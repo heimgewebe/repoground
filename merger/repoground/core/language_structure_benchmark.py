@@ -18,7 +18,10 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from merger.repoground.core.agent_benchmark_evaluation import validate_evaluation
+from merger.repoground.core.agent_benchmark_evaluation import (
+    validate_evaluation,
+    validate_evaluation_derivations,
+)
 from merger.repoground.core.agent_benchmark_common import (
     CATEGORIES,
     is_repository_relative_path,
@@ -498,10 +501,39 @@ def _promotion_measurements(
     )
 
 
+def _agent_benefit_thresholds_sufficient(agent_benefit: Mapping[str, Any]) -> bool:
+    thresholds = agent_benefit.get("thresholds")
+    if not isinstance(thresholds, Mapping):
+        return False
+    minimum_success_gain = _finite_rate(thresholds.get("minimum_success_rate_gain"))
+    maximum_success_regression = _finite_rate(
+        thresholds.get("maximum_class_success_regression")
+    )
+    maximum_false_confidence = _finite_rate(
+        thresholds.get("maximum_false_confidence_increase")
+    )
+    minimum_efficiency = _finite_rate(thresholds.get("minimum_efficiency_improvement"))
+    if None in {
+        minimum_success_gain,
+        maximum_success_regression,
+        maximum_false_confidence,
+        minimum_efficiency,
+    }:
+        return False
+    return bool(
+        float(minimum_success_gain) >= 0.1
+        and float(maximum_success_regression) <= 0.05
+        and float(maximum_false_confidence) <= 0.0
+        and float(minimum_efficiency) >= 0.2
+    )
+
+
 def _verified_component_delta_agent_benefit(
     agent_benefit: Mapping[str, Any], *, source_revision: str
 ) -> bool:
-    if validate_evaluation(agent_benefit):
+    if validate_evaluation(agent_benefit) or validate_evaluation_derivations(
+        agent_benefit
+    ):
         return False
     comparison = agent_benefit.get("comparison")
     decision = agent_benefit.get("decision")
@@ -515,6 +547,7 @@ def _verified_component_delta_agent_benefit(
         and isinstance(agent_benefit.get("taskset_sha256"), str)
         and _SHA256_RE.fullmatch(str(agent_benefit.get("taskset_sha256"))) is not None
         and agent_benefit.get("measurement_scope") == "real_paired_agent_runs"
+        and _agent_benefit_thresholds_sufficient(agent_benefit)
         and isinstance(comparison, Mapping)
         and comparison.get("mode") == "component_delta"
         and comparison.get("component") == "language_structure_json"

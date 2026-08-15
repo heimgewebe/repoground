@@ -199,16 +199,19 @@ def comparison_contract(taskset: Mapping[str, Any]) -> Mapping[str, Any]:
 
 
 def comparison_mode(taskset: Mapping[str, Any]) -> str:
-    comparison = comparison_contract(taskset)
-    if not comparison:
+    if "comparison" not in taskset:
         return LEGACY_COMPARISON_MODE
+    comparison = comparison_contract(taskset)
     return str(comparison.get("mode", ""))
 
 
 def _validate_comparison(taskset: Mapping[str, Any]) -> list[str]:
-    comparison = comparison_contract(taskset)
-    if not comparison:
+    if "comparison" not in taskset:
         return []
+    raw_comparison = taskset.get("comparison")
+    if not isinstance(raw_comparison, Mapping) or not raw_comparison:
+        return ["comparison contract is invalid"]
+    comparison = raw_comparison
     if comparison.get("mode") != COMPONENT_DELTA_MODE:
         return ["comparison mode is unsupported"]
     component = comparison.get("component")
@@ -269,13 +272,15 @@ def _validate_case_shape(cases: list[Any]) -> list[str]:
 
 
 def _validate_case(
-    case: Mapping[str, Any], *, repository_ids: set[str]
+    case: Mapping[str, Any], *, repository_ids: set[str], require_identical_expectations: bool = False
 ) -> tuple[list[str], bool]:
     case_id = str(case.get("id", ""))
     errors: list[str] = []
     if case.get("repository_id") not in repository_ids:
         errors.append(f"case {case_id} references an unknown repository")
     expectations = mapping_value(case.get("expectations"))
+    if require_identical_expectations and expectations.get("baseline") != expectations.get("treatment"):
+        errors.append(f"case {case_id} component_delta expectations must be identical")
     negative = False
     for condition in CONDITIONS:
         expectation = mapping_value(expectations.get(condition))
@@ -299,9 +304,12 @@ def validate_taskset(taskset: Mapping[str, Any]) -> list[str]:
     cases = list_value(taskset.get("cases"))
     errors.extend(_validate_case_shape(cases))
     negative_count = 0
+    require_identical_expectations = comparison_mode(taskset) == COMPONENT_DELTA_MODE
     for raw_case in cases:
         case_errors, negative = _validate_case(
-            mapping_value(raw_case), repository_ids=repository_ids
+            mapping_value(raw_case),
+            repository_ids=repository_ids,
+            require_identical_expectations=require_identical_expectations,
         )
         errors.extend(case_errors)
         negative_count += int(negative)

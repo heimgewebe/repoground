@@ -24,6 +24,22 @@
     "taskset_id": {"type": "string", "minLength": 1},
     "taskset_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "measurement_scope": {"enum": ["synthetic_contract_fixture", "real_paired_agent_runs"]},
+    "thresholds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "minimum_success_rate_gain",
+        "maximum_class_success_regression",
+        "maximum_false_confidence_increase",
+        "minimum_efficiency_improvement"
+      ],
+      "properties": {
+        "minimum_success_rate_gain": {"type": "number", "minimum": 0, "maximum": 1},
+        "maximum_class_success_regression": {"type": "number", "minimum": 0, "maximum": 1},
+        "maximum_false_confidence_increase": {"type": "number", "minimum": 0, "maximum": 1},
+        "minimum_efficiency_improvement": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
     "run_count": {"type": "integer", "minimum": 0},
     "valid_run_count": {"type": "integer", "minimum": 0},
     "invalid_run_count": {"type": "integer", "minimum": 0},

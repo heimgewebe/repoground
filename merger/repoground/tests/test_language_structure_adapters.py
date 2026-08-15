@@ -995,49 +995,6 @@ def test_benchmark_separates_quality_null_cost_and_fail_closed_promotion(tmp_pat
         == "revision_bound_agent_benefit_missing"
     )
 
-    verified_component_delta = {
-        "kind": "repobrief.agent_benchmark_evaluation",
-        "version": "1.0",
-        "taskset_id": "language-structure-component-delta-fixture",
-        "taskset_sha256": "d" * 64,
-        "measurement_scope": "real_paired_agent_runs",
-        "run_count": 6,
-        "valid_run_count": 6,
-        "invalid_run_count": 0,
-        "cases": [
-            {"pair_valid": True},
-            {"pair_valid": True},
-            {"pair_valid": True},
-        ],
-        "classes": [
-            {"category": "navigation", "valid_pair_count": 1, "classification": "useful"},
-            {"category": "structural", "valid_pair_count": 1, "classification": "neutral"},
-            {
-                "category": "grounding_freshness",
-                "valid_pair_count": 1,
-                "classification": "neutral",
-            },
-        ],
-        "decision": {
-            "status": "useful_class",
-            "useful_classes": ["navigation"],
-            "harmful_classes": [],
-            "default_promoted": False,
-        },
-        "comparison": {
-            "mode": "component_delta",
-            "component": "language_structure_json",
-            "source_revision": revision,
-            "treatment_artifacts": [
-                {
-                    "repository_id": "fixture",
-                    "artifact": "language_structure.json",
-                    "artifact_sha256": "e" * 64,
-                }
-            ],
-            "pair_isolation_verified": True,
-        },
-    }
     score = {
         "valid": True,
         "success": True,
@@ -1053,30 +1010,115 @@ def test_benchmark_separates_quality_null_cost_and_fail_closed_promotion(tmp_pat
         "tool_bytes": 1,
         "invalid_reasons": [],
     }
-    for index, case in enumerate(verified_component_delta["cases"]):
-        case.update(
-            case_id=f"case-{index}",
-            category=("navigation", "structural", "grounding_freshness")[index],
-            repetition=1,
-            baseline=copy.deepcopy(score),
-            treatment=copy.deepcopy(score),
-        )
+    cases = []
+    for category in ("navigation", "structural", "grounding_freshness"):
+        for repetition in (1, 2):
+            baseline = copy.deepcopy(score)
+            treatment = copy.deepcopy(score)
+            if category == "navigation":
+                baseline["success"] = False
+            cases.append(
+                {
+                    "case_id": f"{category}-{repetition}",
+                    "category": category,
+                    "repetition": repetition,
+                    "pair_valid": True,
+                    "baseline": baseline,
+                    "treatment": treatment,
+                }
+            )
     efficiency = {
-        key: {"baseline_mean": 1.0, "treatment_mean": 1.0, "improvement_ratio": 0.0}
-        for key in ("duration", "tool_calls", "input_tokens", "output_tokens", "tool_bytes")
-    }
-    for item in verified_component_delta["classes"]:
-        item.update(
-            baseline_success_rate=1.0,
-            treatment_success_rate=1.0,
-            success_rate_delta=0.0,
-            baseline_false_confidence_rate=0.0,
-            treatment_false_confidence_rate=0.0,
-            false_confidence_delta=0.0,
-            efficiency=copy.deepcopy(efficiency),
+        key: {
+            "baseline_mean": 1.0,
+            "treatment_mean": 1.0,
+            "improvement_ratio": 0.0,
+        }
+        for key in (
+            "duration",
+            "tool_calls",
+            "input_tokens",
+            "output_tokens",
+            "tool_bytes",
         )
-    verified_component_delta["decision"]["reason"] = "fixture reproduces bounded component benefit"
-    verified_component_delta["does_not_establish"] = ["default promotion"]
+    }
+    verified_component_delta = {
+        "kind": "repobrief.agent_benchmark_evaluation",
+        "version": "1.0",
+        "taskset_id": "language-structure-component-delta-fixture",
+        "taskset_sha256": "d" * 64,
+        "measurement_scope": "real_paired_agent_runs",
+        "thresholds": {
+            "minimum_success_rate_gain": 0.1,
+            "maximum_class_success_regression": 0.05,
+            "maximum_false_confidence_increase": 0.0,
+            "minimum_efficiency_improvement": 0.2,
+        },
+        "run_count": 12,
+        "valid_run_count": 12,
+        "invalid_run_count": 0,
+        "cases": cases,
+        "classes": [
+            {
+                "category": "navigation",
+                "valid_pair_count": 2,
+                "baseline_success_rate": 0.0,
+                "treatment_success_rate": 1.0,
+                "success_rate_delta": 1.0,
+                "baseline_false_confidence_rate": 0.0,
+                "treatment_false_confidence_rate": 0.0,
+                "false_confidence_delta": 0.0,
+                "efficiency": copy.deepcopy(efficiency),
+                "classification": "useful",
+            },
+            {
+                "category": "structural",
+                "valid_pair_count": 2,
+                "baseline_success_rate": 1.0,
+                "treatment_success_rate": 1.0,
+                "success_rate_delta": 0.0,
+                "baseline_false_confidence_rate": 0.0,
+                "treatment_false_confidence_rate": 0.0,
+                "false_confidence_delta": 0.0,
+                "efficiency": copy.deepcopy(efficiency),
+                "classification": "neutral",
+            },
+            {
+                "category": "grounding_freshness",
+                "valid_pair_count": 2,
+                "baseline_success_rate": 1.0,
+                "treatment_success_rate": 1.0,
+                "success_rate_delta": 0.0,
+                "baseline_false_confidence_rate": 0.0,
+                "treatment_false_confidence_rate": 0.0,
+                "false_confidence_delta": 0.0,
+                "efficiency": copy.deepcopy(efficiency),
+                "classification": "neutral",
+            },
+        ],
+        "decision": {
+            "status": "useful_class",
+            "useful_classes": ["navigation"],
+            "harmful_classes": [],
+            "default_promoted": False,
+            "reason": (
+                "at least one class met a reproducible benefit threshold without regression"
+            ),
+        },
+        "does_not_establish": ["default promotion"],
+        "comparison": {
+            "mode": "component_delta",
+            "component": "language_structure_json",
+            "source_revision": revision,
+            "treatment_artifacts": [
+                {
+                    "repository_id": "fixture",
+                    "artifact": "language_structure.json",
+                    "artifact_sha256": "e" * 64,
+                }
+            ],
+            "pair_isolation_verified": True,
+        },
+    }
 
     accepted = decide_language_adapter_promotion(
         report, agent_benefit=verified_component_delta
@@ -1094,6 +1136,8 @@ def test_benchmark_separates_quality_null_cost_and_fail_closed_promotion(tmp_pat
     bad_mutations = []
     for mutate in (
         lambda value: value.update(measurement_scope="synthetic_contract_fixture"),
+        lambda value: value["thresholds"].update(minimum_success_rate_gain=0.0),
+        lambda value: value["thresholds"].update(maximum_class_success_regression=0.5),
         lambda value: value["comparison"].update(component="other_component"),
         lambda value: value["comparison"].update(source_revision="b" * 40),
         lambda value: value["comparison"].update(pair_isolation_verified=False),
@@ -1126,7 +1170,7 @@ def test_benchmark_separates_quality_null_cost_and_fail_closed_promotion(tmp_pat
     missing_class["classes"].pop()
     bad_mutations.append(missing_class)
     inconsistent_pair_total = copy.deepcopy(verified_component_delta)
-    inconsistent_pair_total["classes"][0]["valid_pair_count"] = 2
+    inconsistent_pair_total["classes"][0]["valid_pair_count"] = 3
     bad_mutations.append(inconsistent_pair_total)
     neutral_only = copy.deepcopy(verified_component_delta)
     neutral_only["classes"][0]["classification"] = "neutral"

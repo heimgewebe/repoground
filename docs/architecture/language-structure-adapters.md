@@ -153,17 +153,21 @@ Aggregate ist **keine** Promotionsautorität und ergibt `keep_optional` mit
 
 Der generische Agent-Benchmark unterstützt dafür nun `component_delta`: Wir
 vergleichen dasselbe RepoGround einmal ohne und einmal mit genau einem
-Zusatzbaustein. Modell/Runner, Repo-Commit, Prompt, Budget, Tools und
-RepoGround-Kontext müssen identisch sein; nur das revisionsgebundene
+Zusatzbaustein. Modell/Runner, Repo-Commit, Prompt, Budget, Tools,
+Grading-Erwartungen und RepoGround-Kontext müssen identisch sein; nur das revisionsgebundene
 Komponentenartefakt darf variieren. Das Treatment-Artefakt wird relativ zum
-gebundenen Manifest gelesen, stabil und größenbegrenzt geprüft und gegen seine
-tatsächlichen Bytes gehasht. Die Evaluation bindet die Treatment-Artefakte
-eindeutig an ihre Repositories.
+gebundenen Manifest gelesen, stabil und größenbegrenzt geprüft, gegen die
+Manifest-Registrierung und seinen Komponentenvertrag validiert und an seine
+tatsächlichen Bytes gebunden. Für `language_structure_json` müssen zusätzlich
+Schema und `source.repository_commit` zum eingefrorenen Repository-Commit passen.
+Dieselbe Prüfung läuft unmittelbar vor dem Runner-Start erneut.
 
 `language_structure_json` akzeptiert daraus nur reale, vollständig gültige
 Paired-Agent-Runs mit verifizierter Pair-Isolation, passender Source-Revision,
 bytegebundenen Treatment-Artefakten, mindestens einer nützlichen Klasse und keiner
-schädlichen Klasse. Das öffnet ausschließlich
+schädlichen Klasse. Klassenmetriken und Entscheidung werden dabei aus den
+Fall-Scores und den in der Evaluation gebundenen Schwellenwerten neu abgeleitet;
+handgeschriebene Aggregate reichen nicht. Das öffnet ausschließlich
 `eligible_for_explicit_promotion_review`; `broad_activation_eligible` und
 `default_promoted` bleiben `false`. Der Component-Delta-Lauf beweist weder
 allgemeine Kausalität noch Runner-/Grader-Ehrlichkeit oder allgemeine

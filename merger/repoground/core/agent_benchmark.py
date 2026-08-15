@@ -10,7 +10,6 @@ import os
 import subprocess
 import tempfile
 from collections.abc import Mapping, Sequence
-from pathlib import Path
 from typing import Any
 
 from merger.repoground.core.agent_benchmark_common import (
@@ -34,10 +33,11 @@ from merger.repoground.core.agent_benchmark_common import (
     validate_taskset,
     write_json_atomic,
 )
-from merger.repoground.core.agent_benchmark_evaluation import score_receipt, validate_evaluation
-from merger.repoground.core.bounded_artifact_read import (
-    MAX_REGISTERED_ARTIFACT_BYTES,
-    read_stable_regular_file_bytes,
+from merger.repoground.core.agent_benchmark_components import verify_component_artifact_binding
+from merger.repoground.core.agent_benchmark_evaluation import (
+    score_receipt,
+    validate_evaluation,
+    validate_evaluation_derivations,
 )
 from merger.repoground.core.agent_benchmark_integrity import evaluate_paired_runs
 from merger.repoground.core.agent_benchmark_policy import BENCHMARK_REPETITIONS
@@ -130,55 +130,19 @@ def _repobrief_binding(
     }
 
 
-def _verify_component_artifact_bytes(
-    repository_binding: Mapping[str, Any],
-    *,
-    repository_id: str,
-    artifact_path: str,
-    expected_sha256: str,
-) -> None:
-    manifest = repository_binding.get("manifest")
-    if not isinstance(manifest, str) or not manifest or not Path(manifest).is_absolute():
-        raise AgentBenchmarkError(
-            f"component artifact requires an absolute manifest binding for {repository_id}"
-        )
-    if not is_repository_relative_path(artifact_path):
-        raise AgentBenchmarkError(
-            f"component artifact path is not repository-relative for {repository_id}"
-        )
-    artifact_root = Path(manifest).parent.resolve(strict=False)
-    candidate = artifact_root / artifact_path
-    try:
-        candidate.resolve(strict=False).relative_to(artifact_root)
-    except ValueError as exc:
-        raise AgentBenchmarkError(
-            f"component artifact escapes manifest root for {repository_id}"
-        ) from exc
-    raw, _identity, failure, detail = read_stable_regular_file_bytes(
-        candidate, max_bytes=MAX_REGISTERED_ARTIFACT_BYTES
-    )
-    if failure is not None or raw is None:
-        suffix = f": {detail}" if detail else ""
-        raise AgentBenchmarkError(
-            f"component artifact {failure or 'unreadable'} for {repository_id}{suffix}"
-        )
-    if sha256_bytes(raw) != expected_sha256:
-        raise AgentBenchmarkError(
-            f"component artifact SHA-256 mismatch for {repository_id}"
-        )
-
-
 def _component_delta_binding(
     taskset: Mapping[str, Any],
     condition: str,
-    repository_id: str,
+    repository: Mapping[str, Any],
     manifest_bindings: Mapping[str, Mapping[str, Any]],
 ) -> dict[str, Any] | None:
     if comparison_mode(taskset) != COMPONENT_DELTA_MODE:
         return None
     comparison = comparison_contract(taskset)
+    component = str(comparison["component"])
+    repository_id = str(repository["id"])
     result: dict[str, Any] = {
-        "component": str(comparison["component"]),
+        "component": component,
         "source_revision": str(comparison["source_revision"]),
         "artifact": None,
         "artifact_sha256": None,
@@ -189,7 +153,7 @@ def _component_delta_binding(
     components = mapping_value(
         repository_binding.get("components") if isinstance(repository_binding, Mapping) else None
     )
-    artifact = mapping_value(components.get(str(comparison["component"])))
+    artifact = mapping_value(components.get(component))
     if (
         artifact.get("source_revision") != comparison["source_revision"]
         or not isinstance(artifact.get("artifact"), str)
@@ -197,15 +161,18 @@ def _component_delta_binding(
         or not isinstance(artifact.get("artifact_sha256"), str)
         or len(str(artifact.get("artifact_sha256"))) != 64
         or any(ch not in "0123456789abcdef" for ch in str(artifact.get("artifact_sha256")))
+        or not isinstance(repository_binding, Mapping)
     ):
         raise AgentBenchmarkError(
             f"missing or invalid component artifact binding for {repository_id}"
         )
     artifact_path = str(artifact["artifact"])
     artifact_sha256 = str(artifact["artifact_sha256"])
-    _verify_component_artifact_bytes(
+    verify_component_artifact_binding(
         repository_binding,
         repository_id=repository_id,
+        repository_commit=str(repository["commit"]),
+        component=component,
         artifact_path=artifact_path,
         expected_sha256=artifact_sha256,
     )
@@ -271,7 +238,7 @@ def _build_request(
         **(
             {"component_delta": component_delta}
             if (component_delta := _component_delta_binding(
-                taskset, condition, repository_id, manifest_bindings
+                taskset, condition, repository, manifest_bindings
             )) is not None
             else {}
         ),
@@ -379,12 +346,26 @@ def _verify_execution_component_artifact(request: Mapping[str, Any]) -> None:
     repository_id = repository.get("id")
     if not isinstance(manifest, str) or not isinstance(repository_id, str) or not repository_id:
         raise AgentBenchmarkError("component_delta execution RepoGround binding is invalid")
-    _verify_component_artifact_bytes(
-        {"manifest": manifest},
+    component = binding.get("component")
+    repository_commit = repository.get("commit")
+    manifest_sha256 = repobrief.get("manifest_sha256")
+    if (
+        not isinstance(component, str)
+        or not component
+        or not isinstance(repository_commit, str)
+        or not repository_commit
+        or not isinstance(manifest_sha256, str)
+    ):
+        raise AgentBenchmarkError("component_delta execution provenance binding is invalid")
+    verify_component_artifact_binding(
+        {"manifest": manifest, "manifest_sha256": manifest_sha256},
         repository_id=repository_id,
+        repository_commit=repository_commit,
+        component=component,
         artifact_path=artifact,
         expected_sha256=artifact_sha256,
     )
+
 
 def execute_runner(
     command: Sequence[str],
@@ -443,6 +424,7 @@ __all__ = [
     "sha256_bytes",
     "sha256_json",
     "validate_evaluation",
+    "validate_evaluation_derivations",
     "validate_receipt",
     "validate_taskset",
     "write_json_atomic",

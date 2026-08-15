@@ -239,6 +239,7 @@ def evaluate_paired_runs(
         "taskset_id": str(taskset["id"]),
         "taskset_sha256": sha256_json(taskset),
         "measurement_scope": measurement_scope,
+        "thresholds": dict(mapping_value(taskset.get("thresholds"))),
         "run_count": run_count,
         "valid_run_count": valid_run_count,
         "invalid_run_count": run_count - valid_run_count,
