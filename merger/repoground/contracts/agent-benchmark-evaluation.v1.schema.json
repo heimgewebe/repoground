@@ -24,16 +24,6 @@
     "taskset_id": {"type": "string", "minLength": 1},
     "taskset_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "measurement_scope": {"enum": ["synthetic_contract_fixture", "real_paired_agent_runs"]},
-    "runner_execution": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["attested", "authority", "reason"],
-      "properties": {
-        "attested": {"type": "boolean"},
-        "authority": {"type": "string", "minLength": 1},
-        "reason": {"type": "string", "minLength": 1}
-      }
-    },
     "evidence": {
       "type": "object",
       "additionalProperties": false,

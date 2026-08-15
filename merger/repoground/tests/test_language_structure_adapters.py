@@ -13,6 +13,7 @@ import pytest
 
 from merger.repoground.core import doctor
 from merger.repoground.core.agent_benchmark import build_run_requests, evaluate_paired_runs
+from merger.repoground.core.agent_benchmark_evaluation import validate_evaluation
 from merger.repoground.core.bash_structure_adapter import scan_bash_repository
 from merger.repoground.core.language_structure import (
     build_language_structure_document,
@@ -1045,11 +1046,24 @@ def test_benchmark_separates_quality_null_cost_and_fail_closed_promotion(tmp_pat
         == "verified_component_delta_agent_benefit_missing"
     )
 
-    assert verified_component_delta["runner_execution"] == {
-        "attested": False,
-        "authority": "none",
-        "reason": "trusted runner execution attestation is not available in benchmark v1",
+    assert "runner_execution" not in verified_component_delta
+
+    forged_attestation = copy.deepcopy(verified_component_delta)
+    forged_attestation["runner_execution"] = {
+        "attested": True,
+        "authority": "fixture-forgery",
+        "reason": "hand-written",
     }
+    assert validate_evaluation(forged_attestation)
+    assert (
+        decide_language_adapter_promotion(
+            report,
+            agent_benefit=forged_attestation,
+            agent_benefit_inputs=verified_inputs,
+        )["reason"]
+        == "verified_component_delta_agent_benefit_missing"
+    )
+
     accepted = decide_language_adapter_promotion(
         report,
         agent_benefit=verified_component_delta,
@@ -1061,21 +1075,6 @@ def test_benchmark_separates_quality_null_cost_and_fail_closed_promotion(tmp_pat
         "default_promoted": False,
         "reason": "verified_component_delta_agent_benefit_missing",
     }
-
-    forged_attestation = copy.deepcopy(verified_component_delta)
-    forged_attestation["runner_execution"] = {
-        "attested": True,
-        "authority": "fixture-forgery",
-        "reason": "hand-written",
-    }
-    assert (
-        decide_language_adapter_promotion(
-            report,
-            agent_benefit=forged_attestation,
-            agent_benefit_inputs=verified_inputs,
-        )["reason"]
-        == "verified_component_delta_agent_benefit_missing"
-    )
 
     tampered_inputs = copy.deepcopy(verified_inputs)
     tampered_inputs["receipts"][0]["duration_ms"] += 1

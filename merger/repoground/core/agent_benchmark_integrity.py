@@ -266,11 +266,6 @@ def evaluate_paired_runs(
         "taskset_id": str(taskset["id"]),
         "taskset_sha256": sha256_json(taskset),
         "measurement_scope": measurement_scope,
-        "runner_execution": {
-            "attested": False,
-            "authority": "none",
-            "reason": "trusted runner execution attestation is not available in benchmark v1",
-        },
         "evidence": _evaluation_input_evidence(taskset, requests, receipts),
         "thresholds": dict(mapping_value(taskset.get("thresholds"))),
         "run_count": run_count,

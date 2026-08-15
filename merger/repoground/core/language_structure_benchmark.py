@@ -570,12 +570,6 @@ def _verified_component_delta_agent_benefit(
         agent_benefit
     ):
         return False
-    runner_execution = agent_benefit.get("runner_execution")
-    if (
-        not isinstance(runner_execution, Mapping)
-        or runner_execution.get("attested") is not True
-    ):
-        return False
     if not _agent_benefit_inputs_revalidate(agent_benefit, evidence_inputs):
         return False
     comparison = agent_benefit.get("comparison")
@@ -656,7 +650,10 @@ def _verified_component_delta_agent_benefit(
         ):
             return False
         repository_ids.add(repository_id)
-    return True
+    # Benchmark v1 has no trusted runner-origin attestation contract.
+    # Internal consistency and bound evidence are necessary, but cannot by
+    # themselves prove that an authorized runner actually executed the pair.
+    return False
 
 
 def decide_language_adapter_promotion(
