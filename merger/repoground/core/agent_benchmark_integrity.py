@@ -9,9 +9,12 @@ from typing import Any
 from merger.repoground.core.agent_benchmark_common import (
     AgentBenchmarkError,
     CONDITIONS,
+    COMPONENT_DELTA_MODE,
     DOES_NOT_ESTABLISH,
     EVALUATION_KIND,
     VERSION,
+    comparison_contract,
+    comparison_mode,
     list_value,
     mapping_value,
     require_valid_taskset,
@@ -103,7 +106,7 @@ def _harden_pair(
         score = result.get(condition)
         if isinstance(score, dict):
             _append_errors(score, condition_errors.get(condition, []))
-    pair_errors = pair_request_errors(requests)
+    pair_errors = pair_request_errors(taskset, requests)
     if pair_errors:
         for condition in CONDITIONS:
             score = result.get(condition)
@@ -148,6 +151,78 @@ def _complete_case_results(
     return completed
 
 
+
+def _comparison_evidence(
+    taskset: Mapping[str, Any], requests: Sequence[Mapping[str, Any]], cases: Sequence[Mapping[str, Any]]
+) -> dict[str, Any] | None:
+    if comparison_mode(taskset) != COMPONENT_DELTA_MODE:
+        return None
+    comparison = comparison_contract(taskset)
+    treatment_artifacts = sorted(
+        {
+            (
+                str(mapping_value(request.get("repository")).get("id")),
+                str(mapping_value(request.get("component_delta")).get("artifact")),
+                str(mapping_value(request.get("component_delta")).get("artifact_sha256")),
+            )
+            for request in requests
+            if request.get("condition") == "treatment"
+            and isinstance(mapping_value(request.get("repository")).get("id"), str)
+            and isinstance(mapping_value(request.get("component_delta")).get("artifact"), str)
+            and isinstance(mapping_value(request.get("component_delta")).get("artifact_sha256"), str)
+        }
+    )
+    expected = set(expected_pair_keys(taskset))
+    observed = {
+        (str(item.get("case_id")), int(item.get("repetition") or 0)) for item in cases
+    }
+    return {
+        "mode": COMPONENT_DELTA_MODE,
+        "component": str(comparison.get("component", "")),
+        "source_revision": str(comparison.get("source_revision", "")),
+        "treatment_artifacts": [
+            {
+                "repository_id": repository_id,
+                "artifact": artifact,
+                "artifact_sha256": artifact_sha256,
+            }
+            for repository_id, artifact, artifact_sha256 in treatment_artifacts
+        ],
+        "pair_isolation_verified": (
+            bool(expected)
+            and observed == expected
+            and len(cases) == len(expected)
+            and all(item.get("pair_valid") is True for item in cases)
+        ),
+    }
+
+
+
+def _evaluation_input_evidence(
+    taskset: Mapping[str, Any],
+    requests: Sequence[Mapping[str, Any]],
+    receipts: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    ordered_requests = sorted(
+        (dict(item) for item in requests), key=lambda item: str(item.get("request_id", ""))
+    )
+    ordered_receipts = sorted(
+        (dict(item) for item in receipts), key=lambda item: str(item.get("request_id", ""))
+    )
+    transcripts = [
+        {
+            "request_id": str(item.get("request_id", "")),
+            "sha256": str(mapping_value(item.get("transcript")).get("sha256", "")),
+        }
+        for item in ordered_receipts
+    ]
+    return {
+        "taskset_sha256": sha256_json(taskset),
+        "requests_sha256": sha256_json(ordered_requests),
+        "receipts_sha256": sha256_json(ordered_receipts),
+        "transcripts": transcripts,
+    }
+
 def evaluate_paired_runs(
     taskset: Mapping[str, Any],
     requests: Sequence[Mapping[str, Any]],
@@ -185,12 +260,14 @@ def evaluate_paired_runs(
     )
     expected_run_count = len(expected_pair_keys(taskset)) * len(CONDITIONS)
     run_count = max(expected_run_count, len(requests), len(receipts))
-    return {
+    result = {
         "kind": EVALUATION_KIND,
         "version": VERSION,
         "taskset_id": str(taskset["id"]),
         "taskset_sha256": sha256_json(taskset),
         "measurement_scope": measurement_scope,
+        "evidence": _evaluation_input_evidence(taskset, requests, receipts),
+        "thresholds": dict(mapping_value(taskset.get("thresholds"))),
         "run_count": run_count,
         "valid_run_count": valid_run_count,
         "invalid_run_count": run_count - valid_run_count,
@@ -199,6 +276,38 @@ def evaluate_paired_runs(
         "decision": _decision(classes, measurement_scope=measurement_scope),
         "does_not_establish": list(DOES_NOT_ESTABLISH),
     }
+    comparison = _comparison_evidence(taskset, requests, cases)
+    if comparison is not None:
+        result["comparison"] = comparison
+    return result
 
 
-__all__ = ["evaluate_paired_runs"]
+def validate_evaluation_evidence(
+    evaluation: Mapping[str, Any],
+    taskset: Mapping[str, Any],
+    requests: Sequence[Mapping[str, Any]],
+    receipts: Sequence[Mapping[str, Any]],
+    *,
+    transcript_root: str | Path | None = None,
+) -> list[str]:
+    """Re-evaluate the bound run inputs and require byte/digest-equivalent evidence."""
+
+    measurement_scope = evaluation.get("measurement_scope")
+    if measurement_scope not in {"synthetic_contract_fixture", "real_paired_agent_runs"}:
+        return ["evaluation measurement_scope is invalid"]
+    try:
+        recomputed = evaluate_paired_runs(
+            taskset,
+            requests,
+            receipts,
+            measurement_scope=str(measurement_scope),
+            transcript_root=transcript_root,
+        )
+    except (AgentBenchmarkError, KeyError, TypeError, ValueError, OverflowError) as exc:
+        return [f"evaluation input revalidation failed: {exc}"]
+    if dict(evaluation) != recomputed:
+        return ["evaluation does not match re-evaluated taskset, requests, receipts, and transcripts"]
+    return []
+
+
+__all__ = ["evaluate_paired_runs", "validate_evaluation_evidence"]

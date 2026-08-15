@@ -18,9 +18,16 @@ from merger.repoground.core.agent_benchmark import (
     score_receipt,
     sha256_bytes,
     sha256_json,
+    validate_evaluation,
+    validate_evaluation_derivations,
+    validate_evaluation_evidence,
     validate_receipt,
     validate_taskset,
 )
+
+from merger.repoground.core.agent_benchmark_requests import pair_request_errors
+from merger.repoground.core.bounded_artifact_read import MAX_REGISTERED_ARTIFACT_BYTES
+from merger.repoground.core.language_structure_access import load_language_structure_artifact
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 TASKSET_PATH = REPO_ROOT / "docs/retrieval/repobrief_agent_benchmark_taskset.v1.json"
@@ -40,7 +47,14 @@ BINDINGS = {
     repository_id: {
         "manifest": f"/bench/{repository_id}.bundle.manifest.json",
         "manifest_sha256": (str(index + 1) * 64)[:64],
-        "mcp_command": ["python", "-m", "merger.repoground", "mcp", "--bundle-root", "/bench"],
+        "mcp_command": [
+            "python",
+            "-m",
+            "merger.repoground",
+            "mcp",
+            "--bundle-root",
+            "/bench",
+        ],
     }
     for index, repository_id in enumerate(("lenskit", "grabowski", "weltgewebe"))
 }
@@ -216,7 +230,9 @@ def test_frozen_taskset_matches_schema_and_semantic_contract() -> None:
         ),
     ],
 )
-def test_taskset_semantic_validation_rejects_manipulation(mutation, expected: str) -> None:
+def test_taskset_semantic_validation_rejects_manipulation(
+    mutation, expected: str
+) -> None:
     taskset = _taskset()
     mutation(taskset)
     assert any(expected in error for error in validate_taskset(taskset))
@@ -353,7 +369,9 @@ def test_pair_plan_requires_treatment_manifest_binding() -> None:
     taskset = _taskset()
     incomplete = dict(BINDINGS)
     incomplete.pop("grabowski")
-    with pytest.raises(AgentBenchmarkError, match="missing RepoGround manifest binding"):
+    with pytest.raises(
+        AgentBenchmarkError, match="missing RepoGround manifest binding"
+    ):
         build_run_requests(
             taskset,
             runner=RUNNER,
@@ -449,9 +467,7 @@ def test_synthetic_fixtures_can_never_establish_usefulness() -> None:
     Draft7Validator(_schema("evaluation")).validate(result)
     assert result["decision"]["status"] == "synthetic_only"
     assert result["decision"]["default_promoted"] is False
-    assert {item["classification"] for item in result["classes"]} == {
-        "synthetic_only"
-    }
+    assert {item["classification"] for item in result["classes"]} == {"synthetic_only"}
 
 
 def test_real_paired_evaluation_requires_reproduced_direction() -> None:
@@ -539,7 +555,9 @@ def test_reused_session_or_workspace_invalidates_pair() -> None:
 def test_entire_missing_pair_remains_visible_and_invalid() -> None:
     taskset, requests, receipts = _requests_and_receipts(treatment_factor=0.5)
     missing_pair = requests[0]["pair_id"]
-    filtered_requests = [request for request in requests if request["pair_id"] != missing_pair]
+    filtered_requests = [
+        request for request in requests if request["pair_id"] != missing_pair
+    ]
     valid_request_ids = {request["request_id"] for request in filtered_requests}
     filtered_receipts = [
         receipt for receipt in receipts if receipt["request_id"] in valid_request_ids
@@ -581,7 +599,10 @@ def test_request_manipulation_invalidates_matching_receipt() -> None:
     )
     condition_score = affected[target["condition"]]
     assert condition_score["valid"] is False
-    assert "request prompt does not match frozen case" in condition_score["invalid_reasons"]
+    assert (
+        "request prompt does not match frozen case"
+        in condition_score["invalid_reasons"]
+    )
     assert result["decision"]["status"] == "insufficient_evidence"
 
 
@@ -601,6 +622,166 @@ def test_execute_runner_accepts_one_json_object_without_shell(tmp_path: Path) ->
         max_stdout_bytes=1024,
     )
     assert result == {"seen": "demo"}
+
+
+def _component_treatment_execution_setup(tmp_path: Path) -> tuple[dict, Path]:
+    _taskset_value, requests, bindings = _component_requests(tmp_path)
+    treatment = next(item for item in requests if item["condition"] == "treatment")
+    repository_id = treatment["repository"]["id"]
+    artifact = (
+        Path(bindings[repository_id]["manifest"]).parent
+        / treatment["component_delta"]["artifact"]
+    )
+    return treatment, artifact
+
+
+def _marker_runner(tmp_path: Path) -> tuple[list[str], Path]:
+    marker = tmp_path / "runner-started.txt"
+    runner = tmp_path / "marker-runner.py"
+    runner.write_text(
+        "import json, sys\n"
+        "from pathlib import Path\n"
+        "Path(sys.argv[1]).write_text('started', encoding='utf-8')\n"
+        "request = json.load(sys.stdin)\n"
+        "print(json.dumps({'request_id': request['request_id']}))\n",
+        encoding="utf-8",
+    )
+    return [sys.executable, str(runner), str(marker)], marker
+
+
+def test_execute_runner_rechecks_unchanged_component_artifact_before_start(
+    tmp_path: Path,
+) -> None:
+    treatment, _artifact = _component_treatment_execution_setup(tmp_path)
+    command, marker = _marker_runner(tmp_path)
+
+    result = execute_runner(
+        command, treatment, timeout_seconds=5, max_stdout_bytes=1024
+    )
+
+    assert result == {"request_id": treatment["request_id"]}
+    assert marker.read_text(encoding="utf-8") == "started"
+
+
+def test_execute_runner_rejects_malformed_component_delta_binding_before_start(
+    tmp_path: Path,
+) -> None:
+    treatment, _artifact = _component_treatment_execution_setup(tmp_path)
+    treatment["component_delta"] = None
+    command, marker = _marker_runner(tmp_path)
+
+    with pytest.raises(AgentBenchmarkError, match="execution binding is invalid"):
+        execute_runner(command, treatment, timeout_seconds=5, max_stdout_bytes=1024)
+
+    assert not marker.exists()
+
+
+def test_execute_runner_rejects_changed_component_artifact_before_start(
+    tmp_path: Path,
+) -> None:
+    treatment, artifact = _component_treatment_execution_setup(tmp_path)
+    artifact.write_text("tampered-after-plan", encoding="utf-8")
+    command, marker = _marker_runner(tmp_path)
+
+    with pytest.raises(AgentBenchmarkError, match="artifact SHA-256 mismatch"):
+        execute_runner(command, treatment, timeout_seconds=5, max_stdout_bytes=1024)
+
+    assert not marker.exists()
+
+
+def test_execute_runner_rejects_deleted_component_artifact_before_start(
+    tmp_path: Path,
+) -> None:
+    treatment, artifact = _component_treatment_execution_setup(tmp_path)
+    artifact.unlink()
+    command, marker = _marker_runner(tmp_path)
+
+    with pytest.raises(AgentBenchmarkError):
+        execute_runner(command, treatment, timeout_seconds=5, max_stdout_bytes=1024)
+
+    assert not marker.exists()
+
+
+def test_execute_runner_rejects_component_artifact_symlink_before_start(
+    tmp_path: Path,
+) -> None:
+    treatment, artifact = _component_treatment_execution_setup(tmp_path)
+    target = artifact.with_name("symlink-target.json")
+    target.write_bytes(artifact.read_bytes())
+    artifact.unlink()
+    artifact.symlink_to(target.name)
+    command, marker = _marker_runner(tmp_path)
+
+    with pytest.raises(AgentBenchmarkError):
+        execute_runner(command, treatment, timeout_seconds=5, max_stdout_bytes=1024)
+
+    assert not marker.exists()
+
+
+def test_execute_runner_rejects_component_artifact_root_escape_before_start(
+    tmp_path: Path,
+) -> None:
+    treatment, _artifact = _component_treatment_execution_setup(tmp_path)
+    treatment["component_delta"]["artifact"] = "../outside.json"
+    command, marker = _marker_runner(tmp_path)
+
+    with pytest.raises(AgentBenchmarkError):
+        execute_runner(command, treatment, timeout_seconds=5, max_stdout_bytes=1024)
+
+    assert not marker.exists()
+
+
+def test_execute_runner_rejects_component_artifact_sha_tamper_before_start(
+    tmp_path: Path,
+) -> None:
+    treatment, _artifact = _component_treatment_execution_setup(tmp_path)
+    treatment["component_delta"]["artifact_sha256"] = "0" * 64
+    command, marker = _marker_runner(tmp_path)
+
+    with pytest.raises(AgentBenchmarkError, match="artifact SHA-256 mismatch"):
+        execute_runner(command, treatment, timeout_seconds=5, max_stdout_bytes=1024)
+
+    assert not marker.exists()
+
+
+def test_execute_runner_rejects_baseline_manifest_that_reintroduces_component(
+    tmp_path: Path,
+) -> None:
+    _taskset_value, requests, bindings = _component_requests(tmp_path)
+    baseline = next(item for item in requests if item["condition"] == "baseline")
+    treatment = next(item for item in requests if item["condition"] == "treatment")
+    repository_id = treatment["repository"]["id"]
+    binding = bindings[repository_id]
+    baseline_manifest = Path(binding["baseline_manifest"])
+    treatment_raw = Path(binding["manifest"]).read_bytes()
+    baseline_manifest.write_bytes(treatment_raw)
+    baseline["repobrief"]["manifest_sha256"] = sha256_bytes(treatment_raw)
+    command, marker = _marker_runner(tmp_path)
+
+    with pytest.raises(AgentBenchmarkError, match="still registers language_structure_json"):
+        execute_runner(command, baseline, timeout_seconds=5, max_stdout_bytes=1024)
+
+    assert not marker.exists()
+
+
+def test_execute_runner_component_delta_baseline_does_not_read_artifact(
+    tmp_path: Path,
+) -> None:
+    _taskset_value, requests, bindings = _component_requests(tmp_path)
+    baseline = next(item for item in requests if item["condition"] == "baseline")
+    treatment = next(item for item in requests if item["condition"] == "treatment")
+    repository_id = treatment["repository"]["id"]
+    artifact = (
+        Path(bindings[repository_id]["manifest"]).parent
+        / treatment["component_delta"]["artifact"]
+    )
+    artifact.unlink()
+    command, marker = _marker_runner(tmp_path)
+
+    result = execute_runner(command, baseline, timeout_seconds=5, max_stdout_bytes=1024)
+
+    assert result == {"request_id": baseline["request_id"]}
+    assert marker.read_text(encoding="utf-8") == "started"
 
 
 def test_execute_runner_rejects_oversized_or_invalid_output(tmp_path: Path) -> None:
@@ -623,6 +804,7 @@ def test_execute_runner_rejects_oversized_or_invalid_output(tmp_path: Path) -> N
             timeout_seconds=5,
             max_stdout_bytes=1024,
         )
+
 
 def test_receipt_rejects_invalid_status_and_timestamps() -> None:
     taskset = _taskset()
@@ -664,9 +846,7 @@ def test_transcript_content_is_nonempty_and_bounded(tmp_path: Path) -> None:
     case = _cases(taskset)[request["case_id"]]
 
     empty = _receipt(request, case)
-    empty["transcript"].update(
-        {"inline": "", "bytes": 0, "sha256": sha256_bytes(b"")}
-    )
+    empty["transcript"].update({"inline": "", "bytes": 0, "sha256": sha256_bytes(b"")})
     assert "transcript must not be empty" in validate_receipt(request, empty)
 
     oversized_path = tmp_path / "oversized-transcript.json"
@@ -685,3 +865,708 @@ def test_transcript_content_is_nonempty_and_bounded(tmp_path: Path) -> None:
     assert "transcript exceeds configured limit" in validate_receipt(
         request, oversized, transcript_root=tmp_path
     )
+
+
+COMPONENT_REVISION = "a" * 40
+
+
+def _component_taskset(*, source_revision: str = COMPONENT_REVISION) -> dict:
+    taskset = copy.deepcopy(_taskset())
+    taskset["comparison"] = {
+        "mode": "component_delta",
+        "component": "language_structure_json",
+        "source_revision": source_revision,
+    }
+    taskset["tool_policy"]["baseline"] = copy.deepcopy(
+        taskset["tool_policy"]["treatment"]
+    )
+    for case in taskset["cases"]:
+        case["expectations"]["baseline"] = copy.deepcopy(
+            case["expectations"]["treatment"]
+        )
+    return taskset
+
+
+def _language_structure_fixture(
+    *, repository_id: str, repository_commit: str, manifest_name: str
+) -> dict:
+    def summary(adapter_id: str) -> dict:
+        value = {
+            "status": "available",
+            "adapter": {"id": adapter_id, "version": "1.0"},
+            "supported_files": [],
+            "supported_symbols": [],
+            "supported_relations": [],
+            "range_basis": "fixture",
+            "explicit_limits": [],
+            "candidate_file_count": 0,
+            "scanned_file_count": 0,
+            "record_count": 0,
+        }
+        if adapter_id == "rust-static-structure":
+            value["scip_adapter"] = {"id": "rust-scip-structure", "version": "1.0"}
+            value["scip_record_count"] = 0
+        return value
+
+    return {
+        "kind": "repoground.language_structure",
+        "version": "1.0",
+        "authority": "navigation_index",
+        "canonicality": "derived",
+        "risk_class": "navigation",
+        "run_id": f"fixture-{repository_id}",
+        "status": "available",
+        "source": {
+            "repository_root_name": repository_id,
+            "repository_commit": repository_commit,
+            "bundle_manifest": manifest_name,
+            "canonical_dump_index_sha256": "d" * 64,
+            "network_used": False,
+            "secrets_read": False,
+            "workspace_state_used_beyond_bound_source": False,
+        },
+        "languages": {
+            "bash": summary("bash-static-structure"),
+            "rust": summary("rust-static-structure"),
+        },
+        "records": [],
+        "record_count": 0,
+        "degradations": [],
+        "truncation": None,
+        "promotion": {
+            "default_promoted": False,
+            "status": "keep_optional",
+            "reason": "contract fixture",
+        },
+        "does_not_establish": [
+            "repository_truth",
+            "complete_symbol_index",
+            "complete_call_graph",
+            "complete_dependency_graph",
+            "runtime_behavior",
+            "dynamic_dispatch_resolution",
+            "macro_expansion",
+            "generated_code_coverage",
+            "python_ast_equivalence",
+            "test_sufficiency",
+            "default_promotion",
+        ],
+    }
+
+
+def _component_bindings(
+    tmp_path: Path, *, source_revision: str = COMPONENT_REVISION
+) -> dict[str, dict]:
+    bindings: dict[str, dict] = {}
+    for repository in _taskset()["repositories"]:
+        repository_id = repository["id"]
+        root = tmp_path / repository_id
+        root.mkdir(parents=True)
+        manifest = root / f"{repository_id}.bundle.manifest.json"
+        baseline_manifest = root / f"{repository_id}.baseline.bundle.manifest.json"
+        artifact = root / "language_structure.json"
+        artifact_raw = (
+            json.dumps(
+                _language_structure_fixture(
+                    repository_id=repository_id,
+                    repository_commit=repository["commit"],
+                    manifest_name=manifest.name,
+                ),
+                sort_keys=True,
+            )
+            + "\n"
+        ).encode()
+        artifact.write_bytes(artifact_raw)
+        artifact_sha256 = sha256_bytes(artifact_raw)
+        manifest_document = {
+            "kind": "repoground.bundle.manifest",
+            "version": "2.0",
+            "run_id": f"fixture-{repository_id}",
+            "created_at": "2026-08-15T00:00:00Z",
+            "generator": {
+                "name": "repoground",
+                "version": "fixture",
+                "config_sha256": "c" * 64,
+                "runtime": {
+                    "module": "merger.repoground.core.bundle",
+                    "python_version": "3.11",
+                    "git_commit": source_revision,
+                    "git_dirty": False,
+                },
+            },
+            "artifacts": [
+                {
+                    "role": "language_structure_json",
+                    "path": artifact.name,
+                    "content_type": "application/json",
+                    "bytes": len(artifact_raw),
+                    "sha256": artifact_sha256,
+                    "contract": {"id": "language-structure", "version": "v1"},
+                    "interpretation": {"mode": "contract"},
+                    "authority": "navigation_index",
+                    "canonicality": "derived",
+                    "risk_class": "navigation",
+                    "regenerable": True,
+                    "staleness_sensitive": True,
+                }
+            ],
+            "links": {"canonical_dump_index_sha256": "d" * 64},
+            "capabilities": {},
+            "snapshot_provenance": {
+                "repositories": [{"git_commit": repository["commit"]}]
+            },
+        }
+        manifest_raw = (json.dumps(manifest_document, sort_keys=True) + "\n").encode()
+        manifest.write_bytes(manifest_raw)
+        baseline_manifest_document = copy.deepcopy(manifest_document)
+        baseline_manifest_document["artifacts"] = []
+        baseline_manifest_raw = (
+            json.dumps(baseline_manifest_document, sort_keys=True) + "\n"
+        ).encode()
+        baseline_manifest.write_bytes(baseline_manifest_raw)
+        bindings[repository_id] = {
+            "manifest": str(manifest),
+            "manifest_sha256": sha256_bytes(manifest_raw),
+            "baseline_manifest": str(baseline_manifest),
+            "baseline_manifest_sha256": sha256_bytes(baseline_manifest_raw),
+            "mcp_command": ["python", "-m", "merger.repoground.mcp_server"],
+            "components": {
+                "language_structure_json": {
+                    "source_revision": source_revision,
+                    "artifact": artifact.name,
+                    "artifact_sha256": artifact_sha256,
+                }
+            },
+        }
+    return bindings
+
+
+def _component_requests(tmp_path: Path) -> tuple[dict, list[dict], dict[str, dict]]:
+    taskset = _component_taskset()
+    bindings = _component_bindings(tmp_path)
+    requests = build_run_requests(
+        taskset, runner=RUNNER, manifest_bindings=bindings, repetitions=2
+    )
+    return taskset, requests, bindings
+
+
+def test_complete_evaluation_contract_rejects_incomplete_objects(
+    tmp_path: Path,
+) -> None:
+    taskset, requests, _bindings = _component_requests(tmp_path)
+    cases = _cases(taskset)
+    receipts = [_receipt(request, cases[request["case_id"]]) for request in requests]
+    evaluation = evaluate_paired_runs(
+        taskset, requests, receipts, measurement_scope="real_paired_agent_runs"
+    )
+    assert validate_evaluation(evaluation) == []
+    Draft7Validator(_schema("evaluation")).validate(evaluation)
+
+    incomplete = copy.deepcopy(evaluation)
+    incomplete["cases"][0]["baseline"].pop("duration_ms")
+    assert validate_evaluation(incomplete)
+    incomplete = copy.deepcopy(evaluation)
+    incomplete["classes"][0]["efficiency"].pop("duration")
+    assert validate_evaluation(incomplete)
+    incomplete = copy.deepcopy(evaluation)
+    incomplete["decision"].pop("reason")
+    assert validate_evaluation(incomplete)
+    incomplete = copy.deepcopy(evaluation)
+    incomplete.pop("does_not_establish")
+    assert validate_evaluation(incomplete)
+
+
+def test_component_delta_taskset_contract_is_fail_closed() -> None:
+    taskset = _component_taskset()
+    Draft7Validator(_schema("taskset")).validate(taskset)
+    assert validate_taskset(taskset) == []
+
+    mutations = []
+    unknown_mode = copy.deepcopy(taskset)
+    unknown_mode["comparison"]["mode"] = "unknown"
+    mutations.append(unknown_mode)
+    invalid_component = copy.deepcopy(taskset)
+    invalid_component["comparison"]["component"] = "A"
+    mutations.append(invalid_component)
+    one_character_component = copy.deepcopy(taskset)
+    one_character_component["comparison"]["component"] = "a"
+    mutations.append(one_character_component)
+    invalid_revision = copy.deepcopy(taskset)
+    invalid_revision["comparison"]["source_revision"] = "a" * 39
+    mutations.append(invalid_revision)
+    split_tools = copy.deepcopy(taskset)
+    split_tools["tool_policy"]["baseline"] = ["glob", "grep", "read_file", "search"]
+    mutations.append(split_tools)
+    missing_repoground = copy.deepcopy(taskset)
+    missing_repoground["tool_policy"]["baseline"] = [
+        tool
+        for tool in missing_repoground["tool_policy"]["baseline"]
+        if tool
+        not in {
+            "ask_context",
+            "repobrief_resource_read",
+            "grounding_verify",
+            "live_freshness",
+        }
+    ]
+    mutations.append(missing_repoground)
+    for mutated in mutations:
+        assert validate_taskset(mutated)
+
+
+def test_evaluation_derivations_are_recomputed_from_case_scores(
+    tmp_path: Path,
+) -> None:
+    taskset, requests, _bindings = _component_requests(tmp_path)
+    cases = _cases(taskset)
+    receipts = [_receipt(request, cases[request["case_id"]]) for request in requests]
+    evaluation = evaluate_paired_runs(
+        taskset, requests, receipts, measurement_scope="real_paired_agent_runs"
+    )
+
+    assert validate_evaluation(evaluation) == []
+    assert validate_evaluation_derivations(evaluation) == []
+
+    legacy_v1 = copy.deepcopy(evaluation)
+    legacy_v1.pop("thresholds")
+    assert validate_evaluation(legacy_v1) == []
+    assert validate_evaluation_derivations(legacy_v1)
+
+    forged_class = copy.deepcopy(evaluation)
+    forged_class["classes"][0]["classification"] = "useful"
+    assert validate_evaluation_derivations(forged_class)
+
+    forged_decision = copy.deepcopy(evaluation)
+    forged_decision["decision"]["status"] = "useful_class"
+    forged_decision["decision"]["useful_classes"] = [
+        forged_decision["classes"][0]["category"]
+    ]
+    assert validate_evaluation_derivations(forged_decision)
+
+
+def test_evaluation_is_bound_to_requests_receipts_and_transcripts(
+    tmp_path: Path,
+) -> None:
+    taskset, requests, _bindings = _component_requests(tmp_path)
+    cases = _cases(taskset)
+    receipts = [_receipt(request, cases[request["case_id"]]) for request in requests]
+    evaluation = evaluate_paired_runs(
+        taskset, requests, receipts, measurement_scope="real_paired_agent_runs"
+    )
+
+    assert validate_evaluation_evidence(evaluation, taskset, requests, receipts) == []
+    assert evaluation["evidence"]["taskset_sha256"] == sha256_json(taskset)
+    assert len(evaluation["evidence"]["transcripts"]) == len(receipts)
+
+    forged_evaluation = copy.deepcopy(evaluation)
+    forged_evaluation["cases"][0]["baseline"]["success"] = not forged_evaluation["cases"][0][
+        "baseline"
+    ]["success"]
+    assert validate_evaluation_evidence(
+        forged_evaluation, taskset, requests, receipts
+    )
+
+    changed_receipts = copy.deepcopy(receipts)
+    changed_receipts[0]["duration_ms"] += 1
+    assert validate_evaluation_evidence(
+        evaluation, taskset, requests, changed_receipts
+    )
+
+    changed_requests = copy.deepcopy(requests)
+    changed_requests[0]["budgets"]["max_tool_calls"] += 1
+    assert validate_evaluation_evidence(
+        evaluation, taskset, changed_requests, receipts
+    )
+
+
+def test_explicit_empty_comparison_contract_fails_semantic_validation() -> None:
+    taskset = copy.deepcopy(_taskset())
+    taskset["comparison"] = {}
+
+    assert "comparison contract is invalid" in validate_taskset(taskset)
+
+
+def test_component_delta_requires_identical_grading_expectations() -> None:
+    taskset = _component_taskset()
+    baseline = taskset["cases"][0]["expectations"]["baseline"]
+    treatment = taskset["cases"][0]["expectations"]["treatment"]
+    baseline["outcome"] = "abstain" if treatment["outcome"] != "abstain" else "answer"
+
+    errors = validate_taskset(taskset)
+
+    assert any(
+        "component_delta expectations must be identical" in error for error in errors
+    )
+    with pytest.raises(
+        AgentBenchmarkError, match="component_delta expectations must be identical"
+    ):
+        build_run_requests(taskset, runner=RUNNER, manifest_bindings={}, repetitions=2)
+
+
+def test_component_delta_requests_differ_only_by_bound_artifact(tmp_path: Path) -> None:
+    taskset, requests, bindings = _component_requests(tmp_path)
+    schema = Draft7Validator(_schema("request"))
+    by_pair: dict[str, list[dict]] = defaultdict(list)
+    for request in requests:
+        schema.validate(request)
+        by_pair[request["pair_id"]].append(request)
+    assert by_pair
+    for pair in by_pair.values():
+        assert pair_request_errors(taskset, pair) == []
+        baseline = next(item for item in pair if item["condition"] == "baseline")
+        treatment = next(item for item in pair if item["condition"] == "treatment")
+        for field in (
+            "repository",
+            "runner",
+            "prompt",
+            "allowed_tools",
+            "budgets",
+            "isolation",
+        ):
+            assert baseline[field] == treatment[field]
+        assert baseline["repobrief"]["mcp_command"] == treatment["repobrief"]["mcp_command"]
+        repository_id = treatment["repository"]["id"]
+        binding = bindings[repository_id]
+        assert baseline["repobrief"] == {
+            "manifest": binding["baseline_manifest"],
+            "manifest_sha256": binding["baseline_manifest_sha256"],
+            "mcp_command": binding["mcp_command"],
+        }
+        assert treatment["repobrief"] == {
+            "manifest": binding["manifest"],
+            "manifest_sha256": binding["manifest_sha256"],
+            "mcp_command": binding["mcp_command"],
+        }
+        expected = binding["components"]["language_structure_json"]
+        assert baseline["component_delta"] == {
+            "component": "language_structure_json",
+            "source_revision": COMPONENT_REVISION,
+            "artifact": None,
+            "artifact_sha256": None,
+        }
+        assert treatment["component_delta"] == {
+            "component": "language_structure_json",
+            "source_revision": COMPONENT_REVISION,
+            "artifact": expected["artifact"],
+            "artifact_sha256": expected["artifact_sha256"],
+        }
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "components_missing",
+        "component_missing",
+        "artifact_missing",
+        "sha_missing",
+        "revision_mismatch",
+        "sha_invalid",
+        "file_missing",
+        "path_escape",
+        "sha_mismatch",
+    ],
+)
+def test_component_delta_artifact_binding_fails_closed(
+    tmp_path: Path, mutation: str
+) -> None:
+    taskset = _component_taskset()
+    bindings = _component_bindings(tmp_path)
+    repository_id = taskset["repositories"][0]["id"]
+    binding = bindings[repository_id]
+    component = binding["components"]["language_structure_json"]
+    if mutation == "components_missing":
+        binding.pop("components")
+    elif mutation == "component_missing":
+        binding["components"].pop("language_structure_json")
+    elif mutation == "artifact_missing":
+        component.pop("artifact")
+    elif mutation == "sha_missing":
+        component.pop("artifact_sha256")
+    elif mutation == "revision_mismatch":
+        component["source_revision"] = "b" * 40
+    elif mutation == "sha_invalid":
+        component["artifact_sha256"] = "z" * 64
+    elif mutation == "file_missing":
+        (Path(binding["manifest"]).parent / component["artifact"]).unlink()
+    elif mutation == "path_escape":
+        component["artifact"] = "../outside.json"
+    elif mutation == "sha_mismatch":
+        component["artifact_sha256"] = "f" * 64
+    with pytest.raises(AgentBenchmarkError):
+        build_run_requests(
+            taskset, runner=RUNNER, manifest_bindings=bindings, repetitions=2
+        )
+
+
+def _rewrite_component_fixture(
+    binding: dict,
+    *,
+    mutate_artifact=None,
+    mutate_manifest=None,
+) -> None:
+    manifest_path = Path(binding["manifest"])
+    component = binding["components"]["language_structure_json"]
+    artifact_path = manifest_path.parent / component["artifact"]
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+    if mutate_artifact is not None:
+        mutate_artifact(artifact)
+    artifact_raw = (json.dumps(artifact, sort_keys=True) + "\n").encode()
+    artifact_path.write_bytes(artifact_raw)
+    component["artifact_sha256"] = sha256_bytes(artifact_raw)
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    registered = next(
+        item
+        for item in manifest.get("artifacts", [])
+        if item.get("role") == "language_structure_json"
+    )
+    registered["sha256"] = component["artifact_sha256"]
+    if mutate_manifest is not None:
+        mutate_manifest(manifest)
+    manifest_raw = (json.dumps(manifest, sort_keys=True) + "\n").encode()
+    manifest_path.write_bytes(manifest_raw)
+    binding["manifest_sha256"] = sha256_bytes(manifest_raw)
+
+
+def test_component_delta_requires_exact_component_free_baseline_manifest(
+    tmp_path: Path,
+) -> None:
+    taskset = _component_taskset()
+    bindings = _component_bindings(tmp_path / "missing")
+    repository_id = taskset["repositories"][0]["id"]
+    bindings[repository_id].pop("baseline_manifest")
+    bindings[repository_id].pop("baseline_manifest_sha256")
+    with pytest.raises(AgentBenchmarkError, match="component-free baseline manifest"):
+        build_run_requests(
+            taskset, runner=RUNNER, manifest_bindings=bindings, repetitions=2
+        )
+
+    bindings = _component_bindings(tmp_path / "leak")
+    binding = bindings[repository_id]
+    baseline_path = Path(binding["baseline_manifest"])
+    treatment_raw = Path(binding["manifest"]).read_bytes()
+    baseline_path.write_bytes(treatment_raw)
+    binding["baseline_manifest_sha256"] = sha256_bytes(treatment_raw)
+    with pytest.raises(AgentBenchmarkError, match="still registers language_structure_json"):
+        build_run_requests(
+            taskset, runner=RUNNER, manifest_bindings=bindings, repetitions=2
+        )
+
+    bindings = _component_bindings(tmp_path / "unrelated")
+    binding = bindings[repository_id]
+    baseline_path = Path(binding["baseline_manifest"])
+    baseline_document = json.loads(baseline_path.read_text(encoding="utf-8"))
+    baseline_document["run_id"] = "unrelated-change"
+    baseline_raw = (json.dumps(baseline_document, sort_keys=True) + "\n").encode()
+    baseline_path.write_bytes(baseline_raw)
+    binding["baseline_manifest_sha256"] = sha256_bytes(baseline_raw)
+    with pytest.raises(AgentBenchmarkError, match="differ beyond language_structure_json"):
+        build_run_requests(
+            taskset, runner=RUNNER, manifest_bindings=bindings, repetitions=2
+        )
+
+
+def test_component_delta_baseline_is_missing_through_production_loader(
+    tmp_path: Path,
+) -> None:
+    bindings = _component_bindings(tmp_path)
+    binding = next(iter(bindings.values()))
+
+    loaded = load_language_structure_artifact(Path(binding["baseline_manifest"]))
+
+    assert loaded["status"] == "missing"
+    assert loaded["reason"] == "language_structure_not_registered"
+
+
+def test_component_delta_requires_manifest_registration_and_component_contract(
+    tmp_path: Path,
+) -> None:
+    taskset = _component_taskset()
+    bindings = _component_bindings(tmp_path)
+    repository_id = taskset["repositories"][0]["id"]
+    binding = bindings[repository_id]
+    manifest_path = Path(binding["manifest"])
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artifacts"] = []
+    manifest_raw = (json.dumps(manifest, sort_keys=True) + "\n").encode()
+    manifest_path.write_bytes(manifest_raw)
+    binding["manifest_sha256"] = sha256_bytes(manifest_raw)
+    with pytest.raises(
+        AgentBenchmarkError, match="exactly one language_structure_json"
+    ):
+        build_run_requests(
+            taskset, runner=RUNNER, manifest_bindings=bindings, repetitions=2
+        )
+
+    bindings = _component_bindings(tmp_path / "contract")
+    repository_id = taskset["repositories"][0]["id"]
+    binding = bindings[repository_id]
+    _rewrite_component_fixture(
+        binding,
+        mutate_manifest=lambda value: value["artifacts"][0].update(
+            contract={"id": "wrong-contract", "version": "v1"}
+        ),
+    )
+    with pytest.raises(AgentBenchmarkError, match="contract mismatch"):
+        build_run_requests(
+            taskset, runner=RUNNER, manifest_bindings=bindings, repetitions=2
+        )
+
+
+def test_component_delta_requires_schema_valid_revision_bound_component(
+    tmp_path: Path,
+) -> None:
+    taskset = _component_taskset()
+    bindings = _component_bindings(tmp_path / "revision")
+    repository_id = taskset["repositories"][0]["id"]
+    binding = bindings[repository_id]
+    _rewrite_component_fixture(
+        binding,
+        mutate_artifact=lambda value: value["source"].update(
+            repository_commit="f" * 40
+        ),
+    )
+    with pytest.raises(AgentBenchmarkError, match="provenance mismatch"):
+        build_run_requests(
+            taskset, runner=RUNNER, manifest_bindings=bindings, repetitions=2
+        )
+
+    bindings = _component_bindings(tmp_path / "schema")
+    repository_id = taskset["repositories"][0]["id"]
+    binding = bindings[repository_id]
+    _rewrite_component_fixture(
+        binding, mutate_artifact=lambda value: value.pop("source")
+    )
+    with pytest.raises(AgentBenchmarkError, match="contract invalid"):
+        build_run_requests(
+            taskset, runner=RUNNER, manifest_bindings=bindings, repetitions=2
+        )
+
+
+def test_component_delta_artifact_size_and_stability_fail_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    taskset = _component_taskset()
+    bindings = _component_bindings(tmp_path / "large")
+    repository_id = taskset["repositories"][0]["id"]
+    binding = bindings[repository_id]
+    component = binding["components"]["language_structure_json"]
+    artifact = Path(binding["manifest"]).parent / component["artifact"]
+    with artifact.open("wb") as handle:
+        handle.truncate(MAX_REGISTERED_ARTIFACT_BYTES + 1)
+    with pytest.raises(AgentBenchmarkError, match="too_large"):
+        build_run_requests(
+            taskset, runner=RUNNER, manifest_bindings=bindings, repetitions=2
+        )
+
+    stable_bindings = _component_bindings(tmp_path / "unstable")
+    monkeypatch.setattr(
+        "merger.repoground.core.agent_benchmark_components.read_stable_regular_file_bytes",
+        lambda *_args, **_kwargs: (None, None, "source_changed", "changed"),
+    )
+    with pytest.raises(AgentBenchmarkError, match="source_changed"):
+        build_run_requests(
+            taskset, runner=RUNNER, manifest_bindings=stable_bindings, repetitions=2
+        )
+
+
+def _set_nested_value(target: dict, path: tuple[str, ...], value) -> None:
+    current = target
+    for key in path[:-1]:
+        current = current[key]
+    current[path[-1]] = value
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        (("repository", "commit"), "f" * 40),
+        (("runner", "model"), "other"),
+        (("prompt",), "changed prompt"),
+        (("allowed_tools",), []),
+        (("budgets", "max_tool_calls"), 999),
+        (("repobrief", "manifest"), "other.manifest.json"),
+        (("repobrief", "manifest_sha256"), "f" * 64),
+        (("repobrief", "mcp_command"), ["other"]),
+        (("component_delta", "component"), "other_component"),
+        (("component_delta", "source_revision"), "b" * 40),
+        (("component_delta", "artifact"), None),
+    ],
+)
+def test_component_delta_pair_isolation_rejects_forbidden_difference(
+    tmp_path: Path, path: tuple[str, ...], value
+) -> None:
+    taskset, requests, _bindings = _component_requests(tmp_path)
+    pair_id = requests[0]["pair_id"]
+    pair = [item for item in requests if item["pair_id"] == pair_id]
+    assert pair_request_errors(taskset, pair) == []
+    mutated = copy.deepcopy(pair)
+    treatment = next(item for item in mutated if item["condition"] == "treatment")
+    _set_nested_value(treatment, path, value)
+    assert pair_request_errors(taskset, mutated)
+
+
+def test_component_delta_pair_isolation_rejects_baseline_artifact(
+    tmp_path: Path,
+) -> None:
+    taskset, requests, _bindings = _component_requests(tmp_path)
+    pair_id = requests[0]["pair_id"]
+    mutated = copy.deepcopy([item for item in requests if item["pair_id"] == pair_id])
+    baseline = next(item for item in mutated if item["condition"] == "baseline")
+    baseline["component_delta"]["artifact"] = "unexpected.json"
+    baseline["component_delta"]["artifact_sha256"] = "f" * 64
+    assert pair_request_errors(taskset, mutated)
+
+
+def test_component_delta_evaluation_binds_repository_artifacts_and_complete_pairs(
+    tmp_path: Path,
+) -> None:
+    taskset, requests, _bindings = _component_requests(tmp_path)
+    cases = _cases(taskset)
+    receipts = [_receipt(request, cases[request["case_id"]]) for request in requests]
+    result = evaluate_paired_runs(
+        taskset, requests, receipts, measurement_scope="real_paired_agent_runs"
+    )
+    Draft7Validator(_schema("evaluation")).validate(result)
+    comparison = result["comparison"]
+    assert comparison["pair_isolation_verified"] is True
+    assert comparison["mode"] == "component_delta"
+    assert comparison["component"] == "language_structure_json"
+    assert comparison["source_revision"] == COMPONENT_REVISION
+    assert {item["repository_id"] for item in comparison["treatment_artifacts"]} == {
+        item["id"] for item in taskset["repositories"]
+    }
+    assert all(
+        len(item["artifact_sha256"]) == 64 for item in comparison["treatment_artifacts"]
+    )
+
+    missing_pair = requests[0]["pair_id"]
+    filtered_requests = [item for item in requests if item["pair_id"] != missing_pair]
+    allowed_request_ids = {item["request_id"] for item in filtered_requests}
+    filtered_receipts = [
+        item for item in receipts if item["request_id"] in allowed_request_ids
+    ]
+    incomplete = evaluate_paired_runs(
+        taskset,
+        filtered_requests,
+        filtered_receipts,
+        measurement_scope="real_paired_agent_runs",
+    )
+    assert incomplete["comparison"]["pair_isolation_verified"] is False
+
+    baseline_only_requests = [
+        item for item in requests if item["condition"] == "baseline"
+    ]
+    baseline_request_ids = {item["request_id"] for item in baseline_only_requests}
+    baseline_only_receipts = [
+        item for item in receipts if item["request_id"] in baseline_request_ids
+    ]
+    baseline_only = evaluate_paired_runs(
+        taskset,
+        baseline_only_requests,
+        baseline_only_receipts,
+        measurement_scope="real_paired_agent_runs",
+    )
+    Draft7Validator(_schema("evaluation")).validate(baseline_only)
+    assert baseline_only["comparison"]["treatment_artifacts"] == []
+    assert baseline_only["comparison"]["pair_isolation_verified"] is False

@@ -1,6 +1,7 @@
 """Score paired benchmark receipts and classify bounded task classes."""
 from __future__ import annotations
 
+import json
 from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -20,6 +21,31 @@ from merger.repoground.core.agent_benchmark_common import (
     sha256_json,
 )
 from merger.repoground.core.agent_benchmark_receipts import validate_receipt
+
+
+
+def validate_evaluation(evaluation: Mapping[str, Any]) -> list[str]:
+    """Validate a complete v1 evaluation against its canonical JSON Schema."""
+
+    try:
+        import jsonschema
+    except ModuleNotFoundError:
+        return ["evaluation schema validation unavailable: jsonschema is not installed"]
+    schema_path = (
+        Path(__file__).resolve().parents[1]
+        / "contracts"
+        / "agent-benchmark-evaluation.v1.schema.json"
+    )
+    try:
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        jsonschema.Draft7Validator.check_schema(schema)
+    except (OSError, UnicodeError, json.JSONDecodeError, jsonschema.SchemaError) as exc:
+        return [f"evaluation schema validation unavailable: {exc}"]
+    validator = jsonschema.Draft7Validator(schema)
+    return [
+        error.message
+        for error in sorted(validator.iter_errors(evaluation), key=lambda item: list(item.path))
+    ]
 
 
 def _citation_key(value: Mapping[str, Any]) -> tuple[str, int, int] | None:
@@ -528,6 +554,60 @@ def _decision(
     }
 
 
+def validate_evaluation_derivations(evaluation: Mapping[str, Any]) -> list[str]:
+    """Recompute every aggregate derived from case scores and frozen thresholds."""
+
+    try:
+        thresholds = evaluation.get("thresholds")
+        cases = evaluation.get("cases")
+        classes = evaluation.get("classes")
+        measurement_scope = evaluation.get("measurement_scope")
+        if (
+            not isinstance(thresholds, Mapping)
+            or not isinstance(cases, list)
+            or not isinstance(classes, list)
+            or measurement_scope not in {
+                "synthetic_contract_fixture",
+                "real_paired_agent_runs",
+            }
+        ):
+            return ["evaluation derivation inputs are invalid"]
+        expected_classes = _class_results(
+            cases,
+            thresholds=thresholds,
+            measurement_scope=str(measurement_scope),
+        )
+        errors: list[str] = []
+        if classes != expected_classes:
+            errors.append("evaluation classes do not match case scores and thresholds")
+        expected_decision = _decision(
+            expected_classes, measurement_scope=str(measurement_scope)
+        )
+        if evaluation.get("decision") != expected_decision:
+            errors.append("evaluation decision does not match recomputed classes")
+        valid_run_count = sum(
+            int(mapping_value(item.get(condition)).get("valid") is True)
+            for item in cases
+            if isinstance(item, Mapping)
+            for condition in CONDITIONS
+        )
+        run_count = evaluation.get("run_count")
+        if (
+            isinstance(run_count, bool)
+            or not isinstance(run_count, int)
+            or run_count < len(cases) * len(CONDITIONS)
+        ):
+            errors.append("evaluation run_count is inconsistent with case scores")
+        else:
+            if evaluation.get("valid_run_count") != valid_run_count:
+                errors.append("evaluation valid_run_count does not match case scores")
+            if evaluation.get("invalid_run_count") != run_count - valid_run_count:
+                errors.append("evaluation invalid_run_count does not match case scores")
+        return errors
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return ["evaluation derivations are invalid"]
+
+
 def evaluate_paired_runs(
     taskset: Mapping[str, Any],
     requests: Sequence[Mapping[str, Any]],
@@ -563,6 +643,7 @@ def evaluate_paired_runs(
         "taskset_id": str(taskset["id"]),
         "taskset_sha256": sha256_json(taskset),
         "measurement_scope": measurement_scope,
+        "thresholds": dict(mapping_value(taskset.get("thresholds"))),
         "run_count": max(expected_run_count, len(receipts)),
         "valid_run_count": valid_run_count,
         "invalid_run_count": expected_run_count - valid_run_count + extra_receipts,
@@ -573,4 +654,9 @@ def evaluate_paired_runs(
     }
 
 
-__all__ = ["evaluate_paired_runs", "score_receipt"]
+__all__ = [
+    "evaluate_paired_runs",
+    "score_receipt",
+    "validate_evaluation",
+    "validate_evaluation_derivations",
+]

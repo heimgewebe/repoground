@@ -5,14 +5,19 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from merger.repoground.core.agent_benchmark_common import (
+    AgentBenchmarkError,
+    COMPONENT_DELTA_MODE,
     CONDITIONS,
     REQUEST_KIND,
     VERSION,
+    comparison_contract,
+    comparison_mode,
     list_value,
     mapping_value,
     sha256_json,
 )
 from merger.repoground.core.agent_benchmark_policy import BENCHMARK_REPETITIONS
+from merger.repoground.core.agent_benchmark_components import verify_component_manifest_delta
 
 
 def _repository_map(taskset: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
@@ -115,10 +120,43 @@ def _validate_policy(
     }:
         errors.append("request isolation contract is invalid")
     repobrief = request.get("repobrief")
-    if condition == "baseline" and repobrief is not None:
-        errors.append("baseline request must not contain RepoGround binding")
-    if condition == "treatment" and not isinstance(repobrief, Mapping):
-        errors.append("treatment request requires RepoGround binding")
+    if comparison_mode(taskset) == COMPONENT_DELTA_MODE:
+        if not isinstance(repobrief, Mapping):
+            errors.append("component_delta request requires RepoGround binding")
+        errors.extend(_validate_component_delta(taskset, request, condition=condition))
+    else:
+        if condition == "baseline" and repobrief is not None:
+            errors.append("baseline request must not contain RepoGround binding")
+        if condition == "treatment" and not isinstance(repobrief, Mapping):
+            errors.append("treatment request requires RepoGround binding")
+        if "component_delta" in request:
+            errors.append("legacy request must not contain component_delta binding")
+    return errors
+
+
+def _validate_component_delta(
+    taskset: Mapping[str, Any], request: Mapping[str, Any], *, condition: str
+) -> list[str]:
+    comparison = comparison_contract(taskset)
+    binding = mapping_value(request.get("component_delta"))
+    errors: list[str] = []
+    if binding.get("component") != comparison.get("component"):
+        errors.append("component_delta component does not match taskset")
+    if binding.get("source_revision") != comparison.get("source_revision"):
+        errors.append("component_delta source_revision does not match taskset")
+    artifact = binding.get("artifact")
+    artifact_sha256 = binding.get("artifact_sha256")
+    if condition == "baseline":
+        if artifact is not None or artifact_sha256 is not None:
+            errors.append("component_delta baseline must not bind an artifact")
+    elif (
+        not isinstance(artifact, str)
+        or not artifact
+        or not isinstance(artifact_sha256, str)
+        or len(artifact_sha256) != 64
+        or any(ch not in "0123456789abcdef" for ch in artifact_sha256)
+    ):
+        errors.append("component_delta treatment artifact binding is invalid")
     return errors
 
 
@@ -170,7 +208,57 @@ def expected_pair_keys(taskset: Mapping[str, Any]) -> list[tuple[str, int]]:
     ]
 
 
+def _component_delta_pair_errors(
+    baseline: Mapping[str, Any], treatment: Mapping[str, Any]
+) -> list[str]:
+    errors: list[str] = []
+    for field in ("repository", "prompt", "allowed_tools", "budgets", "isolation"):
+        if baseline.get(field) != treatment.get(field):
+            errors.append(f"component_delta paired requests disagree on {field}")
+    baseline_repobrief = mapping_value(baseline.get("repobrief"))
+    treatment_repobrief = mapping_value(treatment.get("repobrief"))
+    if baseline_repobrief.get("mcp_command") != treatment_repobrief.get("mcp_command"):
+        errors.append("component_delta paired requests disagree on RepoGround MCP command")
+    baseline_delta = mapping_value(baseline.get("component_delta"))
+    treatment_delta = mapping_value(treatment.get("component_delta"))
+    for field in ("component", "source_revision"):
+        if baseline_delta.get(field) != treatment_delta.get(field):
+            errors.append(f"component_delta paired requests disagree on {field}")
+    if baseline_delta.get("artifact") is not None or baseline_delta.get("artifact_sha256") is not None:
+        errors.append("component_delta baseline unexpectedly contains artifact evidence")
+    artifact = treatment_delta.get("artifact")
+    artifact_sha256 = treatment_delta.get("artifact_sha256")
+    if artifact is None or artifact_sha256 is None:
+        errors.append("component_delta treatment is missing artifact evidence")
+        return errors
+    repository = mapping_value(treatment.get("repository"))
+    repository_id = repository.get("id")
+    repository_commit = repository.get("commit")
+    component = treatment_delta.get("component")
+    if not all(
+        isinstance(value, str) and value
+        for value in (repository_id, repository_commit, component, artifact, artifact_sha256)
+    ):
+        errors.append("component_delta manifest isolation binding is incomplete")
+        return errors
+    try:
+        verify_component_manifest_delta(
+            baseline_repobrief,
+            treatment_repobrief,
+            repository_id=str(repository_id),
+            repository_commit=str(repository_commit),
+            source_revision=str(treatment_delta.get("source_revision", "")),
+            component=str(component),
+            artifact_path=str(artifact),
+            expected_sha256=str(artifact_sha256),
+        )
+    except AgentBenchmarkError as exc:
+        errors.append(f"component_delta manifest isolation invalid: {exc}")
+    return errors
+
+
 def pair_request_errors(
+    taskset: Mapping[str, Any],
     requests: Sequence[Mapping[str, Any]],
 ) -> list[str]:
     """Validate cross-condition provider and pairing invariants."""
@@ -186,6 +274,10 @@ def pair_request_errors(
         errors.append("paired requests use different runner configuration")
     if {first.get("condition"), second.get("condition")} != set(CONDITIONS):
         errors.append("paired requests do not contain baseline and treatment")
+    if comparison_mode(taskset) == COMPONENT_DELTA_MODE:
+        baseline = first if first.get("condition") == "baseline" else second
+        treatment = second if baseline is first else first
+        errors.extend(_component_delta_pair_errors(baseline, treatment))
     return errors
 
 

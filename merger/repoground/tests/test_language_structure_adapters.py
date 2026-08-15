@@ -12,6 +12,8 @@ import jsonschema
 import pytest
 
 from merger.repoground.core import doctor
+from merger.repoground.core.agent_benchmark import build_run_requests, evaluate_paired_runs
+from merger.repoground.core.agent_benchmark_evaluation import validate_evaluation
 from merger.repoground.core.bash_structure_adapter import scan_bash_repository
 from merger.repoground.core.language_structure import (
     build_language_structure_document,
@@ -30,6 +32,13 @@ from merger.repoground.core.language_structure_benchmark import (
 from merger.repoground.core.rust_structure_adapter import (
     _rust_call_evidence,
     scan_rust_repository,
+)
+from merger.repoground.tests.test_agent_benchmark import (
+    RUNNER as AGENT_RUNNER,
+    _cases as _agent_cases,
+    _component_bindings as _agent_component_bindings,
+    _component_taskset as _agent_component_taskset,
+    _receipt as _agent_receipt,
 )
 
 COMMIT = "b" * 40
@@ -993,6 +1002,175 @@ def test_benchmark_separates_quality_null_cost_and_fail_closed_promotion(tmp_pat
     assert (
         decide_language_adapter_promotion(report)["reason"]
         == "revision_bound_agent_benefit_missing"
+    )
+
+    agent_taskset = _agent_component_taskset(source_revision=revision)
+    agent_bindings = _agent_component_bindings(
+        tmp_path / "agent-evidence", source_revision=revision
+    )
+    agent_requests = build_run_requests(
+        agent_taskset,
+        runner=AGENT_RUNNER,
+        manifest_bindings=agent_bindings,
+        repetitions=2,
+    )
+    agent_cases = _agent_cases(agent_taskset)
+    agent_receipts = []
+    for request in agent_requests:
+        case = agent_cases[request["case_id"]]
+        answer_override = None
+        if request["condition"] == "baseline" and case["category"] == "navigation":
+            answer_override = {
+                "outcome": "abstain",
+                "asserted_sufficient_evidence": False,
+            }
+        agent_receipts.append(
+            _agent_receipt(request, case, answer_override=answer_override)
+        )
+    verified_component_delta = evaluate_paired_runs(
+        agent_taskset,
+        agent_requests,
+        agent_receipts,
+        measurement_scope="real_paired_agent_runs",
+    )
+    verified_inputs = {
+        "taskset": agent_taskset,
+        "requests": agent_requests,
+        "receipts": agent_receipts,
+    }
+
+    assert (
+        decide_language_adapter_promotion(
+            report, agent_benefit=verified_component_delta
+        )["reason"]
+        == "verified_component_delta_agent_benefit_missing"
+    )
+
+    assert "runner_execution" not in verified_component_delta
+
+    forged_attestation = copy.deepcopy(verified_component_delta)
+    forged_attestation["runner_execution"] = {
+        "attested": True,
+        "authority": "fixture-forgery",
+        "reason": "hand-written",
+    }
+    assert validate_evaluation(forged_attestation)
+    assert (
+        decide_language_adapter_promotion(
+            report,
+            agent_benefit=forged_attestation,
+            agent_benefit_inputs=verified_inputs,
+        )["reason"]
+        == "verified_component_delta_agent_benefit_missing"
+    )
+
+    accepted = decide_language_adapter_promotion(
+        report,
+        agent_benefit=verified_component_delta,
+        agent_benefit_inputs=verified_inputs,
+    )
+    assert accepted == {
+        "status": "keep_optional",
+        "broad_activation_eligible": False,
+        "default_promoted": False,
+        "reason": "verified_component_delta_agent_benefit_missing",
+    }
+
+    tampered_inputs = copy.deepcopy(verified_inputs)
+    tampered_inputs["receipts"][0]["duration_ms"] += 1
+    assert (
+        decide_language_adapter_promotion(
+            report,
+            agent_benefit=verified_component_delta,
+            agent_benefit_inputs=tampered_inputs,
+        )["reason"]
+        == "verified_component_delta_agent_benefit_missing"
+    )
+
+    first_treatment = next(
+        item for item in agent_requests if item["condition"] == "treatment"
+    )
+    artifact_path = (
+        Path(first_treatment["repobrief"]["manifest"]).parent
+        / first_treatment["component_delta"]["artifact"]
+    )
+    artifact_raw = artifact_path.read_bytes()
+    artifact_path.write_text("{}\n", encoding="utf-8")
+    try:
+        assert (
+            decide_language_adapter_promotion(
+                report,
+                agent_benefit=verified_component_delta,
+                agent_benefit_inputs=verified_inputs,
+            )["reason"]
+            == "verified_component_delta_agent_benefit_missing"
+        )
+    finally:
+        artifact_path.write_bytes(artifact_raw)
+
+    bad_mutations = []
+    for mutate in (
+        lambda value: value.update(measurement_scope="synthetic_contract_fixture"),
+        lambda value: value["thresholds"].update(minimum_success_rate_gain=0.0),
+        lambda value: value["thresholds"].update(maximum_class_success_regression=0.5),
+        lambda value: value["comparison"].update(component="other_component"),
+        lambda value: value["comparison"].update(source_revision="b" * 40),
+        lambda value: value["comparison"].update(pair_isolation_verified=False),
+        lambda value: value["comparison"]["treatment_artifacts"][0].update(
+            artifact="../escape.json"
+        ),
+        lambda value: value["comparison"]["treatment_artifacts"][0].update(
+            artifact_sha256="z" * 64
+        ),
+        lambda value: value.update(run_count=4),
+        lambda value: value.update(valid_run_count=5, invalid_run_count=1),
+        lambda value: value["cases"][0].update(pair_valid=False),
+        lambda value: value["classes"][0].update(classification="harmful"),
+        lambda value: value["decision"].update(harmful_classes=["navigation"]),
+        lambda value: value["decision"].update(default_promoted=True),
+        lambda value: value["decision"].pop("reason"),
+        lambda value: value["cases"][0]["baseline"].pop("duration_ms"),
+        lambda value: value["classes"][0]["efficiency"].pop("duration"),
+        lambda value: value.pop("does_not_establish"),
+    ):
+        mutated = copy.deepcopy(verified_component_delta)
+        mutate(mutated)
+        bad_mutations.append(mutated)
+    duplicate_artifact = copy.deepcopy(verified_component_delta)
+    duplicate_artifact["comparison"]["treatment_artifacts"].append(
+        copy.deepcopy(duplicate_artifact["comparison"]["treatment_artifacts"][0])
+    )
+    bad_mutations.append(duplicate_artifact)
+    missing_class = copy.deepcopy(verified_component_delta)
+    missing_class["classes"].pop()
+    bad_mutations.append(missing_class)
+    inconsistent_pair_total = copy.deepcopy(verified_component_delta)
+    inconsistent_pair_total["classes"][0]["valid_pair_count"] = 3
+    bad_mutations.append(inconsistent_pair_total)
+    neutral_only = copy.deepcopy(verified_component_delta)
+    neutral_only["classes"][0]["classification"] = "neutral"
+    neutral_only["decision"]["useful_classes"] = []
+    neutral_only["decision"]["status"] = "neutral"
+    bad_mutations.append(neutral_only)
+    for mutated in bad_mutations:
+        assert (
+            decide_language_adapter_promotion(
+                report,
+                agent_benefit=mutated,
+                agent_benefit_inputs=verified_inputs,
+            )["reason"]
+            == "verified_component_delta_agent_benefit_missing"
+        )
+
+    degraded_report = copy.deepcopy(report)
+    degraded_report["determinism"]["semantic_projection_repeated_equal"] = False
+    assert (
+        decide_language_adapter_promotion(
+            degraded_report,
+            agent_benefit=verified_component_delta,
+            agent_benefit_inputs=verified_inputs,
+        )["reason"]
+        == "verified_component_delta_agent_benefit_missing"
     )
 
     malformed_report = json.loads(json.dumps(report))

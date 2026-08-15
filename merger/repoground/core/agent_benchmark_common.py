@@ -17,6 +17,8 @@ EVALUATION_KIND = "repobrief.agent_benchmark_evaluation"
 VERSION = "1.0"
 CATEGORIES = ("navigation", "structural", "grounding_freshness")
 CONDITIONS = ("baseline", "treatment")
+LEGACY_COMPARISON_MODE = "repoground_vs_baseline"
+COMPONENT_DELTA_MODE = "component_delta"
 NON_ANSWER_OUTCOMES = {
     "abstain",
     "stale",
@@ -192,6 +194,45 @@ def _repository_ids(taskset: Mapping[str, Any]) -> tuple[set[str], list[str]]:
     return set(identifiers), errors
 
 
+def comparison_contract(taskset: Mapping[str, Any]) -> Mapping[str, Any]:
+    return mapping_value(taskset.get("comparison"))
+
+
+def comparison_mode(taskset: Mapping[str, Any]) -> str:
+    if "comparison" not in taskset:
+        return LEGACY_COMPARISON_MODE
+    comparison = comparison_contract(taskset)
+    return str(comparison.get("mode", ""))
+
+
+def _validate_comparison(taskset: Mapping[str, Any]) -> list[str]:
+    if "comparison" not in taskset:
+        return []
+    raw_comparison = taskset.get("comparison")
+    if not isinstance(raw_comparison, Mapping) or not raw_comparison:
+        return ["comparison contract is invalid"]
+    comparison = raw_comparison
+    if comparison.get("mode") != COMPONENT_DELTA_MODE:
+        return ["comparison mode is unsupported"]
+    component = comparison.get("component")
+    source_revision = comparison.get("source_revision")
+    errors: list[str] = []
+    component_valid = (
+        isinstance(component, str)
+        and len(component) >= 2
+        and "a" <= component[0] <= "z"
+        and all(
+            "a" <= char <= "z" or "0" <= char <= "9" or char in "_.-"
+            for char in component[1:]
+        )
+    )
+    if not component_valid:
+        errors.append("component_delta component is invalid")
+    if not isinstance(source_revision, str) or len(source_revision) not in {40, 64} or any(ch not in "0123456789abcdef" for ch in source_revision):
+        errors.append("component_delta source_revision is invalid")
+    return errors
+
+
 def _validate_tool_policy(taskset: Mapping[str, Any]) -> list[str]:
     policy = mapping_value(taskset.get("tool_policy"))
     baseline = {str(item) for item in list_value(policy.get("baseline"))}
@@ -203,7 +244,12 @@ def _validate_tool_policy(taskset: Mapping[str, Any]) -> list[str]:
         errors.append("treatment tools must include every baseline tool")
     if not REPOBRIEF_TOOLS.issubset(treatment):
         errors.append("treatment tool policy misses required RepoGround tools")
-    if baseline.intersection(REPOBRIEF_TOOLS):
+    if comparison_mode(taskset) == COMPONENT_DELTA_MODE:
+        if baseline != treatment:
+            errors.append("component_delta tool policies must be identical")
+        if not REPOBRIEF_TOOLS.issubset(baseline):
+            errors.append("component_delta baseline must expose RepoGround tools")
+    elif baseline.intersection(REPOBRIEF_TOOLS):
         errors.append("baseline tool policy must not expose RepoGround tools")
     return errors
 
@@ -226,13 +272,15 @@ def _validate_case_shape(cases: list[Any]) -> list[str]:
 
 
 def _validate_case(
-    case: Mapping[str, Any], *, repository_ids: set[str]
+    case: Mapping[str, Any], *, repository_ids: set[str], require_identical_expectations: bool = False
 ) -> tuple[list[str], bool]:
     case_id = str(case.get("id", ""))
     errors: list[str] = []
     if case.get("repository_id") not in repository_ids:
         errors.append(f"case {case_id} references an unknown repository")
     expectations = mapping_value(case.get("expectations"))
+    if require_identical_expectations and expectations.get("baseline") != expectations.get("treatment"):
+        errors.append(f"case {case_id} component_delta expectations must be identical")
     negative = False
     for condition in CONDITIONS:
         expectation = mapping_value(expectations.get(condition))
@@ -251,13 +299,17 @@ def validate_taskset(taskset: Mapping[str, Any]) -> list[str]:
     errors = _validate_taskset_identity(taskset)
     repository_ids, repository_errors = _repository_ids(taskset)
     errors.extend(repository_errors)
+    errors.extend(_validate_comparison(taskset))
     errors.extend(_validate_tool_policy(taskset))
     cases = list_value(taskset.get("cases"))
     errors.extend(_validate_case_shape(cases))
     negative_count = 0
+    require_identical_expectations = comparison_mode(taskset) == COMPONENT_DELTA_MODE
     for raw_case in cases:
         case_errors, negative = _validate_case(
-            mapping_value(raw_case), repository_ids=repository_ids
+            mapping_value(raw_case),
+            repository_ids=repository_ids,
+            require_identical_expectations=require_identical_expectations,
         )
         errors.extend(case_errors)
         negative_count += int(negative)
@@ -275,9 +327,11 @@ def require_valid_taskset(taskset: Mapping[str, Any]) -> None:
 __all__ = [
     "AgentBenchmarkError",
     "CATEGORIES",
+    "COMPONENT_DELTA_MODE",
     "CONDITIONS",
     "DOES_NOT_ESTABLISH",
     "EVALUATION_KIND",
+    "LEGACY_COMPARISON_MODE",
     "MAX_JSON_BYTES",
     "MAX_RUNNER_STDERR_BYTES",
     "NON_ANSWER_OUTCOMES",
@@ -286,6 +340,8 @@ __all__ = [
     "TASKSET_KIND",
     "VERSION",
     "canonical_json",
+    "comparison_contract",
+    "comparison_mode",
     "is_repository_relative_path",
     "list_value",
     "load_json",

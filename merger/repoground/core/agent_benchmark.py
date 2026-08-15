@@ -14,12 +14,15 @@ from typing import Any
 
 from merger.repoground.core.agent_benchmark_common import (
     AgentBenchmarkError,
+    COMPONENT_DELTA_MODE,
     DOES_NOT_ESTABLISH,
     MAX_JSON_BYTES,
     MAX_RUNNER_STDERR_BYTES,
     REQUEST_KIND,
     VERSION,
     canonical_json,
+    comparison_contract,
+    comparison_mode,
     is_repository_relative_path,
     list_value,
     load_json,
@@ -30,8 +33,20 @@ from merger.repoground.core.agent_benchmark_common import (
     validate_taskset,
     write_json_atomic,
 )
-from merger.repoground.core.agent_benchmark_evaluation import score_receipt
-from merger.repoground.core.agent_benchmark_integrity import evaluate_paired_runs
+from merger.repoground.core.agent_benchmark_components import (
+    verify_component_artifact_binding,
+    verify_component_free_manifest_binding,
+    verify_component_manifest_delta,
+)
+from merger.repoground.core.agent_benchmark_evaluation import (
+    score_receipt,
+    validate_evaluation,
+    validate_evaluation_derivations,
+)
+from merger.repoground.core.agent_benchmark_integrity import (
+    evaluate_paired_runs,
+    validate_evaluation_evidence,
+)
 from merger.repoground.core.agent_benchmark_policy import BENCHMARK_REPETITIONS
 from merger.repoground.core.agent_benchmark_receipts import validate_receipt
 
@@ -103,22 +118,114 @@ def _condition_order(case_index: int, repetition: int) -> tuple[str, str]:
 
 
 def _repobrief_binding(
+    taskset: Mapping[str, Any],
     condition: str,
     repository_id: str,
     manifest_bindings: Mapping[str, Mapping[str, Any]],
 ) -> dict[str, Any] | None:
-    if condition == "baseline":
+    if condition == "baseline" and comparison_mode(taskset) != COMPONENT_DELTA_MODE:
         return None
     binding = manifest_bindings.get(repository_id)
     if not isinstance(binding, Mapping):
         raise AgentBenchmarkError(
             f"missing RepoGround manifest binding for {repository_id}"
         )
+    manifest_key = (
+        "baseline_manifest"
+        if condition == "baseline" and comparison_mode(taskset) == COMPONENT_DELTA_MODE
+        else "manifest"
+    )
+    sha_key = (
+        "baseline_manifest_sha256"
+        if condition == "baseline" and comparison_mode(taskset) == COMPONENT_DELTA_MODE
+        else "manifest_sha256"
+    )
+    manifest = binding.get(manifest_key)
+    manifest_sha256 = binding.get(sha_key)
+    mcp_command = binding.get("mcp_command")
+    if (
+        not isinstance(manifest, str)
+        or not manifest
+        or not isinstance(manifest_sha256, str)
+        or not isinstance(mcp_command, list)
+        or not mcp_command
+        or not all(isinstance(item, str) and item for item in mcp_command)
+    ):
+        if condition == "baseline" and comparison_mode(taskset) == COMPONENT_DELTA_MODE:
+            raise AgentBenchmarkError(
+                f"component_delta requires a component-free baseline manifest for {repository_id}"
+            )
+        raise AgentBenchmarkError(
+            f"invalid RepoGround manifest binding for {repository_id} condition {condition}"
+        )
     return {
-        "manifest": str(binding["manifest"]),
-        "manifest_sha256": str(binding["manifest_sha256"]),
-        "mcp_command": list(binding["mcp_command"]),
+        "manifest": manifest,
+        "manifest_sha256": manifest_sha256,
+        "mcp_command": list(mcp_command),
     }
+
+
+def _component_delta_binding(
+    taskset: Mapping[str, Any],
+    condition: str,
+    repository: Mapping[str, Any],
+    manifest_bindings: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any] | None:
+    if comparison_mode(taskset) != COMPONENT_DELTA_MODE:
+        return None
+    comparison = comparison_contract(taskset)
+    component = str(comparison["component"])
+    repository_id = str(repository["id"])
+    repository_binding = manifest_bindings.get(repository_id)
+    components = mapping_value(
+        repository_binding.get("components") if isinstance(repository_binding, Mapping) else None
+    )
+    artifact = mapping_value(components.get(component))
+    if (
+        artifact.get("source_revision") != comparison["source_revision"]
+        or not isinstance(artifact.get("artifact"), str)
+        or not artifact.get("artifact")
+        or not isinstance(artifact.get("artifact_sha256"), str)
+        or len(str(artifact.get("artifact_sha256"))) != 64
+        or any(ch not in "0123456789abcdef" for ch in str(artifact.get("artifact_sha256")))
+        or not isinstance(repository_binding, Mapping)
+    ):
+        raise AgentBenchmarkError(
+            f"missing or invalid component artifact binding for {repository_id}"
+        )
+    artifact_path = str(artifact["artifact"])
+    artifact_sha256 = str(artifact["artifact_sha256"])
+    baseline_manifest = repository_binding.get("baseline_manifest")
+    baseline_manifest_sha256 = repository_binding.get("baseline_manifest_sha256")
+    if not isinstance(baseline_manifest, str) or not isinstance(
+        baseline_manifest_sha256, str
+    ):
+        raise AgentBenchmarkError(
+            f"component_delta requires a component-free baseline manifest for {repository_id}"
+        )
+    verify_component_manifest_delta(
+        {
+            "manifest": baseline_manifest,
+            "manifest_sha256": baseline_manifest_sha256,
+        },
+        repository_binding,
+        repository_id=repository_id,
+        repository_commit=str(repository["commit"]),
+        source_revision=str(comparison["source_revision"]),
+        component=component,
+        artifact_path=artifact_path,
+        expected_sha256=artifact_sha256,
+    )
+    result: dict[str, Any] = {
+        "component": component,
+        "source_revision": str(comparison["source_revision"]),
+        "artifact": None,
+        "artifact_sha256": None,
+    }
+    if condition == "treatment":
+        result["artifact"] = artifact_path
+        result["artifact_sha256"] = artifact_sha256
+    return result
 
 
 def _build_request(
@@ -173,7 +280,14 @@ def _build_request(
             ),
         },
         "repobrief": _repobrief_binding(
-            condition, repository_id, manifest_bindings
+            taskset, condition, repository_id, manifest_bindings
+        ),
+        **(
+            {"component_delta": component_delta}
+            if (component_delta := _component_delta_binding(
+                taskset, condition, repository, manifest_bindings
+            )) is not None
+            else {}
         ),
         "isolation": {
             "fresh_session": True,
@@ -249,6 +363,85 @@ def _decode_runner_output(raw: bytes) -> dict[str, Any]:
     return value
 
 
+
+def _verify_execution_component_artifact(request: Mapping[str, Any]) -> None:
+    if "component_delta" not in request:
+        return
+    binding = request.get("component_delta")
+    if not isinstance(binding, Mapping):
+        raise AgentBenchmarkError("component_delta execution binding is invalid")
+    artifact = binding.get("artifact")
+    artifact_sha256 = binding.get("artifact_sha256")
+    condition = request.get("condition")
+    if condition == "baseline":
+        if artifact is not None or artifact_sha256 is not None:
+            raise AgentBenchmarkError("component_delta baseline cannot execute with an artifact")
+        repobrief = request.get("repobrief")
+        repository = mapping_value(request.get("repository"))
+        component = binding.get("component")
+        source_revision = binding.get("source_revision")
+        repository_id = repository.get("id")
+        repository_commit = repository.get("commit")
+        if (
+            not isinstance(repobrief, Mapping)
+            or not isinstance(component, str)
+            or not component
+            or not isinstance(source_revision, str)
+            or not source_revision
+            or not isinstance(repository_id, str)
+            or not repository_id
+            or not isinstance(repository_commit, str)
+            or not repository_commit
+        ):
+            raise AgentBenchmarkError(
+                "component_delta baseline RepoGround binding is invalid"
+            )
+        verify_component_free_manifest_binding(
+            repobrief,
+            repository_id=repository_id,
+            repository_commit=repository_commit,
+            source_revision=source_revision,
+            component=component,
+        )
+        return
+    if (
+        condition != "treatment"
+        or not isinstance(artifact, str)
+        or not artifact
+        or not isinstance(artifact_sha256, str)
+        or len(artifact_sha256) != 64
+    ):
+        raise AgentBenchmarkError("component_delta execution artifact binding is invalid")
+    repobrief = request.get("repobrief")
+    repository = request.get("repository")
+    if not isinstance(repobrief, Mapping) or not isinstance(repository, Mapping):
+        raise AgentBenchmarkError("component_delta execution requires RepoGround repository binding")
+    manifest = repobrief.get("manifest")
+    repository_id = repository.get("id")
+    if not isinstance(manifest, str) or not isinstance(repository_id, str) or not repository_id:
+        raise AgentBenchmarkError("component_delta execution RepoGround binding is invalid")
+    component = binding.get("component")
+    repository_commit = repository.get("commit")
+    manifest_sha256 = repobrief.get("manifest_sha256")
+    if (
+        not isinstance(component, str)
+        or not component
+        or not isinstance(repository_commit, str)
+        or not repository_commit
+        or not isinstance(manifest_sha256, str)
+    ):
+        raise AgentBenchmarkError("component_delta execution provenance binding is invalid")
+    verify_component_artifact_binding(
+        {"manifest": manifest, "manifest_sha256": manifest_sha256},
+        repository_id=repository_id,
+        repository_commit=repository_commit,
+        source_revision=str(binding.get("source_revision", "")),
+        component=component,
+        artifact_path=artifact,
+        expected_sha256=artifact_sha256,
+    )
+
+
 def execute_runner(
     command: Sequence[str],
     request: Mapping[str, Any],
@@ -262,6 +455,7 @@ def execute_runner(
         raise AgentBenchmarkError("runner command must be a non-empty string array")
     if timeout_seconds < 1:
         raise AgentBenchmarkError("runner timeout must be positive")
+    _verify_execution_component_artifact(request)
     request_bytes = (canonical_json(request) + "\n").encode("utf-8")
     with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
         try:
@@ -304,6 +498,9 @@ __all__ = [
     "score_receipt",
     "sha256_bytes",
     "sha256_json",
+    "validate_evaluation",
+    "validate_evaluation_derivations",
+    "validate_evaluation_evidence",
     "validate_receipt",
     "validate_taskset",
     "write_json_atomic",
