@@ -291,6 +291,22 @@ def _validate_post_health_schema(post_doc: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+def _validate_pass_run_binding(
+    status: str,
+    manifest_run_id: Optional[str],
+    post_bundle_run_id: Any,
+) -> Optional[str]:
+    if status != "pass":
+        return None
+    if not isinstance(manifest_run_id, str) or not manifest_run_id.strip():
+        return "manifest run_id is missing or empty; cannot bind post_emit_health"
+    if not isinstance(post_bundle_run_id, str) or not post_bundle_run_id.strip():
+        return "post_emit_health bundle_run_id is missing or empty"
+    if post_bundle_run_id != manifest_run_id:
+        return "post_emit_health bundle_run_id does not match manifest run_id"
+    return None
+
+
 def _validate_post_health_binding(
     post_doc: Dict[str, Any],
     *,
@@ -321,13 +337,11 @@ def _validate_post_health_binding(
         return "post_emit_health bundle_manifest_path does not match the evaluated manifest"
 
     post_bundle_run_id = post_doc.get("bundle_run_id")
-    if status == "pass":
-        if not isinstance(manifest_run_id, str) or not manifest_run_id.strip():
-            return "manifest run_id is missing or empty; cannot bind post_emit_health"
-        if not isinstance(post_bundle_run_id, str) or not post_bundle_run_id.strip():
-            return "post_emit_health bundle_run_id is missing or empty"
-        if post_bundle_run_id != manifest_run_id:
-            return "post_emit_health bundle_run_id does not match manifest run_id"
+    run_binding_error = _validate_pass_run_binding(
+        status, manifest_run_id, post_bundle_run_id
+    )
+    if run_binding_error is not None:
+        return run_binding_error
 
     schema_error = _validate_post_health_schema(post_doc)
     if schema_error is not None:
