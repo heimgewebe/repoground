@@ -70,6 +70,280 @@ def load_publisher() -> ModuleType:
     return module
 
 
+def _is_advertised_branch_fetch(argv: list[str], branch: str) -> bool:
+    return argv[-4:] == [
+        "fetch",
+        "--no-tags",
+        "origin",
+        f"+refs/heads/{branch}:refs/remotes/origin/{branch}",
+    ]
+
+
+def test_remote_head_explicitly_fetches_remote_advertised_nonstandard_default_branch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    repo = tmp_path / "preview"
+    sha = "b2ba42acc074410e44f03bb2d0943c2c7fc1ef59"
+    calls: list[list[str]] = []
+    advertised_fetched = False
+
+    def fake_run(
+        argv: list[str],
+        cwd: Path | None = None,
+        check: bool = True,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal advertised_fetched
+        calls.append(argv)
+        if argv[-4:] == ["ls-remote", "--symref", "origin", "HEAD"]:
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout=f"ref: refs/heads/gh-pages\tHEAD\n{sha}\tHEAD\n",
+            )
+        if _is_advertised_branch_fetch(argv, "gh-pages"):
+            advertised_fetched = True
+            return subprocess.CompletedProcess(argv, 0, stdout="")
+        if argv[-3:] == ["rev-parse", "--verify", "refs/remotes/origin/gh-pages"]:
+            return subprocess.CompletedProcess(
+                argv,
+                0 if advertised_fetched else 1,
+                stdout=f"{sha}\n" if advertised_fetched else "",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    monkeypatch.setattr(module, "run", fake_run)
+
+    assert module.remote_head(repo) == ("origin/gh-pages", "gh-pages", sha)
+    assert advertised_fetched is True
+    assert len(calls) == 3
+    assert not any(argv[-3:] == ["fetch", "origin", "--prune"] for argv in calls)
+    assert not any("set-head" in argv for argv in calls)
+
+
+def test_remote_head_rejects_remote_head_that_moves_after_fetch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    repo = tmp_path / "moving"
+    advertised_sha = "a" * 40
+    fetched_sha = "b" * 40
+
+    def fake_run(
+        argv: list[str],
+        cwd: Path | None = None,
+        check: bool = True,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        if argv[-4:] == ["ls-remote", "--symref", "origin", "HEAD"]:
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout=(
+                    "ref: refs/heads/trunk\tHEAD\n"
+                    f"{advertised_sha}\tHEAD\n"
+                ),
+            )
+        if _is_advertised_branch_fetch(argv, "trunk"):
+            return subprocess.CompletedProcess(argv, 0, stdout="")
+        if argv[-3:] == ["rev-parse", "--verify", "refs/remotes/origin/trunk"]:
+            return subprocess.CompletedProcess(argv, 0, stdout=f"{fetched_sha}\n")
+        raise AssertionError(f"unexpected command: {argv}")
+
+    monkeypatch.setattr(module, "run", fake_run)
+
+    with pytest.raises(RuntimeError, match="moved during resolution"):
+        module.remote_head(repo)
+
+
+def test_remote_head_falls_back_to_existing_local_origin_head(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    repo = tmp_path / "demo"
+    sha = "a" * 40
+    calls: list[list[str]] = []
+
+    def fake_run(
+        argv: list[str],
+        cwd: Path | None = None,
+        check: bool = True,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        if argv[-3:] == ["fetch", "origin", "--prune"]:
+            return subprocess.CompletedProcess(argv, 0, stdout="")
+        if argv[-4:] == ["ls-remote", "--symref", "origin", "HEAD"]:
+            return subprocess.CompletedProcess(argv, 0, stdout=f"{sha}\tHEAD\n")
+        if argv[-3:] == ["symbolic-ref", "refs/remotes/origin/HEAD", "--short"]:
+            return subprocess.CompletedProcess(argv, 0, stdout="origin/release\n")
+        if argv[-2:] == ["rev-parse", "origin/release"]:
+            return subprocess.CompletedProcess(argv, 0, stdout=f"{sha}\n")
+        raise AssertionError(f"unexpected command: {argv}")
+
+    monkeypatch.setattr(module, "run", fake_run)
+
+    assert module.remote_head(repo) == ("origin/release", "release", sha)
+    assert not any("set-head" in argv for argv in calls)
+
+
+def test_remote_head_rejects_fallback_that_disagrees_with_remote_head_sha(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    repo = tmp_path / "stale-local-head"
+    advertised_sha = "a" * 40
+    local_sha = "b" * 40
+
+    def fake_run(
+        argv: list[str],
+        cwd: Path | None = None,
+        check: bool = True,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        if argv[-3:] == ["fetch", "origin", "--prune"]:
+            return subprocess.CompletedProcess(argv, 0, stdout="")
+        if argv[-4:] == ["ls-remote", "--symref", "origin", "HEAD"]:
+            return subprocess.CompletedProcess(argv, 0, stdout=f"{advertised_sha}\tHEAD\n")
+        if argv[-3:] == ["symbolic-ref", "refs/remotes/origin/HEAD", "--short"]:
+            return subprocess.CompletedProcess(argv, 0, stdout="origin/release\n")
+        if argv[-2:] == ["rev-parse", "origin/release"]:
+            return subprocess.CompletedProcess(argv, 0, stdout=f"{local_sha}\n")
+        raise AssertionError(f"unexpected command: {argv}")
+
+    monkeypatch.setattr(module, "run", fake_run)
+
+    with pytest.raises(RuntimeError, match="remote HEAD disagrees"):
+        module.remote_head(repo)
+
+
+def test_remote_head_remains_fail_closed_without_any_default_branch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    repo = tmp_path / "empty-default"
+    calls: list[list[str]] = []
+
+    def fake_run(
+        argv: list[str],
+        cwd: Path | None = None,
+        check: bool = True,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        if argv[-3:] == ["fetch", "origin", "--prune"]:
+            return subprocess.CompletedProcess(argv, 0, stdout="")
+        if argv[-4:] == ["ls-remote", "--symref", "origin", "HEAD"]:
+            return subprocess.CompletedProcess(argv, 0, stdout="")
+        if argv[-3:] == ["symbolic-ref", "refs/remotes/origin/HEAD", "--short"]:
+            return subprocess.CompletedProcess(argv, 1, stdout="")
+        if len(argv) >= 2 and argv[-2] == "rev-parse":
+            return subprocess.CompletedProcess(argv, 1, stdout="")
+        raise AssertionError(f"unexpected command: {argv}")
+
+    monkeypatch.setattr(module, "run", fake_run)
+
+    with pytest.raises(RuntimeError, match="no remote default branch"):
+        module.remote_head(repo)
+    assert not any("set-head" in argv for argv in calls)
+
+
+def test_remote_head_rejects_non_branch_remote_head_symref(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    repo = tmp_path / "malformed"
+    sha = "c" * 40
+    calls: list[list[str]] = []
+
+    def fake_run(
+        argv: list[str],
+        cwd: Path | None = None,
+        check: bool = True,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        if argv[-4:] == ["ls-remote", "--symref", "origin", "HEAD"]:
+            return subprocess.CompletedProcess(
+                argv, 0, stdout=f"ref: refs/tags/v1\tHEAD\n{sha}\tHEAD\n"
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    monkeypatch.setattr(module, "run", fake_run)
+
+    with pytest.raises(RuntimeError, match="does not advertise a branch"):
+        module.remote_head(repo)
+    assert calls == [
+        ["git", "-C", str(repo), "ls-remote", "--symref", "origin", "HEAD"]
+    ]
+
+
+def test_remote_head_rejects_unsafe_advertised_branch_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    repo = tmp_path / "unsafe"
+    sha = "d" * 40
+
+    def fake_run(
+        argv: list[str],
+        cwd: Path | None = None,
+        check: bool = True,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        if argv[-4:] == ["ls-remote", "--symref", "origin", "HEAD"]:
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout=f"ref: refs/heads/feat/../escape\tHEAD\n{sha}\tHEAD\n",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    monkeypatch.setattr(module, "run", fake_run)
+
+    with pytest.raises(RuntimeError, match="unsafe branch"):
+        module.remote_head(repo)
+
+
+def test_remote_head_fetches_nested_advertised_branch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    repo = tmp_path / "nested"
+    sha = "e" * 40
+    advertised_fetched = False
+
+    def fake_run(
+        argv: list[str],
+        cwd: Path | None = None,
+        check: bool = True,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal advertised_fetched
+        if argv[-4:] == ["ls-remote", "--symref", "origin", "HEAD"]:
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout=f"ref: refs/heads/release/1.2\tHEAD\n{sha}\tHEAD\n",
+            )
+        if _is_advertised_branch_fetch(argv, "release/1.2"):
+            advertised_fetched = True
+            return subprocess.CompletedProcess(argv, 0, stdout="")
+        if argv[-3:] == [
+            "rev-parse",
+            "--verify",
+            "refs/remotes/origin/release/1.2",
+        ]:
+            return subprocess.CompletedProcess(argv, 0, stdout=f"{sha}\n")
+        raise AssertionError(f"unexpected command: {argv}")
+
+    monkeypatch.setattr(module, "run", fake_run)
+
+    assert module.remote_head(repo) == ("origin/release/1.2", "release/1.2", sha)
+    assert advertised_fetched is True
+
+
 def test_publication_config_uses_compact_daily_profile(tmp_path: Path) -> None:
     module = load_publisher()
     default = module.RepoEntry(
@@ -185,6 +459,61 @@ def initialize_repository(tmp_path: Path, name: str = "repo") -> tuple[Path, str
     git(repo, "add", ".gitignore", "tracked.txt")
     git(repo, "commit", "-m", "initial")
     return repo, git(repo, "rev-parse", "HEAD")
+
+
+def test_remote_head_fetches_advertised_branch_from_single_branch_clone(
+    tmp_path: Path,
+) -> None:
+    module = load_publisher()
+    remote, _ = initialize_repository(tmp_path, "remote")
+    git(remote, "checkout", "-b", "gh-pages")
+    (remote / "index.html").write_text("preview\n", encoding="utf-8")
+    git(remote, "add", "index.html")
+    git(remote, "commit", "-m", "preview")
+    preview_sha = git(remote, "rev-parse", "HEAD")
+    git(remote, "symbolic-ref", "HEAD", "refs/heads/gh-pages")
+
+    clone = tmp_path / "single-branch"
+    completed = subprocess.run(
+        [
+            "git",
+            "clone",
+            "--single-branch",
+            "--branch",
+            "main",
+            str(remote),
+            str(clone),
+        ],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise AssertionError(
+            f"single-branch clone failed rc={completed.returncode}\n{completed.stdout}"
+        )
+    tracking = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(clone),
+            "rev-parse",
+            "--verify",
+            "refs/remotes/origin/gh-pages",
+        ],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    assert tracking.returncode != 0
+
+    assert module.remote_head(clone) == ("origin/gh-pages", "gh-pages", preview_sha)
+    assert (
+        git(clone, "rev-parse", "--verify", "refs/remotes/origin/gh-pages")
+        == preview_sha
+    )
 
 
 def write_managed_recovery_manifest(
