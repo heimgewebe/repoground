@@ -56,6 +56,15 @@ def _sha256_file(path: Path) -> Optional[str]:
         return None
 
 
+def _has_valid_chunk_id(obj: Dict[str, Any]) -> bool:
+    """Return whether chunk_id or id is a non-empty string, in precedence order."""
+    for key in ("chunk_id", "id"):
+        cid = obj.get(key)
+        if isinstance(cid, str) and cid.strip():
+            return True
+    return False
+
+
 def _chunk_index_stats(chunk_index_path: Optional[Path]) -> Tuple[int, int, int, int]:
     """
     Validate chunk_index.jsonl and return (chunk_count, invalid_json_count, missing_id_count, empty_line_count).
@@ -88,15 +97,7 @@ def _chunk_index_stats(chunk_index_path: Optional[Path]) -> Tuple[int, int, int,
                         invalid_json_count += 1
                         continue
                     
-                    # A chunk is valid when either chunk_id or id is present and non-empty.
-                    has_valid_id = False
-                    for key in ("chunk_id", "id"):
-                        cid = obj.get(key)
-                        if isinstance(cid, str) and cid.strip():
-                            has_valid_id = True
-                            break
-
-                    if not has_valid_id:
+                    if not _has_valid_chunk_id(obj):
                         missing_id_count += 1
                         continue
                     
