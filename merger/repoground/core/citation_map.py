@@ -189,18 +189,23 @@ def _is_split_mode_noncanonical_chunk(chunk: Dict[str, Any]) -> bool:
       - source_range.status == "declared"
     """
     source_range = chunk.get("source_range")
+    source_status = chunk.get("source_status")
+
     if not isinstance(source_range, dict):
+        return False
+    if (
+        source_status != "full"
+        or chunk.get("canonical_range") is not None
+        or chunk.get("content_range_ref") is not None
+        or chunk.get("content_artifact") != "merge_md"
+        or not isinstance(chunk.get("content_range"), dict)
+    ):
         return False
 
     chunk_path = chunk.get("path")
     source_file_path = source_range.get("file_path")
     return (
-        chunk.get("source_status") == "full"
-        and chunk.get("canonical_range") is None
-        and chunk.get("content_range_ref") is None
-        and chunk.get("content_artifact") == "merge_md"
-        and isinstance(chunk.get("content_range"), dict)
-        and isinstance(chunk_path, str)
+        isinstance(chunk_path, str)
         and bool(chunk_path)
         and isinstance(source_file_path, str)
         and bool(source_file_path)
