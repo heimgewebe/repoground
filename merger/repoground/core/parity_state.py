@@ -169,6 +169,22 @@ def _artifact_path(manifest_path: Path, artifacts: Mapping[str, dict[str, Any]],
     return _resolve_manifest_artifact_path(manifest_path, role, rel)
 
 
+def _verify_canonical_dump_link(
+    manifest_path: Path,
+    artifacts: Mapping[str, dict[str, Any]],
+    links: Any,
+) -> bool:
+    if not isinstance(links, dict):
+        return True
+    expected_dump_sha = links.get("canonical_dump_index_sha256")
+    if not isinstance(expected_dump_sha, str):
+        return True
+    dump_path = _artifact_path(manifest_path, artifacts, "dump_index_json")
+    if not dump_path or not dump_path.exists():
+        return False
+    return _sha256_file(dump_path) == expected_dump_sha
+
+
 def _verify_manifest_hash_bytes(
     manifest_path: Path,
     manifest: Mapping[str, Any],
@@ -196,17 +212,9 @@ def _verify_manifest_hash_bytes(
         if _sha256_file(p) != sha:
             return False
 
-    links = manifest.get("links")
-    if isinstance(links, dict):
-        expected_dump_sha = links.get("canonical_dump_index_sha256")
-        if isinstance(expected_dump_sha, str):
-            dump_path = _artifact_path(manifest_path, artifacts, "dump_index_json")
-            if not dump_path or not dump_path.exists():
-                return False
-            if _sha256_file(dump_path) != expected_dump_sha:
-                return False
-
-    return True
+    return _verify_canonical_dump_link(
+        manifest_path, artifacts, manifest.get("links")
+    )
 
 
 def _read_sidecar(manifest_path: Path, artifacts: Mapping[str, dict[str, Any]]) -> dict[str, Any] | None:
