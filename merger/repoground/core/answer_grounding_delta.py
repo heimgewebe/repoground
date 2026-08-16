@@ -126,6 +126,16 @@ def _new_snapshot_freshness(
     return freshness if isinstance(freshness, Mapping) else None
 
 
+def _aggregate_status(statuses: list[str]) -> str:
+    if "drifted" in statuses:
+        return "drifted"
+    if "missing" in statuses:
+        return "missing"
+    if "not_comparable" in statuses or not statuses:
+        return "not_comparable"
+    return "valid"
+
+
 def check_answer_grounding_delta(
     old_declaration: Mapping[str, Any],
     *,
@@ -194,14 +204,7 @@ def check_answer_grounding_delta(
         })
 
     all_statuses = [item["status"] for item in citation_checks + range_checks]
-    if "drifted" in all_statuses:
-        status = "drifted"
-    elif "missing" in all_statuses:
-        status = "missing"
-    elif "not_comparable" in all_statuses or not all_statuses:
-        status = "not_comparable"
-    else:
-        status = "valid"
+    status = _aggregate_status(all_statuses)
 
     new_freshness = _new_snapshot_freshness(manifest_path, manifest_data)
     return {
