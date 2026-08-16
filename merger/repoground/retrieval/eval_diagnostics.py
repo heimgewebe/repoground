@@ -564,10 +564,7 @@ class RetrievalEvalDiagnosticsCalibrator:
         )
 
         # Detect staleness if applicable
-        if self._is_stale_indicator(expected_target):
-            details["staleness_indicator"] = "path_format_obsolete"
-            if primary_diagnosis != "stale_expected_target":
-                details["secondary_diagnoses"].append("index_stale")
+        self._annotate_staleness(expected_target, primary_diagnosis, details)
 
         record = DiagnosticsRecord(
             query_id=query_id,
@@ -641,6 +638,17 @@ class RetrievalEvalDiagnosticsCalibrator:
 
         # Fallback
         return "diagnostic_inconclusive"
+
+    def _annotate_staleness(
+        self,
+        expected_target: str,
+        primary_diagnosis: str,
+        details: Dict[str, Any],
+    ) -> None:
+        if self._is_stale_indicator(expected_target):
+            details["staleness_indicator"] = "path_format_obsolete"
+            if primary_diagnosis != "stale_expected_target":
+                details["secondary_diagnoses"].append("index_stale")
 
     def _is_stale_indicator(self, target: str) -> bool:
         """Check if target has staleness indicators (e.g., obsolete path format)."""
