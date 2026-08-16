@@ -59,6 +59,28 @@ def _compare_file_sets(from_files: Dict[str, Dict[str, Any]], to_files: Dict[str
     return new_files, removed_files, changed_files
 
 
+def _resolve_inventory_paths(
+    atlas_base: Path,
+    from_snap: Dict[str, Any],
+    to_snap: Dict[str, Any],
+    from_snap_id: str,
+    to_snap_id: str,
+) -> Tuple[Path, Path]:
+    from_inv_path = None
+    if from_snap["inventory_ref"]:
+        from_inv_path = resolve_artifact_ref(atlas_base, from_snap["inventory_ref"])
+    to_inv_path = None
+    if to_snap["inventory_ref"]:
+        to_inv_path = resolve_artifact_ref(atlas_base, to_snap["inventory_ref"])
+
+    if not from_inv_path or not from_inv_path.exists():
+        raise FileNotFoundError(f"Inventory missing for snapshot {from_snap_id}")
+    if not to_inv_path or not to_inv_path.exists():
+        raise FileNotFoundError(f"Inventory missing for snapshot {to_snap_id}")
+
+    return from_inv_path, to_inv_path
+
+
 def compute_snapshot_delta(registry, from_snap_id: str, to_snap_id: str) -> Dict[str, Any]:
     from_snap = registry.get_snapshot(from_snap_id)
     to_snap = registry.get_snapshot(to_snap_id)
@@ -81,17 +103,9 @@ def compute_snapshot_delta(registry, from_snap_id: str, to_snap_id: str) -> Dict
         raise ValueError("Cannot compute snapshot delta without a canonical registry db_path.")
     atlas_base = resolve_atlas_base_dir(registry.db_path)
 
-    from_inv_path = None
-    if from_snap["inventory_ref"]:
-        from_inv_path = resolve_artifact_ref(atlas_base, from_snap["inventory_ref"])
-    to_inv_path = None
-    if to_snap["inventory_ref"]:
-        to_inv_path = resolve_artifact_ref(atlas_base, to_snap["inventory_ref"])
-
-    if not from_inv_path or not from_inv_path.exists():
-        raise FileNotFoundError(f"Inventory missing for snapshot {from_snap_id}")
-    if not to_inv_path or not to_inv_path.exists():
-        raise FileNotFoundError(f"Inventory missing for snapshot {to_snap_id}")
+    from_inv_path, to_inv_path = _resolve_inventory_paths(
+        atlas_base, from_snap, to_snap, from_snap_id, to_snap_id
+    )
 
     from_files = _load_inventory_index(from_inv_path)
     to_files = _load_inventory_index(to_inv_path)
