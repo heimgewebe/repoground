@@ -137,6 +137,7 @@ RETIRED_REPOSITORY_ALIASES = {
 }
 SOURCE_REVISION_RE = re.compile(r"^[0-9a-f]{40}$")
 SOURCE_RECOVERY_SCHEMA = "repoground.managed-source-recovery.v1"
+_UNSAFE_GIT_BRANCH_TOKENS = (" ", "\t", "\n", "..", "~", "^", ":", "?", "*", "[", "\\", "@{")
 
 
 @dataclass(frozen=True)
@@ -1943,54 +1944,96 @@ def ensure_tool_worktree() -> tuple[str, str]:
     return tool_sha, generator_inputs_sha(TOOL_WT)
 
 
-def remote_head(repo_path: Path) -> tuple[str, str, str]:
-    run(["git", "-C", str(repo_path), "fetch", "origin", "--prune"])
-    advertised = run(
-        ["git", "-C", str(repo_path), "ls-remote", "--symref", "origin", "HEAD"]
-    ).stdout.splitlines()
+def is_safe_git_branch_name(name: str) -> bool:
+    if not name or name.startswith(("-", ".", "/")):
+        return False
+    if name.endswith(("/", ".", ".lock")):
+        return False
+    if any(part == "" or part.startswith(".") for part in name.split("/")):
+        return False
+    return not any(token in name for token in _UNSAFE_GIT_BRANCH_TOKENS)
+
+
+def advertised_branch_name(remote_ref: str, repo_path: Path) -> str:
+    if not remote_ref.startswith("refs/heads/"):
+        raise RuntimeError(
+            f"remote HEAD does not advertise a branch for {repo_path}: {remote_ref}"
+        )
+    branch = remote_ref.removeprefix("refs/heads/")
+    if not branch:
+        raise RuntimeError(f"remote HEAD advertises an empty branch for {repo_path}")
+    if not is_safe_git_branch_name(branch):
+        raise RuntimeError(
+            f"remote HEAD advertises an unsafe branch for {repo_path}: {branch!r}"
+        )
+    return branch
+
+
+def parse_advertised_remote_head(
+    lines: list[str], repo_path: Path
+) -> tuple[str | None, str | None]:
     advertised_branch: str | None = None
     advertised_sha: str | None = None
-    for line in advertised:
+    for line in lines:
         value, separator, target = line.partition("\t")
         if not separator or target != "HEAD":
             continue
         if value.startswith("ref: "):
-            remote_ref = value.removeprefix("ref: ").strip()
-            if not remote_ref.startswith("refs/heads/"):
-                raise RuntimeError(
-                    f"remote HEAD does not advertise a branch for {repo_path}: {remote_ref}"
-                )
-            advertised_branch = remote_ref.removeprefix("refs/heads/")
-            if not advertised_branch:
-                raise RuntimeError(
-                    f"remote HEAD advertises an empty branch for {repo_path}"
-                )
+            advertised_branch = advertised_branch_name(
+                value.removeprefix("ref: ").strip(), repo_path
+            )
         elif SOURCE_REVISION_RE.fullmatch(value):
             advertised_sha = value
+    return advertised_branch, advertised_sha
+
+
+def fetch_remote_tracking_branch(repo_path: Path, branch: str) -> str:
+    tracking_ref = f"refs/remotes/origin/{branch}"
+    run(
+        [
+            "git",
+            "-C",
+            str(repo_path),
+            "fetch",
+            "--no-tags",
+            "origin",
+            f"+refs/heads/{branch}:{tracking_ref}",
+        ]
+    )
+    parsed = run(
+        ["git", "-C", str(repo_path), "rev-parse", "--verify", tracking_ref],
+        check=False,
+    )
+    revision = parsed.stdout.strip() if parsed.returncode == 0 else ""
+    if SOURCE_REVISION_RE.fullmatch(revision) is None:
+        raise RuntimeError(
+            f"remote default branch unavailable after fetch for {repo_path}: {branch}"
+        )
+    return revision
+
+
+def remote_head(repo_path: Path) -> tuple[str, str, str]:
+    advertised = run(
+        ["git", "-C", str(repo_path), "ls-remote", "--symref", "origin", "HEAD"]
+    ).stdout.splitlines()
+    advertised_branch, advertised_sha = parse_advertised_remote_head(
+        advertised, repo_path
+    )
     if advertised_branch is not None:
         if advertised_sha is None:
             raise RuntimeError(
                 f"remote default branch revision unavailable for {repo_path}: "
                 f"{advertised_branch}"
             )
-        advertised_ref = f"origin/{advertised_branch}"
-        local = run(
-            ["git", "-C", str(repo_path), "rev-parse", advertised_ref],
-            check=False,
-        )
-        local_sha = local.stdout.strip() if local.returncode == 0 else ""
-        if SOURCE_REVISION_RE.fullmatch(local_sha) is None:
-            raise RuntimeError(
-                f"remote default branch unavailable after fetch for {repo_path}: "
-                f"{advertised_branch}"
-            )
+        local_sha = fetch_remote_tracking_branch(repo_path, advertised_branch)
         if local_sha != advertised_sha:
             raise RuntimeError(
                 f"remote default branch moved during resolution for {repo_path}: "
                 f"{advertised_branch}"
             )
-        return advertised_ref, advertised_branch, local_sha
+        return f"origin/{advertised_branch}", advertised_branch, local_sha
 
+    run(["git", "-C", str(repo_path), "fetch", "origin", "--prune"])
     head = run(
         [
             "git",
