@@ -72,6 +72,18 @@ def run_context_quality_inspect(args: argparse.Namespace) -> int:
     return _EXIT_CODES.get(report["projection_status"], 1)
 
 
+def _signal_extra(name: str, sig: dict, avail) -> str:
+    if name == "output_health" and avail:
+        return f" verdict_observed={sig.get('verdict_observed')} (observation only)"
+    if name == "post_emit_health" and avail:
+        return f" status_observed={sig.get('status_observed')} evidence_level={sig.get('evidence_level')}"
+    if name == "agent_export_gate" and avail:
+        return f" status_observed={sig.get('status_observed')} (observation only)"
+    if name == "evidence" and avail:
+        return f" evidence_level={sig.get('evidence_level')}"
+    return ""
+
+
 def _print_human_report(report: dict, written_path=None) -> None:
     print(f"Context Quality (diagnostic projection): {report['projection_status'].upper()}")
     print(f"  bundle_manifest_path:    {report['bundle_manifest_path']}")
@@ -90,15 +102,7 @@ def _print_human_report(report: dict, written_path=None) -> None:
     for name in ("output_health", "post_emit_health", "retrieval_eval", "agent_export_gate", "evidence"):
         sig = signals.get(name) or {}
         avail = sig.get("available")
-        extra = ""
-        if name == "output_health" and avail:
-            extra = f" verdict_observed={sig.get('verdict_observed')} (observation only)"
-        elif name == "post_emit_health" and avail:
-            extra = f" status_observed={sig.get('status_observed')} evidence_level={sig.get('evidence_level')}"
-        elif name == "agent_export_gate" and avail:
-            extra = f" status_observed={sig.get('status_observed')} (observation only)"
-        elif name == "evidence" and avail:
-            extra = f" evidence_level={sig.get('evidence_level')}"
+        extra = _signal_extra(name, sig, avail)
         print(f"  signal.{name}: available={avail}{extra}")
 
     print(
