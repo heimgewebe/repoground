@@ -2000,8 +2000,6 @@ def determine_inclusion_status(fi: "FileInfo", level: str, max_file_bytes: int) 
     if level == "summary":
         if fi.category in ["doc", "config", "contract"] or "ci" in tags or "ai-context" in tags or "wgx-profile" in tags:
             return "full"
-        if fi.category in ["source", "test"]:
-            return "full" if is_priority_file(fi) else "meta-only"
         return "full" if is_priority_file(fi) else "meta-only"
 
     if level in ("dev", "machine-lean"):
