@@ -143,6 +143,20 @@ def _resolve_config_path(base: Path, raw: Any, *, label: str) -> Path:
     return candidate.resolve()
 
 
+def _resolve_allowed_roots(base: Path, raw_roots: Any) -> tuple[Path, ...]:
+    if not isinstance(raw_roots, list) or not raw_roots:
+        raise RepoGroundReadonlyAdapterError("allowed_roots must be a non-empty array")
+    roots = tuple(
+        _resolve_config_path(base, value, label="allowed root") for value in raw_roots
+    )
+    for root in roots:
+        if not root.is_dir():
+            raise RepoGroundReadonlyAdapterError(
+                f"allowed root does not exist or is not a directory: {root}"
+            )
+    return roots
+
+
 def _validate_manifest(path: Path) -> None:
     if not path.is_file() or not path.name.endswith(".bundle.manifest.json"):
         raise RepoGroundReadonlyAdapterError(
@@ -202,17 +216,7 @@ class RepoGroundReadonlyAdapter:
                 f"adapter config must be {CONFIG_KIND} version {CONFIG_VERSION}"
             )
         base = path.parent
-        raw_roots = document.get("allowed_roots")
-        if not isinstance(raw_roots, list) or not raw_roots:
-            raise RepoGroundReadonlyAdapterError("allowed_roots must be a non-empty array")
-        roots = tuple(
-            _resolve_config_path(base, value, label="allowed root") for value in raw_roots
-        )
-        for root in roots:
-            if not root.is_dir():
-                raise RepoGroundReadonlyAdapterError(
-                    f"allowed root does not exist or is not a directory: {root}"
-                )
+        roots = _resolve_allowed_roots(base, document.get("allowed_roots"))
 
         raw_snapshots = document.get("snapshots")
         if not isinstance(raw_snapshots, list) or not raw_snapshots:
