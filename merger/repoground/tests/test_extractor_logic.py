@@ -98,3 +98,71 @@ def test_make_entry_logic_with_errors(tmp_path, monkeypatch):
     assert entry.get("sha256") is None
     # ensure no sha256_error_class (deprecated/removed in favor of status)
     assert "sha256_error_class" not in entry
+
+
+def _prepare_extractor_main(monkeypatch, tmp_path, outcomes):
+    hub = tmp_path / "hub"
+    hub.mkdir()
+    merges_dir = tmp_path / "merges"
+    calls = []
+
+    for name in outcomes:
+        (hub / name).write_bytes(b"zip")
+
+    def fake_import_zip_wrapper(zip_path, observed_hub, observed_merges_dir):
+        calls.append((zip_path.name, observed_hub, observed_merges_dir))
+        return outcomes[zip_path.name]
+
+    monkeypatch.setattr(extractor.sys, "argv", ["extractor", "--hub", str(hub)])
+    monkeypatch.setattr(extractor, "detect_hub_dir", lambda *_: hub)
+    monkeypatch.setattr(extractor, "get_merges_dir", lambda _: merges_dir)
+    monkeypatch.setattr(extractor, "import_zip_wrapper", fake_import_zip_wrapper)
+    monkeypatch.setattr(extractor, "console", None)
+    return hub, merges_dir, calls
+
+
+def test_main_reports_diff_paths_in_sorted_zip_order(tmp_path, monkeypatch, capsys):
+    outcomes = {
+        "b.zip": tmp_path / "b-diff.md",
+        "a.zip": tmp_path / "a-diff.md",
+    }
+    hub, merges_dir, calls = _prepare_extractor_main(monkeypatch, tmp_path, outcomes)
+
+    result = extractor.main()
+    captured = capsys.readouterr()
+
+    assert result == 0
+    assert calls == [
+        ("a.zip", hub, merges_dir),
+        ("b.zip", hub, merges_dir),
+    ]
+    assert captured.err == ""
+    assert captured.out == (
+        f"RepoGround extractor – Hub: {hub}\n"
+        "Import fertig.\n"
+        f"Hub: {hub}\n"
+        "Diff-Berichte (2):\n"
+        f"  - {outcomes['a.zip']}\n"
+        f"  - {outcomes['b.zip']}\n"
+    )
+
+
+def test_main_reports_when_processed_zips_create_no_diffs(tmp_path, monkeypatch, capsys):
+    outcomes = {"b.zip": None, "a.zip": None}
+    hub, merges_dir, calls = _prepare_extractor_main(monkeypatch, tmp_path, outcomes)
+
+    result = extractor.main()
+    captured = capsys.readouterr()
+
+    assert result == 0
+    assert calls == [
+        ("a.zip", hub, merges_dir),
+        ("b.zip", hub, merges_dir),
+    ]
+    assert captured.err == ""
+    assert captured.out == (
+        f"RepoGround extractor – Hub: {hub}\n"
+        "Import fertig.\n"
+        f"Hub: {hub}\n"
+        "Keine Diff-Berichte erzeugt.\n"
+    )
