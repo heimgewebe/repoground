@@ -934,6 +934,28 @@ def _cmd_profiles(args: argparse.Namespace) -> int:
     return 0
 
 
+def _service_client_handler(command: Any):
+    if command == "health":
+        return _cmd_health
+    if command == "artifacts":
+        return _cmd_artifacts
+    if command == "latest":
+        return _cmd_latest
+    if command == "jobs":
+        return _cmd_jobs
+    if command == "job":
+        return _cmd_job
+    if command == "run":
+        return _cmd_run
+    if command == "cancel":
+        return _cmd_cancel
+    if command == "logs":
+        return _cmd_logs
+    if command == "profiles":
+        return _cmd_profiles
+    return None
+
+
 def run_service_client(args: argparse.Namespace) -> int:
     if not hasattr(args, "service_client_cmd") or args.service_client_cmd is None:
         print("Usage: repoground service-client <subcommand>", file=sys.stderr)
@@ -942,24 +964,9 @@ def run_service_client(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
-    if args.service_client_cmd == "health":
-        return _cmd_health(args)
-    if args.service_client_cmd == "artifacts":
-        return _cmd_artifacts(args)
-    if args.service_client_cmd == "latest":
-        return _cmd_latest(args)
-    if args.service_client_cmd == "jobs":
-        return _cmd_jobs(args)
-    if args.service_client_cmd == "job":
-        return _cmd_job(args)
-    if args.service_client_cmd == "run":
-        return _cmd_run(args)
-    if args.service_client_cmd == "cancel":
-        return _cmd_cancel(args)
-    if args.service_client_cmd == "logs":
-        return _cmd_logs(args)
-    if args.service_client_cmd == "profiles":
-        return _cmd_profiles(args)
+    handler = _service_client_handler(args.service_client_cmd)
+    if handler is not None:
+        return handler(args)
     print(f"Unknown service-client subcommand: {args.service_client_cmd!r}", file=sys.stderr)
     return 2
 
