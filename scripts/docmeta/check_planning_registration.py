@@ -577,8 +577,7 @@ def _validate_baseline_path(path_str, index):
         )
 
 
-def _validate_baseline_entry(entry, index):
-    """Validate a single baseline entry dict. Raises BaselineError on violation."""
+def _validate_baseline_entry_shape(entry, index):
     if not isinstance(entry, dict):
         raise BaselineError(f"Baseline entry [{index}] must be an object.")
 
@@ -593,6 +592,11 @@ def _validate_baseline_entry(entry, index):
         raise BaselineError(
             f"Baseline entry [{index}] has unexpected field(s): {sorted(extra)}."
         )
+
+
+def _validate_baseline_entry(entry, index):
+    """Validate a single baseline entry dict. Raises BaselineError on violation."""
+    _validate_baseline_entry_shape(entry, index)
 
     eid = entry["id"]
     if not isinstance(eid, str) or not _BASELINE_ID_RE.match(eid):
