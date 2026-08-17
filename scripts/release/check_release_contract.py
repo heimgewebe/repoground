@@ -569,12 +569,23 @@ def _check_workflows(root: Path) -> list[dict[str, str]]:
     return findings
 
 
-def scan(root: str | Path) -> dict[str, object]:
-    repo = Path(root).resolve()
+def _required_file_findings(repo: Path) -> list[dict[str, str]]:
     findings: list[dict[str, str]] = []
     for relative in REQUIRED_FILES:
         if not (repo / relative).is_file():
-            findings.append(_finding("RELEASE_FILE_MISSING", relative, "required release file is missing"))
+            findings.append(
+                _finding(
+                    "RELEASE_FILE_MISSING",
+                    relative,
+                    "required release file is missing",
+                )
+            )
+    return findings
+
+
+def scan(root: str | Path) -> dict[str, object]:
+    repo = Path(root).resolve()
+    findings = _required_file_findings(repo)
     if findings:
         return {"status": "fail", "findings": findings}
 
