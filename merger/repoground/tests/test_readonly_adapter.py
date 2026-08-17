@@ -139,6 +139,47 @@ def test_adapter_lists_only_explicit_snapshots(tmp_path: Path) -> None:
     assert str(other) not in json.dumps(result)
 
 
+def test_adapter_rejects_empty_allowed_roots(tmp_path: Path) -> None:
+    config = tmp_path / "adapter.json"
+    config.write_text(
+        json.dumps(
+            {
+                "kind": "repobrief.readonly_adapter_config",
+                "version": "1.0",
+                "allowed_roots": [],
+                "snapshots": [{"id": "demo", "manifest": "missing.json"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        RepoGroundReadonlyAdapterError, match="allowed_roots must be a non-empty array"
+    ):
+        RepoGroundReadonlyAdapter.from_config(config)
+
+
+def test_adapter_rejects_missing_allowed_root(tmp_path: Path) -> None:
+    config = tmp_path / "adapter.json"
+    config.write_text(
+        json.dumps(
+            {
+                "kind": "repobrief.readonly_adapter_config",
+                "version": "1.0",
+                "allowed_roots": ["missing-root"],
+                "snapshots": [{"id": "demo", "manifest": "missing.json"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        RepoGroundReadonlyAdapterError,
+        match="allowed root does not exist or is not a directory",
+    ):
+        RepoGroundReadonlyAdapter.from_config(config)
+
+
 def test_adapter_rejects_manifest_outside_allowed_root(tmp_path: Path) -> None:
     root = tmp_path / "allowed"
     root.mkdir()
