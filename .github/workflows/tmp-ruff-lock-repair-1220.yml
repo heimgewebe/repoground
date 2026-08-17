@@ -1,0 +1,44 @@
+name: tmp Ruff lock repair 1220
+
+'on':
+  push:
+    branches:
+      - renovate/ruff-0.x
+    paths:
+      - '.github/workflows/tmp-ruff-lock-repair-1220.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: ${{ github.repository == 'heimgewebe/repoground' && github.ref_name == 'renovate/ruff-0.x' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact repair branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Regenerate locks through canonical pinned toolchain
+        run: scripts/release/compile_dependency_locks.sh
+
+      - name: Verify bounded lock delta
+        run: |
+          mapfile -t changed < <(git diff --name-only)
+          printf 'changed: %s\n' "${changed[@]}"
+          test "${#changed[@]}" = 1
+          test "${changed[0]}" = 'requirements/repoground-dev.lock.txt'
+          grep -q '^ruff==0\.16\.3' requirements/repoground-dev.lock.txt
+          ! grep -q '^ruff==0\.16\.2' requirements/repoground-dev.lock.txt
+          git diff --check
+
+      - name: Commit regenerated lock
+        run: |
+          git add requirements/repoground-dev.lock.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'chore(deps): refresh dev lock for Ruff 0.16.3'
+          git push origin HEAD:renovate/ruff-0.x
