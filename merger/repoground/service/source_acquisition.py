@@ -468,6 +468,22 @@ class SourceModeConflictError(ValueError):
     """
 
 
+def _validate_local_remote_selection(
+    *,
+    has_remote_ref: bool,
+    non_default_policy: bool,
+) -> None:
+    if has_remote_ref:
+        raise SourceModeConflictError(
+            "remote_ref is only valid with repo_source_mode='remote_snapshot'."
+        )
+    if non_default_policy:
+        raise SourceModeConflictError(
+            "a non-default remote_ref_policy is only valid with "
+            "repo_source_mode='remote_snapshot'."
+        )
+
+
 def validate_source_mode_request(
     *,
     repo_source_mode: Optional[str],
@@ -507,15 +523,10 @@ def validate_source_mode_request(
 
     # Every non-remote mode (local_current, local_ff, or the legacy None default):
     # remote ref selection must not be smuggled in where it has no effect.
-    if has_remote_ref:
-        raise SourceModeConflictError(
-            "remote_ref is only valid with repo_source_mode='remote_snapshot'."
-        )
-    if non_default_policy:
-        raise SourceModeConflictError(
-            "a non-default remote_ref_policy is only valid with "
-            "repo_source_mode='remote_snapshot'."
-        )
+    _validate_local_remote_selection(
+        has_remote_ref=has_remote_ref,
+        non_default_policy=non_default_policy,
+    )
 
     if repo_source_mode == "local_current":
         if pre_pull is True:
