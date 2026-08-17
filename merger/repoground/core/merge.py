@@ -3071,6 +3071,29 @@ def _generate_run_id(
     return "-".join(components)
 
 
+def _append_tree_lines(node: Dict[str, Any], indent: str, lines: List[str]) -> None:
+    dirs = []
+    files = []
+    for k, v in node.items():
+        if v:
+            dirs.append(k)
+        else:
+            files.append(k)
+    for d in sorted(dirs):
+        lines.append(f"{indent}📁 {d}/")
+        _append_tree_lines(node[d], indent + "    ", lines)
+    for f in sorted(files):
+        # Optional: Hyperlinking in Tree
+        # Needs rel path reconstruction which is tricky in this recursive walk without passing it down
+        # For v2.3 Spec 6.3: 📄 [filename](#file-…)
+        # We need to construct the full relative path to generate the anchor.
+        # Since we don't pass the path down easily here, let's skip tree linking for this iteration
+        # to keep it robust, or do a simple approximation if needed.
+        # Actually, we can use a lookup if we want, but "optional" in spec allows skipping.
+        # Let's stick to plain text for now to avoid complexity in build_tree.
+        lines.append(f"{indent}📄 {f}")
+
+
 def build_tree(file_infos: List[FileInfo]) -> str:
     by_root: Dict[str, List[Path]] = {}
 
@@ -3098,29 +3121,7 @@ def build_tree(file_infos: List[FileInfo]) -> str:
                     node[p] = {}
                 node = node[p]
 
-        def walk(node, indent, root_lbl):
-            dirs = []
-            files = []
-            for k, v in node.items():
-                if v:
-                    dirs.append(k)
-                else:
-                    files.append(k)
-            for d in sorted(dirs):
-                lines.append(f"{indent}📁 {d}/")
-                walk(node[d], indent + "    ", root_lbl)
-            for f in sorted(files):
-                # Optional: Hyperlinking in Tree
-                # Needs rel path reconstruction which is tricky in this recursive walk without passing it down
-                # For v2.3 Spec 6.3: 📄 [filename](#file-…)
-                # We need to construct the full relative path to generate the anchor.
-                # Since we don't pass the path down easily here, let's skip tree linking for this iteration
-                # to keep it robust, or do a simple approximation if needed.
-                # Actually, we can use a lookup if we want, but "optional" in spec allows skipping.
-                # Let's stick to plain text for now to avoid complexity in build_tree.
-                lines.append(f"{indent}📄 {f}")
-
-        walk(tree, "    ", root)
+        _append_tree_lines(tree, "    ", lines)
     lines.append("```")
     return "\n".join(lines)
 
