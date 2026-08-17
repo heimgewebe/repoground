@@ -1119,6 +1119,21 @@ def run_extractor(
     return (0 if failures == 0 else 2), msg
 
 
+def _format_import_summary(hub: Path, diff_paths: List[Path]) -> str:
+    summary_lines = []
+    summary_lines.append("Import fertig.")
+    summary_lines.append("Hub: {}".format(hub))
+    if diff_paths:
+        summary_lines.append(
+            "Diff-Berichte ({}):".format(len(diff_paths))
+        )
+        for p in diff_paths:
+            summary_lines.append("  - {}".format(p))
+    else:
+        summary_lines.append("Keine Diff-Berichte erzeugt.")
+    return "\n".join(summary_lines)
+
+
 def main() -> int:
     import argparse
     parser = argparse.ArgumentParser(description="repolens-extractor-v2: Import ZIPs to hub.")
@@ -1157,19 +1172,7 @@ def main() -> int:
         except Exception as e:
             print("Fehler bei {}: {}".format(zp, e), file=sys.stderr)
 
-    summary_lines = []
-    summary_lines.append("Import fertig.")
-    summary_lines.append("Hub: {}".format(hub))
-    if diff_paths:
-        summary_lines.append(
-            "Diff-Berichte ({}):".format(len(diff_paths))
-        )
-        for p in diff_paths:
-            summary_lines.append("  - {}".format(p))
-    else:
-        summary_lines.append("Keine Diff-Berichte erzeugt.")
-
-    summary = "\n".join(summary_lines)
+    summary = _format_import_summary(hub, diff_paths)
     print(summary)
 
     if console:
