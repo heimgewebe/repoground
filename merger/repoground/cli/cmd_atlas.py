@@ -175,6 +175,15 @@ def _resolve_snapshot_ref(ref: str, registry) -> str:
     sorted_snaps = sorted(snapshots, key=safe_sort_key, reverse=True)
     return sorted_snaps[0]["snapshot_id"]
 
+
+def _print_diff_file_list(delta: Dict[str, Any], key: str, label: str, marker: str) -> None:
+    print(f"\n{label}: {len(delta[key])}")
+    for f in delta[key][:10]:
+        print(f"  {marker} {f}")
+    if len(delta[key]) > 10:
+        print(f"  ... and {len(delta[key]) - 10} more")
+
+
 def run_atlas_diff(args: argparse.Namespace) -> int:
     from merger.repoground.atlas.diff import compute_snapshot_delta, compute_snapshot_comparison
     registry_path = Path("atlas/registry/atlas_registry.sqlite").resolve()
@@ -205,23 +214,9 @@ def run_atlas_diff(args: argparse.Namespace) -> int:
                 print(f"To:   {to_desc}")
 
         print(f"Summary: {json.dumps(delta['summary'], indent=2)}")
-        print(f"\nNew files: {len(delta['new_files'])}")
-        for f in delta['new_files'][:10]:
-            print(f"  + {f}")
-        if len(delta['new_files']) > 10:
-            print(f"  ... and {len(delta['new_files']) - 10} more")
-
-        print(f"\nRemoved files: {len(delta['removed_files'])}")
-        for f in delta['removed_files'][:10]:
-            print(f"  - {f}")
-        if len(delta['removed_files']) > 10:
-            print(f"  ... and {len(delta['removed_files']) - 10} more")
-
-        print(f"\nChanged files: {len(delta['changed_files'])}")
-        for f in delta['changed_files'][:10]:
-            print(f"  ~ {f}")
-        if len(delta['changed_files']) > 10:
-            print(f"  ... and {len(delta['changed_files']) - 10} more")
+        _print_diff_file_list(delta, "new_files", "New files", "+")
+        _print_diff_file_list(delta, "removed_files", "Removed files", "-")
+        _print_diff_file_list(delta, "changed_files", "Changed files", "~")
 
         return 0
     except Exception as e:
