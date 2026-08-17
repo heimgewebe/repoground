@@ -658,6 +658,36 @@ def test_remote_snapshot_warns_on_lfs_attributes_or_pointer(remote_and_local):
     assert sa.WARN_LFS_NOT_SMUDGED in result.warnings
 
 
+def _assert_remote_fetch_is_non_persistent(run_git_calls):
+    fetch_calls = [
+        call_args
+        for call_args in run_git_calls
+        if call_args and call_args[0] == "fetch"
+    ]
+    assert fetch_calls, "expected at least one direct fetch call"
+    for call_args in fetch_calls:
+        assert "--no-write-fetch-head" in call_args
+
+    for call_args in run_git_calls:
+        if call_args[0] == "remote":
+            assert "add" not in call_args
+            assert "set-url" not in call_args
+
+
+def _assert_secret_absent_from_cache(cache_git_dir: Path, secret: str):
+    config_file = cache_git_dir / "config"
+    if config_file.exists():
+        content = config_file.read_text(encoding="utf-8")
+        assert secret not in content
+        assert 'remote "origin"' not in content
+
+    if cache_git_dir.exists():
+        secret_bytes = secret.encode("utf-8")
+        for path in cache_git_dir.rglob("*"):
+            if path.is_file():
+                assert secret_bytes not in path.read_bytes(), f"secret leaked into cache file: {path}"
+
+
 def test_remote_snapshot_does_not_persist_remote_url_credentials_in_cache(tmp_path, monkeypatch):
     repo = tmp_path / "cred_repo"
     _git("init", "-b", "main", str(repo), cwd=tmp_path)
@@ -696,28 +726,10 @@ def test_remote_snapshot_does_not_persist_remote_url_credentials_in_cache(tmp_pa
     assert secret not in (result.stderr or "")
     assert secret not in (result.message or "")
 
-    fetch_calls = [call_args for call_args in run_git_calls if call_args and call_args[0] == "fetch"]
-    assert fetch_calls, "expected at least one direct fetch call"
-    for call_args in fetch_calls:
-        assert "--no-write-fetch-head" in call_args
-
-    for call_args in run_git_calls:
-        if call_args[0] == "remote":
-            assert "add" not in call_args
-            assert "set-url" not in call_args
+    _assert_remote_fetch_is_non_persistent(run_git_calls)
 
     cache_git_dir = tmp_path / "cache" / sa.SNAPSHOT_DIR_NAME / "job-cred-test" / "cred_repo.git"
-    config_file = cache_git_dir / "config"
-    if config_file.exists():
-        content = config_file.read_text(encoding="utf-8")
-        assert secret not in content
-        assert 'remote "origin"' not in content
-
-    if cache_git_dir.exists():
-        secret_bytes = secret.encode("utf-8")
-        for path in cache_git_dir.rglob("*"):
-            if path.is_file():
-                assert secret_bytes not in path.read_bytes(), f"secret leaked into cache file: {path}"
+    _assert_secret_absent_from_cache(cache_git_dir, secret)
 
 # --- 12. Fix 1: Non-origin upstream ---
 
