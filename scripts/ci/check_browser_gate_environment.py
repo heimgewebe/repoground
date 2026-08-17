@@ -20,7 +20,7 @@ KIND = "lenskit.browser_gate_environment_check"
 VERSION = "v1"
 
 
-def inspect_environment() -> dict[str, object]:
+def _inspect_package_versions() -> tuple[dict[str, str | None], list[str]]:
     findings: list[str] = []
     observed_versions: dict[str, str | None] = {}
     for package, expected in sorted(EXPECTED_VERSIONS.items()):
@@ -33,6 +33,11 @@ def inspect_environment() -> dict[str, object]:
             findings.append(
                 f"package version mismatch for {package}: expected {expected}, found {observed}"
             )
+    return observed_versions, findings
+
+
+def inspect_environment() -> dict[str, object]:
+    observed_versions, findings = _inspect_package_versions()
 
     configured_root = Path(os.environ.get("PLAYWRIGHT_BROWSERS_PATH", ""))
     if configured_root != EXPECTED_BROWSER_ROOT:
