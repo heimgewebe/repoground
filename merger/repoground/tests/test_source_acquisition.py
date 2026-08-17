@@ -137,6 +137,71 @@ def test_effective_source_mode_rejects_explicit_contradictions():
         resolve_effective_source_mode(_Req(repo_source_mode="wat"))
 
 
+SOURCE_MODE_ERRORS = {
+    "unknown": "unknown repo_source_mode: 'wat'",
+    "remote_snapshot_pre_pull": (
+        "remote_snapshot never mutates the local repo; pre_pull must not be true. "
+        "Use local_ff for a fast-forward pre-pull."
+    ),
+    "remote_ref": "remote_ref is only valid with repo_source_mode='remote_snapshot'.",
+    "remote_policy": (
+        "a non-default remote_ref_policy is only valid with "
+        "repo_source_mode='remote_snapshot'."
+    ),
+    "local_current_pre_pull": (
+        "local_current scans the working tree as-is and does not fast-forward; "
+        "pre_pull must not be true."
+    ),
+    "local_ff_pre_pull": "local_ff implies a fast-forward pre-pull; pre_pull must not be false.",
+    "local_ff_plan_only": (
+        "local_ff cannot be combined with plan_only: local_ff would fast-forward "
+        "the local repo, but plan_only must not cause any local mutation. "
+        "Use local_current for plan-only, or remote_snapshot for a non-mutating remote check."
+    ),
+}
+
+
+@pytest.mark.parametrize(
+    ("repo_source_mode", "pre_pull", "plan_only", "remote_ref", "remote_ref_policy", "expected_error"),
+    [
+        (None, None, False, None, None, None),
+        ("local_current", False, True, "   ", "upstream", None),
+        ("local_ff", True, False, None, "upstream", None),
+        ("remote_snapshot", False, True, "origin/main", "default_branch", None),
+        ("wat", None, False, "origin/main", "default_branch", SOURCE_MODE_ERRORS["unknown"]),
+        ("remote_snapshot", True, False, None, None, SOURCE_MODE_ERRORS["remote_snapshot_pre_pull"]),
+        ("local_current", None, False, "origin/main", None, SOURCE_MODE_ERRORS["remote_ref"]),
+        ("local_ff", True, True, "origin/main", "default_branch", SOURCE_MODE_ERRORS["remote_ref"]),
+        ("local_current", None, False, None, "default_branch", SOURCE_MODE_ERRORS["remote_policy"]),
+        ("local_current", True, False, None, None, SOURCE_MODE_ERRORS["local_current_pre_pull"]),
+        ("local_ff", False, False, None, None, SOURCE_MODE_ERRORS["local_ff_pre_pull"]),
+        ("local_ff", True, True, None, None, SOURCE_MODE_ERRORS["local_ff_plan_only"]),
+    ],
+)
+def test_source_mode_validator_contract(
+    repo_source_mode,
+    pre_pull,
+    plan_only,
+    remote_ref,
+    remote_ref_policy,
+    expected_error,
+):
+    kwargs = {
+        "repo_source_mode": repo_source_mode,
+        "pre_pull": pre_pull,
+        "plan_only": plan_only,
+        "remote_ref": remote_ref,
+        "remote_ref_policy": remote_ref_policy,
+    }
+    if expected_error is None:
+        assert sa.validate_source_mode_request(**kwargs) is None
+        return
+
+    with pytest.raises(SourceModeConflictError) as exc_info:
+        sa.validate_source_mode_request(**kwargs)
+    assert str(exc_info.value) == expected_error
+
+
 # --- 1. default_branch on a no-upstream local branch -----------------------
 
 def test_remote_snapshot_passes_seekable_archive_stream_to_extractor(
