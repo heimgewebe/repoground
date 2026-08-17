@@ -65,6 +65,37 @@ def _is_reusable_workflow(value: str) -> bool:
     return "/.github/workflows/" in target
 
 
+def _normalize_workflow_inventory(
+    caller_path: str,
+    raw_workflows: Any,
+    location: str,
+) -> tuple[list[dict[str, Any]], list[Finding]]:
+    findings: list[Finding] = []
+    if not isinstance(raw_workflows, list):
+        findings.append(
+            Finding(
+                caller_path,
+                "missing_transitive_workflow_inventory",
+                f"{location}: {raw_workflows!r}",
+            )
+        )
+        return [], findings
+
+    workflows: list[dict[str, Any]] = []
+    for index, value in enumerate(raw_workflows):
+        if not isinstance(value, dict):
+            findings.append(
+                Finding(
+                    caller_path,
+                    "invalid_transitive_workflow_entry",
+                    f"{location}[{index}]: {value!r}",
+                )
+            )
+            continue
+        workflows.append(value)
+    return workflows, findings
+
+
 def _inventory_findings(
     caller_path: str,
     node: dict[str, Any],
@@ -104,28 +135,10 @@ def _inventory_findings(
                 )
 
     raw_workflows = node.get("transitive_workflows")
-    if not isinstance(raw_workflows, list):
-        findings.append(
-            Finding(
-                caller_path,
-                "missing_transitive_workflow_inventory",
-                f"{location}: {raw_workflows!r}",
-            )
-        )
-        workflows: list[dict[str, Any]] = []
-    else:
-        workflows = []
-        for index, value in enumerate(raw_workflows):
-            if not isinstance(value, dict):
-                findings.append(
-                    Finding(
-                        caller_path,
-                        "invalid_transitive_workflow_entry",
-                        f"{location}[{index}]: {value!r}",
-                    )
-                )
-                continue
-            workflows.append(value)
+    workflows, workflow_findings = _normalize_workflow_inventory(
+        caller_path, raw_workflows, location
+    )
+    findings.extend(workflow_findings)
 
     required_closures = Counter(
         value for value in transitive_uses if _is_reusable_workflow(value)
