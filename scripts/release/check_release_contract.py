@@ -495,6 +495,30 @@ def _path_filter_blocks(header: str) -> list[set[str]]:
     return blocks
 
 
+def _workflow_install_finding(
+    relative: str, lineno: int, stripped: str
+) -> dict[str, str] | None:
+    if re.search(r"\bpip(?:3)?\s+install\b", stripped) is None:
+        return None
+    if "--upgrade pip" in stripped:
+        return _finding(
+            "WORKFLOW_PIP_UPGRADE",
+            relative,
+            f"line {lineno}: mutable pip upgrade",
+        )
+    if (
+        "--require-hashes" not in stripped
+        or "repoground-" not in stripped
+        or ".lock.txt" not in stripped
+    ):
+        return _finding(
+            "WORKFLOW_UNLOCKED_INSTALL",
+            relative,
+            f"line {lineno}: {stripped}",
+        )
+    return None
+
+
 def _check_workflows(root: Path) -> list[dict[str, str]]:
     findings: list[dict[str, str]] = []
     workflow_dir = root / ".github/workflows"
@@ -507,28 +531,9 @@ def _check_workflows(root: Path) -> list[dict[str, str]]:
         text = path.read_text(encoding="utf-8")
         for lineno, line in enumerate(text.splitlines(), 1):
             stripped = line.strip()
-            if re.search(r"\bpip(?:3)?\s+install\b", stripped):
-                if "--upgrade pip" in stripped:
-                    findings.append(
-                        _finding(
-                            "WORKFLOW_PIP_UPGRADE",
-                            relative,
-                            f"line {lineno}: mutable pip upgrade",
-                        )
-                    )
-                    continue
-                if (
-                    "--require-hashes" not in stripped
-                    or "repoground-" not in stripped
-                    or ".lock.txt" not in stripped
-                ):
-                    findings.append(
-                        _finding(
-                            "WORKFLOW_UNLOCKED_INSTALL",
-                            relative,
-                            f"line {lineno}: {stripped}",
-                        )
-                    )
+            finding = _workflow_install_finding(relative, lineno, stripped)
+            if finding is not None:
+                findings.append(finding)
 
         jobs_match = re.search(r"(?m)^jobs:\s*$", text)
         if jobs_match is None:
