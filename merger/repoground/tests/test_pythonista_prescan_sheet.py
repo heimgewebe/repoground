@@ -21,6 +21,9 @@ class _Console:
     def hide_activity(self, *args: object) -> None:
         self.calls.append(("hide_activity", *args))
 
+    def alert(self, *args: object, **kwargs: object) -> None:
+        self.calls.append(("alert", *args, kwargs))
+
 
 class _View(prescan_ui.MergerUIPrescanMixin):
     def __init__(self, selected: list[str]) -> None:
@@ -165,6 +168,9 @@ class _FakeTableView(_Widget):
     def reload_data(self) -> None:
         self.reload_count += 1
 
+    def delete_rows(self, rows) -> None:
+        self.deleted_rows = list(rows)
+
 
 class _FakeTableViewCell:
     def __init__(self, style=None) -> None:
@@ -181,6 +187,12 @@ class _FakeUI:
     Button = _FakeButton
     TableView = _FakeTableView
     TableViewCell = _FakeTableViewCell
+    ALIGN_CENTER = "center"
+    alert_calls = []
+
+    @staticmethod
+    def alert(*args) -> None:
+        _FakeUI.alert_calls.append(args)
 
 
 def _prescan_tree():
@@ -417,3 +429,129 @@ def test_present_prescan_ui_append_unions_and_recompresses_partial(monkeypatch) 
     assert view.saved_state_calls == 1
     assert view._prescan_active is False
     assert sheet.closed is True
+
+
+def _presented_pool_viewer(monkeypatch, pool, *, use_console=True):
+    monkeypatch.setattr(prescan_ui, "ui", _FakeUI, raising=False)
+    console = _Console() if use_console else None
+    monkeypatch.setattr(prescan_ui, "console", console, raising=False)
+    view = _View([])
+    view.saved_prescan_selections = pool
+    view.saved_state_calls = 0
+    view.repo_info_calls = 0
+    view.save_last_state = lambda: setattr(
+        view, "saved_state_calls", view.saved_state_calls + 1
+    )
+    view._update_repo_info = lambda: setattr(
+        view, "repo_info_calls", view.repo_info_calls + 1
+    )
+    _FakeUI.last_presented = None
+    _FakeUI.alert_calls = []
+    view.show_pool_viewer(None)
+    return view, _FakeUI.last_presented, console
+
+
+def _pool_table(sheet):
+    return next(widget for widget in sheet.subviews if isinstance(widget, _FakeTableView))
+
+
+def test_show_pool_viewer_empty_pool_presents_empty_label(monkeypatch) -> None:
+    _, sheet, _ = _presented_pool_viewer(monkeypatch, {})
+
+    assert sheet.name == "Selection Pool"
+    assert sheet.presented == "sheet"
+    labels = [widget for widget in sheet.subviews if isinstance(widget, _FakeLabel)]
+    assert len(labels) == 1
+    assert labels[0].text == "Pool is empty."
+    assert labels[0].alignment == _FakeUI.ALIGN_CENTER
+    assert labels[0].text_color == "gray"
+
+
+def test_show_pool_viewer_sorts_and_formats_rows(monkeypatch) -> None:
+    pool = {
+        "z-invalid": "legacy",
+        "m-partial": {"raw": ["a", "b"], "compressed": ["src"]},
+        "a-all": {"raw": None, "compressed": None},
+    }
+    _, sheet, _ = _presented_pool_viewer(monkeypatch, pool)
+    table = _pool_table(sheet)
+    ds = table.data_source
+
+    cells = [
+        ds.tableview_cell_for_row(table, 0, row)
+        for row in range(ds.tableview_number_of_rows(table, 0))
+    ]
+    assert [(cell.text_label.text, cell.detail_text_label.text) for cell in cells] == [
+        ("a-all", "ALL"),
+        ("m-partial", "Partial: 2 files / 1 rules"),
+        ("z-invalid", "Invalid state"),
+    ]
+    assert all(cell.accessory_type == "detail_button" for cell in cells)
+
+
+def test_show_pool_viewer_inspector_limits_compressed_rules(monkeypatch) -> None:
+    rules = [f"rule-{index:02d}" for index in range(16)]
+    pool = {"repo-a": {"raw": ["a", "b"], "compressed": rules}}
+    _, sheet, console = _presented_pool_viewer(monkeypatch, pool)
+    table = _pool_table(sheet)
+
+    table.data_source.tableview_did_select(table, 0, 0)
+
+    assert console.calls[-1][0:3] == ("alert", "Pool Details", console.calls[-1][2])
+    message = console.calls[-1][2]
+    assert message.startswith("Repo: repo-a\n\nState: Partial\nFiles: 2\nRules: 16\n\nRules (Compressed):\n")
+    assert "- rule-14\n" in message
+    assert "rule-15" not in message
+    assert message.endswith("... and 1 more")
+    assert console.calls[-1][3] == "OK"
+    assert console.calls[-1][4] == {"hide_cancel_button": True}
+
+
+def test_show_pool_viewer_inspector_falls_back_to_ui_alert(monkeypatch) -> None:
+    pool = {"repo-a": {"raw": None, "compressed": None}}
+    _, sheet, _ = _presented_pool_viewer(monkeypatch, pool, use_console=False)
+    table = _pool_table(sheet)
+
+    table.data_source.tableview_accessory_button_tapped(table, 0, 0)
+
+    assert _FakeUI.alert_calls == [
+        ("Pool Details", "Repo: repo-a\n\nState: ALL files included.", "OK")
+    ]
+
+
+def test_show_pool_viewer_delete_persists_and_updates_info(monkeypatch) -> None:
+    pool = {
+        "repo-a": {"raw": None, "compressed": None},
+        "repo-b": {"raw": ["x"], "compressed": ["x"]},
+    }
+    view, sheet, _ = _presented_pool_viewer(monkeypatch, pool)
+    table = _pool_table(sheet)
+    ds = table.data_source
+
+    assert ds.tableview_can_edit(table, 0, 0) is True
+    ds.tableview_delete(table, 0, 0)
+
+    assert view.saved_prescan_selections == {
+        "repo-b": {"raw": ["x"], "compressed": ["x"]}
+    }
+    assert view.saved_state_calls == 1
+    assert view.repo_info_calls == 1
+    assert table.deleted_rows == [0]
+    assert ds.tableview_number_of_rows(table, 0) == 1
+
+
+def test_show_pool_viewer_clear_pool_persists_updates_and_closes(monkeypatch) -> None:
+    pool = {"repo-a": {"raw": None, "compressed": None}}
+    view, sheet, console = _presented_pool_viewer(monkeypatch, pool)
+    clear_button = next(
+        widget for container in sheet.subviews for widget in getattr(container, "subviews", [])
+        if getattr(widget, "title", None) == "Clear Pool"
+    )
+
+    clear_button.action(clear_button)
+
+    assert view.saved_prescan_selections == {}
+    assert view.saved_state_calls == 1
+    assert view.repo_info_calls == 1
+    assert sheet.closed is True
+    assert console.calls[-1] == ("hud_alert", "Pool cleared")
