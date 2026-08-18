@@ -1849,6 +1849,29 @@ def test_service_client_invalid_profile_config_with_base_url_override_is_config_
     assert "garbage" in parsed["message"]
 
 
+def test_profile_config_forbidden_keys_precede_unknown_keys() -> None:
+    data = {
+        "profiles": {
+            "bad": {
+                "base_url": "http://x:8787",
+                "token": "super-secret",
+                "garbage": "x",
+            }
+        }
+    }
+
+    with pytest.raises(ValueError) as exc_info:
+        _mod._validate_profile_config(data, pathlib.Path("profiles.json"))
+
+    message = str(exc_info.value)
+    assert message == (
+        "Profile 'bad' contains forbidden key(s) ['token']; "
+        "secrets must come from env (token_env) or --token, never from config"
+    )
+    assert "garbage" not in message
+    assert "super-secret" not in message
+
+
 def test_service_client_profile_with_token_field_rejected(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: pathlib.Path,
