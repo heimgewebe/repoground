@@ -345,6 +345,21 @@ except ImportError:
         class SourceModeConflictError(ValueError):  # type: ignore[no-redef]
             """Local fallback mirroring service.source_acquisition.SourceModeConflictError."""
 
+        def _validate_local_remote_selection(
+            *,
+            has_remote_ref,
+            non_default_policy,
+        ):
+            if has_remote_ref:
+                raise SourceModeConflictError(
+                    "remote_ref is only valid with repo_source_mode='remote_snapshot'."
+                )
+            if non_default_policy:
+                raise SourceModeConflictError(
+                    "a non-default remote_ref_policy is only valid with "
+                    "repo_source_mode='remote_snapshot'."
+                )
+
         def validate_source_mode_request(  # type: ignore[no-redef]
             *,
             repo_source_mode,
@@ -368,19 +383,15 @@ except ImportError:
             if repo_source_mode == "remote_snapshot":
                 if pre_pull is True:
                     raise SourceModeConflictError(
-                        "remote_snapshot never mutates the local repo; pre_pull must not be true."
+                        "remote_snapshot never mutates the local repo; pre_pull must not be true. "
+                        "Use local_ff for a fast-forward pre-pull."
                     )
                 return None
 
-            if has_remote_ref:
-                raise SourceModeConflictError(
-                    "remote_ref is only valid with repo_source_mode='remote_snapshot'."
-                )
-            if non_default_policy:
-                raise SourceModeConflictError(
-                    "a non-default remote_ref_policy is only valid with "
-                    "repo_source_mode='remote_snapshot'."
-                )
+            _validate_local_remote_selection(
+                has_remote_ref=has_remote_ref,
+                non_default_policy=non_default_policy,
+            )
 
             if repo_source_mode == "local_current":
                 if pre_pull is True:
@@ -398,7 +409,8 @@ except ImportError:
                 if plan_only:
                     raise SourceModeConflictError(
                         "local_ff cannot be combined with plan_only: local_ff would fast-forward "
-                        "the local repo, but plan_only must not cause any local mutation."
+                        "the local repo, but plan_only must not cause any local mutation. "
+                        "Use local_current for plan-only, or remote_snapshot for a non-mutating remote check."
                     )
                 return None
 

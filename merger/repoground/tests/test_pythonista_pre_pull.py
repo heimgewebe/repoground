@@ -187,6 +187,58 @@ def test_headless_source_mode_control_plane_conflicts(monkeypatch, argv):
     assert exc.value.code == 2
 
 
+def test_repo_ground_fallback_validator_matches_service_contract(monkeypatch):
+    """The dependency-free Pythonista fallback must exactly mirror the service validator."""
+    import importlib
+    import itertools
+
+    from merger.repoground.service.source_acquisition import (
+        validate_source_mode_request as central_validator,
+    )
+
+    def outcome(validator, kwargs):
+        try:
+            return ("return", validator(**kwargs))
+        except Exception as exc:
+            return ("raise", exc.__class__.__name__, str(exc))
+
+    monkeypatch.setitem(sys.modules, "merger.repoground.service.source_acquisition", None)
+    monkeypatch.setitem(sys.modules, "repoground.service.source_acquisition", None)
+    try:
+        importlib.reload(repo_ground)
+        fallback_validator = repo_ground.validate_source_mode_request
+        mismatches = []
+        dimensions = (
+            [None, "local_current", "local_ff", "remote_snapshot", "wat"],
+            [None, False, True],
+            [False, True],
+            [None, "", "   ", "origin/main"],
+            [None, "upstream", "default_branch"],
+        )
+        names = (
+            "repo_source_mode",
+            "pre_pull",
+            "plan_only",
+            "remote_ref",
+            "remote_ref_policy",
+        )
+        for values in itertools.product(*dimensions):
+            kwargs = dict(zip(names, values))
+            central = outcome(central_validator, kwargs)
+            fallback = outcome(fallback_validator, kwargs)
+            if central != fallback:
+                mismatches.append((kwargs, central, fallback))
+
+        assert not mismatches, (
+            f"fallback validator drifted in {len(mismatches)} of 360 cases: "
+            f"{mismatches[:2]}"
+        )
+    finally:
+        sys.modules.pop("merger.repoground.service.source_acquisition", None)
+        sys.modules.pop("repoground.service.source_acquisition", None)
+        importlib.reload(repo_ground)
+
+
 def test_repo_ground_falls_closed_when_service_validator_unavailable(monkeypatch):
     """If the service package cannot be imported, repoLens must not fail open.
 
