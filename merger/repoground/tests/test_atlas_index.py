@@ -2,6 +2,7 @@ import json
 
 from merger.repoground.atlas.registry import AtlasRegistry
 from merger.repoground.atlas.index import AtlasFTSIndex
+from merger.repoground.atlas import search as search_module
 from merger.repoground.atlas.search import AtlasSearch
 from merger.repoground.atlas.paths import resolve_index_db_path, resolve_atlas_base_dir
 
@@ -135,6 +136,56 @@ def test_all_snapshots_returns_history(tmp_path):
     assert len(searcher.search()) == 4
     # historical: s1(2) + s2(3) + s3(1) = 6
     assert len(searcher.search(all_snapshots=True)) == 6
+
+
+def test_search_latest_snapshot_selection_keeps_first_per_root(
+    tmp_path, monkeypatch
+):
+    snapshots = [
+        {"snapshot_id": "r1-new", "root_id": "r1"},
+        {"snapshot_id": "r2-new", "root_id": "r2"},
+        {"snapshot_id": "r1-old", "root_id": "r1"},
+        {"snapshot_id": "r3-new", "root_id": "r3"},
+        {"snapshot_id": "r2-old", "root_id": "r2"},
+    ]
+
+    class FakeRegistry:
+        def __init__(self, _path):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def list_complete_snapshots(self, **kwargs):
+            assert kwargs == {
+                "machine_id": None,
+                "root_id": None,
+                "snapshot_id": None,
+            }
+            return snapshots
+
+        def list_roots(self):
+            return [{"root_id": root_id} for root_id in ("r1", "r2", "r3")]
+
+    observed = {}
+    monkeypatch.setattr(search_module, "AtlasRegistry", FakeRegistry)
+    searcher = AtlasSearch(tmp_path / "registry.sqlite")
+
+    def capture_linear(selected_snapshots, roots_cache, *args):
+        observed["snapshot_ids"] = [item["snapshot_id"] for item in selected_snapshots]
+        observed["root_ids"] = list(roots_cache)
+        return []
+
+    monkeypatch.setattr(searcher, "_search_linear", capture_linear)
+
+    assert searcher.search(use_index=False) == []
+    assert observed == {
+        "snapshot_ids": ["r1-new", "r2-new", "r3-new"],
+        "root_ids": ["r1", "r2", "r3"],
+    }
 
 
 def test_latest_resolution(tmp_path):
