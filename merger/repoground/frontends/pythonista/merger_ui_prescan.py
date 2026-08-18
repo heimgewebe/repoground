@@ -15,6 +15,15 @@ BUILD_GLOBAL_NAMES = (
 )
 
 
+def _selected_prescan_repo_path(view):
+    selected = view._get_selected_repos()
+    if len(selected) != 1:
+        if console:
+            console.hud_alert("Please select exactly one repo for Prescan.", "error")
+        return False, None
+    return True, view.hub / selected[0]
+
+
 class MergerUIPrescanMixin:
     def show_prescan_sheet(self, sender):
         """
@@ -26,14 +35,9 @@ class MergerUIPrescanMixin:
         - Merge → Explicit action from main view via Run Merge button
         - No implicit transition from prescan to merge execution
         """
-        selected = self._get_selected_repos()
-        if len(selected) != 1:
-            if console:
-                console.hud_alert("Please select exactly one repo for Prescan.", "error")
+        selection_ok, repo_path = _selected_prescan_repo_path(self)
+        if not selection_ok:
             return
-
-        repo_name = selected[0]
-        repo_path = self.hub / repo_name
 
         # We need to run prescan logic. Since we are in Pythonista (local), we call core directly.
         try:
