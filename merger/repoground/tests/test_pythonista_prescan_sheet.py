@@ -315,3 +315,105 @@ def test_present_prescan_ui_directory_toggle_updates_descendants(monkeypatch) ->
     }
     assert {"📁 src", "📄 a.py", "📄 b.py"} <= selected
     assert table.reload_count == 1
+
+
+def _button(sheet, title):
+    return next(widget for widget in sheet.subviews if getattr(widget, "title", None) == title)
+
+
+def test_present_prescan_ui_remove_deletes_pool_and_closes(monkeypatch) -> None:
+    view, sheet = _presented_prescan(
+        monkeypatch, pool={"raw": ["README.md"], "compressed": ["README.md"]}
+    )
+
+    remove_button = _button(sheet, "Remove")
+    remove_button.action(remove_button)
+
+    assert view.saved_prescan_selections == {}
+    assert view.saved_state_calls == 1
+    assert view._prescan_active is False
+    assert sheet.closed is True
+    assert prescan_ui.console.calls[-1] == (
+        "hud_alert", "Removed selection pool for repo-a", "success", 1.5
+    )
+
+
+def test_present_prescan_ui_replace_partial_materializes_directory(monkeypatch) -> None:
+    view, sheet = _presented_prescan(
+        monkeypatch, pool={"raw": ["src"], "compressed": ["src"]}
+    )
+
+    replace_button = _button(sheet, "Store (Replace)")
+    replace_button.action(replace_button)
+
+    assert view.saved_prescan_selections == {
+        "repo-a": {
+            "raw": ["src/a.py", "src/b.py"],
+            "compressed": ["src"],
+        }
+    }
+    assert view.saved_state_calls == 1
+    assert view._prescan_active is False
+    assert sheet.closed is True
+    assert prescan_ui.console.calls[-1] == (
+        "hud_alert", "Replaced selection pool for repo-a", "success", 1.5
+    )
+
+
+def test_present_prescan_ui_append_none_is_noop_and_stays_open(monkeypatch) -> None:
+    original = {"raw": ["README.md"], "compressed": ["README.md"]}
+    view, sheet = _presented_prescan(monkeypatch, pool=original.copy())
+
+    none_button = _button(sheet, "None")
+    none_button.action(none_button)
+    append_button = _button(sheet, "Store (Append)")
+    append_button.action(append_button)
+
+    assert view.saved_prescan_selections == {"repo-a": original}
+    assert view.saved_state_calls == 0
+    assert view._prescan_active is True
+    assert sheet.closed is False
+    assert prescan_ui.console.calls[-1] == (
+        "hud_alert", "No changes: no items selected in append mode", "error", 2.0
+    )
+
+
+def test_present_prescan_ui_append_partial_to_existing_all_keeps_all(monkeypatch) -> None:
+    view, sheet = _presented_prescan(
+        monkeypatch, pool={"raw": None, "compressed": None}
+    )
+    table, _ = _table_cells(sheet)
+
+    _button(sheet, "None").action(_button(sheet, "None"))
+    table.data_source.tableview_did_select(table, 0, 6)
+    _button(sheet, "Store (Append)").action(_button(sheet, "Store (Append)"))
+
+    assert view.saved_prescan_selections == {
+        "repo-a": {"raw": None, "compressed": None}
+    }
+    assert view.saved_state_calls == 1
+    assert view._prescan_active is False
+    assert sheet.closed is True
+    assert prescan_ui.console.calls[-1] == (
+        "hud_alert", "Appended to selection pool for repo-a", "success", 1.5
+    )
+
+
+def test_present_prescan_ui_append_unions_and_recompresses_partial(monkeypatch) -> None:
+    view, sheet = _presented_prescan(
+        monkeypatch, pool={"raw": ["README.md"], "compressed": ["README.md"]}
+    )
+    table, _ = _table_cells(sheet)
+
+    table.data_source.tableview_did_select(table, 0, 3)
+    _button(sheet, "Store (Append)").action(_button(sheet, "Store (Append)"))
+
+    assert view.saved_prescan_selections == {
+        "repo-a": {
+            "raw": ["README.md", "src/a.py", "src/b.py"],
+            "compressed": ["src", "README.md"],
+        }
+    }
+    assert view.saved_state_calls == 1
+    assert view._prescan_active is False
+    assert sheet.closed is True

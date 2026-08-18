@@ -159,6 +159,185 @@ def _create_prescan_table(sheet, flat_items, selection_state, ui_module):
     return table_view
 
 
+def _collect_all_descendant_files(node, materialized_raw):
+    if node["type"] == "file":
+        materialized_raw.append(node["path"])
+        return
+    for child in node.get("children") or []:
+        _collect_all_descendant_files(child, materialized_raw)
+
+
+def _collect_materialized_selection(node, selection_map, materialized_raw, compressed_paths):
+    path = node["path"]
+    if selection_map.get(path, False):
+        if node["type"] == "file":
+            materialized_raw.append(path)
+            compressed_paths.append(path)
+        else:
+            compressed_paths.append(path)
+            _collect_all_descendant_files(node, materialized_raw)
+        return
+    if node["type"] == "dir":
+        for child in node.get("children") or []:
+            _collect_materialized_selection(
+                child, selection_map, materialized_raw, compressed_paths
+            )
+
+
+def _materialize_prescan_paths(root_node, flat_items, normalize_path_fn):
+    selection_map = {item["path"]: item["selected"] for item in flat_items}
+    materialized_raw = []
+    compressed_paths = []
+    _collect_materialized_selection(
+        root_node, selection_map, materialized_raw, compressed_paths
+    )
+    raw_paths = sorted({normalize_path_fn(path) for path in materialized_raw})
+    compressed = sorted({normalize_path_fn(path) for path in compressed_paths})
+    return raw_paths, compressed
+
+
+def _prescan_node_selection_status(root_node, raw_set, normalize_path_fn):
+    stack1 = [root_node]
+    stack2 = []
+    while stack1:
+        node = stack1.pop()
+        stack2.append(node)
+        stack1.extend(node.get("children") or [])
+
+    node_status = {}
+    while stack2:
+        node = stack2.pop()
+        path = normalize_path_fn(node["path"])
+        if node["type"] == "file":
+            node_status[path] = path in raw_set
+            continue
+        children = node.get("children") or []
+        node_status[path] = bool(children) and all(
+            node_status.get(normalize_path_fn(child["path"]), False)
+            for child in children
+        )
+    return node_status
+
+
+def _compress_prescan_raw_paths(root_node, merged_raw, normalize_path_fn):
+    raw_set = {normalize_path_fn(path) for path in merged_raw}
+    node_status = _prescan_node_selection_status(root_node, raw_set, normalize_path_fn)
+    new_compressed = []
+    stack = [root_node]
+    while stack:
+        node = stack.pop()
+        path = normalize_path_fn(node["path"])
+        if node_status.get(path, False):
+            new_compressed.append(path)
+            continue
+        children = node.get("children") or []
+        for child in reversed(children):
+            stack.append(child)
+    return {
+        "raw": sorted(raw_set),
+        "compressed": [normalize_path_fn(path) for path in new_compressed],
+    }
+
+
+def _replace_prescan_pool(pool, root_name, current_mode, raw_paths, compressed_paths):
+    if current_mode == "all":
+        pool[root_name] = {"raw": None, "compressed": None}
+    elif current_mode == "none":
+        pool.pop(root_name, None)
+    elif compressed_paths or raw_paths:
+        pool[root_name] = {
+            "raw": raw_paths if raw_paths else None,
+            "compressed": compressed_paths if compressed_paths else None,
+        }
+    else:
+        pool.pop(root_name, None)
+
+
+def _append_prescan_pool(
+    pool, root_name, current_mode, raw_paths, root_node, normalize_path_fn
+):
+    if current_mode == "none":
+        return False
+    if current_mode == "all":
+        pool[root_name] = {"raw": None, "compressed": None}
+        return True
+
+    existing = pool.get(root_name)
+    if existing and isinstance(existing, dict):
+        existing_raw = existing.get("raw")
+        if existing_raw is None:
+            pool[root_name] = {"raw": None, "compressed": None}
+            return True
+        merged_raw = set(existing_raw)
+        merged_raw.update(raw_paths)
+    else:
+        merged_raw = set(raw_paths) if raw_paths else None
+
+    if merged_raw:
+        pool[root_name] = _compress_prescan_raw_paths(
+            root_node, merged_raw, normalize_path_fn
+        )
+    else:
+        pool.pop(root_name, None)
+    return True
+
+
+def _finish_prescan_pool_update(view, sheet, root_name, action, console_module):
+    view.save_last_state()
+    if console_module:
+        console_module.hud_alert(
+            f"{action} selection pool for {root_name}", "success", 1.5
+        )
+    view._prescan_active = False
+    sheet.close()
+
+
+def _update_prescan_pool(
+    view,
+    sheet,
+    root_node,
+    root_name,
+    flat_items,
+    selection_state,
+    mode,
+    normalize_path_fn,
+    console_module,
+):
+    raw_paths, compressed_paths = _materialize_prescan_paths(
+        root_node, flat_items, normalize_path_fn
+    )
+    pool = view.saved_prescan_selections
+
+    if mode == "remove":
+        pool.pop(root_name, None)
+        _finish_prescan_pool_update(view, sheet, root_name, "Removed", console_module)
+        return
+
+    current_mode = selection_state["mode"]
+    if mode == "replace":
+        _replace_prescan_pool(
+            pool, root_name, current_mode, raw_paths, compressed_paths
+        )
+        _finish_prescan_pool_update(view, sheet, root_name, "Replaced", console_module)
+        return
+
+    if mode == "append":
+        changed = _append_prescan_pool(
+            pool, root_name, current_mode, raw_paths, root_node, normalize_path_fn
+        )
+        if not changed:
+            if console_module:
+                console_module.hud_alert(
+                    "No changes: no items selected in append mode", "error", 2.0
+                )
+            return
+        _finish_prescan_pool_update(view, sheet, root_name, "Appended to", console_module)
+        return
+
+    view._prescan_active = False
+    sheet.close()
+
+
 class MergerUIPrescanMixin:
     def show_prescan_sheet(self, sender):
         """
@@ -236,223 +415,6 @@ class MergerUIPrescanMixin:
         # Bottom Bar: Remove / Cancel / Replace / Append
         bar_y = sheet.height - 50
 
-        # Shared pool update logic
-        def _pool_update(mode):
-            """
-            Update the prescan selection pool.
-            mode: 'replace', 'append', or 'remove'
-            """
-            # Create a map for quick lookup of selection status by path
-            # Note: We rely on the UI state (flat_items) where possible.
-            selection_map = {item["path"]: item["selected"] for item in flat_items}
-
-            # FIX 1: Materialize raw paths correctly (DFS).
-            # If a directory is selected, ALL its descendants must be in raw_paths.
-            # We cannot rely solely on flat_items["selected"] for files if the user only clicked the folder.
-
-            materialized_raw = []
-            compressed_paths = []
-
-            def collect_materialized(node):
-                path = node["path"]
-                # Check selection state from map (populated by UI toggles)
-                is_selected = selection_map.get(path, False)
-
-                if is_selected:
-                    if node["type"] == "file":
-                        materialized_raw.append(path)
-                        compressed_paths.append(path)
-                    else:
-                        # Directory is selected -> fully selected
-                        compressed_paths.append(path)
-                        # Materialize all descendants for raw truth
-                        collect_all_descendants(node)
-                else:
-                    # Not selected -> descend
-                    if node["type"] == "dir" and node.get("children"):
-                        for c in node["children"]:
-                            collect_materialized(c)
-
-            def collect_all_descendants(node):
-                if node["type"] == "file":
-                    materialized_raw.append(node["path"])
-                elif node.get("children"):
-                    for c in node["children"]:
-                        collect_all_descendants(c)
-
-            collect_materialized(root_node)
-
-            # Normalize and deduplicate
-            raw_paths = sorted(list(set(normalize_path(p) for p in materialized_raw)))
-            compressed_paths = sorted(list(set(normalize_path(p) for p in compressed_paths)))
-
-            # Handle different modes
-            if mode == 'remove':
-                # Remove from pool
-                if root_name in self.saved_prescan_selections:
-                    del self.saved_prescan_selections[root_name]
-                self.save_last_state()
-                if console:
-                    console.hud_alert(f"Removed selection pool for {root_name}", "success", 1.5)
-                reset_guard()
-                sheet.close()
-                return
-
-            # Get current selection mode
-            current_mode = selection_state['mode']
-
-            # Check if we have an existing selection for this repo
-            existing = self.saved_prescan_selections.get(root_name)
-
-            if mode == 'replace':
-                # Replace mode: overwrite existing selection
-                if current_mode == 'all':
-                    # ALL selected
-                    self.saved_prescan_selections[root_name] = {"raw": None, "compressed": None}
-                elif current_mode == 'none':
-                    # Nothing selected - remove from pool
-                    if root_name in self.saved_prescan_selections:
-                        del self.saved_prescan_selections[root_name]
-                else:
-                    # Partial selection - store both raw and compressed
-                    if compressed_paths or raw_paths:
-                        self.saved_prescan_selections[root_name] = {
-                            "raw": raw_paths if raw_paths else None,
-                            "compressed": compressed_paths if compressed_paths else None
-                        }
-                    else:
-                        # Empty selection - remove from pool
-                        if root_name in self.saved_prescan_selections:
-                            del self.saved_prescan_selections[root_name]
-
-                self.save_last_state()
-                if console:
-                    console.hud_alert(f"Replaced selection pool for {root_name}", "success", 1.5)
-
-            elif mode == 'append':
-                # Append mode: union with existing selection
-                if current_mode == 'none':
-                    # Nothing selected in current view - no-op with feedback
-                    if console:
-                        console.hud_alert("No changes: no items selected in append mode", "error", 2.0)
-                    return # Don't close dialog
-
-                if current_mode == 'all':
-                    # ALL selected - ALL overrides everything
-                    self.saved_prescan_selections[root_name] = {"raw": None, "compressed": None}
-                else:
-                    # Partial selection - union raw, then RE-COMPRESS
-                    merged_raw = None
-
-                    if existing and isinstance(existing, dict):
-                        existing_raw = existing.get("raw")
-                        if existing_raw is None:
-                            # Existing was ALL. Union(ALL, Partial) = ALL
-                            self.saved_prescan_selections[root_name] = {"raw": None, "compressed": None}
-                            self.save_last_state()
-                            if console: console.hud_alert(f"Appended to selection pool for {root_name}", "success", 1.5)
-                            reset_guard()
-                            sheet.close()
-                            return
-                        else:
-                            # Union of existing and new raw paths
-                            merged_raw = set(existing_raw)
-                            if raw_paths:
-                                merged_raw.update(raw_paths)
-                    else:
-                        # No existing -> just new raw
-                        merged_raw = set(raw_paths) if raw_paths else None
-
-                    # If we have a merged raw set, re-compress using the tree (Iterative DFS)
-                    if merged_raw and len(merged_raw) > 0:
-                        new_compressed = []
-
-                        # Build a map for O(1) lookup, ensure normalization
-                        raw_set = set(normalize_path(p) for p in merged_raw)
-
-                        # Phase 1: Determine selection status of all nodes (Post-order simulation)
-                        # We need to know if a dir is fully selected. Since flat_items is flat,
-                        # we can't easily do post-order without recursion.
-                        # BUT: flat_items was built via DFS. We can iterate backwards?
-                        # No, simpler: Build a tree-like structure or map from the flat items?
-                        # Actually, root_node is available and it IS a tree.
-
-                        # Iterative Post-Order to mark 'fully_selected'
-                        # We decorate the nodes temporarily or use a map ID->Status
-
-                        node_status = {} # path -> bool (fully selected)
-
-                        # Iterative Post-Order Traversal using 2 stacks
-                        stack1 = [root_node]
-                        stack2 = []
-                        while stack1:
-                            node = stack1.pop()
-                            stack2.append(node)
-                            if node.get("children"):
-                                for c in node["children"]:
-                                    stack1.append(c)
-
-                        # Process stack2 (children before parents)
-                        while stack2:
-                            node = stack2.pop()
-                            path = normalize_path(node["path"])
-
-                            if node["type"] == "file":
-                                node_status[path] = path in raw_set
-                            else: # dir
-                                children = node.get("children", [])
-                                if not children:
-                                    node_status[path] = False # Empty dir not selected
-                                else:
-                                    # All children must be fully selected
-                                    all_selected = True
-                                    for c in children:
-                                        c_path = normalize_path(c["path"])
-                                        if not node_status.get(c_path, False):
-                                            all_selected = False
-                                            break
-                                    node_status[path] = all_selected
-
-                        # Phase 2: Collect compressed paths (Pre-order)
-                        # If a node is fully selected, add it and skip children. Else descend.
-                        stack = [root_node]
-                        while stack:
-                            node = stack.pop()
-                            path = normalize_path(node["path"])
-
-                            if node_status.get(path, False):
-                                # Fully selected (Dir or File)
-                                new_compressed.append(path)
-                                # Do NOT push children
-                            else:
-                                # Not fully selected. If dir, push children to check them.
-                                # Push in reverse order to maintain order when popping
-                                if node.get("children"):
-                                    for i in range(len(node["children"]) - 1, -1, -1):
-                                        stack.append(node["children"][i])
-                                elif node["type"] == "file":
-                                    # File not selected? Then don't include.
-                                    # (Should be covered by node_status check above, but logic:
-                                    # if file is false, we do nothing)
-                                    pass
-
-                        self.saved_prescan_selections[root_name] = {
-                            "raw": sorted(list(raw_set)),
-                            "compressed": [normalize_path(p) for p in new_compressed]
-                        }
-                    else:
-                        # Empty result -> remove
-                        if root_name in self.saved_prescan_selections:
-                            del self.saved_prescan_selections[root_name]
-
-                self.save_last_state()
-                if console:
-                    console.hud_alert(f"Appended to selection pool for {root_name}", "success", 1.5)
-
-            reset_guard()
-            sheet.close()
-            # No auto-merge!
-
         # Remove button (left side)
         btn_remove = ui.Button(title="Remove")
         btn_remove.frame = (10, bar_y, 80, 40)
@@ -460,7 +422,10 @@ class MergerUIPrescanMixin:
         btn_remove.background_color = "#ff3b30"
         btn_remove.tint_color = "white"
         btn_remove.corner_radius = 6
-        btn_remove.action = lambda s: _pool_update('remove')
+        btn_remove.action = lambda s: _update_prescan_pool(
+            self, sheet, root_node, root_name, flat_items, selection_state,
+            "remove", normalize_path, console
+        )
         sheet.add_subview(btn_remove)
 
         # Cancel button (right side)
@@ -481,7 +446,10 @@ class MergerUIPrescanMixin:
         btn_replace.background_color = "#007aff"
         btn_replace.tint_color = "white"
         btn_replace.corner_radius = 6
-        btn_replace.action = lambda s: _pool_update('replace')
+        btn_replace.action = lambda s: _update_prescan_pool(
+            self, sheet, root_node, root_name, flat_items, selection_state,
+            "replace", normalize_path, console
+        )
         sheet.add_subview(btn_replace)
 
         # Append button (right side)
@@ -492,7 +460,10 @@ class MergerUIPrescanMixin:
         btn_append.background_color = "#34c759"
         btn_append.tint_color = "white"
         btn_append.corner_radius = 6
-        btn_append.action = lambda s: _pool_update('append')
+        btn_append.action = lambda s: _update_prescan_pool(
+            self, sheet, root_node, root_name, flat_items, selection_state,
+            "append", normalize_path, console
+        )
         sheet.add_subview(btn_append)
 
         sheet.present("sheet")
