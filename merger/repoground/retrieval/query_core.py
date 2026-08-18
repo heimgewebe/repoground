@@ -1215,6 +1215,21 @@ def _expand_context(db_conn: sqlite3.Connection, chunk_id: str, file_path: str, 
 
     return None
 
+def _context_hit_provenance(hit: Dict[str, Any]):
+    """Return the existing provenance class, source refs, and derived ref for one hit."""
+    prov_type = "explicit" if "range_ref" in hit else "derived"
+
+    refs = []
+    if "range_ref" in hit and hit["range_ref"]:
+        refs.append(hit["range_ref"].get("file_path", hit.get("path")))
+    elif "derived_range_ref" in hit and hit["derived_range_ref"]:
+        refs.append(hit["derived_range_ref"].get("file_path", hit.get("path")))
+    else:
+        refs.append(hit.get("path", ""))
+
+    return prov_type, refs, hit.get("derived_range_ref")
+
+
 def build_context_bundle(query_text: str, results: List[Dict[str, Any]], raw_contents: Dict[str, str], db_conn: sqlite3.Connection, context_mode: str = "exact", context_window_lines: int = 0) -> Dict[str, Any]:
     """
     Builds a query_context_bundle_json compliant structure from a list of hits.
@@ -1226,20 +1241,8 @@ def build_context_bundle(query_text: str, results: List[Dict[str, Any]], raw_con
     }
 
     for idx, hit in enumerate(results):
-        # Extract explicit vs derived provenance
-        prov_type = "derived"
-        if "range_ref" in hit:
-            prov_type = "explicit"
-
-        refs = []
-        if "range_ref" in hit and hit["range_ref"]:
-            refs.append(hit["range_ref"].get("file_path", hit.get("path")))
-        elif "derived_range_ref" in hit and hit["derived_range_ref"]:
-            refs.append(hit["derived_range_ref"].get("file_path", hit.get("path")))
-        else:
-            refs.append(hit.get("path", ""))
-
-        derived_ref = hit.get("derived_range_ref")
+        # Extract explicit vs derived provenance.
+        prov_type, refs, derived_ref = _context_hit_provenance(hit)
 
         hit_ctx = {
             "hit_identity": hit.get("chunk_id", f"hit_{idx}"),

@@ -126,6 +126,38 @@ def test_context_bundle_preserves_provenance(tmp_path):
     assert "merged.md" in hit["bundle_source_references"]
 
 
+def test_context_bundle_preserves_falsy_explicit_range_ref_precedence():
+    import sqlite3
+
+    hit = {
+        "chunk_id": "c-falsy-explicit",
+        "repo_id": "r1",
+        "path": "src/original.py",
+        "range": "L1-L2",
+        "score": 0.75,
+        "why": {},
+        "range_ref": None,
+        "derived_range_ref": {"file_path": "src/derived.py", "start_byte": 10},
+    }
+
+    with sqlite3.connect(":memory:") as conn:
+        bundle = query_core.build_context_bundle(
+            "needle", [hit], {"c-falsy-explicit": "body"}, conn, context_mode="exact"
+        )
+
+    projected = bundle["hits"][0]
+    assert projected["provenance_type"] == "explicit"
+    assert projected["bundle_source_references"] == ["src/derived.py"]
+    assert projected["epistemics"]["resolver_status"] == "resolved_explicit"
+    assert projected["epistemics"]["interpolation"] == {
+        "used": True,
+        "reason": "derived_from_source",
+    }
+    assert "range_ref" in projected
+    assert projected["range_ref"] is None
+    assert "derived_range_ref" not in projected
+
+
 def test_context_expansion_exact_vs_block_vs_window(mini_index):
     # exact
     res_exact = query_core.execute_query(mini_index, query_text="hello", build_context=True, context_mode="exact")
