@@ -163,6 +163,33 @@ def _source_identity(manifest_path: Path) -> dict[str, Any]:
     }
 
 
+def _validate_goldset_question(
+    raw: Any, seen: set[str]
+) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise ValueError("goldset question must be an object")
+    question_id = raw.get("id")
+    query = raw.get("query")
+    expected_paths = raw.get("expected_paths")
+    expected_symbols = raw.get("expected_symbols")
+    if not isinstance(question_id, str) or not question_id:
+        raise ValueError("goldset question id must be a non-empty string")
+    if question_id in seen:
+        raise ValueError(f"duplicate goldset question id: {question_id}")
+    if not isinstance(query, str) or not query:
+        raise ValueError(f"question {question_id} query must be non-empty")
+    if not isinstance(expected_paths, list) or not expected_paths:
+        raise ValueError(f"question {question_id} expected_paths must be non-empty")
+    if not isinstance(expected_symbols, list) or not expected_symbols:
+        raise ValueError(f"question {question_id} expected_symbols must be non-empty")
+    if not all(isinstance(item, str) and item for item in expected_paths):
+        raise ValueError(f"question {question_id} expected_paths are invalid")
+    if not all(isinstance(item, str) and item for item in expected_symbols):
+        raise ValueError(f"question {question_id} expected_symbols are invalid")
+    seen.add(question_id)
+    return raw
+
+
 def _validate_goldset(goldset: dict[str, Any]) -> list[dict[str, Any]]:
     if (
         goldset.get("kind") != GOLDSET_KIND
@@ -177,28 +204,7 @@ def _validate_goldset(goldset: dict[str, Any]) -> list[dict[str, Any]]:
     seen: set[str] = set()
     validated: list[dict[str, Any]] = []
     for raw in questions:
-        if not isinstance(raw, dict):
-            raise ValueError("goldset question must be an object")
-        question_id = raw.get("id")
-        query = raw.get("query")
-        expected_paths = raw.get("expected_paths")
-        expected_symbols = raw.get("expected_symbols")
-        if not isinstance(question_id, str) or not question_id:
-            raise ValueError("goldset question id must be a non-empty string")
-        if question_id in seen:
-            raise ValueError(f"duplicate goldset question id: {question_id}")
-        if not isinstance(query, str) or not query:
-            raise ValueError(f"question {question_id} query must be non-empty")
-        if not isinstance(expected_paths, list) or not expected_paths:
-            raise ValueError(f"question {question_id} expected_paths must be non-empty")
-        if not isinstance(expected_symbols, list) or not expected_symbols:
-            raise ValueError(f"question {question_id} expected_symbols must be non-empty")
-        if not all(isinstance(item, str) and item for item in expected_paths):
-            raise ValueError(f"question {question_id} expected_paths are invalid")
-        if not all(isinstance(item, str) and item for item in expected_symbols):
-            raise ValueError(f"question {question_id} expected_symbols are invalid")
-        seen.add(question_id)
-        validated.append(raw)
+        validated.append(_validate_goldset_question(raw, seen))
     return validated
 
 

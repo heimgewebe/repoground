@@ -9,6 +9,7 @@ import pytest
 from merger.repoground.cli.main import main
 from merger.repoground.core.workbench_usefulness import (
     _baseline_guardrails_visible,
+    _validate_goldset,
     evaluate_workbench_usefulness,
 )
 from merger.repoground.tests.test_readonly_adapter import _adapter
@@ -96,6 +97,41 @@ def test_repository_goldset_questions_do_not_describe_retired_products_as_curren
                         )
 
     assert offenders == [], "retired product name found in active goldset question: " + "; ".join(offenders)
+
+
+def test_validate_goldset_preserves_question_validation_order() -> None:
+    def question(question_id: str, **overrides):
+        value = {
+            "id": question_id,
+            "query": "hello",
+            "expected_paths": ["brief.md"],
+            "expected_symbols": ["hello_adapter"],
+        }
+        value.update(overrides)
+        return value
+
+    cases = [
+        (0, "not-an-object", "goldset question must be an object"),
+        (0, question("", query="", expected_paths=[], expected_symbols=[]), "goldset question id must be a non-empty string"),
+        (1, question("demo-0", query=""), "duplicate goldset question id: demo-0"),
+        (0, question("demo-0", query="", expected_paths=[], expected_symbols=[]), "question demo-0 query must be non-empty"),
+        (0, question("demo-0", expected_paths=[], expected_symbols=[]), "question demo-0 expected_paths must be non-empty"),
+        (0, question("demo-0", expected_symbols=[]), "question demo-0 expected_symbols must be non-empty"),
+        (0, question("demo-0", expected_paths=["", "brief.md"], expected_symbols=[""]), "question demo-0 expected_paths are invalid"),
+        (0, question("demo-0", expected_symbols=["", "hello_adapter"]), "question demo-0 expected_symbols are invalid"),
+    ]
+
+    for index, replacement, expected_message in cases:
+        questions = [question(f"demo-{ordinal}") for ordinal in range(5)]
+        questions[index] = replacement
+        goldset = {
+            "kind": "repobrief.workbench_usefulness_goldset",
+            "version": "1.0",
+            "questions": questions,
+        }
+        with pytest.raises(ValueError) as exc_info:
+            _validate_goldset(goldset)
+        assert str(exc_info.value) == expected_message
 
 
 def test_eval_measures_navigation_advantage_without_default_promotion(tmp_path: Path) -> None:
