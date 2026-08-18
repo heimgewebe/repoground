@@ -27,6 +27,21 @@ _PROFILE_ALLOWED_KEYS = frozenset({"base_url", "token_env"})
 _PROFILE_FORBIDDEN_KEYS = frozenset({"token", "secret"})
 
 
+def _validate_profile_keys(name: str, profile: dict) -> None:
+    forbidden = _PROFILE_FORBIDDEN_KEYS.intersection(profile.keys())
+    if forbidden:
+        raise ValueError(
+            f"Profile {name!r} contains forbidden key(s) {sorted(forbidden)}; "
+            "secrets must come from env (token_env) or --token, never from config"
+        )
+    unknown = set(profile.keys()) - _PROFILE_ALLOWED_KEYS
+    if unknown:
+        raise ValueError(
+            f"Profile {name!r} has unknown key(s) {sorted(unknown)}; "
+            f"allowed: {sorted(_PROFILE_ALLOWED_KEYS)}"
+        )
+
+
 def _validate_profile_config(data: Any, path: pathlib.Path) -> dict:
     if not isinstance(data, dict):
         raise ValueError(f"Profile config root must be a JSON object ({path})")
@@ -40,18 +55,7 @@ def _validate_profile_config(data: Any, path: pathlib.Path) -> dict:
     for name, profile in (profiles or {}).items():
         if not isinstance(profile, dict):
             raise ValueError(f"Profile {name!r} must be a JSON object")
-        forbidden = _PROFILE_FORBIDDEN_KEYS.intersection(profile.keys())
-        if forbidden:
-            raise ValueError(
-                f"Profile {name!r} contains forbidden key(s) {sorted(forbidden)}; "
-                "secrets must come from env (token_env) or --token, never from config"
-            )
-        unknown = set(profile.keys()) - _PROFILE_ALLOWED_KEYS
-        if unknown:
-            raise ValueError(
-                f"Profile {name!r} has unknown key(s) {sorted(unknown)}; "
-                f"allowed: {sorted(_PROFILE_ALLOWED_KEYS)}"
-            )
+        _validate_profile_keys(name, profile)
         base_url = profile.get("base_url")
         if base_url is not None and not isinstance(base_url, str):
             raise ValueError(f"Profile {name!r} 'base_url' must be a string")
