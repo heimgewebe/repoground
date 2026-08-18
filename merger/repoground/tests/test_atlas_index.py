@@ -338,6 +338,27 @@ def _content_keys(rows):
     return sorted((r["snapshot_id"], r["rel_path"]) for r in rows)
 
 
+def test_index_content_confirmation_resolves_snapshot_root_value(
+    tmp_path, monkeypatch
+):
+    searcher, _ = _build_content_index(tmp_path, {"a.txt": "alpha beta"})
+    observed = []
+
+    def capture_content_match(root_value, item, content_query_lower):
+        observed.append((root_value, item["rel_path"], content_query_lower))
+        return True, "captured snippet"
+
+    monkeypatch.setattr(search_module, "_content_match", capture_content_match)
+
+    rows = searcher.search(use_index=True, content_query="Needle")
+
+    assert _content_keys(rows) == [("s1", "a.txt")]
+    assert rows[0]["content_snippet"] == "captured snippet"
+    assert observed == [
+        (str(tmp_path / "content_root"), "a.txt", "needle"),
+    ]
+
+
 # --- Regression: the index-backed content search must never lose a hit that
 # --- the linear (live-filesystem substring) path would find (ADR-009 invariant).
 
