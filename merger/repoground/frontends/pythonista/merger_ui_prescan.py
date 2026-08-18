@@ -24,6 +24,141 @@ def _selected_prescan_repo_path(view):
     return True, view.hub / selected[0]
 
 
+def _append_prescan_item(flat_items, node, depth, root_name):
+    name = node["path"].split("/")[-1]
+    if node["path"] == ".":
+        name = root_name
+    icon = "📁" if node["type"] == "dir" else "📄"
+    flat_items.append(
+        {
+            "path": node["path"],
+            "display": f"{'  ' * depth}{icon} {name}",
+            "type": node["type"],
+            "depth": depth,
+            "orig": node,
+            "selected": False,
+        }
+    )
+    children = node.get("children") or []
+    dirs = sorted((child for child in children if child["type"] == "dir"), key=lambda child: child["path"])
+    files = sorted((child for child in children if child["type"] == "file"), key=lambda child: child["path"])
+    for child in dirs + files:
+        _append_prescan_item(flat_items, child, depth + 1, root_name)
+
+
+def _flatten_prescan_items(root_node, root_name):
+    flat_items = []
+    _append_prescan_item(flat_items, root_node, 0, root_name)
+    return flat_items
+
+
+def _recommended_prescan_path(path_str):
+    path = path_str.lower()
+    if "readme" in path or path.endswith(".ai-context.yml"):
+        return True
+    parts = path.split("/")
+    return ("src" in parts or "contracts" in parts or "docs" in parts) and "test" not in path
+
+
+def _pool_selects_path(path, pool_set, normalize_path_fn):
+    normalized = normalize_path_fn(path)
+    if normalized in pool_set:
+        return True
+    parts = normalized.split("/")
+    return any("/".join(parts[: index + 1]) in pool_set for index in range(len(parts)))
+
+
+def _initialize_prescan_selection(flat_items, existing_pool_entry, normalize_path_fn):
+    if existing_pool_entry and isinstance(existing_pool_entry, dict):
+        raw = existing_pool_entry.get("raw")
+        if raw is None:
+            for item in flat_items:
+                item["selected"] = True
+            return
+        if isinstance(raw, list):
+            pool_set = {normalize_path_fn(path) for path in raw}
+            for item in flat_items:
+                item["selected"] = _pool_selects_path(item["path"], pool_set, normalize_path_fn)
+        return
+    if not existing_pool_entry:
+        for item in flat_items:
+            item["selected"] = item["type"] == "file" and _recommended_prescan_path(item["path"])
+
+
+def _initial_prescan_selection_state(flat_items, existing_pool_entry):
+    is_all = (
+        isinstance(existing_pool_entry, dict)
+        and existing_pool_entry.get("raw") is None
+        and existing_pool_entry.get("compressed") is None
+    )
+    if is_all:
+        return {"mode": "all"}
+    if not any(item["selected"] for item in flat_items):
+        return {"mode": "none"}
+    return {"mode": "partial"}
+
+
+def _make_prescan_sheet(owner, root_name, ui_module):
+    class PrescanSheet(ui_module.View):
+        def __init__(self, parent):
+            super().__init__()
+            self._parent = parent
+            self.name = f"Prescan: {root_name}"
+            self.background_color = "#111111"
+            self.frame = (0, 0, 600, 800)
+
+        def will_close(self):
+            if self._parent._prescan_active:
+                self._parent._prescan_active = False
+
+    return PrescanSheet(owner)
+
+
+def _add_prescan_stats(sheet, prescan_data, ui_module, parse_human_size_fn):
+    stats_lbl = ui_module.Label(frame=(10, 10, 580, 20))
+    stats_lbl.text = (
+        f"{prescan_data['file_count']} files • "
+        f"{parse_human_size_fn(str(prescan_data['total_bytes']))} bytes total"
+    )
+    stats_lbl.text_color = "gray"
+    stats_lbl.font = ("<System>", 12)
+    sheet.add_subview(stats_lbl)
+
+
+def _toggle_prescan_all(flat_items, selection_state, table_view, value):
+    for item in flat_items:
+        item["selected"] = value
+    selection_state["mode"] = "all" if value else "none"
+    table_view.reload_data()
+
+
+def _add_prescan_select_buttons(sheet, flat_items, selection_state, table_view, ui_module):
+    button_specs = (("All", 10, True), ("None", 100, False))
+    for title, x, value in button_specs:
+        button = ui_module.Button(title=title)
+        button.frame = (x, 40, 80, 30)
+        button.background_color = "#333333"
+        button.tint_color = "white"
+        button.corner_radius = 4
+        button.action = lambda sender, selected=value: _toggle_prescan_all(
+            flat_items, selection_state, table_view, selected
+        )
+        sheet.add_subview(button)
+
+
+def _create_prescan_table(sheet, flat_items, selection_state, ui_module):
+    table_view = ui_module.TableView()
+    table_view.frame = (0, 80, sheet.width, sheet.height - 140)
+    table_view.flex = "WH"
+    table_view.background_color = "#111111"
+    table_view.separator_color = "#333333"
+    table_view.allows_multiple_selection = False
+    data_source = _PrescanDataSource(flat_items, selection_state, ui_module)
+    table_view.data_source = data_source
+    table_view.delegate = data_source
+    return table_view
+
+
 class MergerUIPrescanMixin:
     def show_prescan_sheet(self, sender):
         """
@@ -81,261 +216,22 @@ class MergerUIPrescanMixin:
         t.start()
 
     def _present_prescan_ui(self, prescan_data):
-        """
-        Displays the prescan tree in a Sheet.
-        Allows selection of files/folders.
-        """
+        """Displays the prescan tree in a selection-only Sheet."""
         root_node = prescan_data["tree"]
         root_name = prescan_data["root"]
-
-        # Flatten tree for table view (simple indentation approach)
-        flat_items = []
-
-        def traverse(node, depth):
-            # Item struct: { path, display, type, depth, node_ref }
-            name = node["path"].split("/")[-1]
-            if node["path"] == ".": name = root_name
-
-            icon = "📁" if node["type"] == "dir" else "📄"
-            indent = "  " * depth
-            display = f"{indent}{icon} {name}"
-
-            flat_items.append({
-                "path": node["path"],
-                "display": display,
-                "type": node["type"],
-                "depth": depth,
-                "orig": node,
-                "selected": False # Default state
-            })
-
-            if node.get("children"):
-                # Sort: Dirs first, then files
-                dirs = [c for c in node["children"] if c["type"] == "dir"]
-                files = [c for c in node["children"] if c["type"] == "file"]
-
-                dirs.sort(key=lambda x: x["path"])
-                files.sort(key=lambda x: x["path"])
-
-                for c in dirs + files:
-                    traverse(c, depth + 1)
-
-        traverse(root_node, 0)
-
-        # Initially select based on Recommended heuristic
-        # Start with None, then run heuristic
-        for item in flat_items:
-            item["selected"] = False
-
-        # Load existing selection from pool if available
-        # This supports the "Append" workflow by initializing with previous state
+        flat_items = _flatten_prescan_items(root_node, root_name)
         existing_pool_entry = self.saved_prescan_selections.get(root_name)
+        _initialize_prescan_selection(flat_items, existing_pool_entry, normalize_path)
+        selection_state = _initial_prescan_selection_state(flat_items, existing_pool_entry)
 
-        # Logic:
-        # - If pool has entry (dict):
-        #   - If raw is None: ALL state - select everything
-        #   - If raw is list: Use raw for UI truth (not compressed)
-        # - If no pool entry:
-        #   - Run Heuristic (Recommended).
-
-        if existing_pool_entry:
-            if isinstance(existing_pool_entry, dict):
-                raw = existing_pool_entry.get("raw")
-                if raw is None:
-                    # ALL state - select everything
-                    for item in flat_items:
-                        item["selected"] = True
-                elif isinstance(raw, list):
-                    # Partial selection from pool - use raw for UI truth
-                    # Normalize paths for consistent matching
-                    pool_set = set(normalize_path(p) for p in raw)
-                    for item in flat_items:
-                        normalized_item_path = normalize_path(item["path"])
-                        # Direct match
-                        if normalized_item_path in pool_set:
-                            item["selected"] = True
-                        else:
-                            # Check if parent dir is in pool (for compressed paths)
-                            parts = normalized_item_path.split('/')
-                            for i in range(len(parts)):
-                                sub = "/".join(parts[:i+1])
-                                if sub in pool_set:
-                                    item["selected"] = True
-                                    break
-            else:
-                # Legacy format - shouldn't happen after migration
-                # Run heuristic as fallback
-                pass
-        else:
-            # No existing selection -> Heuristic
-            # Run heuristic logic (same as prescanRecommended)
-            def is_recommended(path_str):
-                path = path_str.lower()
-                # Critical
-                if "readme" in path or path.endswith(".ai-context.yml"):
-                    return True
-                # Code
-                parts = path.split('/')
-                if "src" in parts or "contracts" in parts or "docs" in parts:
-                    if "test" not in path:
-                         return True
-                return False
-
-            for item in flat_items:
-                if item["type"] == "file":
-                    if is_recommended(item["path"]):
-                        item["selected"] = True
-
-        # Create Sheet with reliable close handling
-        # ARCHITECTURE NOTE: Prescan → Selection Pool (modify only)
-        # Merge → Explicit action from main view (never triggered from prescan)
-        class PrescanSheet(ui.View):
-            """
-            Custom View subclass.
-            Note: We avoid relying solely on will_close() for critical state reset due to
-            potential delegate limitations/bugs in some Pythonista versions.
-            State is reset explicitly in action handlers.
-            """
-            def __init__(self, parent):
-                super().__init__()
-                self._parent = parent
-                self.name = f"Prescan: {root_name}"
-                self.background_color = "#111111"
-                self.frame = (0, 0, 600, 800)
-
-            def will_close(self):
-                # Fallback safety net
-                if self._parent._prescan_active:
-                     self._parent._prescan_active = False
-
-        sheet = PrescanSheet(self)
+        sheet = _make_prescan_sheet(self, root_name, ui)
+        _add_prescan_stats(sheet, prescan_data, ui, parse_human_size)
+        tv = _create_prescan_table(sheet, flat_items, selection_state, ui)
+        _add_prescan_select_buttons(sheet, flat_items, selection_state, tv, ui)
+        sheet.add_subview(tv)
 
         def reset_guard():
             self._prescan_active = False
-
-        # Track selection mode explicitly for better state management
-        # This helps prevent crashes when transitioning between ALL/PARTIAL/NONE states
-        selection_state = {
-            'mode': 'partial'  # 'all', 'partial', or 'none'
-        }
-
-        # Initialize selection mode based on current selection
-        # Check if existing pool entry is in ALL state (both raw and compressed are None)
-        is_all = (isinstance(existing_pool_entry, dict) and
-                  existing_pool_entry.get("raw") is None and
-                  existing_pool_entry.get("compressed") is None)
-
-        if is_all:
-            selection_state['mode'] = 'all'
-        elif not any(item["selected"] for item in flat_items):
-            selection_state['mode'] = 'none'
-        else:
-            selection_state['mode'] = 'partial'
-
-        # Header Stats
-        stats_lbl = ui.Label(frame=(10, 10, 580, 20))
-        stats_lbl.text = f"{prescan_data['file_count']} files • {parse_human_size(str(prescan_data['total_bytes']))} bytes total" # approximate
-        stats_lbl.text_color = "gray"
-        stats_lbl.font = ("<System>", 12)
-        sheet.add_subview(stats_lbl)
-
-        # Buttons: Select All / None / Recommended
-        btn_y = 40
-        btn_w = 80
-        btn_h = 30
-
-        def toggle_all(val):
-            for i in flat_items: i["selected"] = val
-            # Update selection mode
-            if val:
-                selection_state['mode'] = 'all'
-            else:
-                selection_state['mode'] = 'none'
-            tv.reload_data()
-
-        btn_all = ui.Button(title="All")
-        btn_all.frame = (10, btn_y, btn_w, btn_h)
-        btn_all.background_color = "#333333"
-        btn_all.tint_color = "white"
-        btn_all.corner_radius = 4
-        btn_all.action = lambda s: toggle_all(True)
-        sheet.add_subview(btn_all)
-
-        btn_none = ui.Button(title="None")
-        btn_none.frame = (100, btn_y, btn_w, btn_h)
-        btn_none.background_color = "#333333"
-        btn_none.tint_color = "white"
-        btn_none.corner_radius = 4
-        btn_none.action = lambda s: toggle_all(False)
-        sheet.add_subview(btn_none)
-
-        # TableView
-        tv_y = 80
-        tv_h = sheet.height - tv_y - 60 # space for bottom bar
-        tv = ui.TableView()
-        tv.frame = (0, tv_y, sheet.width, tv_h)
-        tv.flex = "WH"
-        tv.background_color = "#111111"
-        tv.separator_color = "#333333"
-        tv.allows_multiple_selection = False # We handle selection manually
-
-        class PrescanDS(object):
-            def tableview_number_of_rows(self, tv, section):
-                return len(flat_items)
-
-            def tableview_cell_for_row(self, tv, section, row):
-                item = flat_items[row]
-                cell = ui.TableViewCell()
-                cell.text_label.text = item["display"]
-                cell.text_label.font = ("<Mono>", 12)
-                cell.background_color = "#111111"
-                cell.text_label.text_color = "white" if item["type"] == "file" else "#88ccff"
-
-                if item["selected"]:
-                    cell.accessory_type = "checkmark"
-                else:
-                    cell.accessory_type = "none"
-                return cell
-
-            def tableview_did_select(self, tv, section, row):
-                # Toggle logic
-                item = flat_items[row]
-                new_state = not item["selected"]
-
-                # Handle ALL state transition
-                if selection_state['mode'] == 'all' and not new_state:
-                    # Deselecting from ALL state - switch to partial selection mode
-                    selection_state['mode'] = 'partial'
-
-                self._set_selected_recursive(item, new_state)
-
-                # Update selection mode after change
-                if all(i["selected"] for i in flat_items):
-                    selection_state['mode'] = 'all'
-                elif not any(i["selected"] for i in flat_items):
-                    selection_state['mode'] = 'none'
-                else:
-                    selection_state['mode'] = 'partial'
-
-                tv.reload_data()
-
-            def _set_selected_recursive(self, item, state):
-                item["selected"] = state
-                # If dir, find children in flat list and toggle
-                if item["type"] == "dir":
-                    # Naive: scan following items with depth > item.depth
-                    # Since it is a flat list from traversal, children are immediately following.
-                    idx = flat_items.index(item)
-                    for i in range(idx + 1, len(flat_items)):
-                        child = flat_items[i]
-                        if child["depth"] <= item["depth"]:
-                            break
-                        child["selected"] = state
-
-        ds = PrescanDS()
-        tv.data_source = ds
-        tv.delegate = ds
-        sheet.add_subview(tv)
 
         # Bottom Bar: Remove / Cancel / Replace / Append
         bar_y = sheet.height - 50
@@ -747,3 +643,50 @@ class MergerUIPrescanMixin:
             sheet.add_subview(bar)
 
         sheet.present("sheet")
+
+
+class _PrescanDataSource:
+    def __init__(self, flat_items, selection_state, ui_module):
+        self.flat_items = flat_items
+        self.selection_state = selection_state
+        self.ui = ui_module
+
+    def tableview_number_of_rows(self, tv, section):
+        return len(self.flat_items)
+
+    def tableview_cell_for_row(self, tv, section, row):
+        item = self.flat_items[row]
+        cell = self.ui.TableViewCell()
+        cell.text_label.text = item["display"]
+        cell.text_label.font = ("<Mono>", 12)
+        cell.background_color = "#111111"
+        cell.text_label.text_color = "white" if item["type"] == "file" else "#88ccff"
+        cell.accessory_type = "checkmark" if item["selected"] else "none"
+        return cell
+
+    def tableview_did_select(self, tv, section, row):
+        item = self.flat_items[row]
+        new_state = not item["selected"]
+        if self.selection_state["mode"] == "all" and not new_state:
+            self.selection_state["mode"] = "partial"
+        self._set_selected_recursive(item, new_state)
+        self._refresh_selection_mode()
+        tv.reload_data()
+
+    def _refresh_selection_mode(self):
+        if all(item["selected"] for item in self.flat_items):
+            self.selection_state["mode"] = "all"
+        elif not any(item["selected"] for item in self.flat_items):
+            self.selection_state["mode"] = "none"
+        else:
+            self.selection_state["mode"] = "partial"
+
+    def _set_selected_recursive(self, item, state):
+        item["selected"] = state
+        if item["type"] != "dir":
+            return
+        index = self.flat_items.index(item)
+        for child in self.flat_items[index + 1 :]:
+            if child["depth"] <= item["depth"]:
+                break
+            child["selected"] = state
