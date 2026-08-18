@@ -330,6 +330,49 @@ def test_public_share_removes_profile_excluded_sqlite(monkeypatch, tmp_path, cap
     assert manifest_data["capabilities"]["fts5_bm25"] is False
 
 
+def test_drop_manifest_role_keeps_external_targets_outside_bundle(tmp_path):
+    bundle_dir = tmp_path / "bundle"
+    bundle_dir.mkdir()
+    manifest = bundle_dir / "bundle.manifest.json"
+    inside = bundle_dir / "inside.sqlite"
+    outside = tmp_path / "outside.sqlite"
+    linked = bundle_dir / "linked.sqlite"
+    missing = bundle_dir / "missing.sqlite"
+
+    inside.write_bytes(b"inside")
+    outside.write_bytes(b"outside")
+    linked.symlink_to(outside)
+    manifest.write_text(
+        json.dumps(
+            {
+                "artifacts": [
+                    {"role": "sqlite_index", "path": inside.name},
+                    {"role": "sqlite_index", "path": "../outside.sqlite"},
+                    {"role": "sqlite_index", "path": linked.name},
+                    {"role": "sqlite_index", "path": missing.name},
+                    {"role": "canonical_md", "path": "brief.md"},
+                    "opaque-artifact-entry",
+                ],
+                "capabilities": {"fts5_bm25": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    dropped = cmd_ground._drop_manifest_role(manifest, "sqlite_index")
+
+    assert dropped == [inside.resolve(), missing.resolve()]
+    assert not inside.exists()
+    assert outside.read_bytes() == b"outside"
+    assert linked.is_symlink()
+    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+    assert manifest_data["artifacts"] == [
+        {"role": "canonical_md", "path": "brief.md"},
+        "opaque-artifact-entry",
+    ]
+    assert manifest_data["capabilities"]["fts5_bm25"] is False
+
+
 def test_snapshot_create_graph_index_is_not_verified_as_primary_json(tmp_path, capsys):
     repo = tmp_path / "repo"
     repo.mkdir()

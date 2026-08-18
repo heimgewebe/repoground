@@ -1641,6 +1641,19 @@ def run_snapshot_create(args: argparse.Namespace) -> int:
     return 0 if result.get("status") == "ok" else 1
 
 
+def _manifest_deletion_candidate(
+    bundle_dir: Path, root: Path, raw_path: object
+) -> Path | None:
+    if not isinstance(raw_path, str) or not raw_path:
+        return None
+    candidate = (bundle_dir / raw_path).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        return None
+    return candidate
+
+
 def _drop_manifest_role(bundle_manifest: Path, role: str) -> list[Path]:
     data = json.loads(bundle_manifest.read_text(encoding="utf-8"))
     artifacts = data.get("artifacts", [])
@@ -1653,15 +1666,11 @@ def _drop_manifest_role(bundle_manifest: Path, role: str) -> list[Path]:
         if not isinstance(artifact, dict) or artifact.get("role") != role:
             kept.append(artifact)
             continue
-        raw_path = artifact.get("path")
-        if isinstance(raw_path, str) and raw_path:
-            candidate = (bundle_manifest.parent / raw_path).resolve()
-            try:
-                candidate.relative_to(root)
-            except ValueError:
-                pass
-            else:
-                dropped.append(candidate)
+        candidate = _manifest_deletion_candidate(
+            bundle_manifest.parent, root, artifact.get("path")
+        )
+        if candidate is not None:
+            dropped.append(candidate)
     data["artifacts"] = kept
     if role == "sqlite_index":
         capabilities = data.setdefault("capabilities", {})
