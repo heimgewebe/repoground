@@ -79,6 +79,17 @@ def _content_match(root_value: str, item: Dict[str, Any], content_query_lower: s
     return False, None
 
 
+def _latest_snapshots_per_root(
+    snapshots: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    latest_snapshots: Dict[str, Dict[str, Any]] = {}
+    for snapshot in snapshots:
+        root_id = snapshot['root_id']
+        if root_id not in latest_snapshots:
+            latest_snapshots[root_id] = snapshot
+    return list(latest_snapshots.values())
+
+
 class AtlasSearch:
     def __init__(self, registry_db_path: Path):
         self.registry_db_path = registry_db_path
@@ -114,11 +125,7 @@ class AtlasSearch:
 
         if not snapshot_id and not all_snapshots:
             # Keep only the latest snapshot per root (DESC order => first wins).
-            latest_snapshots = {}
-            for s in snapshots:
-                if s['root_id'] not in latest_snapshots:
-                    latest_snapshots[s['root_id']] = s
-            snapshots = list(latest_snapshots.values())
+            snapshots = _latest_snapshots_per_root(snapshots)
 
         # Parse date filters once (shared by both paths).
         after_dt = None
