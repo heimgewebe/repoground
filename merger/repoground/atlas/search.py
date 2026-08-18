@@ -90,6 +90,21 @@ def _latest_snapshots_per_root(
     return list(latest_snapshots.values())
 
 
+def _indexed_content_match(
+    row,
+    item: Dict[str, Any],
+    snap_by_id: Dict[str, Dict[str, Any]],
+    roots_cache: Dict[str, Dict[str, Any]],
+    content_query_lower: str,
+) -> Tuple[bool, Optional[str]]:
+    snap = snap_by_id.get(row['snapshot_id'])
+    root = roots_cache.get(snap['root_id']) if snap else None
+    root_val = root.get('root_value') if root else None
+    if not root_val:
+        return False, None
+    return _content_match(root_val, item, content_query_lower)
+
+
 class AtlasSearch:
     def __init__(self, registry_db_path: Path):
         self.registry_db_path = registry_db_path
@@ -212,12 +227,9 @@ class AtlasSearch:
                 continue
 
             if content_query:
-                snap = snap_by_id.get(row['snapshot_id'])
-                root = roots_cache.get(snap['root_id']) if snap else None
-                root_val = root.get('root_value') if root else None
-                if not root_val:
-                    continue
-                matched, snippet = _content_match(root_val, item, content_query_lower)
+                matched, snippet = _indexed_content_match(
+                    row, item, snap_by_id, roots_cache, content_query_lower
+                )
                 if not matched:
                     continue
                 if snippet:
