@@ -20,6 +20,7 @@ from merger.repoground.core.merge import (
     make_output_filename,
     determine_inclusion_status,
     iter_report_blocks,
+    infer_repo_role,
     FileInfo
 )
 
@@ -78,6 +79,38 @@ class TestMergeCore(unittest.TestCase):
         cat, tags = classify_file_v2(Path("scripts/deploy.sh"), ".sh")
         self.assertEqual(cat, "source")
         self.assertIn("script", tags)
+
+    def test_infer_repo_role_preserves_name_order_and_contract_fallback(self):
+        class FakeFile:
+            def __init__(self, category):
+                self.category = category
+
+        cases = [
+            ("", [], "service"),
+            ("plain", [], "service"),
+            ("TOOL-APP", [], "tooling / ui"),
+            (
+                "tool-schema-meta-ui-wgx",
+                [],
+                "tooling / contracts / governance / ui / fleet-management",
+            ),
+            (
+                "lern-geist-haus-sensor-app",
+                [],
+                "education / knowledge-base / logic-core / ingestion / ui",
+            ),
+            ("schema", [FakeFile("contract")], "contracts"),
+            ("plain", [FakeFile("source"), FakeFile("contract")], "contracts"),
+            ("plain", [FakeFile("source")], "service"),
+            (
+                "merger-contract-meta-lern-geist-haus-sensor-leitstand-wgx",
+                [],
+                "tooling / contracts / governance / education / knowledge-base / logic-core / ingestion / ui / fleet-management",
+            ),
+        ]
+
+        for root_label, files, expected in cases:
+            self.assertEqual(infer_repo_role(root_label, files), expected)
 
     def test_generate_run_id(self):
         # Basic determinism
