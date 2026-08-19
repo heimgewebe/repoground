@@ -788,6 +788,28 @@ def test_classify_miss_found_expected_pattern_in_results_but_not_relevant():
     assert miss_types == ["unknown"]
 
 
+def test_classify_miss_expected_path_substring_matching_contract():
+    case = {"query": "test"}
+    cases = [
+        (["expected.py"], ["src/expected.py"], ["unknown"]),
+        (["src/expected.py"], ["expected.py"], ["expected_not_in_top_k"]),
+        ([""], ["anything.py"], ["unknown"]),
+        (["expected.py"], ["other.py", "nested/expected.py"], ["unknown"]),
+        ([""], [""], ["unknown"]),
+    ]
+
+    for expected_paths, top_results, expected_miss_types in cases:
+        miss_types, primary = eval_core.classify_miss(
+            case,
+            expected_paths=expected_paths,
+            is_relevant=False,
+            found_count=len(top_results),
+            top_results=top_results,
+        )
+        assert miss_types == expected_miss_types
+        assert primary == expected_miss_types[0]
+
+
 def test_miss_taxonomy_expected_not_in_top_k_integration(mini_index_for_eval, tmp_path):
     """Integration-level check: do_eval emits expected_not_in_top_k on a real miss with returned results."""
     queries_json = tmp_path / "eval_queries.json"

@@ -11,6 +11,16 @@ WHY_FAIL_QUERY_EXECUTION = "query execution failed"
 WHY_FAIL_MISSING_EXPLAIN = "missing explain from query execution"
 
 
+def _has_expected_path_match(
+    expected_paths: List[str], top_results: List[str]
+) -> bool:
+    for result_path in top_results:
+        for exp_pattern in expected_paths:
+            if exp_pattern in result_path:
+                return True
+    return False
+
+
 def classify_miss(query_case: Dict[str, Any], expected_paths: List[str], is_relevant: bool, found_count: int, top_results: List[str]) -> Tuple[List[str], Optional[str]]:
     """
     Classify a retrieval miss mechanically.
@@ -40,16 +50,7 @@ def classify_miss(query_case: Dict[str, Any], expected_paths: List[str], is_rele
     # Expected paths provided but not in results: expected not in top-k
     elif expected_paths and top_results:
         # Check if any expected path substring is in top results
-        found_expected = False
-        for result_path in top_results:
-            for exp_pattern in expected_paths:
-                if exp_pattern in result_path:
-                    found_expected = True
-                    break
-            if found_expected:
-                break
-        
-        if not found_expected:
+        if not _has_expected_path_match(expected_paths, top_results):
             miss_types.append("expected_not_in_top_k")
     # Missing metadata for classification
     elif not expected_paths:
