@@ -172,20 +172,7 @@ def _apply_path_filter(query: str, role: str) -> str:
     return f"({query}) AND {path_filter}"
 
 
-def plan_review_query(query_text: str) -> Dict[str, Any]:
-    """Build a deterministic, bounded review-artifact lookup plan.
-
-    Lanes are ordered by first role mention. A source lane is an unqualified
-    lexical lane; test/contract/CLI/docs lanes add FTS ``path_tokens`` filters.
-    Strict variants require all anchor groups. Relaxed variants use OR only as
-    a bounded fallback inside the same role lane.
-    """
-    if not isinstance(query_text, str):
-        raise ValueError("query_text must be a string")
-
-    tokens = TOKEN_RE.findall(query_text.lower())
-    content_tokens = [token for token in tokens if token not in _REVIEW_STOPWORDS]
-
+def _classify_review_terms(content_tokens: Sequence[str]) -> tuple[List[str], List[str]]:
     roles: List[str] = []
     for token in content_tokens:
         role = _ROLE_BY_TOKEN.get(token)
@@ -203,6 +190,24 @@ def plan_review_query(query_text: str) -> Dict[str, Any]:
 
     if not anchors:
         anchors = _dedupe(content_tokens)
+
+    return roles, anchors
+
+
+def plan_review_query(query_text: str) -> Dict[str, Any]:
+    """Build a deterministic, bounded review-artifact lookup plan.
+
+    Lanes are ordered by first role mention. A source lane is an unqualified
+    lexical lane; test/contract/CLI/docs lanes add FTS ``path_tokens`` filters.
+    Strict variants require all anchor groups. Relaxed variants use OR only as
+    a bounded fallback inside the same role lane.
+    """
+    if not isinstance(query_text, str):
+        raise ValueError("query_text must be a string")
+
+    tokens = TOKEN_RE.findall(query_text.lower())
+    content_tokens = [token for token in tokens if token not in _REVIEW_STOPWORDS]
+    roles, anchors = _classify_review_terms(content_tokens)
 
     groups = [_term_group(token) for token in anchors]
     strict_query = _join_groups(groups, "AND")
