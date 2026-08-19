@@ -5725,6 +5725,25 @@ def build_derived_artifacts(dump_index_path, chunk_path, base_name_func, run_id,
     return derived_paths
 
 
+def _advance_file_offset_marker(
+    line_str: str, current_id: Optional[str]
+) -> Tuple[Optional[str], Optional[str], bool]:
+    """Advance the legacy code-zone marker state for one decoded line."""
+    if "<!-- zone:begin" in line_str and re.search(r'type="?code"?', line_str):
+        # Dual-read: extract id regardless of quotes.
+        # Handles id="FILE:..." or id=FILE:...
+        # Tighter regex ensures we don't grab the trailing -->
+        match = re.search(r'id=(?:"([^"]+)"|([a-zA-Z0-9._:-]+))', line_str)
+        if match:
+            return match.group(1) or match.group(2), None, False
+        return current_id, None, False
+    if current_id and line_str.strip().startswith("```"):
+        return None, current_id, False
+    if current_id and "<!-- zone:end" in line_str:
+        return None, None, True
+    return current_id, None, False
+
+
 def extract_file_offsets(md_paths: List[Path], debug: bool = False) -> Dict[str, Tuple[str, int]]:
     offsets = {}
     for md_path in md_paths:
@@ -5742,21 +5761,14 @@ def extract_file_offsets(md_paths: List[Path], debug: bool = False) -> Dict[str,
 
                     line_len = len(line)
                     line_str = line.decode("utf-8", errors="ignore")
+                    current_id, captured_id, malformed_zone = _advance_file_offset_marker(
+                        line_str, current_id
+                    )
 
-                    if "<!-- zone:begin" in line_str and re.search(r'type="?code"?', line_str):
-                        # Dual-read: extract id regardless of quotes.
-                        # Handles id="FILE:..." or id=FILE:...
-                        # Tighter regex ensures we don't grab the trailing -->
-                        m = re.search(r'id=(?:"([^"]+)"|([a-zA-Z0-9._:-]+))', line_str)
-                        if m:
-                            current_id = m.group(1) or m.group(2)
-                    elif current_id and line_str.strip().startswith("```"):
-                        offsets[current_id] = (md_path.name, pos + line_len)
-                        current_id = None
-                    elif current_id and "<!-- zone:end" in line_str:
-                        if debug:
-                            print(f"warning: malformed zone marker in {md_path.name}", file=sys.stderr)
-                        current_id = None
+                    if captured_id is not None:
+                        offsets[captured_id] = (md_path.name, pos + line_len)
+                    if malformed_zone and debug:
+                        print(f"warning: malformed zone marker in {md_path.name}", file=sys.stderr)
 
                     pos += line_len
         except Exception as e:

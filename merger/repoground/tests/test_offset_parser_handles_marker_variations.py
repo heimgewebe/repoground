@@ -108,3 +108,20 @@ def test_offset_parser_handles_marker_variations(tmp_path: Path):
     assert "FILE:test6" not in offsets
     assert "FILE:test7" in offsets
     assert offsets["FILE:test7"][0] == "f6.md"
+
+
+def test_offset_parser_preserves_open_id_across_idless_code_begin(tmp_path: Path):
+    path = tmp_path / "idless-begin.md"
+    payload = (
+        "<!-- zone:begin type=code id=FILE:original -->\n"
+        "<!-- zone:begin type=code lang=python -->\n"
+        "```python\n"
+        "value = 1\n"
+        "```\n"
+    ).encode("utf-8")
+    path.write_bytes(payload)
+
+    offsets = extract_file_offsets([path], debug=False)
+
+    fence_end = payload.index(b"```python\n") + len(b"```python\n")
+    assert offsets == {"FILE:original": (path.name, fence_end)}
