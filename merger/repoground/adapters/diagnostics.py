@@ -9,6 +9,46 @@ logger = logging.getLogger(__name__)
 SCHEMA_VERSION = "diagnostics.snapshot.v1"
 TTL_HOURS = 24
 
+
+def _collect_repo_diagnostics(hub_path: Path, repos: Dict[str, Any]) -> Dict[str, Any]:
+    results = {}
+
+    # 2. Iterate Fleet Repos and check local state
+    for repo_name, meta in repos.items():
+        repo_path = hub_path / repo_name
+
+        # Check existence
+        if not repo_path.is_dir():
+            results[repo_name] = {
+                "status": "missing",
+                "checks": []
+            }
+            continue
+
+        checks = []
+
+        # Profile Expectation
+        wgx = meta.get("wgx") if isinstance(meta.get("wgx"), dict) else {}
+        expected = wgx.get("profile_expected")
+        if expected is True:
+            profile_path = repo_path / ".wgx" / "profile.yml"
+            if not profile_path.exists():
+                checks.append({
+                    "code": "missing_wgx_profile",
+                    "severity": "warn",
+                    "message": ".wgx/profile.yml expected but missing"
+                })
+
+        results[repo_name] = {
+            "status": "ok" if not checks else "issue",
+            "checks": checks,
+            # Pass through role for convenience
+            "role": meta.get("role", "unknown")
+        }
+
+    return results
+
+
 def rebuild(hub_path: Path) -> Dict[str, Any]:
     """
     Rebuilds diagnostics snapshot based on fleet.snapshot.json expectations.
@@ -73,40 +113,7 @@ def rebuild(hub_path: Path) -> Dict[str, Any]:
             pass
 
     repos = fleet_data.get("data", {}).get("repos", {})
-    results = {}
-
-    # 2. Iterate Fleet Repos and check local state
-    for repo_name, meta in repos.items():
-        repo_path = hub_path / repo_name
-
-        # Check existence
-        if not repo_path.is_dir():
-            results[repo_name] = {
-                "status": "missing",
-                "checks": []
-            }
-            continue
-
-        checks = []
-
-        # Profile Expectation
-        wgx = meta.get("wgx") if isinstance(meta.get("wgx"), dict) else {}
-        expected = wgx.get("profile_expected")
-        if expected is True:
-            profile_path = repo_path / ".wgx" / "profile.yml"
-            if not profile_path.exists():
-                checks.append({
-                    "code": "missing_wgx_profile",
-                    "severity": "warn",
-                    "message": ".wgx/profile.yml expected but missing"
-                })
-
-        results[repo_name] = {
-            "status": "ok" if not checks else "issue",
-            "checks": checks,
-            # Pass through role for convenience
-            "role": meta.get("role", "unknown")
-        }
+    results = _collect_repo_diagnostics(hub_path, repos)
 
     # P3: Summary & Issues Total
     summary = {
