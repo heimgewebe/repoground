@@ -338,6 +338,111 @@ def _update_prescan_pool(
     sheet.close()
 
 
+def _format_pool_info(data):
+    if not data or not isinstance(data, dict):
+        return "Invalid state"
+    raw = data.get("raw")
+    compressed = data.get("compressed")
+    if raw is None and compressed is None:
+        return "ALL"
+    raw_count = len(raw) if raw else 0
+    compressed_count = len(compressed) if compressed else 0
+    return f"Partial: {raw_count} files / {compressed_count} rules"
+
+
+def _pool_viewer_items(pool):
+    items = [
+        {"repo": repo, "info": _format_pool_info(data)}
+        for repo, data in pool.items()
+    ]
+    items.sort(key=lambda item: item["repo"])
+    return items
+
+
+def _pool_inspector_message(repo, entry):
+    raw = entry.get("raw")
+    compressed = entry.get("compressed")
+    message = f"Repo: {repo}\n\n"
+    if raw is None and compressed is None:
+        return message + "State: ALL files included."
+
+    raw_count = len(raw) if raw else 0
+    compressed_count = len(compressed) if compressed else 0
+    message += (
+        f"State: Partial\nFiles: {raw_count}\nRules: {compressed_count}\n\n"
+    )
+    if not compressed:
+        return message
+
+    message += "Rules (Compressed):\n"
+    for rule in compressed[:15]:
+        message += f"- {rule}\n"
+    if len(compressed) > 15:
+        message += f"... and {len(compressed) - 15} more"
+    return message
+
+
+def _show_pool_inspector(pool, repo, console_module, ui_module):
+    entry = pool.get(repo)
+    if not entry or not isinstance(entry, dict):
+        return
+    message = _pool_inspector_message(repo, entry)
+    if console_module:
+        console_module.alert(
+            "Pool Details", message, "OK", hide_cancel_button=True
+        )
+    elif ui_module:
+        ui_module.alert("Pool Details", message, "OK")
+
+
+def _add_empty_pool_label(sheet, ui_module):
+    label = ui_module.Label(frame=(0, 0, 500, 600))
+    label.text = "Pool is empty."
+    label.alignment = ui_module.ALIGN_CENTER
+    label.text_color = "gray"
+    sheet.add_subview(label)
+
+
+def _create_pool_viewer_table(parent, pool, ui_module, console_module):
+    table = ui_module.TableView()
+    table.frame = (0, 0, 500, 540)
+    table.flex = "WH"
+    table.background_color = "#111111"
+    table.separator_color = "#333333"
+    data_source = _PoolViewerDataSource(
+        parent, pool, _pool_viewer_items(pool), ui_module, console_module
+    )
+    table.data_source = data_source
+    table.delegate = data_source
+    return table
+
+
+def _clear_pool_from_viewer(parent, pool, sheet, console_module):
+    pool.clear()
+    parent.save_last_state()
+    parent._update_repo_info()
+    sheet.close()
+    if console_module:
+        console_module.hud_alert("Pool cleared")
+
+
+def _add_pool_viewer_clear_bar(parent, pool, sheet, ui_module, console_module):
+    bar = ui_module.View(frame=(0, 540, 500, 60))
+    bar.flex = "WT"
+    bar.background_color = "#222222"
+
+    button = ui_module.Button(title="Clear Pool")
+    button.frame = (10, 10, 100, 40)
+    button.background_color = "#ff3b30"
+    button.tint_color = "white"
+    button.corner_radius = 6
+    button.action = lambda sender: _clear_pool_from_viewer(
+        parent, pool, sheet, console_module
+    )
+    bar.add_subview(button)
+    sheet.add_subview(bar)
+
+
 class MergerUIPrescanMixin:
     def show_prescan_sheet(self, sender):
         """
@@ -471,149 +576,63 @@ class MergerUIPrescanMixin:
     def show_pool_viewer(self, sender):
         """Shows the current Selection Pool content."""
         pool = self.saved_prescan_selections
-
         sheet = ui.View()
         sheet.name = "Selection Pool"
         sheet.background_color = "#111111"
         sheet.frame = (0, 0, 500, 600)
 
         if not pool:
-            lbl = ui.Label(frame=(0, 0, 500, 600))
-            lbl.text = "Pool is empty."
-            lbl.alignment = ui.ALIGN_CENTER
-            lbl.text_color = "gray"
-            sheet.add_subview(lbl)
+            _add_empty_pool_label(sheet, ui)
         else:
-            tv = ui.TableView()
-            tv.frame = (0, 0, 500, 540)
-            tv.flex = "WH"
-            tv.background_color = "#111111"
-            tv.separator_color = "#333333"
-
-            # Helper to format info
-            def format_pool_info(data):
-                if not data or not isinstance(data, dict):
-                    return "Invalid state"
-
-                # Check for ALL state (both None)
-                raw = data.get("raw")
-                compressed = data.get("compressed")
-
-                if raw is None and compressed is None:
-                    return "ALL"
-
-                # Partial state
-                raw_count = len(raw) if raw else 0
-                compressed_count = len(compressed) if compressed else 0
-                return f"Partial: {raw_count} files / {compressed_count} rules"
-
-            # Convert pool to list
-            items = []
-            for repo, data in pool.items():
-                info = format_pool_info(data)
-                items.append({"repo": repo, "info": info})
-
-            items.sort(key=lambda x: x["repo"])
-
-            class PoolDS(object):
-                def __init__(self, parent_ui):
-                    self.parent = parent_ui
-
-                def tableview_number_of_rows(self, tv, section):
-                    return len(items)
-
-                def tableview_cell_for_row(self, tv, section, row):
-                    item = items[row]
-                    cell = ui.TableViewCell('value1')
-                    cell.text_label.text = item["repo"]
-                    cell.detail_text_label.text = item["info"]
-                    cell.text_label.text_color = "white"
-                    cell.detail_text_label.text_color = "#888888"
-                    cell.background_color = "#111111"
-                    cell.accessory_type = 'detail_button'
-                    return cell
-
-                def tableview_accessory_button_tapped(self, tv, section, row):
-                    self.show_inspector(row)
-
-                def tableview_did_select(self, tv, section, row):
-                    self.show_inspector(row)
-
-                def show_inspector(self, row):
-                    item = items[row]
-                    repo = item["repo"]
-                    entry = pool.get(repo)
-
-                    if not entry or not isinstance(entry, dict):
-                        return
-
-                    raw = entry.get("raw")
-                    compressed = entry.get("compressed")
-
-                    msg = f"Repo: {repo}\n\n"
-
-                    if raw is None and compressed is None:
-                        msg += "State: ALL files included."
-                    else:
-                        r_count = len(raw) if raw else 0
-                        c_count = len(compressed) if compressed else 0
-                        msg += f"State: Partial\nFiles: {r_count}\nRules: {c_count}\n\n"
-
-                        if compressed:
-                            msg += "Rules (Compressed):\n"
-                            # Limit display
-                            display_rules = compressed[:15]
-                            for r in display_rules:
-                                msg += f"- {r}\n"
-                            if len(compressed) > 15:
-                                msg += f"... and {len(compressed)-15} more"
-
-                    if console:
-                        console.alert("Pool Details", msg, "OK", hide_cancel_button=True)
-                    elif ui:
-                        ui.alert("Pool Details", msg, "OK")
-
-                def tableview_can_edit(self, tv, section, row):
-                    return True
-
-                def tableview_delete(self, tv, section, row):
-                    repo = items[row]["repo"]
-                    if repo in pool:
-                        del pool[repo]
-                        # Persist immediately using parent reference
-                        self.parent.save_last_state()
-                        self.parent._update_repo_info()
-
-                    items.pop(row)
-                    tv.delete_rows([row])
-
-            ds = PoolDS(self)
-            tv.data_source = ds
-            tv.delegate = ds
-            sheet.add_subview(tv)
-
-            # Bottom Bar
-            bar = ui.View(frame=(0, 540, 500, 60))
-            bar.flex = "WT"
-            bar.background_color = "#222222"
-
-            btn_clear = ui.Button(title="Clear Pool")
-            btn_clear.frame = (10, 10, 100, 40)
-            btn_clear.background_color = "#ff3b30"
-            btn_clear.tint_color = "white"
-            btn_clear.corner_radius = 6
-            def clear_action(sender):
-                pool.clear()
-                self.save_last_state()
-                self._update_repo_info()
-                sheet.close()
-                if console: console.hud_alert("Pool cleared")
-            btn_clear.action = clear_action
-            bar.add_subview(btn_clear)
-
-            sheet.add_subview(bar)
+            sheet.add_subview(_create_pool_viewer_table(self, pool, ui, console))
+            _add_pool_viewer_clear_bar(self, pool, sheet, ui, console)
 
         sheet.present("sheet")
+
+
+class _PoolViewerDataSource:
+    def __init__(self, parent, pool, items, ui_module, console_module):
+        self.parent = parent
+        self.pool = pool
+        self.items = items
+        self.ui = ui_module
+        self.console = console_module
+
+    def tableview_number_of_rows(self, tv, section):
+        return len(self.items)
+
+    def tableview_cell_for_row(self, tv, section, row):
+        item = self.items[row]
+        cell = self.ui.TableViewCell("value1")
+        cell.text_label.text = item["repo"]
+        cell.detail_text_label.text = item["info"]
+        cell.text_label.text_color = "white"
+        cell.detail_text_label.text_color = "#888888"
+        cell.background_color = "#111111"
+        cell.accessory_type = "detail_button"
+        return cell
+
+    def tableview_accessory_button_tapped(self, tv, section, row):
+        self.show_inspector(row)
+
+    def tableview_did_select(self, tv, section, row):
+        self.show_inspector(row)
+
+    def show_inspector(self, row):
+        repo = self.items[row]["repo"]
+        _show_pool_inspector(self.pool, repo, self.console, self.ui)
+
+    def tableview_can_edit(self, tv, section, row):
+        return True
+
+    def tableview_delete(self, tv, section, row):
+        repo = self.items[row]["repo"]
+        if repo in self.pool:
+            del self.pool[repo]
+            self.parent.save_last_state()
+            self.parent._update_repo_info()
+        self.items.pop(row)
+        tv.delete_rows([row])
 
 
 class _PrescanDataSource:
