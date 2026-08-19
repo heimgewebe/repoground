@@ -1834,23 +1834,35 @@ def save_hub_path(script_path: Path, hub_dir: Path) -> bool:
         return False
 
 
+def _infer_repo_roles_from_name(root: str) -> List[str]:
+    roles = []
+    if "tool" in root or "merger" in root:
+        roles.append("tooling")
+    if "contract" in root or "schema" in root:
+        roles.append("contracts")
+    if "meta" in root:
+        roles.append("governance")
+    if "lern" in root:
+        roles.append("education")
+    if "geist" in root:
+        roles.append("knowledge-base")
+    if "haus" in root:
+        roles.append("logic-core")
+    if "sensor" in root:
+        roles.append("ingestion")
+    if "ui" in root or "app" in root or "leitstand" in root:
+        roles.append("ui")
+    if "wgx" in root:
+        roles.append("fleet-management")
+    return roles
+
+
 def infer_repo_role(root_label: str, files: List["FileInfo"]) -> str:
     """
     Infers the high-level semantic role of the repository within the organism.
     """
-    roles = []
     root = root_label.lower()
-
-    # Name-based heuristics
-    if "tool" in root or "merger" in root: roles.append("tooling")
-    if "contract" in root or "schema" in root: roles.append("contracts")
-    if "meta" in root: roles.append("governance")
-    if "lern" in root: roles.append("education")
-    if "geist" in root: roles.append("knowledge-base")
-    if "haus" in root: roles.append("logic-core")
-    if "sensor" in root: roles.append("ingestion")
-    if "ui" in root or "app" in root or "leitstand" in root: roles.append("ui")
-    if "wgx" in root: roles.append("fleet-management")
+    roles = _infer_repo_roles_from_name(root)
 
     # Content-based heuristics
     has_contracts = any(f.category == "contract" for f in files)
