@@ -23,6 +23,25 @@ logger = logging.getLogger(__name__)
 _SUCCESSFUL_BUNDLE_STATUSES = frozenset({"ok", "stale"})
 
 
+def _resolved_bundles_from_federation_trace(
+    federation_trace: Dict[str, Any],
+) -> List[str]:
+    """Collect bundle IDs whose federation query actually executed."""
+    bundle_status = federation_trace.get("bundle_status", {})
+    if not isinstance(bundle_status, dict):
+        logger.warning(
+            "federation_trace.bundle_status is not a dict (got %s); skipping",
+            type(bundle_status).__name__,
+        )
+        return []
+
+    resolved: List[str] = []
+    for repo_id, status in bundle_status.items():
+        if status in _SUCCESSFUL_BUNDLE_STATUSES and isinstance(repo_id, str) and repo_id:
+            resolved.append(repo_id)
+    return resolved
+
+
 def build_agent_query_session_v2(
     query: str,
     context_bundle: Optional[Dict[str, Any]] = None,
@@ -74,20 +93,8 @@ def build_agent_query_session_v2(
                 resolved.append(origin)
 
     # Source 2: successfully queried bundles from the federation trace.
-    # federation_trace.bundle_status is a dict {repo_id: status_str}.
-    # "ok" = query ran and returned results (possibly empty).
-    # "stale" = query ran against an outdated index — still counts as resolved.
     if federation_trace is not None:
-        bundle_status = federation_trace.get("bundle_status", {})
-        if not isinstance(bundle_status, dict):
-            logger.warning(
-                "federation_trace.bundle_status is not a dict (got %s); skipping",
-                type(bundle_status).__name__,
-            )
-        else:
-            for repo_id, status in bundle_status.items():
-                if status in _SUCCESSFUL_BUNDLE_STATUSES and isinstance(repo_id, str) and repo_id:
-                    resolved.append(repo_id)
+        resolved.extend(_resolved_bundles_from_federation_trace(federation_trace))
 
     # Deduplicate and sort for determinism.
     resolved_bundles = sorted(set(resolved))
