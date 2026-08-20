@@ -1204,15 +1204,7 @@ class AtlasScanner:
             "truncated": limit_hit_reason
         }
 
-def render_atlas_md(atlas_data: Dict[str, Any]) -> str:
-    stats = atlas_data["stats"]
-    root = atlas_data.get("root", "Unknown")
-
-    lines = []
-    lines.append(f"# 🗺️ Atlas: {root}")
-    lines.append(f"Generated: {stats.get('end_time')} (Duration: {stats.get('duration_seconds'):.2f}s)")
-    lines.append("")
-
+def _append_atlas_scan_metadata(lines: List[str], stats: Dict[str, Any]) -> None:
     if stats.get("inventory_file"):
         lines.append(f"**Inventory (Files):** `{Path(stats.get('inventory_file')).name}`")
     if stats.get("dirs_inventory_file"):
@@ -1238,6 +1230,18 @@ def render_atlas_md(atlas_data: Dict[str, Any]) -> str:
         for ex in sorted(stats["active_excludes"]):
             lines.append(f"- `{ex}`")
         lines.append("")
+
+
+def render_atlas_md(atlas_data: Dict[str, Any]) -> str:
+    stats = atlas_data["stats"]
+    root = atlas_data.get("root", "Unknown")
+
+    lines = []
+    lines.append(f"# 🗺️ Atlas: {root}")
+    lines.append(f"Generated: {stats.get('end_time')} (Duration: {stats.get('duration_seconds'):.2f}s)")
+    lines.append("")
+
+    _append_atlas_scan_metadata(lines, stats)
 
     lines.append("## 📊 Overview")
     lines.append(f"- **Total Directories:** {stats.get('total_dirs')}")
