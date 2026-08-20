@@ -312,36 +312,51 @@ def memory_record_from_projection(
     )
 
 
-def _citation_lookup(
-    current_citations: Mapping[str, Any] | Sequence[Mapping[str, Any]] | None,
+def _citation_lookup_from_mapping(
+    current_citations: Mapping[str, Any],
 ) -> tuple[dict[str, Mapping[str, Any]], set[str]]:
     lookup: dict[str, Mapping[str, Any]] = {}
     conflicts: set[str] = set()
-    if current_citations is None:
-        return lookup, conflicts
-    if isinstance(current_citations, Mapping):
-        for key, value in current_citations.items():
-            if not isinstance(key, str) or not isinstance(value, Mapping):
-                continue
-            inner_id = value.get("citation_id")
-            if inner_id not in (None, key):
-                conflicts.add(key)
-                if isinstance(inner_id, str):
-                    conflicts.add(inner_id)
-            lookup[key] = value
-        return lookup, conflicts
-    if isinstance(current_citations, Sequence) and not isinstance(current_citations, (str, bytes)):
-        for citation in current_citations:
-            if not isinstance(citation, Mapping):
-                continue
-            citation_id = citation.get("citation_id")
-            if not isinstance(citation_id, str):
-                continue
-            if citation_id in lookup:
-                conflicts.add(citation_id)
-                continue
-            lookup[citation_id] = citation
+    for key, value in current_citations.items():
+        if not isinstance(key, str) or not isinstance(value, Mapping):
+            continue
+        inner_id = value.get("citation_id")
+        if inner_id not in (None, key):
+            conflicts.add(key)
+            if isinstance(inner_id, str):
+                conflicts.add(inner_id)
+        lookup[key] = value
     return lookup, conflicts
+
+
+def _citation_lookup_from_sequence(
+    current_citations: Sequence[Mapping[str, Any]],
+) -> tuple[dict[str, Mapping[str, Any]], set[str]]:
+    lookup: dict[str, Mapping[str, Any]] = {}
+    conflicts: set[str] = set()
+    for citation in current_citations:
+        if not isinstance(citation, Mapping):
+            continue
+        citation_id = citation.get("citation_id")
+        if not isinstance(citation_id, str):
+            continue
+        if citation_id in lookup:
+            conflicts.add(citation_id)
+            continue
+        lookup[citation_id] = citation
+    return lookup, conflicts
+
+
+def _citation_lookup(
+    current_citations: Mapping[str, Any] | Sequence[Mapping[str, Any]] | None,
+) -> tuple[dict[str, Mapping[str, Any]], set[str]]:
+    if current_citations is None:
+        return {}, set()
+    if isinstance(current_citations, Mapping):
+        return _citation_lookup_from_mapping(current_citations)
+    if isinstance(current_citations, Sequence) and not isinstance(current_citations, (str, bytes)):
+        return _citation_lookup_from_sequence(current_citations)
+    return {}, set()
 
 
 def _current_range_hash(citation: Mapping[str, Any] | None) -> str | None:
