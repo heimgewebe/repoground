@@ -526,6 +526,57 @@ def _consume_text_stream(handle: TextIO) -> bool:
     return True
 
 
+def _relation_candidate_summary(
+    *,
+    candidates: list[dict[str, Any]],
+    errors: list[dict[str, Any]],
+    invalid_row_count: int,
+    candidate_limit_reached: bool,
+    unparsed_tail_present: bool,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    errors_truncated = invalid_row_count > len(errors)
+    json_row_validation_complete = not unparsed_tail_present
+    invalid_row_count_scope = (
+        "complete_artifact" if json_row_validation_complete else "parsed_prefix"
+    )
+    gaps: list[dict[str, Any]] = []
+    if invalid_row_count:
+        gaps.append(
+            {
+            "source": "relation_cards_jsonl",
+            "status": "invalid_rows",
+            "invalid_row_count": invalid_row_count,
+            "invalid_row_count_scope": invalid_row_count_scope,
+            "row_errors": errors,
+            "row_error_sample_limit": RELATION_ERROR_SAMPLE_LIMIT,
+            "row_errors_truncated": errors_truncated,
+            }
+        )
+    if not candidates:
+        gaps.append(
+            {
+                "source": "relation_cards_jsonl",
+                "status": "empty",
+                "reason": "relation card search returned no candidates",
+            }
+        )
+    signal_status = "warn" if invalid_row_count else "available"
+    return (
+        {
+        "status": signal_status,
+        "hit_count": len(candidates),
+        "invalid_row_count": invalid_row_count,
+        "invalid_row_count_scope": invalid_row_count_scope,
+        "row_error_sample_count": len(errors),
+        "row_errors_truncated": errors_truncated,
+        "candidate_limit_reached": candidate_limit_reached,
+        "json_row_validation_complete": json_row_validation_complete,
+        "tail_utf8_validation_complete": True,
+        },
+        gaps,
+    )
+
+
 def _relation_candidates(
     status: Mapping[str, Any],
     *,
@@ -616,48 +667,14 @@ def _relation_candidates(
             ],
         )
 
-    errors_truncated = invalid_row_count > len(errors)
-    json_row_validation_complete = not unparsed_tail_present
-    invalid_row_count_scope = (
-        "complete_artifact" if json_row_validation_complete else "parsed_prefix"
+    signal, gaps = _relation_candidate_summary(
+        candidates=candidates,
+        errors=errors,
+        invalid_row_count=invalid_row_count,
+        candidate_limit_reached=candidate_limit_reached,
+        unparsed_tail_present=unparsed_tail_present,
     )
-    gaps: list[dict[str, Any]] = []
-    if invalid_row_count:
-        gaps.append(
-            {
-            "source": "relation_cards_jsonl",
-            "status": "invalid_rows",
-            "invalid_row_count": invalid_row_count,
-            "invalid_row_count_scope": invalid_row_count_scope,
-            "row_errors": errors,
-            "row_error_sample_limit": RELATION_ERROR_SAMPLE_LIMIT,
-            "row_errors_truncated": errors_truncated,
-            }
-        )
-    if not candidates:
-        gaps.append(
-            {
-                "source": "relation_cards_jsonl",
-                "status": "empty",
-                "reason": "relation card search returned no candidates",
-            }
-        )
-    signal_status = "warn" if invalid_row_count else "available"
-    return (
-        candidates,
-        {
-        "status": signal_status,
-        "hit_count": len(candidates),
-        "invalid_row_count": invalid_row_count,
-        "invalid_row_count_scope": invalid_row_count_scope,
-        "row_error_sample_count": len(errors),
-        "row_errors_truncated": errors_truncated,
-        "candidate_limit_reached": candidate_limit_reached,
-        "json_row_validation_complete": json_row_validation_complete,
-        "tail_utf8_validation_complete": True,
-        },
-        gaps,
-    )
+    return candidates, signal, gaps
 
 
 def _changed_path_candidates(
