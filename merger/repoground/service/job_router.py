@@ -28,6 +28,24 @@ def _cleanup_source_snapshots_after_gc() -> None:
     if snapshot_cleanup.get("status") == "blocked":
         logger.warning("Source snapshot cleanup blocked: %s", snapshot_cleanup)
 
+
+def _reuse_succeeded_job(existing: Job, request: JobRequest) -> bool:
+    effective_source_mode = resolve_effective_source_mode(request)
+    if effective_source_mode == "local_ff":
+        logger.info(
+            "Not reusing succeeded job %s because local_ff requires a fresh repo-sync check.",
+            existing.id,
+        )
+        return False
+    if effective_source_mode == "remote_snapshot":
+        logger.info(
+            "Not reusing succeeded job %s because remote_snapshot requires fresh remote resolution.",
+            existing.id,
+        )
+        return False
+    logger.info("Reusing existing succeeded job %s", existing.id)
+    return True
+
 @router.post('/api/jobs', response_model=Job, dependencies=[Depends(verify_token)])
 def create_job(request: JobRequest):
     # Validate Hub in request
@@ -79,23 +97,8 @@ def create_job(request: JobRequest):
         # A succeeded remote_snapshot job is likewise never reused: moving ref
         # names are not content-stable, so the cached result may no longer match
         # the current remote. (See rlens-source-acquisition-blueprint.md.)
-        if existing.status == "succeeded":
-            effective_source_mode = resolve_effective_source_mode(request)
-            effective_local_ff = effective_source_mode == "local_ff"
-            effective_remote_snapshot = effective_source_mode == "remote_snapshot"
-            if effective_local_ff:
-                logger.info(
-                    "Not reusing succeeded job %s because local_ff requires a fresh repo-sync check.",
-                    existing.id,
-                )
-            elif effective_remote_snapshot:
-                logger.info(
-                    "Not reusing succeeded job %s because remote_snapshot requires fresh remote resolution.",
-                    existing.id,
-                )
-            else:
-                logger.info("Reusing existing succeeded job %s", existing.id)
-                return existing
+        if existing.status == "succeeded" and _reuse_succeeded_job(existing, request):
+            return existing
 
     job = Job.create(request, content_hash=content_hash)
     job.hub_resolved = resolved_hub_str
