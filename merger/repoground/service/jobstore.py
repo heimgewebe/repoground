@@ -169,22 +169,19 @@ class JobStore:
             self._save_jobs()
             self._save_artifacts()
 
-    def _remove_job_internal(self, job_id: str):
-        job = self._jobs_cache.get(job_id)
-        if not job:
+    @staticmethod
+    def _safe_unlink_artifact_file(base: Path, rel: str) -> None:
+        if not rel or os.path.isabs(rel):
             return
+        try:
+            target = (base / rel).resolve()
+            target.relative_to(base.resolve())
+            if target.exists():
+                target.unlink()
+        except Exception as exc:
+            logger.warning("Failed to delete artifact file %s relative to %s: %s", rel, base, exc)
 
-        def _safe_unlink(base: Path, rel: str) -> None:
-            if not rel or os.path.isabs(rel):
-                return
-            try:
-                target = (base / rel).resolve()
-                target.relative_to(base.resolve())
-                if target.exists():
-                    target.unlink()
-            except Exception as exc:
-                logger.warning("Failed to delete artifact file %s relative to %s: %s", rel, base, exc)
-
+    def _remove_job_artifacts(self, job_id: str, job: Job) -> None:
         for art_id in job.artifact_ids:
             art = self._artifacts_cache.get(art_id)
             if art:
@@ -196,11 +193,17 @@ class JobStore:
                     )
                     if merges_dir.exists():
                         for fname in art.paths.values():
-                            _safe_unlink(merges_dir, fname)
+                            self._safe_unlink_artifact_file(merges_dir, fname)
                 except Exception as exc:
                     logger.warning("Failed to clean up artifact %s for job %s: %s", art_id, job_id, exc)
                 del self._artifacts_cache[art_id]
 
+    def _remove_job_internal(self, job_id: str):
+        job = self._jobs_cache.get(job_id)
+        if not job:
+            return
+
+        self._remove_job_artifacts(job_id, job)
         self._remove_source_snapshot_for_job(job_id)
 
         log_p = self.logs_dir / f"{job_id}.log"
