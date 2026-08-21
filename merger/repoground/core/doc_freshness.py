@@ -284,6 +284,50 @@ def _hard_dangling(results: Iterable[EvidenceResult]) -> list[EvidenceResult]:
     ]
 
 
+def _classify_partial(
+    results: list[EvidenceResult], dangling: list[EvidenceResult]
+) -> tuple[str, str, str]:
+    # Owner-asserted mixed state (v1 done / rest open). Never auto-flag as
+    # under/overstated; only a vanished hard evidence ref is a real problem.
+    if dangling:
+        return (
+            "regressed",
+            "error",
+            "partial claim cites evidence that no longer exists: "
+            + "; ".join(d.detail for d in dangling),
+        )
+    missing_open = _missing_open_markers(results)
+    if missing_open:
+        return (
+            "partial_maybe_resolved",
+            "warning",
+            "partial claim's open marker(s) are gone; implementation may be "
+            "complete — either promote to done, mark stale, or verify: "
+            + "; ".join(m.detail for m in missing_open),
+        )
+    return "partial_ok", "ok", "partial (mixed state asserted by owner)"
+
+
+def _classify_done(
+    dangling: list[EvidenceResult], stale_markers: list[EvidenceResult]
+) -> tuple[str, str, str]:
+    if dangling:
+        return (
+            "regressed",
+            "error",
+            "doc claims done, but cited evidence is missing: "
+            + "; ".join(d.detail for d in dangling),
+        )
+    if stale_markers:
+        return (
+            "stale_marker_present",
+            "warning",
+            "doc claims done, but still literally contains the stale/TODO "
+            "marker: " + "; ".join(m.detail for m in stale_markers),
+        )
+    return "consistent", "ok", "done and evidence verified"
+
+
 def classify_entry(
     status: str, results: list[EvidenceResult]
 ) -> tuple[str, str, str]:
@@ -311,42 +355,10 @@ def classify_entry(
         return "consistent", "ok", "no completion evidence; matches 'none'"
 
     if status == "partial":
-        # Owner-asserted mixed state (v1 done / rest open). Never auto-flag as
-        # under/overstated; only a vanished hard evidence ref is a real problem.
-        if dangling:
-            return (
-                "regressed",
-                "error",
-                "partial claim cites evidence that no longer exists: "
-                + "; ".join(d.detail for d in dangling),
-            )
-        missing_open = _missing_open_markers(results)
-        if missing_open:
-            return (
-                "partial_maybe_resolved",
-                "warning",
-                "partial claim's open marker(s) are gone; implementation may be "
-                "complete — either promote to done, mark stale, or verify: "
-                + "; ".join(m.detail for m in missing_open),
-            )
-        return "partial_ok", "ok", "partial (mixed state asserted by owner)"
+        return _classify_partial(results, dangling)
 
     if status == "done":
-        if dangling:
-            return (
-                "regressed",
-                "error",
-                "doc claims done, but cited evidence is missing: "
-                + "; ".join(d.detail for d in dangling),
-            )
-        if stale_markers:
-            return (
-                "stale_marker_present",
-                "warning",
-                "doc claims done, but still literally contains the stale/TODO "
-                "marker: " + "; ".join(m.detail for m in stale_markers),
-            )
-        return "consistent", "ok", "done and evidence verified"
+        return _classify_done(dangling, stale_markers)
 
     if status == "stale":
         # A known, *declared* drift (mirrors C2.9 declared_upgrades). Valid only
