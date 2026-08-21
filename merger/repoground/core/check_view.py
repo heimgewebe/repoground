@@ -62,6 +62,23 @@ class CheckView:
     container_shape: CheckContainerShape
 
 
+def _check_metadata(
+    value: Any,
+) -> tuple[str | None, str | None, Mapping[str, Any] | None]:
+    if not isinstance(value, Mapping):
+        return None, None, None
+
+    status_raw = value.get("status")
+    status = status_raw if isinstance(status_raw, str) else None
+    detail_raw = value.get("detail")
+    if not isinstance(detail_raw, str):
+        detail_raw = value.get("reason")
+    detail = detail_raw if isinstance(detail_raw, str) else None
+    validation_raw = value.get("validation")
+    validation = validation_raw if isinstance(validation_raw, Mapping) else None
+    return status, detail, validation
+
+
 def iter_check_views(report: Mapping[str, Any]) -> Iterator[CheckView]:
     """Yield :class:`CheckView` objects for every entry in ``report["checks"]``.
 
@@ -88,21 +105,7 @@ def iter_check_views(report: Mapping[str, Any]) -> Iterator[CheckView]:
         for name, value in checks.items():
             if not isinstance(name, str):
                 continue
-            if isinstance(value, Mapping):
-                status_raw = value.get("status")
-                status = status_raw if isinstance(status_raw, str) else None
-                detail_raw = value.get("detail")
-                if not isinstance(detail_raw, str):
-                    detail_raw = value.get("reason")
-                detail = detail_raw if isinstance(detail_raw, str) else None
-                validation_raw = value.get("validation")
-                validation: Mapping[str, Any] | None = (
-                    validation_raw if isinstance(validation_raw, Mapping) else None
-                )
-            else:
-                status = None
-                detail = None
-                validation = None
+            status, detail, validation = _check_metadata(value)
             yield CheckView(
                 name=name,
                 status=status,
@@ -119,16 +122,7 @@ def iter_check_views(report: Mapping[str, Any]) -> Iterator[CheckView]:
             name = item.get("name")
             if not isinstance(name, str):
                 continue
-            status_raw = item.get("status")
-            status = status_raw if isinstance(status_raw, str) else None
-            detail_raw = item.get("detail")
-            if not isinstance(detail_raw, str):
-                detail_raw = item.get("reason")
-            detail = detail_raw if isinstance(detail_raw, str) else None
-            validation_raw = item.get("validation")
-            validation = (
-                validation_raw if isinstance(validation_raw, Mapping) else None
-            )
+            status, detail, validation = _check_metadata(item)
             yield CheckView(
                 name=name,
                 status=status,
