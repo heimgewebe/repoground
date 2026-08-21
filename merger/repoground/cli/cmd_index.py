@@ -3,14 +3,35 @@ import sys
 from pathlib import Path
 from merger.repoground.retrieval import index_db
 
+
+def _resolve_index_output_path(args: argparse.Namespace, chunk_path: Path) -> Path:
+    if args.out:
+        return Path(args.out)
+    return chunk_path.with_suffix(".index.sqlite")
+
+
+def _build_index_config_payload(
+    args: argparse.Namespace, dump_path: Path
+) -> dict[str, object]:
+    config_payload: dict[str, object] = {"cli_args": str(args)}
+    if dump_path.exists():
+        import json
+
+        try:
+            dump_data = json.loads(dump_path.read_text(encoding="utf-8"))
+            generator = dump_data.get("generator", {})
+            config_payload["config_sha256"] = generator.get("config_sha256", "")
+            config_payload["lenskit_version"] = generator.get("version", "unknown")
+        except Exception:
+            pass
+    return config_payload
+
+
 def run_index(args: argparse.Namespace) -> int:
     dump_path = Path(args.dump)
     chunk_path = Path(args.chunk_index)
 
-    if args.out:
-        out_path = Path(args.out)
-    else:
-        out_path = chunk_path.with_suffix(".index.sqlite")
+    out_path = _resolve_index_output_path(args, chunk_path)
 
     if not dump_path.exists():
         print(f"Error: Dump file not found: {dump_path}", file=sys.stderr)
@@ -38,21 +59,10 @@ def run_index(args: argparse.Namespace) -> int:
 
     print(f"Building index from {chunk_path.name}...")
     try:
-        config_payload = {
-            "cli_args": str(args),
-        }
-        # Attempt to extract config_sha256 and lenskit_version from dump manifest if available
-        if dump_path.exists():
-            import json
-            try:
-                dump_data = json.loads(dump_path.read_text(encoding="utf-8"))
-                generator = dump_data.get("generator", {})
-                config_payload["config_sha256"] = generator.get("config_sha256", "")
-                config_payload["lenskit_version"] = generator.get("version", "unknown")
-            except Exception:
-                pass
-
-        index_db.build_index(dump_path, chunk_path, out_path, config_payload=config_payload)
+        config_payload = _build_index_config_payload(args, dump_path)
+        index_db.build_index(
+            dump_path, chunk_path, out_path, config_payload=config_payload
+        )
         print(f"✅ Index built successfully: {out_path}")
         return 0
     except Exception as e:
