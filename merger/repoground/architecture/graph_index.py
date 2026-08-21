@@ -132,6 +132,29 @@ def _infer_bundle_provenance(
     return run_id, digest
 
 
+def _build_graph_lookups(
+    graph: Dict[str, Any],
+) -> tuple[dict[str, list[str]], dict[str, str], dict[str, dict[str, Any]]]:
+    adjacency: dict[str, list[str]] = {}
+    nodes_by_path: dict[str, str] = {}
+    node_meta_by_id: dict[str, dict[str, Any]] = {}
+
+    for node in graph["nodes"]:
+        node_id = node["node_id"]
+        adjacency[node_id] = []
+        node_meta_by_id[node_id] = node
+        if node.get("path"):
+            nodes_by_path[node["path"]] = node_id
+
+    for edge in graph["edges"]:
+        if edge["src"] in adjacency:
+            adjacency[edge["src"]].append(edge["dst"])
+    for neighbors in adjacency.values():
+        neighbors.sort()
+
+    return adjacency, nodes_by_path, node_meta_by_id
+
+
 def compile_graph_index(
     graph_path: Path,
     entrypoints_path: Path,
@@ -175,22 +198,7 @@ def compile_graph_index(
             "unreachable_nodes": 0,
         },
     }
-    adjacency: dict[str, list[str]] = {}
-    nodes_by_path: dict[str, str] = {}
-    node_meta_by_id: dict[str, dict[str, Any]] = {}
-
-    for node in graph["nodes"]:
-        node_id = node["node_id"]
-        adjacency[node_id] = []
-        node_meta_by_id[node_id] = node
-        if node.get("path"):
-            nodes_by_path[node["path"]] = node_id
-
-    for edge in graph["edges"]:
-        if edge["src"] in adjacency:
-            adjacency[edge["src"]].append(edge["dst"])
-    for neighbors in adjacency.values():
-        neighbors.sort()
+    adjacency, nodes_by_path, node_meta_by_id = _build_graph_lookups(graph)
 
     entrypoint_nodes = {
         nodes_by_path[item["path"]]
