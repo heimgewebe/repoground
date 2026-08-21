@@ -527,6 +527,33 @@ def test_compile_context_plan_rejects_invalid_utf8_after_relation_hit(tmp_path, 
     assert not any(item["source"] == "relation_cards_jsonl" for item in plan["selected_context"])
 
 
+def test_compile_context_plan_preserves_required_and_availability_diagnostics(tmp_path):
+    manifest = _write_complete_bundle(tmp_path)
+
+    plan = compile_context_plan(
+        manifest,
+        task="Explain the context compiler",
+        task_profile="basic_repo_question",
+        query="context compiler",
+        context_budget_tokens=120,
+        bytes_per_token=4.0,
+    )
+
+    required = plan["signals"]["required_reading"]
+    availability = plan["signals"]["availability"]
+    assert required["status"] == "warn"
+    assert required["missing_recommended"] == ["snapshot_plan_json"]
+    assert availability["status"] == "fail"
+    assert availability["freshness"]["status"] == "unknown"
+    assert availability["freshness"]["reason"] == "blocked_by_missing_provenance"
+    assert availability["graph_availability"]["status"] == "not_generated"
+    assert [gap["source"] for gap in plan["gaps"][:3]] == [
+        "required_reading",
+        "freshness",
+        "graph_availability",
+    ]
+
+
 def test_compile_context_plan_falls_back_to_required_reading_when_signals_missing(tmp_path):
     manifest = _write_fallback_bundle(tmp_path)
 

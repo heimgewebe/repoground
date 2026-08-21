@@ -1080,6 +1080,64 @@ def _prepare_context_selection_inputs(
     )
 
 
+def _context_plan_diagnostics(
+    status: Mapping[str, Any],
+    required_resolution: Mapping[str, Any],
+) -> tuple[
+    dict[str, Any],
+    list[dict[str, Any]],
+    dict[str, Any],
+    Any,
+    Any,
+]:
+    required_value = required_resolution.get("required_reading")
+    required = required_value if isinstance(required_value, dict) else {}
+    gaps: list[dict[str, Any]] = []
+    if required.get("status") in {"fail", "not_applicable"}:
+        gaps.append(
+            {
+                "source": "required_reading",
+                "status": required.get("status"),
+                "missing_required": required.get("missing_required"),
+                "reason": "required reading is not fully available",
+            }
+        )
+    elif required.get("missing_recommended"):
+        gaps.append(
+            {
+                "source": "required_reading",
+                "status": "warn",
+                "missing_recommended": required.get("missing_recommended"),
+                "reason": "recommended reading is not fully available",
+            }
+        )
+
+    availability_value = status.get("availability_model")
+    availability = availability_value if isinstance(availability_value, dict) else {}
+    freshness = availability.get("freshness")
+    graph_availability = availability.get("graph_availability")
+    if isinstance(freshness, dict) and freshness.get("status") not in {
+        "fresh",
+        "not_comparable",
+    }:
+        gaps.append(
+            {
+                "source": "freshness",
+                "status": freshness.get("status"),
+                "reason": freshness.get("reason"),
+            }
+        )
+    if (
+        isinstance(graph_availability, dict)
+        and graph_availability.get("status") != "available"
+    ):
+        gaps.append(
+            graph_gap_from_availability("graph_availability", graph_availability)
+        )
+
+    return required, gaps, availability, freshness, graph_availability
+
+
 def compile_context_plan(
     bundle_manifest: str | Path,
     *,
@@ -1151,62 +1209,9 @@ def compile_context_plan(
             context_budget_tokens=context_budget_tokens,
         )
 
-    required = (
-        required_resolution.get("required_reading")
-        if isinstance(required_resolution.get("required_reading"), dict)
-        else {}
+    required, gaps, availability, freshness, graph_availability = (
+        _context_plan_diagnostics(status, required_resolution)
     )
-    gaps: list[dict[str, Any]] = []
-    if required.get("status") in {"fail", "not_applicable"}:
-        gaps.append(
-            {
-            "source": "required_reading",
-            "status": required.get("status"),
-            "missing_required": required.get("missing_required"),
-            "reason": "required reading is not fully available",
-            }
-        )
-    elif required.get("missing_recommended"):
-        gaps.append(
-            {
-            "source": "required_reading",
-            "status": "warn",
-            "missing_recommended": required.get("missing_recommended"),
-            "reason": "recommended reading is not fully available",
-            }
-        )
-
-    availability = (
-        status.get("availability_model")
-        if isinstance(status.get("availability_model"), dict)
-        else {}
-    )
-    freshness = (
-        availability.get("freshness") if isinstance(availability, dict) else None
-    )
-    graph_availability = (
-        availability.get("graph_availability")
-        if isinstance(availability, dict)
-        else None
-    )
-    if isinstance(freshness, dict) and freshness.get("status") not in {
-        "fresh",
-        "not_comparable",
-    }:
-        gaps.append(
-            {
-                "source": "freshness",
-                "status": freshness.get("status"),
-                "reason": freshness.get("reason"),
-            }
-        )
-    if (
-        isinstance(graph_availability, dict)
-        and graph_availability.get("status") != "available"
-    ):
-        gaps.append(
-            graph_gap_from_availability("graph_availability", graph_availability)
-        )
 
     retrieval_candidates, retrieval_signal, retrieval_gaps = _retrieval_candidates(
         manifest_path,
