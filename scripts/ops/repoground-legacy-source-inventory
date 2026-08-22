@@ -19,6 +19,7 @@ DEFAULT_ROOT = Path("/home/alex/repos/.repobrief-sources")
 DEFAULT_CANONICAL_ROOT = Path("/home/alex/repos")
 DEFAULT_PROC_ROOT = Path("/proc")
 DEFAULT_MAX_PROC_ENTRIES = 4096
+OUTPUT_DETAIL_LIMIT = 16
 GIT_TIMEOUT_SECONDS = 5
 DOES_NOT_ESTABLISH = [
     "lease_clearance",
@@ -72,6 +73,29 @@ def _is_within(path: Path, parent: Path) -> bool:
     except ValueError:
         return False
     return True
+
+
+def _bounded_detail(
+    values: list[str], *, priority_prefixes: tuple[str, ...] = ()
+) -> dict[str, Any]:
+    """Return a stable, bounded diagnostic sample with exact totals."""
+    if priority_prefixes:
+        ordered = sorted(
+            values,
+            key=lambda value: (
+                0 if value.startswith(priority_prefixes) else 1,
+                value,
+            ),
+        )
+    else:
+        ordered = sorted(values)
+    count = len(ordered)
+    return {
+        "sample": ordered[:OUTPUT_DETAIL_LIMIT],
+        "count": count,
+        "truncated": count > OUTPUT_DETAIL_LIMIT,
+        "omitted_count": max(0, count - OUTPUT_DETAIL_LIMIT),
+    }
 
 
 def _scan_process_cwds(proc_root: Path, max_entries: int) -> dict[str, Any]:
@@ -139,6 +163,9 @@ def _git_inventory(entry: Path) -> dict[str, Any]:
             "head": None,
             "git_common_dir": None,
             "worktree_paths": [],
+            "worktree_path_count": 0,
+            "worktree_paths_truncated": False,
+            "worktree_paths_omitted_count": 0,
             "shared_common_dir": None,
             "errors": errors or ["not_a_git_worktree"],
         }
@@ -174,12 +201,16 @@ def _git_inventory(entry: Path) -> dict[str, Any]:
     else:
         errors.append("git_worktree_list_unreadable")
 
+    worktree_detail = _bounded_detail([str(path) for path in worktree_paths])
     return {
         "git_repository": True,
         "git_state": git_state,
         "head": head_out.strip() if head_ok else None,
         "git_common_dir": str(common_dir) if common_dir is not None else None,
-        "worktree_paths": [str(path) for path in worktree_paths],
+        "worktree_paths": worktree_detail["sample"],
+        "worktree_path_count": worktree_detail["count"],
+        "worktree_paths_truncated": worktree_detail["truncated"],
+        "worktree_paths_omitted_count": worktree_detail["omitted_count"],
         "shared_common_dir": shared_common_dir,
         "errors": errors,
     }
@@ -282,6 +313,9 @@ def _entry_inventory(
         "head": git_info["head"],
         "git_common_dir": git_info["git_common_dir"],
         "worktree_paths": git_info["worktree_paths"],
+        "worktree_path_count": git_info["worktree_path_count"],
+        "worktree_paths_truncated": git_info["worktree_paths_truncated"],
+        "worktree_paths_omitted_count": git_info["worktree_paths_omitted_count"],
         "shared_common_dir": git_info["shared_common_dir"],
         "canonical_checkout": canonical,
         "process_cwd_conflicts": process_conflicts,
@@ -319,6 +353,9 @@ def build_inventory(
     for child in children:
         entries.append(_entry_inventory(child, canonical_root, process_scan))
 
+    error_detail = _bounded_detail(
+        process_scan["errors"], priority_prefixes=("process_limit_exceeded:",)
+    )
     return {
         "schema_version": 1,
         "root": str(root),
@@ -331,8 +368,10 @@ def build_inventory(
             "complete": process_scan["complete"],
             "available": process_scan["available"],
             "scanned": process_scan["scanned"],
-            "error_count": len(process_scan["errors"]),
-            "errors": process_scan["errors"],
+            "error_count": error_detail["count"],
+            "errors": error_detail["sample"],
+            "errors_truncated": error_detail["truncated"],
+            "errors_omitted_count": error_detail["omitted_count"],
         },
         "summary": {
             "entry_count": len(entries),
