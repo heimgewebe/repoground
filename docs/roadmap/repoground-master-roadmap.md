@@ -716,9 +716,10 @@ PR 5 (docs-only): RepoGround service CLI Client Blueprint und Umsetzungspfad
   - [x] Sicherheits-Hardening: `token`/`secret`-Felder im Profil verboten (`config_error`, Exit 2); unbekannte Schlüssel abgelehnt
   - [x] Sobald Profil-Config vorhanden ist, wird sie auch ohne Profilselektion strikt validiert
   - [x] Explizit angeforderte Profile werden nie still ignoriert (auch nicht bei Base-URL-Override)
-- [ ] Heim-PC/Heimserver-Betriebsmodell entscheiden
-  - lokaler Service je Host
-  - Remote-Client via LAN/Tailscale/SSH-Tunnel
+- [x] Heim-PC/Heimserver-Betriebsmodell entschieden
+  - `heimserver` ist laut geprüftem Systemkatalog-Stand vom 2026-08-22 `retired` und kein aktuelles RepoGround-/Atlas-Serviceziel.
+  - Die aktive RepoGround-Zielarchitektur bleibt lokal auf `heim-pc` und loopback-first; das ist eine Architekturentscheidung, keine Runtime-Health-Aussage.
+  - Ein künftiger Remote-Host benötigt eine frische Systemkatalog-Registrierung, eigene Autorisierung und neu gebundene Host-Profile; die historischen Heimserver-Profile reaktivieren den Host nicht.
 - [x] CLI-Client-Sicherheitsinvarianten durch Tests abgesichert
   - Bearer Token (`--token` / `RLENS_TOKEN`)
   - Token-Redaction in Fehlerausgaben

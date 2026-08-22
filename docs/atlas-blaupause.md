@@ -1,7 +1,7 @@
 # Atlas-Blaupause
 
 ## These
-Atlas soll kein Repo-Spezialscanner mit etwas Dateisystemdeko werden, sondern ein maschinenweiter Dateiatlas mit Zeitgedächtnis: PC, Heimserver, externe Platten, Backups, später auch weitere Hosts.
+Atlas soll kein Repo-Spezialscanner mit etwas Dateisystemdeko werden, sondern ein maschinenweiter Dateiatlas mit Zeitgedächtnis: PC, externe Platten, Backups und – sofern aktuell autorisiert – weitere Hosts. Der frühere `heimserver` ist kein aktueller Zielhost, sondern nur historische Referenz.
 
 ## Antithese
 Wenn Atlas zu viel auf einmal tut, droht der klassische Werkzeugtod: ein Scanner, der alles können soll und deshalb vor allem langsam, teuer und epistemisch verwirrt wird. Der Dateibaum wird dann zum Opfer seiner eigenen Ambitionen – eine Art digitaler Messie mit Index.
@@ -10,7 +10,7 @@ Wenn Atlas zu viel auf einmal tut, droht der klassische Werkzeugtod: ein Scanner
 Die tragfähige Lösung ist:
 **Atlas = physische Wahrnehmungsschicht + Snapshot-Gedächtnis + optionale Inhaltserschließung**
 
-Darauf setzen Retrieval, Analyse, Visualisierung und Agentenlogik auf. RepoGround bleibt die Denkmaschine; Atlas bleibt das Beobachtungsorgan. Das passt auch zum aktuellen Repo-Stand: Atlas ist im README ausdrücklich als vom Repository-Inspektionspfad getrennte Dateisystem-Erkundung beschrieben, inklusive Root-Modell für `preset`, `token` und `abs_path`.
+Darauf setzen Retrieval, Analyse, Visualisierung und Agentenlogik auf. RepoGround bleibt die read-only Kontext- und Retrievalschicht für verifizierbares Repositorywissen; Atlas bleibt das Beobachtungsorgan. Das passt auch zum aktuellen Repo-Stand: Atlas ist im README ausdrücklich als vom Repository-Inspektionspfad getrennte Dateisystem-Erkundung beschrieben, inklusive Root-Modell für `preset`, `token` und `abs_path`.
 
 ---
 
@@ -19,6 +19,9 @@ Darauf setzen Retrieval, Analyse, Visualisierung und Agentenlogik auf. RepoGroun
 * Sie beschreibt den **Soll-Zustand**, die Architekturentscheidungen und die priorisierten Ausbaupfade.
 * Einzelne Passagen referenzieren den aktuellen Repo-Stand, aber **die meisten beschriebenen Bausteine sind ausdrücklich noch nicht vollständig implementiert**.
 * Die Umsetzung erfolgt schrittweise in Folgearbeiten.
+* **Autoritäts- und Frischeregel:** Diese Blaupause ist keine Runtime-Wahrheit. Host-, Consumer- und Integrationsketten gelten nur dann als aktuell, wenn ihre Primärquelle und – bei Runtimeaussagen – ein frischer Live-Readback das belegen.
+* **Audit-Snapshot 2026-08-22:** Der Systemkatalog führt RepoGround, Grabowski, HausKI, Chronik und Leitstand als `active`, Heimgeist als `transition` und Heimserver als `retired`. Diese Lifecycle-Klassifikation beweist keine aktuell verdrahtete Consumer-Pipeline.
+* Namen externer Systeme in Beispielen oder Soll-Pipelines bezeichnen daher mögliche beziehungsweise historische Integrationspunkte; sie begründen weder Ausführungsautorität noch eine aktive Verbindung.
 
 ---
 
@@ -78,7 +81,7 @@ Sekundär darf Atlas:
 * Hotspots berechnen
 * Topologien ableiten
 * Deltas zwischen Snapshots berechnen
-* RepoGround/Heimgeist/HausKI mit Rohwirklichkeit versorgen
+* read-only Rohwirklichkeits-Exporte für klar autorisierte Consumer bereitstellen; RepoGround ist der repositorybezogene Kontext-Consumer, HausKI/Heimgeist sind nur optionale Consumer bei separat belegtem Pfad
 
 Das sind Aufbauten, nicht das Mandat selbst.
 
@@ -157,7 +160,7 @@ Der aktuelle `scan_mode`-Ansatz geht bereits in diese Richtung, weil unterschied
 * **E. Exportierte Artefakte**: inventory, dirs inventory, summary, topology, content, workspaces, hotspots, später snapshots/deltas/history/search-indizes
 
 ### 5.2 Atlas ist nicht zuständig für
-* **A. Semantische Tiefeninterpretation**: Dafür sind RepoGround, Heimgeist, HausKI besser geeignet.
+* **A. Semantische Tiefeninterpretation**: Dafür sind spezialisierte Consumer außerhalb des Atlas-Kerns zuständig. RepoGround liefert repositorybezogenen Kontext; HausKI oder Heimgeist können nur über separat belegte Consumerpfade hinzukommen.
 * **B. Politische oder organisatorische Systemlogik**: Nicht Atlas’ Aufgabe.
 * **C. Vollständige Git-Historienanalyse**: Atlas darf Repos erkennen, aber nicht in seinem Kern von Git abhängen.
 * **D. UI-zentrierte Wahrheitsdefinition**: Die WebUI ist Konsument, nicht Kanon.
@@ -199,7 +202,7 @@ Der aktuelle `scan_mode`-Ansatz geht bereits in diese Richtung, weil unterschied
 * **Schicht C – Enrichment Layer**: Zusatzwissen pro Datei/Verzeichnis (`content.json`, `media.json`, `workspace_annotations.json`).
 * **Schicht D – Derivation Layer**: Abgeleitete Sichten (`topology.json`, `hotspots.json`, `duplicates.json`, `history_views.json`).
 * **Schicht E – Index Layer**: Suchen, Filtern, Retrieval (`FTS`, `Chunk-Index`, `Semantik-Index`).
-* **Schicht F – Integration Layer**: Exports für RepoGround, Heimgeist, HausKI, Chronik, UI.
+* **Schicht F – Integration Layer**: read-only Exports für autorisierte Consumer. RepoGround ist ein repositorybezogener Consumer; Chronik, UI, HausKI oder Heimgeist sind mögliche Integrationsziele, aber diese Blaupause belegt keine aktive Runtimeverdrahtung.
 
 ## 9. Soll-Ist-Abgleich zum aktuellen Repo-Stand
 
@@ -500,6 +503,8 @@ Später: optional über Hash-Matching, evtl. Heuristik (gleicher checksum, neuer
 Registry + Indizes in SQLite (für Snapshot/Root/Machine Registries und schnelle Suche). Rohartefakte als Dateien (für große Inventare, Versionierung).
 
 ### 6.2 Verzeichnisstruktur-Vorschlag
+Die Namen in diesem Beispiel sind absichtlich generisch; retired Hosts werden nicht als aktuelle Zielmaschinen fortgeschrieben.
+
 ```text
 atlas/
   machines/
@@ -518,7 +523,7 @@ atlas/
               snapshot_meta.json
         repos/
           snapshots/...
-    heimserver/
+    machine-b/
       roots/...
   registry/
     atlas_registry.sqlite
@@ -611,9 +616,9 @@ machines:
   - machine_id: heim-pc
     hostname: heim-pc
     labels: [primary, workstation]
-  - machine_id: heimserver
-    hostname: heimserver
-    labels: [server, remote]
+  - machine_id: machine-b
+    hostname: machine-b
+    labels: [remote]
 ```
 
 ### 10.2 Root Registry
@@ -622,9 +627,9 @@ roots:
   - root_id: heim-pc__home
     machine_id: heim-pc
     path: /home/alex
-  - root_id: heimserver__srv
-    machine_id: heimserver
-    path: /srv
+  - root_id: machine-b__data
+    machine_id: machine-b
+    path: /data
 ```
 
 ### 10.3 Cross-Machine-Fähigkeiten
@@ -658,7 +663,7 @@ Ich ordne die kommenden Atlas-Funktionen nach fünf Kriterien:
 1. **Hebel**: Wie stark erhöht die Funktion den praktischen Nutzen im Alltag?
 2. **Systemtiefe**: Verbessert sie nur die Oberfläche oder den Kern?
 3. **Replizierbarkeit**: Ist das Verhalten stabil, deterministisch, testbar?
-4. **Anschlussfähigkeit**: Kann RepoGround/Heimgeist/HausKI später darauf aufsetzen?
+4. **Anschlussfähigkeit**: Kann ein klar ausgewiesener read-only Consumer später darauf aufsetzen?
 5. **Drift-Risiko**: Verführt die Funktion Atlas dazu, seine Kernrolle zu verlieren?
 
 ## 3. Die große Ausbau-Roadmap (Übersicht)
@@ -671,7 +676,7 @@ Die detaillierte, abhakbare Roadmap mit spezifischen Tasks und Stop-Kriterien be
 
 ### Phase B – Zeitgedächtnis
 **Muss können**: Snapshot-Vergleich, deterministische Delta-Artefakte, Datei-/Root-Historie.
-**Praktische Wirkung**: Ab hier wird Atlas von einem Scanner zu einem Gedächtnisorgan. (Was war gestern neu? Was änderte sich auf Heimserver vs. Heim-PC?)
+**Praktische Wirkung**: Ab hier wird Atlas von einem Scanner zu einem Gedächtnisorgan. (Was war gestern neu? Was änderte sich zwischen zwei aktuell registrierten Maschinen?)
 
 ### Phase C – Incrementalität und Watch-Mode
 **Muss können**: inkrementelle Re-Scans, heuristische Änderungserkennung.
@@ -711,7 +716,7 @@ Die detaillierte, abhakbare Roadmap mit spezifischen Tasks und Stop-Kriterien be
 
 ### 4.5 Feature 5 – Cross-Machine Diff
 **Warum?**: Dein Setup lebt von mehreren Maschinen.
-**Ziel**: Heim-PC vs Heimserver, Root A vs Root B, Backup-Lücken.
+**Ziel**: aktuell registrierte Maschine A vs. Maschine B, Root A vs. Root B, Backup-Lücken.
 **Priorität**: sehr hoch
 
 ### 4.6 Feature 6 – Duplicate Detection
@@ -777,7 +782,8 @@ Hier liegt ein großer Heimgewebe-Hebel.
 
 ### 6.2 Chronik-Anbindung
 Atlas sollte Watch-Events als Chronik-kompatible Artefakte exportieren.
-**Pipeline**: `filesystem events -> atlas watch -> normalized file events -> chronik -> hausKI / heimgeist / leitstand`
+**Soll-Pipeline**: `filesystem events -> atlas watch -> normalized file events -> optionaler Chronik-Export -> optionale Consumer`
+**Statusgrenze**: Die Blaupause belegt weder einen heute aktiven Watch-Pfad noch eine aktuelle Chronik→HausKI/Heimgeist/Leitstand-Verkabelung; jeder Consumerpfad braucht eigene Primär- und Runtimeevidenz.
 **Nutzen**: Atlas wird von einem passiven Beobachter zu einem Echtzeit-Sensor.
 
 ## 7. Change Intelligence
@@ -992,7 +998,8 @@ Ziel: Maschinenübergreifende Dateiwirklichkeit sichtbar und vergleichbar machen
   - implementation: done (struktureller Metadaten-Abgleich)
   - tests: present
   - hardening: partial (tiefe Inhaltsgleichheit nicht bewiesen)
-- [x] CLI: `atlas diff heim-pc:/home heimserver:/home`
+- [x] CLI: `atlas diff machine-a:/home machine-b:/data`
+  - *Beispielstatus: Die Machine-IDs sind absichtlich generisch; der retired Heimserver wird nicht als aktueller Scan- oder Vergleichshost vorausgesetzt.*
   - *Methodische Notiz: `machine:path` löst deterministisch auf den neuesten vollständigen Snapshot auf.*
   - *Semantische Notiz: `atlas diff` leitet cross-root Anfragen intern auf `cross-root-comparison` um (statt strengem `same-root-delta`). Der aktuelle Vergleich ist ein strukturbezogener Metadatenabgleich (`rel_path`, `size_bytes`, `mtime`) und kein inhaltlich tief gehärteter Gleichheitsbeweis.*
 - [~] Backup-gap-Analyse definieren
