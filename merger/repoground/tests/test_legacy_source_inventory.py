@@ -185,10 +185,12 @@ def test_incomplete_process_scan_fails_closed(
 ) -> None:
     legacy, canonical, proc = roots
     _init_repo(legacy / "owner__sample__main")
-    for pid in ("1", "2"):
-        pid_dir = proc / pid
+    for pid in range(1, 33):
+        pid_dir = proc / str(pid)
         pid_dir.mkdir()
-        (pid_dir / "cwd").symlink_to("/")
+        # A directory in place of /proc/<pid>/cwd deterministically makes
+        # readlink fail and fills the bounded per-PID diagnostic sample.
+        (pid_dir / "cwd").mkdir()
 
     completed = subprocess.run(
         [
@@ -200,16 +202,22 @@ def test_incomplete_process_scan_fails_closed(
             "--proc-root",
             str(proc),
             "--max-proc-entries",
-            "1",
+            "20",
         ],
         check=True,
         capture_output=True,
         text=True,
     )
     payload = json.loads(completed.stdout)
+    process_scan = payload["process_scan"]
     item = payload["entries"][0]
 
-    assert payload["process_scan"]["complete"] is False
+    assert process_scan["complete"] is False
+    assert process_scan["error_count"] == 21
+    assert process_scan["errors"][0] == "process_limit_exceeded:32>20"
+    assert len(process_scan["errors"]) == 16
+    assert process_scan["errors_truncated"] is True
+    assert process_scan["errors_omitted_count"] == 5
     assert item["process_scan_complete"] is False
     assert item["preflight_candidate"] is False
     assert "process_scan_incomplete" in item["errors"]
