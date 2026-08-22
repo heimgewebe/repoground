@@ -75,9 +75,20 @@ def _is_within(path: Path, parent: Path) -> bool:
     return True
 
 
-def _bounded_detail(values: list[str]) -> dict[str, Any]:
+def _bounded_detail(
+    values: list[str], *, priority_prefixes: tuple[str, ...] = ()
+) -> dict[str, Any]:
     """Return a stable, bounded diagnostic sample with exact totals."""
-    ordered = sorted(values)
+    if priority_prefixes:
+        ordered = sorted(
+            values,
+            key=lambda value: (
+                0 if value.startswith(priority_prefixes) else 1,
+                value,
+            ),
+        )
+    else:
+        ordered = sorted(values)
     count = len(ordered)
     return {
         "sample": ordered[:OUTPUT_DETAIL_LIMIT],
@@ -342,7 +353,9 @@ def build_inventory(
     for child in children:
         entries.append(_entry_inventory(child, canonical_root, process_scan))
 
-    error_detail = _bounded_detail(process_scan["errors"])
+    error_detail = _bounded_detail(
+        process_scan["errors"], priority_prefixes=("process_limit_exceeded:",)
+    )
     return {
         "schema_version": 1,
         "root": str(root),
