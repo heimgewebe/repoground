@@ -42,6 +42,8 @@ def _run(
     legacy_root: Path,
     canonical_root: Path,
     proc_root: Path,
+    *,
+    env: dict[str, str] | None = None,
 ) -> dict:
     proc_root.mkdir(parents=True, exist_ok=True)
     completed = subprocess.run(
@@ -57,6 +59,7 @@ def _run(
         check=True,
         capture_output=True,
         text=True,
+        env=env,
     )
     return json.loads(completed.stdout)
 
@@ -210,3 +213,60 @@ def test_incomplete_process_scan_fails_closed(
     assert item["process_scan_complete"] is False
     assert item["preflight_candidate"] is False
     assert "process_scan_incomplete" in item["errors"]
+
+
+def test_large_diagnostics_are_bounded_without_losing_evidence(
+    roots: tuple[Path, Path, Path], tmp_path: Path
+) -> None:
+    legacy, canonical, proc = roots
+    entry = legacy / "owner__sample__main"
+    entry.mkdir()
+    for pid in range(1, 201):
+        (proc / str(pid)).mkdir()
+        # A directory in place of /proc/<pid>/cwd deterministically makes
+        # readlink fail, simulating an unreadable proc cwd entry.
+        (proc / str(pid) / "cwd").mkdir()
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_git = fake_bin / "git"
+    fake_git.write_text(
+        "#!/usr/bin/env python3\n"
+        "import sys\n"
+        "args = sys.argv[1:]\n"
+        "if args[-2:] == ['rev-parse', '--is-inside-work-tree']:\n"
+        "    print('true')\n"
+        "elif args[-2:] == ['rev-parse', 'HEAD']:\n"
+        "    print('deadbeef')\n"
+        "elif args[-2:] == ['rev-parse', '--git-common-dir']:\n"
+        "    print('/synthetic/common')\n"
+        "elif args[-3:] == ['worktree', 'list', '--porcelain']:\n"
+        "    for index in range(128):\n"
+        "        print(f'worktree /synthetic/worktree-{index:03d}')\n"
+        "else:\n"
+        "    raise SystemExit(0)\n",
+        encoding="utf-8",
+    )
+    fake_git.chmod(0o755)
+    fake_env = {**os.environ, "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}"}
+
+    first = _run(legacy, canonical, proc, env=fake_env)
+    second = _run(legacy, canonical, proc, env=fake_env)
+    item = first["entries"][0]
+    process_scan = first["process_scan"]
+
+    assert first == second
+    assert item["worktree_path_count"] == 128
+    assert item["worktree_paths"] == [
+        f"/synthetic/worktree-{index:03d}" for index in range(16)
+    ]
+    assert item["worktree_paths_truncated"] is True
+    assert item["worktree_paths_omitted_count"] == 112
+    assert item["shared_common_dir"] is True
+    assert item["preflight_candidate"] is False
+    assert process_scan["error_count"] == 200
+    assert len(process_scan["errors"]) == 16
+    assert process_scan["errors"] == sorted(process_scan["errors"])
+    assert process_scan["errors_truncated"] is True
+    assert process_scan["errors_omitted_count"] == 184
+    assert len(json.dumps(first, separators=(",", ":"), sort_keys=True)) < 20_000
