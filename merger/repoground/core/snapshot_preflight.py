@@ -37,6 +37,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+from merger.repoground.core.bundle_catalog import normalize_repo_remote
 from merger.repoground.core.clock import now_utc
 from merger.repoground.core.path_security import resolve_secure_path
 from merger.repoground.core.post_emit_health import derive_post_health_path
@@ -653,6 +654,71 @@ def _normalize_git_commit(value: Any) -> str | None:
     return value.lower()
 
 
+def _bounded_git_output(repository: Path, *args: str) -> bytes | None:
+    env = os.environ.copy()
+    env.update(
+        {
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_OPTIONAL_LOCKS": "0",
+            "GIT_TERMINAL_PROMPT": "0",
+            "LC_ALL": "C",
+        }
+    )
+    try:
+        completed = subprocess.run(
+            [
+                "git",
+                "-c",
+                "core.fsmonitor=false",
+                "-c",
+                "core.untrackedCache=false",
+                "-C",
+                str(repository),
+                *args,
+            ],
+            check=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=_LIVE_HEAD_GIT_TIMEOUT_SECONDS,
+            env=env,
+        )
+    except (OSError, RuntimeError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0:
+        return None
+    if (
+        len(completed.stdout) > _LIVE_HEAD_OUTPUT_LIMIT_BYTES
+        or len(completed.stderr) > _LIVE_HEAD_OUTPUT_LIMIT_BYTES
+    ):
+        return None
+    return completed.stdout
+
+
+def _origin_repository_identity(repository: Path) -> str | None:
+    raw = _bounded_git_output(
+        repository,
+        "config",
+        "--get-all",
+        "remote.origin.url",
+    )
+    if raw is None:
+        return None
+    try:
+        remotes = {
+            line.strip()
+            for line in raw.decode("utf-8").splitlines()
+            if line.strip()
+        }
+    except UnicodeDecodeError:
+        return None
+    identities = {normalize_repo_remote(remote) for remote in remotes}
+    if None in identities or len(identities) != 1:
+        return None
+    return next(iter(identities))
+
+
 def _snapshot_repository_for_live_repo(
     snapshot_repositories: Sequence[Any], repository: Path
 ) -> Mapping[str, Any] | None:
@@ -676,45 +742,44 @@ def _snapshot_repository_for_live_repo(
             matching_roots.append(candidate)
     if len(matching_roots) == 1:
         return matching_roots[0]
-    if not matching_roots and len(candidates) == 1:
-        return candidates[0]
+
+    current_remote = _origin_repository_identity(repository)
+    if current_remote is not None:
+        matching_remotes = [
+            candidate
+            for candidate in candidates
+            if normalize_repo_remote(candidate.get("repo_remote")) == current_remote
+        ]
+        if len(matching_remotes) == 1:
+            return matching_remotes[0]
+        if len(matching_remotes) > 1:
+            return None
+
+    named_identity_fallbacks = [
+        candidate
+        for candidate in candidates
+        if candidate.get("name") == repository.name
+        and not candidate.get("repo_root")
+        and normalize_repo_remote(candidate.get("repo_remote")) is None
+    ]
+    if len(named_identity_fallbacks) == 1:
+        return named_identity_fallbacks[0]
     return None
 
 
 def _advertised_origin_head(repository: Path) -> tuple[str, str] | None:
-    env = os.environ.copy()
-    env["GIT_TERMINAL_PROMPT"] = "0"
-    env["LC_ALL"] = "C"
-    try:
-        completed = subprocess.run(
-            [
-                "git",
-                "-C",
-                str(repository),
-                "ls-remote",
-                "--exit-code",
-                "--symref",
-                "origin",
-                "HEAD",
-            ],
-            check=False,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=_LIVE_HEAD_GIT_TIMEOUT_SECONDS,
-            env=env,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if completed.returncode != 0:
-        return None
-    if (
-        len(completed.stdout) > _LIVE_HEAD_OUTPUT_LIMIT_BYTES
-        or len(completed.stderr) > _LIVE_HEAD_OUTPUT_LIMIT_BYTES
-    ):
+    raw = _bounded_git_output(
+        repository,
+        "ls-remote",
+        "--exit-code",
+        "--symref",
+        "origin",
+        "HEAD",
+    )
+    if raw is None:
         return None
     try:
-        lines = completed.stdout.decode("utf-8").splitlines()
+        lines = raw.decode("utf-8").splitlines()
     except UnicodeDecodeError:
         return None
 

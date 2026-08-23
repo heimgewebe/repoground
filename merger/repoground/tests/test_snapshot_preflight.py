@@ -7,6 +7,9 @@ import merger.repoground.core.snapshot_preflight as snapshot_preflight
 from merger.repoground.core.snapshot_preflight import run_consumption_preflight
 
 
+_DEFAULT_SNAPSHOT_REPO_ROOT = object()
+
+
 def _artifact(root: Path, role: str, text: str = 'x\n') -> dict:
     path = root / f'{role}.txt'
     path.write_text(text, encoding='utf-8')
@@ -22,7 +25,8 @@ def _bundle(
     post=True,
     capabilities=None,
     snapshot_commit='b' * 40,
-    snapshot_repo_root=None,
+    snapshot_repo_root=_DEFAULT_SNAPSHOT_REPO_ROOT,
+    snapshot_repo_remote=None,
 ):
     artifacts = [_artifact(tmp_path, role) for role in roles]
     data = {
@@ -34,7 +38,13 @@ def _bundle(
     if generator:
         data['generator'] = {'runtime': {'git_commit': 'a' * 40}}
     if snapshot:
-        data['snapshot_provenance'] = {'version': 'v1', 'repositories': [{'name': 'repo', 'repo_root': str(snapshot_repo_root or tmp_path), 'repo_remote': None, 'git_commit': snapshot_commit, 'git_dirty': False, 'git_branch': 'main', 'provenance_status': 'present', 'freshness_basis': 'git_commit'}], 'does_not_establish': ['freshness_against_remote']}
+        if snapshot_repo_root is _DEFAULT_SNAPSHOT_REPO_ROOT:
+            resolved_snapshot_repo_root = str(tmp_path)
+        elif snapshot_repo_root is None:
+            resolved_snapshot_repo_root = None
+        else:
+            resolved_snapshot_repo_root = str(snapshot_repo_root)
+        data['snapshot_provenance'] = {'version': 'v1', 'repositories': [{'name': 'repo', 'repo_root': resolved_snapshot_repo_root, 'repo_remote': snapshot_repo_remote, 'git_commit': snapshot_commit, 'git_dirty': False, 'git_branch': 'main', 'provenance_status': 'present', 'freshness_basis': 'git_commit'}], 'does_not_establish': ['freshness_against_remote']}
     if capabilities:
         data['capabilities'] = capabilities
     manifest = tmp_path / 'sample.bundle.manifest.json'
@@ -180,6 +190,114 @@ def test_live_head_remote_advance_fails_stale_with_both_commits(tmp_path):
         == snapshot_commit
     )
     assert _git(repository, 'status', '--porcelain') == ''
+
+
+def test_live_head_repo_root_absent_remote_mismatch_fails_unknown_before_compare(
+    tmp_path, monkeypatch
+):
+    repository = tmp_path / 'repository'
+    repository.mkdir()
+    _git(repository, 'init')
+    _git(
+        repository,
+        'remote',
+        'add',
+        'origin',
+        'https://github.com/example/different.git',
+    )
+    bundle_dir = tmp_path / 'bundle'
+    bundle_dir.mkdir()
+    manifest = _bundle(
+        bundle_dir,
+        FULL_BASIC,
+        snapshot_repo_root=None,
+        snapshot_repo_remote='git@github.com:heimgewebe/repoground.git',
+    )
+
+    def fail_if_head_is_compared(repository):
+        raise AssertionError('mismatched repository identity must not be compared')
+
+    monkeypatch.setattr(
+        snapshot_preflight,
+        '_advertised_origin_head',
+        fail_if_head_is_compared,
+    )
+
+    result = run_consumption_preflight(
+        manifest, 'basic_repo_question', live_repo=repository
+    )
+
+    assert result['status'] == 'fail'
+    assert result['live_head']['status'] == 'unknown'
+    assert result['live_head']['reason'] == 'snapshot_repository_commit_unproven'
+    assert result['live_head']['snapshot_commit'] is None
+    assert result['live_head']['remote_commit'] is None
+
+
+def test_live_head_repository_selection_normalizes_ssh_and_https_remotes(tmp_path):
+    repository = tmp_path / 'repoground'
+    repository.mkdir()
+    _git(repository, 'init')
+    _git(
+        repository,
+        'remote',
+        'add',
+        'origin',
+        'https://github.com/Heimgewebe/RepoGround.git',
+    )
+    snapshot_repository = {
+        'name': 'repo',
+        'repo_root': None,
+        'repo_remote': 'git@github.com:heimgewebe/repoground.git',
+        'git_commit': 'b' * 40,
+        'provenance_status': 'present',
+    }
+
+    selected = snapshot_preflight._snapshot_repository_for_live_repo(
+        [snapshot_repository], repository.resolve()
+    )
+
+    assert selected is snapshot_repository
+
+
+def test_live_head_real_style_repo_root_null_remote_match_selects_successfully(
+    tmp_path, monkeypatch
+):
+    repository = tmp_path / 'repoground'
+    repository.mkdir()
+    _git(repository, 'init')
+    _git(
+        repository,
+        'remote',
+        'add',
+        'origin',
+        'https://github.com/heimgewebe/repoground.git',
+    )
+    snapshot_commit = 'c' * 40
+    bundle_dir = tmp_path / 'bundle'
+    bundle_dir.mkdir()
+    manifest = _bundle(
+        bundle_dir,
+        FULL_BASIC,
+        snapshot_commit=snapshot_commit,
+        snapshot_repo_root=None,
+        snapshot_repo_remote='git@github.com:heimgewebe/repoground.git',
+    )
+    monkeypatch.setattr(
+        snapshot_preflight,
+        '_advertised_origin_head',
+        lambda repository: ('refs/heads/main', snapshot_commit),
+    )
+
+    result = run_consumption_preflight(
+        manifest, 'basic_repo_question', live_repo=repository
+    )
+
+    assert result['status'] == 'pass'
+    assert result['live_head']['status'] == 'fresh'
+    assert result['live_head']['snapshot_commit'] == snapshot_commit
+    assert result['live_head']['remote_commit'] == snapshot_commit
+    assert result['live_head']['remote_ref'] == 'refs/heads/main'
 
 
 def test_live_head_missing_repository_or_origin_fails_closed_unknown(tmp_path):
