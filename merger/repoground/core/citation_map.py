@@ -324,6 +324,39 @@ def _valid_git_blob_sha1(value: Any) -> Optional[str]:
     return None
 
 
+def _live_repo_provenance_state(
+    repo: Optional[Dict[str, Any]],
+) -> Tuple[str, str, Optional[str], Optional[str], Optional[bool], Any]:
+    if repo is None:
+        return "unknown", "snapshot_provenance_missing", None, None, None, None
+
+    provenance_status = repo.get("provenance_status")
+    repo_remote = (
+        repo.get("repo_remote") if isinstance(repo.get("repo_remote"), str) else None
+    )
+    git_commit = (
+        repo.get("git_commit") if isinstance(repo.get("git_commit"), str) else None
+    )
+    git_dirty = (
+        repo.get("git_dirty") if isinstance(repo.get("git_dirty"), bool) else None
+    )
+
+    if provenance_status != "present":
+        status = "unavailable"
+        reason = f"snapshot_provenance_status_{provenance_status or 'unknown'}"
+    elif not git_commit:
+        status = "unknown"
+        reason = "git_commit_missing"
+    elif git_dirty is True:
+        status = "degraded"
+        reason = "snapshot_worktree_dirty"
+    else:
+        status = "available"
+        reason = "snapshot_git_provenance_present"
+
+    return status, reason, repo_remote, git_commit, git_dirty, provenance_status
+
+
 def build_live_repo_address(
     chunk: Dict[str, Any],
     repo_id: str,
@@ -344,29 +377,14 @@ def build_live_repo_address(
         return None
 
     repo = _snapshot_repo(snapshot_provenance, repo_id)
-    status = "unknown"
-    reason = "snapshot_provenance_missing"
-    repo_remote = None
-    git_commit = None
-    git_dirty = None
-    provenance_status = None
-    if repo is not None:
-        provenance_status = repo.get("provenance_status")
-        repo_remote = repo.get("repo_remote") if isinstance(repo.get("repo_remote"), str) else None
-        git_commit = repo.get("git_commit") if isinstance(repo.get("git_commit"), str) else None
-        git_dirty = repo.get("git_dirty") if isinstance(repo.get("git_dirty"), bool) else None
-        if provenance_status != "present":
-            status = "unavailable"
-            reason = f"snapshot_provenance_status_{provenance_status or 'unknown'}"
-        elif not git_commit:
-            status = "unknown"
-            reason = "git_commit_missing"
-        elif git_dirty is True:
-            status = "degraded"
-            reason = "snapshot_worktree_dirty"
-        else:
-            status = "available"
-            reason = "snapshot_git_provenance_present"
+    (
+        status,
+        reason,
+        repo_remote,
+        git_commit,
+        git_dirty,
+        provenance_status,
+    ) = _live_repo_provenance_state(repo)
 
     if isinstance(source_range, dict) and source_range.get("status") == "unavailable":
         status = "unavailable"
