@@ -748,10 +748,15 @@ def _snapshot_repository_for_live_repo(
             continue
         if recorded_root == repository:
             matching_roots.append(candidate)
-    if len(matching_roots) == 1:
-        return matching_roots[0]
-
     current_remote = _origin_repository_identity(repository)
+    if len(matching_roots) == 1:
+        recorded_remote = normalize_repo_remote(matching_roots[0].get("repo_remote"))
+        if recorded_remote is not None and current_remote != recorded_remote:
+            return None
+        return matching_roots[0]
+    if len(matching_roots) > 1:
+        return None
+
     if current_remote is not None:
         matching_remotes = [
             candidate

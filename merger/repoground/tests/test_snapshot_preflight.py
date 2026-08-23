@@ -234,6 +234,48 @@ def test_live_head_repo_root_absent_remote_mismatch_fails_unknown_before_compare
     assert result['live_head']['remote_commit'] is None
 
 
+def test_live_head_matching_repo_root_remote_mismatch_fails_unknown_before_compare(
+    tmp_path, monkeypatch
+):
+    repository = tmp_path / 'repository'
+    repository.mkdir()
+    _git(repository, 'init')
+    _git(
+        repository,
+        'remote',
+        'add',
+        'origin',
+        'https://github.com/example/different.git',
+    )
+    bundle_dir = tmp_path / 'bundle'
+    bundle_dir.mkdir()
+    manifest = _bundle(
+        bundle_dir,
+        FULL_BASIC,
+        snapshot_repo_root=repository,
+        snapshot_repo_remote='git@github.com:heimgewebe/repoground.git',
+    )
+
+    def fail_if_head_is_compared(repository):
+        raise AssertionError('mismatched repository identity must not be compared')
+
+    monkeypatch.setattr(
+        snapshot_preflight,
+        '_advertised_origin_head',
+        fail_if_head_is_compared,
+    )
+
+    result = run_consumption_preflight(
+        manifest, 'basic_repo_question', live_repo=repository
+    )
+
+    assert result['status'] == 'fail'
+    assert result['live_head']['status'] == 'unknown'
+    assert result['live_head']['reason'] == 'snapshot_repository_commit_unproven'
+    assert result['live_head']['snapshot_commit'] is None
+    assert result['live_head']['remote_commit'] is None
+
+
 def test_live_head_repository_selection_normalizes_ssh_and_https_remotes(tmp_path):
     repository = tmp_path / 'repoground'
     repository.mkdir()
