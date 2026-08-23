@@ -260,6 +260,97 @@ def test_live_head_repository_selection_normalizes_ssh_and_https_remotes(tmp_pat
     assert selected is snapshot_repository
 
 
+def test_local_origin_identity_uses_only_repository_git_config(tmp_path, monkeypatch):
+    repository = tmp_path / 'repository'
+    captured = {}
+    monkeypatch.setenv('GIT_CONFIG_GLOBAL', str(tmp_path / 'caller.gitconfig'))
+    monkeypatch.setenv('GIT_CONFIG_NOSYSTEM', 'caller-sentinel')
+
+    def fake_run(command, **kwargs):
+        captured['command'] = command
+        captured['env'] = kwargs['env']
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=b'https://github.com/heimgewebe/repoground.git\n',
+            stderr=b'',
+        )
+
+    monkeypatch.setattr(snapshot_preflight.subprocess, 'run', fake_run)
+
+    identity = snapshot_preflight._origin_repository_identity(repository)
+
+    assert identity == 'heimgewebe/repoground'
+    assert captured['command'][-3:] == [
+        'config',
+        '--get-all',
+        'remote.origin.url',
+    ]
+    assert captured['env']['GIT_CONFIG_GLOBAL'] == '/dev/null'
+    assert captured['env']['GIT_CONFIG_NOSYSTEM'] == '1'
+
+
+def test_network_origin_head_does_not_suppress_absent_user_git_config(
+    tmp_path, monkeypatch
+):
+    captured = {}
+    monkeypatch.delenv('GIT_CONFIG_GLOBAL', raising=False)
+    monkeypatch.delenv('GIT_CONFIG_NOSYSTEM', raising=False)
+
+    def fake_run(command, **kwargs):
+        captured['command'] = command
+        captured['env'] = kwargs['env']
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=(b'ref: refs/heads/main\tHEAD\n' + b'd' * 40 + b'\tHEAD\n'),
+            stderr=b'',
+        )
+
+    monkeypatch.setattr(snapshot_preflight.subprocess, 'run', fake_run)
+
+    advertised = snapshot_preflight._advertised_origin_head(tmp_path)
+
+    assert advertised == ('refs/heads/main', 'd' * 40)
+    assert captured['command'][-5:] == [
+        'ls-remote',
+        '--exit-code',
+        '--symref',
+        'origin',
+        'HEAD',
+    ]
+    assert 'GIT_CONFIG_GLOBAL' not in captured['env']
+    assert 'GIT_CONFIG_NOSYSTEM' not in captured['env']
+    assert captured['env']['GIT_OPTIONAL_LOCKS'] == '0'
+    assert captured['env']['GIT_TERMINAL_PROMPT'] == '0'
+    assert captured['env']['LC_ALL'] == 'C'
+
+
+def test_network_origin_head_preserves_caller_git_config(tmp_path, monkeypatch):
+    global_config = tmp_path / 'caller.gitconfig'
+    monkeypatch.setenv('GIT_CONFIG_GLOBAL', str(global_config))
+    monkeypatch.setenv('GIT_CONFIG_NOSYSTEM', 'caller-sentinel')
+    captured = {}
+
+    def fake_run(command, **kwargs):
+        captured['env'] = kwargs['env']
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=(b'ref: refs/heads/main\tHEAD\n' + b'e' * 40 + b'\tHEAD\n'),
+            stderr=b'',
+        )
+
+    monkeypatch.setattr(snapshot_preflight.subprocess, 'run', fake_run)
+
+    advertised = snapshot_preflight._advertised_origin_head(tmp_path)
+
+    assert advertised == ('refs/heads/main', 'e' * 40)
+    assert captured['env']['GIT_CONFIG_GLOBAL'] == str(global_config)
+    assert captured['env']['GIT_CONFIG_NOSYSTEM'] == 'caller-sentinel'
+    assert captured['env']['GIT_TERMINAL_PROMPT'] == '0'
+
+
 def test_live_head_real_style_repo_root_null_remote_match_selects_successfully(
     tmp_path, monkeypatch
 ):

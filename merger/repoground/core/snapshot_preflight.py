@@ -654,17 +654,24 @@ def _normalize_git_commit(value: Any) -> str | None:
     return value.lower()
 
 
-def _bounded_git_output(repository: Path, *args: str) -> bytes | None:
+def _bounded_git_output(
+    repository: Path, *args: str, isolate_config: bool
+) -> bytes | None:
     env = os.environ.copy()
     env.update(
         {
-            "GIT_CONFIG_NOSYSTEM": "1",
-            "GIT_CONFIG_GLOBAL": os.devnull,
             "GIT_OPTIONAL_LOCKS": "0",
             "GIT_TERMINAL_PROMPT": "0",
             "LC_ALL": "C",
         }
     )
+    if isolate_config:
+        env.update(
+            {
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_CONFIG_GLOBAL": os.devnull,
+            }
+        )
     try:
         completed = subprocess.run(
             [
@@ -702,6 +709,7 @@ def _origin_repository_identity(repository: Path) -> str | None:
         "config",
         "--get-all",
         "remote.origin.url",
+        isolate_config=True,
     )
     if raw is None:
         return None
@@ -775,6 +783,7 @@ def _advertised_origin_head(repository: Path) -> tuple[str, str] | None:
         "--symref",
         "origin",
         "HEAD",
+        isolate_config=False,
     )
     if raw is None:
         return None
