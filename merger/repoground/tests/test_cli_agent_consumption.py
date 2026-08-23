@@ -510,6 +510,60 @@ def test_cli_preflight_invalid_manifest_shape(tmp_path, capsys):
     assert "expected artifacts array" in capsys.readouterr().err
 
 
+def test_ground_preflight_cli_wires_explicit_live_repo(tmp_path, monkeypatch, capsys):
+    import merger.repoground.core.snapshot_preflight as snapshot_preflight
+
+    manifest = tmp_path / "bundle.manifest.json"
+    repository = tmp_path / "repository"
+    observed = {}
+
+    def fake_run_consumption_preflight(
+        bundle_manifest, task_profile="basic_repo_question", *, live_repo=None, **kwargs
+    ):
+        observed.update(
+            {
+                "bundle_manifest": bundle_manifest,
+                "task_profile": task_profile,
+                "live_repo": live_repo,
+            }
+        )
+        return {
+            "kind": "repobrief.consumption_preflight",
+            "status": "pass",
+            "live_head": {
+                "status": "fresh",
+                "repository": str(repository),
+            },
+        }
+
+    monkeypatch.setattr(
+        snapshot_preflight,
+        "run_consumption_preflight",
+        fake_run_consumption_preflight,
+    )
+
+    rc = main(
+        [
+            "ground",
+            "preflight",
+            "--bundle-manifest",
+            str(manifest),
+            "--task-profile",
+            "pr_review",
+            "--live-repo",
+            str(repository),
+        ]
+    )
+
+    assert rc == 0
+    assert observed == {
+        "bundle_manifest": str(manifest),
+        "task_profile": "pr_review",
+        "live_repo": str(repository),
+    }
+    assert json.loads(capsys.readouterr().out)["live_head"]["status"] == "fresh"
+
+
 def test_cli_compare_evidence_declared_and_observed(tmp_path, capsys):
     from merger.repoground.core.agent_consumption_receipts import TrustedToolReadWrapper
 

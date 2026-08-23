@@ -1,6 +1,9 @@
 import json
+import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
+import merger.repoground.core.snapshot_preflight as snapshot_preflight
 from merger.repoground.core.snapshot_preflight import run_consumption_preflight
 
 
@@ -10,7 +13,17 @@ def _artifact(root: Path, role: str, text: str = 'x\n') -> dict:
     return {'role': role, 'path': path.name, 'content_type': 'text/plain', 'bytes': path.stat().st_size, 'sha256': '0' * 64}
 
 
-def _bundle(tmp_path: Path, roles, *, generator=True, snapshot=True, post=True, capabilities=None):
+def _bundle(
+    tmp_path: Path,
+    roles,
+    *,
+    generator=True,
+    snapshot=True,
+    post=True,
+    capabilities=None,
+    snapshot_commit='b' * 40,
+    snapshot_repo_root=None,
+):
     artifacts = [_artifact(tmp_path, role) for role in roles]
     data = {
         'kind': 'repobrief.bundle_manifest',
@@ -21,7 +34,7 @@ def _bundle(tmp_path: Path, roles, *, generator=True, snapshot=True, post=True, 
     if generator:
         data['generator'] = {'runtime': {'git_commit': 'a' * 40}}
     if snapshot:
-        data['snapshot_provenance'] = {'version': 'v1', 'repositories': [{'name': 'repo', 'repo_root': str(tmp_path), 'repo_remote': None, 'git_commit': 'b' * 40, 'git_dirty': False, 'git_branch': 'main', 'provenance_status': 'present', 'freshness_basis': 'git_commit'}], 'does_not_establish': ['freshness_against_remote']}
+        data['snapshot_provenance'] = {'version': 'v1', 'repositories': [{'name': 'repo', 'repo_root': str(snapshot_repo_root or tmp_path), 'repo_remote': None, 'git_commit': snapshot_commit, 'git_dirty': False, 'git_branch': 'main', 'provenance_status': 'present', 'freshness_basis': 'git_commit'}], 'does_not_establish': ['freshness_against_remote']}
     if capabilities:
         data['capabilities'] = capabilities
     manifest = tmp_path / 'sample.bundle.manifest.json'
@@ -53,10 +66,207 @@ def _bundle(tmp_path: Path, roles, *, generator=True, snapshot=True, post=True, 
 FULL_BASIC = ['agent_reading_pack', 'canonical_md', 'citation_map_jsonl', 'snapshot_plan_json']
 
 
+def _git(repository: Path, *args: str) -> str:
+    completed = subprocess.run(
+        ['git', *args],
+        cwd=repository,
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    return completed.stdout.strip()
+
+
+def _live_repository_fixture(tmp_path: Path) -> tuple[Path, Path, str]:
+    source = tmp_path / 'source'
+    source.mkdir()
+    _git(source, 'init')
+    _git(source, 'config', 'user.name', 'RepoGround Test')
+    _git(source, 'config', 'user.email', 'repoground-test@example.invalid')
+    _git(source, 'checkout', '-b', 'fleet-default')
+    (source / 'tracked.txt').write_text('one\n', encoding='utf-8')
+    _git(source, 'add', 'tracked.txt')
+    _git(source, 'commit', '-m', 'initial')
+    snapshot_commit = _git(source, 'rev-parse', 'HEAD')
+
+    remote = tmp_path / 'remote.git'
+    _git(tmp_path, 'clone', '--bare', str(source), str(remote))
+    repository = tmp_path / 'consumer'
+    _git(tmp_path, 'clone', str(remote), str(repository))
+    return source, repository, snapshot_commit
+
+
+def _advance_remote(source: Path, repository: Path) -> str:
+    tracked = source / 'tracked.txt'
+    tracked.write_text(tracked.read_text(encoding='utf-8') + 'two\n', encoding='utf-8')
+    _git(source, 'add', 'tracked.txt')
+    _git(source, 'commit', '-m', 'advance remote')
+    remote_commit = _git(source, 'rev-parse', 'HEAD')
+    remote_url = _git(repository, 'remote', 'get-url', 'origin')
+    _git(source, 'push', remote_url, 'HEAD:refs/heads/fleet-default')
+    return remote_commit
+
+
 def test_full_basic_bundle_passes(tmp_path):
     result = run_consumption_preflight(_bundle(tmp_path, FULL_BASIC), 'basic_repo_question')
     assert result['status'] == 'pass'
     assert result['missing_required_artifacts'] == []
+
+
+def test_live_head_exact_advertised_remote_head_match_passes(tmp_path):
+    _, repository, snapshot_commit = _live_repository_fixture(tmp_path)
+    bundle_dir = tmp_path / 'bundle'
+    bundle_dir.mkdir()
+    manifest = _bundle(
+        bundle_dir,
+        FULL_BASIC,
+        snapshot_commit=snapshot_commit,
+        snapshot_repo_root=repository,
+    )
+
+    result = run_consumption_preflight(
+        manifest, 'basic_repo_question', live_repo=repository
+    )
+
+    assert result['status'] == 'pass'
+    assert result['live_head'] == {
+        'status': 'fresh',
+        'reason': 'head_matches_snapshot_commit',
+        'snapshot_commit': snapshot_commit,
+        'remote_commit': snapshot_commit,
+        'remote_ref': 'refs/heads/fleet-default',
+        'head_drift': False,
+        'repository': str(repository.resolve()),
+    }
+    assert next(check for check in result['checks'] if check['name'] == 'live_head')['status'] == 'pass'
+
+
+def test_live_head_remote_advance_fails_stale_with_both_commits(tmp_path):
+    source, repository, snapshot_commit = _live_repository_fixture(tmp_path)
+    bundle_dir = tmp_path / 'bundle'
+    bundle_dir.mkdir()
+    manifest = _bundle(
+        bundle_dir,
+        FULL_BASIC,
+        snapshot_commit=snapshot_commit,
+        snapshot_repo_root=repository,
+    )
+    remote_commit = _advance_remote(source, repository)
+    local_origin_before = _git(
+        repository, 'rev-parse', 'refs/remotes/origin/fleet-default'
+    )
+
+    result = run_consumption_preflight(
+        manifest, 'basic_repo_question', live_repo=repository
+    )
+
+    assert result['status'] == 'fail'
+    assert result['live_head']['status'] == 'stale'
+    assert result['live_head']['snapshot_commit'] == snapshot_commit
+    assert result['live_head']['remote_commit'] == remote_commit
+    assert result['live_head']['remote_ref'] == 'refs/heads/fleet-default'
+    assert result['live_head']['head_drift'] is True
+    finding = next(f for f in result['findings'] if f['code'] == 'live_head_stale')
+    assert finding['context']['status'] == 'stale'
+    assert finding['context']['reason'] == 'head_drift'
+    assert finding['context']['snapshot_commit'] == snapshot_commit
+    assert finding['context']['remote_commit'] == remote_commit
+    assert 'Refresh or republish' in finding['context']['remediation']
+    assert 'no refresh was attempted' in finding['context']['remediation']
+    assert local_origin_before == snapshot_commit
+    assert (
+        _git(repository, 'rev-parse', 'refs/remotes/origin/fleet-default')
+        == snapshot_commit
+    )
+    assert _git(repository, 'status', '--porcelain') == ''
+
+
+def test_live_head_missing_repository_or_origin_fails_closed_unknown(tmp_path):
+    missing_repository = tmp_path / 'missing-repository'
+    missing_bundle = tmp_path / 'missing-bundle'
+    missing_bundle.mkdir()
+    missing_result = run_consumption_preflight(
+        _bundle(
+            missing_bundle,
+            FULL_BASIC,
+            snapshot_repo_root=missing_repository,
+        ),
+        'basic_repo_question',
+        live_repo=missing_repository,
+    )
+
+    assert missing_result['status'] == 'fail'
+    assert missing_result['live_head']['status'] == 'unknown'
+    assert missing_result['live_head']['reason'] == 'live_repository_unavailable'
+    assert missing_result['live_head']['head_drift'] is None
+
+    repository_without_origin = tmp_path / 'repository-without-origin'
+    repository_without_origin.mkdir()
+    _git(repository_without_origin, 'init')
+    no_origin_bundle = tmp_path / 'no-origin-bundle'
+    no_origin_bundle.mkdir()
+    no_origin_result = run_consumption_preflight(
+        _bundle(
+            no_origin_bundle,
+            FULL_BASIC,
+            snapshot_repo_root=repository_without_origin,
+        ),
+        'basic_repo_question',
+        live_repo=repository_without_origin,
+    )
+
+    assert no_origin_result['status'] == 'fail'
+    assert no_origin_result['live_head']['status'] == 'unknown'
+    assert no_origin_result['live_head']['reason'] == 'origin_default_head_unproven'
+    finding = next(
+        f for f in no_origin_result['findings'] if f['code'] == 'live_head_unknown'
+    )
+    assert finding['severity'] == 'fail'
+    assert finding['context']['status'] == 'unknown'
+    assert 'no refresh was attempted' in finding['context']['remediation']
+
+
+def test_offline_preflight_keeps_git_free_compatible_path(tmp_path, monkeypatch):
+    def fail_if_git_runs(*args, **kwargs):
+        raise AssertionError('offline preflight must not run a subprocess')
+
+    monkeypatch.setattr(snapshot_preflight.subprocess, 'run', fail_if_git_runs)
+
+    result = run_consumption_preflight(
+        _bundle(tmp_path, FULL_BASIC), 'basic_repo_question'
+    )
+
+    assert result['status'] == 'pass'
+    assert 'live_head' not in result
+    assert all(check['name'] != 'live_head' for check in result['checks'])
+
+
+def test_live_head_gate_stays_separate_from_age_warning(tmp_path):
+    _, repository, snapshot_commit = _live_repository_fixture(tmp_path)
+    bundle_dir = tmp_path / 'bundle'
+    bundle_dir.mkdir()
+    manifest = _bundle(
+        bundle_dir,
+        FULL_BASIC,
+        snapshot_commit=snapshot_commit,
+        snapshot_repo_root=repository,
+    )
+
+    result = run_consumption_preflight(
+        manifest,
+        'basic_repo_question',
+        live_repo=repository,
+        max_age_seconds=1,
+        as_of=datetime(2026, 7, 4, 7, 0, tzinfo=timezone.utc),
+    )
+
+    assert result['status'] == 'warn'
+    assert result['freshness']['status'] == 'stale'
+    assert result['live_head']['status'] == 'fresh'
+    assert not any(
+        finding['code'] == 'live_head_stale' for finding in result['findings']
+    )
 
 
 def test_missing_required_fails(tmp_path):
@@ -530,4 +740,3 @@ def test_post_emit_health_valid_binding_passes(tmp_path):
         f['artifact'] == 'post_emit_health' and 'does not match' in f['detail']
         for f in result['findings']
     )
-

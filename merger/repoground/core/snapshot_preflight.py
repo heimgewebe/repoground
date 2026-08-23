@@ -18,16 +18,21 @@ Layer separation (strict):
 * Availability and freshness are metadata about the bundle, not statements
   about the repository or the answer.
 
-The preflight performs no writes, no refresh, no Git access, no snapshot
-creation.  It makes no truth claim: it does not establish that tests are
-sufficient, runtime behavior is correct, a review is complete, a PR is
-mergeable, or that forensic readiness exists.
+The preflight performs no writes, no refresh, and no snapshot creation.  Its
+default historical/offline path performs no Git access.  An explicit live
+repository enables one bounded, read-only remote-HEAD observation without a
+fetch or local repository mutation.  It makes no truth claim: it does not
+establish that tests are sufficient, runtime behavior is correct, a review is
+complete, a PR is mergeable, or that forensic readiness exists.
 """
 
 from __future__ import annotations
 
 import datetime
 import json
+import os
+import re
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -69,6 +74,10 @@ REQUIREMENT_NA = "not_applicable"
 AVAILABILITY_AVAILABLE = "available"
 AVAILABILITY_MISSING = "missing"
 AVAILABILITY_FILE_MISSING = "file_missing"
+
+_LIVE_HEAD_GIT_TIMEOUT_SECONDS = 10.0
+_LIVE_HEAD_OUTPUT_LIMIT_BYTES = 8 * 1024
+_FULL_GIT_COMMIT_RE = re.compile(r"\A(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})\Z")
 
 _LINKED_SIDECAR_ROLES = {
     "post_emit_health_path": "post_emit_health",
@@ -122,6 +131,7 @@ class PreflightFinding:
     area: str
     detail: str
     artifact: str | None = None
+    context: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {
@@ -132,6 +142,8 @@ class PreflightFinding:
         }
         if self.artifact is not None:
             data["artifact"] = self.artifact
+        if self.context is not None:
+            data["context"] = dict(self.context)
         return data
 
 
@@ -171,7 +183,9 @@ class PreflightInput:
     self-report; when provided it must carry non-empty ``does_not_establish``
     boundaries.  ``max_age_seconds`` enables the staleness check; ``as_of``
     pins the reference time for reproducible staleness evaluation (defaults to
-    the injectable lenskit clock).
+    the injectable lenskit clock).  ``live_repo`` explicitly opts into a
+    bounded read-only comparison with origin's advertised default HEAD; when
+    omitted, the preflight runs no Git subprocess.
     """
 
     bundle_manifest: str | Path
@@ -181,6 +195,7 @@ class PreflightInput:
     declaration: Mapping[str, Any] | None = None
     max_age_seconds: float | None = None
     as_of: datetime.datetime | None = None
+    live_repo: str | Path | None = None
 
 
 @dataclass(frozen=True)
@@ -630,6 +645,206 @@ def _snapshot_present_repositories(
         and isinstance(repo.get("git_commit"), str)
         and repo.get("git_commit")
     ]
+
+
+def _normalize_git_commit(value: Any) -> str | None:
+    if not isinstance(value, str) or not _FULL_GIT_COMMIT_RE.fullmatch(value):
+        return None
+    return value.lower()
+
+
+def _snapshot_repository_for_live_repo(
+    snapshot_repositories: Sequence[Any], repository: Path
+) -> Mapping[str, Any] | None:
+    candidates = [
+        item
+        for item in snapshot_repositories
+        if isinstance(item, Mapping)
+        and item.get("provenance_status") == "present"
+        and _normalize_git_commit(item.get("git_commit")) is not None
+    ]
+    matching_roots: list[Mapping[str, Any]] = []
+    for candidate in candidates:
+        repo_root = candidate.get("repo_root")
+        if not isinstance(repo_root, str) or not repo_root:
+            continue
+        try:
+            recorded_root = Path(repo_root).expanduser().resolve()
+        except (OSError, RuntimeError):
+            continue
+        if recorded_root == repository:
+            matching_roots.append(candidate)
+    if len(matching_roots) == 1:
+        return matching_roots[0]
+    if not matching_roots and len(candidates) == 1:
+        return candidates[0]
+    return None
+
+
+def _advertised_origin_head(repository: Path) -> tuple[str, str] | None:
+    env = os.environ.copy()
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env["LC_ALL"] = "C"
+    try:
+        completed = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repository),
+                "ls-remote",
+                "--exit-code",
+                "--symref",
+                "origin",
+                "HEAD",
+            ],
+            check=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=_LIVE_HEAD_GIT_TIMEOUT_SECONDS,
+            env=env,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0:
+        return None
+    if (
+        len(completed.stdout) > _LIVE_HEAD_OUTPUT_LIMIT_BYTES
+        or len(completed.stderr) > _LIVE_HEAD_OUTPUT_LIMIT_BYTES
+    ):
+        return None
+    try:
+        lines = completed.stdout.decode("utf-8").splitlines()
+    except UnicodeDecodeError:
+        return None
+
+    advertised_refs: set[str] = set()
+    advertised_commits: set[str] = set()
+    for line in lines:
+        fields = line.split()
+        if (
+            len(fields) == 3
+            and fields[0] == "ref:"
+            and fields[1].startswith("refs/heads/")
+            and fields[2] == "HEAD"
+        ):
+            advertised_refs.add(fields[1])
+        elif len(fields) == 2 and fields[1] == "HEAD":
+            commit = _normalize_git_commit(fields[0])
+            if commit is not None:
+                advertised_commits.add(commit)
+    if len(advertised_refs) != 1 or len(advertised_commits) != 1:
+        return None
+    return next(iter(advertised_refs)), next(iter(advertised_commits))
+
+
+def _evaluate_live_head(
+    *,
+    live_repo: str | Path,
+    snapshot_repositories: Sequence[Any],
+    checks: list[dict[str, str]],
+    add: Callable[..., None],
+) -> dict[str, Any]:
+    """Compare snapshot provenance with origin's advertised HEAD, read-only."""
+    remediation = (
+        "Verify the supplied local repository and origin's advertised default HEAD, "
+        "then refresh or republish the bundle explicitly and rerun this preflight; "
+        "no refresh was attempted."
+    )
+    try:
+        repository = Path(live_repo).expanduser().resolve()
+    except (OSError, RuntimeError):
+        repository = Path(str(live_repo)).expanduser().absolute()
+    result: dict[str, Any] = {
+        "status": "unknown",
+        "reason": "unproven",
+        "snapshot_commit": None,
+        "remote_commit": None,
+        "remote_ref": None,
+        "head_drift": None,
+        "repository": str(repository),
+    }
+
+    snapshot_repository = _snapshot_repository_for_live_repo(
+        snapshot_repositories, repository
+    )
+    if snapshot_repository is None:
+        reason = "snapshot_repository_commit_unproven"
+        detail = (
+            "live-head mode could not select one full source snapshot git commit "
+            "for the supplied repository"
+        )
+    else:
+        result["snapshot_commit"] = _normalize_git_commit(
+            snapshot_repository.get("git_commit")
+        )
+        if not repository.is_dir():
+            reason = "live_repository_unavailable"
+            detail = "live-head mode requires an existing local repository directory"
+        else:
+            advertised_head = _advertised_origin_head(repository)
+            if advertised_head is None:
+                reason = "origin_default_head_unproven"
+                detail = (
+                    "live-head mode could not prove origin's advertised default "
+                    "branch and current commit"
+                )
+            else:
+                remote_ref, remote_commit = advertised_head
+                snapshot_commit = result["snapshot_commit"]
+                head_drift = remote_commit != snapshot_commit
+                result.update(
+                    {
+                        "status": "stale" if head_drift else "fresh",
+                        "reason": "head_drift"
+                        if head_drift
+                        else "head_matches_snapshot_commit",
+                        "remote_commit": remote_commit,
+                        "remote_ref": remote_ref,
+                        "head_drift": head_drift,
+                    }
+                )
+                if not head_drift:
+                    checks.append(
+                        _check(
+                            "live_head",
+                            STATUS_PASS,
+                            f"snapshot commit matches {remote_ref} at {remote_commit}",
+                        )
+                    )
+                    return result
+                stale_remediation = (
+                    f"Refresh or republish the bundle explicitly from {remote_ref} "
+                    f"at {remote_commit}, then rerun this preflight; no refresh was "
+                    "attempted."
+                )
+                add(
+                    "live_head_stale",
+                    SEVERITY_FAIL,
+                    "live_head",
+                    f"snapshot commit {snapshot_commit} differs from origin's "
+                    f"advertised {remote_ref} commit {remote_commit}",
+                    context={**result, "remediation": stale_remediation},
+                )
+                checks.append(
+                    _check(
+                        "live_head",
+                        STATUS_FAIL,
+                        f"head drift: snapshot {snapshot_commit}, remote {remote_commit}",
+                    )
+                )
+                return result
+
+    result["reason"] = reason
+    add(
+        "live_head_unknown",
+        SEVERITY_FAIL,
+        "live_head",
+        detail,
+        context={**result, "remediation": remediation},
+    )
+    checks.append(_check("live_head", STATUS_FAIL, detail))
+    return result
 
 
 def _apply_age_freshness(
@@ -1561,6 +1776,7 @@ def _ordered_checks(
                 "snapshot_profile_policy",
                 "validation_state",
                 "freshness",
+                "live_head",
                 "used_citations",
                 "used_ranges",
                 "does_not_establish",
@@ -1589,7 +1805,12 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
     checks: list[dict[str, str]] = []
 
     def add(
-        code: str, severity: str, area: str, detail: str, artifact: str | None = None
+        code: str,
+        severity: str,
+        area: str,
+        detail: str,
+        artifact: str | None = None,
+        context: Mapping[str, Any] | None = None,
     ) -> None:
         findings.append(
             PreflightFinding(
@@ -1598,6 +1819,7 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
                 area=area,
                 detail=detail,
                 artifact=artifact,
+                context=context,
             )
         )
 
@@ -1738,6 +1960,22 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
         checks=checks,
         add=add,
     )
+    live_head = None
+    if preflight_input.live_repo is not None:
+        snapshot_provenance = manifest.get("snapshot_provenance")
+        snapshot_repositories = (
+            snapshot_provenance.get("repositories")
+            if isinstance(snapshot_provenance, Mapping)
+            else []
+        )
+        if not isinstance(snapshot_repositories, list):
+            snapshot_repositories = []
+        live_head = _evaluate_live_head(
+            live_repo=preflight_input.live_repo,
+            snapshot_repositories=snapshot_repositories,
+            checks=checks,
+            add=add,
+        )
 
     # ── Consumption declaration (negative semantics are mandatory) ──────────
     declaration_block, used_citations_input, used_ranges_input = (
@@ -1815,6 +2053,8 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
         "mutation_boundary": json.loads(json.dumps(MUTATION_BOUNDARY)),
         "does_not_establish": list(DOES_NOT_ESTABLISH),
     }
+    if live_head is not None:
+        data["live_head"] = live_head
 
     return PreflightResult(
         status=overall,
@@ -1836,6 +2076,7 @@ def run_consumption_preflight(
     declaration: Mapping[str, Any] | None = None,
     max_age_seconds: float | None = None,
     as_of: datetime.datetime | None = None,
+    live_repo: str | Path | None = None,
 ) -> dict[str, Any]:
     """Dict-level convenience wrapper around :func:`consumption_preflight`."""
     result = consumption_preflight(
@@ -1847,6 +2088,7 @@ def run_consumption_preflight(
             declaration=declaration,
             max_age_seconds=max_age_seconds,
             as_of=as_of,
+            live_repo=live_repo,
         )
     )
     return result.to_dict()
