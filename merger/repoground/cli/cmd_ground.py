@@ -575,6 +575,13 @@ def register_ground_command_groups(ground_parser: argparse.ArgumentParser) -> No
     preflight_parser = ground_subparsers.add_parser("preflight", help="Run RepoGround consumption preflight")
     preflight_parser.add_argument("--bundle-manifest", required=True, help="Path to a RepoGround bundle manifest")
     preflight_parser.add_argument("--task-profile", default="basic_repo_question", help="Required-reading task profile")
+    preflight_parser.add_argument(
+        "--live-repo",
+        help=(
+            "Explicit local repository whose origin advertised default HEAD is "
+            "compared read-only with snapshot provenance"
+        ),
+    )
 
     artifact_parser = ground_subparsers.add_parser("artifact", help="RepoGround artifact read-only commands")
     artifact_subparsers = artifact_parser.add_subparsers(
@@ -1460,7 +1467,11 @@ def run_preflight(args: argparse.Namespace) -> int:
     from merger.repoground.core.snapshot_preflight import run_consumption_preflight
 
     try:
-        result = run_consumption_preflight(args.bundle_manifest, args.task_profile)
+        result = run_consumption_preflight(
+            args.bundle_manifest,
+            args.task_profile,
+            live_repo=args.live_repo,
+        )
     except ValueError as exc:
         print("repoground ground preflight: " + str(exc), file=sys.stderr)
         return 2
