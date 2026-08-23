@@ -727,6 +727,13 @@ def _origin_repository_identity(repository: Path) -> str | None:
     return next(iter(identities))
 
 
+def _snapshot_remote_identity_matches(
+    snapshot_repository: Mapping[str, Any], current_remote: str | None
+) -> bool:
+    recorded_remote = normalize_repo_remote(snapshot_repository.get("repo_remote"))
+    return recorded_remote is None or current_remote == recorded_remote
+
+
 def _snapshot_repository_for_live_repo(
     snapshot_repositories: Sequence[Any], repository: Path
 ) -> Mapping[str, Any] | None:
@@ -749,13 +756,10 @@ def _snapshot_repository_for_live_repo(
         if recorded_root == repository:
             matching_roots.append(candidate)
     current_remote = _origin_repository_identity(repository)
-    if len(matching_roots) == 1:
-        recorded_remote = normalize_repo_remote(matching_roots[0].get("repo_remote"))
-        if recorded_remote is not None and current_remote != recorded_remote:
-            return None
+    if len(matching_roots) == 1 and _snapshot_remote_identity_matches(
+        matching_roots[0], current_remote
+    ):
         return matching_roots[0]
-    if len(matching_roots) > 1:
-        return None
 
     if current_remote is not None:
         matching_remotes = [
