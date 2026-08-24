@@ -1,0 +1,25 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "automerge": false,
+  "packageRules": [
+    {
+      "description": "Shared and semantic requirements require coordinated multi-lock regeneration",
+      "matchFileNames": [
+        "merger/repoground/requirements.txt",
+        "merger/repoground/requirements-semantic.txt",
+        "requirements/repoground-semantic-*"
+      ],
+      "enabled": false
+    }
+  ],
+  "postUpgradeTasks": {
+    "commands": [
+      "bash /home/alex/.local/share/renovate-fleet/current/automation/renovate/repoground-lock-coupling.sh"
+    ],
+    "fileFilters": [
+      "requirements*.txt",
+      "requirements/**"
+    ],
+    "executionMode": "branch"
+  }
+}
