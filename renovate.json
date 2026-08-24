@@ -1,0 +1,14 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "automerge": false,
+  "postUpgradeTasks": {
+    "commands": [
+      "bash /home/alex/.local/share/renovate-fleet/current/automation/renovate/repoground-lock-coupling.sh"
+    ],
+    "fileFilters": [
+      "requirements*.txt",
+      "requirements/**"
+    ],
+    "executionMode": "branch"
+  }
+}
