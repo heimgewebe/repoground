@@ -774,6 +774,92 @@ class CitationMapCoherence:
     reason: str
 
 
+def _citation_map_artifact_relative_path(
+    manifest: Dict[str, Any],
+    role: str,
+    path_label: str,
+    *,
+    missing_reason: str,
+    invalid_reason: str,
+    unsafe_reason: str,
+) -> Tuple[Optional[str], Optional[CitationMapCoherence]]:
+    artifact = next(
+        (
+            item
+            for item in manifest.get("artifacts", [])
+            if isinstance(item, dict) and item.get("role") == role
+        ),
+        None,
+    )
+    if artifact is None:
+        return None, CitationMapCoherence(False, False, missing_reason)
+
+    raw_path = artifact.get("path")
+    if not isinstance(raw_path, str) or not raw_path:
+        return None, CitationMapCoherence(False, False, invalid_reason)
+
+    try:
+        return _normalize_relative_path(raw_path, path_label), None
+    except ValueError:
+        return None, CitationMapCoherence(False, False, unsafe_reason)
+
+
+def _check_citation_map_chunk_line(
+    line: str,
+    lineno: int,
+    canonical_md_rel: str,
+) -> Optional[CitationMapCoherence]:
+    try:
+        chunk = json.loads(line)
+    except json.JSONDecodeError:
+        return CitationMapCoherence(False, False, "invalid_chunk_index_json")
+
+    normalized_range = normalize_canonical_range(chunk)
+    if normalized_range is None:
+        if _is_split_mode_noncanonical_chunk(chunk):
+            return None
+        return CitationMapCoherence(False, False, "missing_or_invalid_canonical_range")
+
+    chunk_file_raw = normalized_range.get("file_path")
+    if not isinstance(chunk_file_raw, str) or not chunk_file_raw:
+        return CitationMapCoherence(False, False, "missing_range_file_path")
+
+    try:
+        chunk_file_rel = _normalize_relative_path(
+            chunk_file_raw, f"range.file_path line {lineno}"
+        )
+    except ValueError:
+        return CitationMapCoherence(False, False, "unsafe_range_file_path")
+
+    if chunk_file_rel != canonical_md_rel:
+        return CitationMapCoherence(False, True, "range_file_path_mismatch")
+    return None
+
+
+def _check_citation_map_chunk_index(
+    chunk_index_path: Path,
+    canonical_md_rel: str,
+) -> CitationMapCoherence:
+    saw_nonempty_line = False
+    try:
+        with chunk_index_path.open("r", encoding="utf-8") as f:
+            for lineno, line in enumerate(f, start=1):
+                if not line.strip():
+                    continue
+                saw_nonempty_line = True
+                coherence = _check_citation_map_chunk_line(
+                    line, lineno, canonical_md_rel
+                )
+                if coherence is not None:
+                    return coherence
+    except OSError:
+        return CitationMapCoherence(False, False, "unreadable_chunk_index")
+
+    if not saw_nonempty_line:
+        return CitationMapCoherence(True, False, "coherent_empty_chunk_index")
+    return CitationMapCoherence(True, False, "coherent")
+
+
 def check_manifest_coherence_for_citation_map(manifest_path: Path) -> CitationMapCoherence:
     """
     Validate whether manifest pairing is suitable for citation-map emission.
@@ -788,97 +874,42 @@ def check_manifest_coherence_for_citation_map(manifest_path: Path) -> CitationMa
     deliberate skip, not a failure. Other defects (invalid JSON, unsafe paths,
     missing artifacts) are hard errors and must not be silently downgraded.
     """
-    manifest_dir = manifest_path.parent
-
     try:
         manifest = load_manifest(manifest_path)
     except (json.JSONDecodeError, OSError):
         return CitationMapCoherence(False, False, "invalid_manifest")
 
-    canonical_md_artifact = next(
-        (
-            a
-            for a in manifest.get("artifacts", [])
-            if isinstance(a, dict) and a.get("role") == "canonical_md"
-        ),
-        None,
+    canonical_md_rel, coherence = _citation_map_artifact_relative_path(
+        manifest,
+        "canonical_md",
+        "canonical_md.path",
+        missing_reason="missing_canonical_md_artifact",
+        invalid_reason="invalid_canonical_md_path",
+        unsafe_reason="unsafe_canonical_md_path",
     )
-    if canonical_md_artifact is None:
-        return CitationMapCoherence(False, False, "missing_canonical_md_artifact")
+    if coherence is not None:
+        return coherence
 
-    chunk_index_artifact = next(
-        (
-            a
-            for a in manifest.get("artifacts", [])
-            if isinstance(a, dict) and a.get("role") == "chunk_index_jsonl"
-        ),
-        None,
+    chunk_index_rel, coherence = _citation_map_artifact_relative_path(
+        manifest,
+        "chunk_index_jsonl",
+        "chunk_index_jsonl.path",
+        missing_reason="missing_chunk_index_artifact",
+        invalid_reason="invalid_chunk_index_path",
+        unsafe_reason="unsafe_chunk_index_path",
     )
-    if chunk_index_artifact is None:
-        return CitationMapCoherence(False, False, "missing_chunk_index_artifact")
-
-    canonical_md_raw = canonical_md_artifact.get("path")
-    if not isinstance(canonical_md_raw, str) or not canonical_md_raw:
-        return CitationMapCoherence(False, False, "invalid_canonical_md_path")
+    if coherence is not None:
+        return coherence
 
     try:
-        canonical_md_rel = _normalize_relative_path(canonical_md_raw, "canonical_md.path")
-    except ValueError:
-        return CitationMapCoherence(False, False, "unsafe_canonical_md_path")
-
-    chunk_index_raw = chunk_index_artifact.get("path", "")
-    if not isinstance(chunk_index_raw, str) or not chunk_index_raw:
-        return CitationMapCoherence(False, False, "invalid_chunk_index_path")
-
-    try:
-        chunk_index_rel = _normalize_relative_path(chunk_index_raw, "chunk_index_jsonl.path")
+        chunk_index_path = resolve_secure_path(manifest_path.parent, chunk_index_rel)
     except ValueError:
         return CitationMapCoherence(False, False, "unsafe_chunk_index_path")
 
-    try:
-        chunk_index_abs = resolve_secure_path(manifest_dir, chunk_index_rel)
-    except ValueError:
-        return CitationMapCoherence(False, False, "unsafe_chunk_index_path")
-
-    if not chunk_index_abs.exists() or not chunk_index_abs.is_file():
+    if not chunk_index_path.exists() or not chunk_index_path.is_file():
         return CitationMapCoherence(False, False, "missing_chunk_index_file")
 
-    saw_nonempty_line = False
-    try:
-        with chunk_index_abs.open("r", encoding="utf-8") as f:
-            for lineno, line in enumerate(f, start=1):
-                if not line.strip():
-                    continue
-                saw_nonempty_line = True
-                try:
-                    chunk = json.loads(line)
-                except json.JSONDecodeError:
-                    return CitationMapCoherence(False, False, "invalid_chunk_index_json")
-
-                normalized_range = normalize_canonical_range(chunk)
-                if normalized_range is None:
-                    if _is_split_mode_noncanonical_chunk(chunk):
-                        continue
-                    return CitationMapCoherence(False, False, "missing_or_invalid_canonical_range")
-
-                chunk_file_raw = normalized_range.get("file_path")
-                if not isinstance(chunk_file_raw, str) or not chunk_file_raw:
-                    return CitationMapCoherence(False, False, "missing_range_file_path")
-
-                try:
-                    chunk_file_rel = _normalize_relative_path(chunk_file_raw, f"range.file_path line {lineno}")
-                except ValueError:
-                    return CitationMapCoherence(False, False, "unsafe_range_file_path")
-
-                if chunk_file_rel != canonical_md_rel:
-                    return CitationMapCoherence(False, True, "range_file_path_mismatch")
-    except OSError:
-        return CitationMapCoherence(False, False, "unreadable_chunk_index")
-
-    if not saw_nonempty_line:
-        return CitationMapCoherence(True, False, "coherent_empty_chunk_index")
-
-    return CitationMapCoherence(True, False, "coherent")
+    return _check_citation_map_chunk_index(chunk_index_path, canonical_md_rel)
 
 
 def is_manifest_coherent_for_citation_map(manifest_path: Path) -> bool:
