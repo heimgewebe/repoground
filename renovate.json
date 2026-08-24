@@ -10,6 +10,22 @@
         "requirements/repoground-semantic-*"
       ],
       "enabled": false
+    },
+    {
+      "description": "Keep workflow control-plane identities coupled to GitHub Actions updates",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "postUpgradeTasks": {
+        "commands": [
+          "python3 scripts/ci/refresh_workflow_control_plane.py"
+        ],
+        "fileFilters": [
+          ".github/workflows/*.yml",
+          "config/workflow-control-plane.v1.json"
+        ],
+        "executionMode": "branch"
+      }
     }
   ],
   "postUpgradeTasks": {
