@@ -499,6 +499,157 @@ class _ChunkResult:
     repo_id_source: Optional[str]
 
 
+@dataclass(frozen=True, slots=True)
+class _ResolvedChunkRange:
+    repo_id: str
+    repo_id_source: str
+    start_byte: int
+    end_byte: int
+    actual_sha256: str
+
+
+class _ChunkLineError(ValueError):
+    """One chunk-index line failed validation without aborting the producer."""
+
+
+def _parse_chunk_line(raw_line: str, lineno: int) -> Dict[str, Any]:
+    try:
+        chunk = json.loads(raw_line)
+    except json.JSONDecodeError as e:
+        raise _ChunkLineError(f"Line {lineno}: invalid JSON: {e}") from e
+    if not isinstance(chunk, dict):
+        raise _ChunkLineError(f"Line {lineno}: chunk must be a JSON object")
+    return chunk
+
+
+def _normalized_chunk_range(
+    chunk: Dict[str, Any],
+    lineno: int,
+) -> Optional[Dict[str, Any]]:
+    norm_range = normalize_canonical_range(chunk)
+    if norm_range is not None:
+        return norm_range
+    if _is_split_mode_noncanonical_chunk(chunk):
+        return None
+    raise _ChunkLineError(
+        f"Line {lineno}: no valid canonical range found "
+        "(need canonical_range or content_range_ref with artifact_role='canonical_md')"
+    )
+
+
+def _resolve_chunk_range(
+    chunk: Dict[str, Any],
+    norm_range: Dict[str, Any],
+    canonical_md_bytes: bytes,
+    canonical_md_rel: str,
+    lineno: int,
+) -> _ResolvedChunkRange:
+    try:
+        repo_id, repo_id_source = resolve_repo_id(chunk, norm_range, lineno)
+    except CitationMapError as e:
+        raise _ChunkLineError(str(e)) from e
+
+    raw_fp = norm_range.get("file_path", "")
+    try:
+        norm_fp = _normalize_relative_path(raw_fp, "range.file_path")
+    except ValueError as e:
+        raise _ChunkLineError(
+            f"Line {lineno}: range.file_path rejected: {e}"
+        ) from e
+    if norm_fp != canonical_md_rel:
+        raise _ChunkLineError(
+            f"Line {lineno}: range.file_path {raw_fp!r} "
+            f"(normalized {norm_fp!r}) does not match "
+            f"manifest canonical_md path {canonical_md_rel!r}"
+        )
+
+    start_byte = norm_range.get("start_byte")
+    end_byte = norm_range.get("end_byte")
+    for name, value in (("start_byte", start_byte), ("end_byte", end_byte)):
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise _ChunkLineError(f"Line {lineno}: range.{name} must be an int")
+
+    content_sha256 = norm_range.get("content_sha256", "")
+    if (
+        not content_sha256
+        or not isinstance(content_sha256, str)
+        or not _SHA256_RE.fullmatch(content_sha256)
+    ):
+        raise _ChunkLineError(
+            f"Line {lineno}: range.content_sha256 is missing or invalid"
+        )
+
+    try:
+        actual_sha256 = verify_byte_range_hash(
+            canonical_md_bytes,
+            start_byte,
+            end_byte,
+            content_sha256,
+            lineno,
+        )
+    except CitationMapError as e:
+        raise _ChunkLineError(str(e)) from e
+
+    return _ResolvedChunkRange(
+        repo_id=repo_id,
+        repo_id_source=repo_id_source,
+        start_byte=start_byte,
+        end_byte=end_byte,
+        actual_sha256=actual_sha256,
+    )
+
+
+def _build_chunk_base_row(
+    resolved: _ResolvedChunkRange,
+    canonical_md_bytes: bytes,
+    canonical_md_rel: str,
+    canonical_md_sha256: str,
+    snapshot: Dict[str, Any],
+    lineno: int,
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    start_line, end_line = byte_range_to_line_range(
+        canonical_md_bytes,
+        resolved.start_byte,
+        resolved.end_byte,
+    )
+    try:
+        citation_id = make_citation_id(
+            canonical_md_sha256,
+            resolved.start_byte,
+            resolved.end_byte,
+            resolved.actual_sha256,
+        )
+    except (ValueError, TypeError) as e:
+        raise _ChunkLineError(f"Line {lineno}: make_citation_id failed: {e}") from e
+
+    range_ref: Dict[str, Any] = {
+        "artifact_role": "canonical_md",
+        "repo_id": resolved.repo_id,
+        "file_path": canonical_md_rel,
+        "start_byte": resolved.start_byte,
+        "end_byte": resolved.end_byte,
+        "start_line": start_line,
+        "end_line": end_line,
+        "content_sha256": resolved.actual_sha256,
+    }
+    row: Dict[str, Any] = {
+        "citation_id": citation_id,
+        "repo_id": resolved.repo_id,
+        "snapshot": snapshot,
+        "canonical_range": {
+            "file_path": canonical_md_rel,
+            "start_byte": resolved.start_byte,
+            "end_byte": resolved.end_byte,
+            "start_line": start_line,
+            "end_line": end_line,
+            "content_sha256": resolved.actual_sha256,
+        },
+        "range_ref": range_ref,
+        "produced_by": PRODUCED_BY,
+    }
+    return row, range_ref
+
+
 def iter_chunk_results(
     chunk_index_path: Path,
     canonical_md_bytes: bytes,
@@ -526,139 +677,28 @@ def iter_chunk_results(
                 continue
 
             try:
-                chunk = json.loads(raw_line)
-            except json.JSONDecodeError as e:
-                yield _ChunkResult(None, f"Line {lineno}: invalid JSON: {e}", None)
-                continue
-
-            if not isinstance(chunk, dict):
-                yield _ChunkResult(
-                    None, f"Line {lineno}: chunk must be a JSON object", None
-                )
-                continue
-
-            # --- normalise range ---
-            norm_range = normalize_canonical_range(chunk)
-            if norm_range is None:
-                if _is_split_mode_noncanonical_chunk(chunk):
+                chunk = _parse_chunk_line(raw_line, lineno)
+                norm_range = _normalized_chunk_range(chunk, lineno)
+                if norm_range is None:
                     continue
-                yield _ChunkResult(
-                    None,
-                    f"Line {lineno}: no valid canonical range found "
-                    "(need canonical_range or content_range_ref with artifact_role='canonical_md')",
-                    None,
-                )
-                continue
-
-            # --- resolve repo_id ---
-            try:
-                repo_id, repo_id_src = resolve_repo_id(chunk, norm_range, lineno)
-            except CitationMapError as e:
-                yield _ChunkResult(None, str(e), None)
-                continue
-
-            # --- validate range fields ---
-            raw_fp = norm_range.get("file_path", "")
-            try:
-                norm_fp = _normalize_relative_path(raw_fp, "range.file_path")
-            except ValueError as e:
-                yield _ChunkResult(
-                    None, f"Line {lineno}: range.file_path rejected: {e}", None
-                )
-                continue
-
-            if norm_fp != canonical_md_rel:
-                yield _ChunkResult(
-                    None,
-                    f"Line {lineno}: range.file_path {raw_fp!r} "
-                    f"(normalized {norm_fp!r}) does not match "
-                    f"manifest canonical_md path {canonical_md_rel!r}",
-                    None,
-                )
-                continue
-
-            start_byte = norm_range.get("start_byte")
-            end_byte = norm_range.get("end_byte")
-            content_sha256 = norm_range.get("content_sha256", "")
-
-            _int_error: Optional[str] = None
-            for name, val in (("start_byte", start_byte), ("end_byte", end_byte)):
-                if isinstance(val, bool) or not isinstance(val, int):
-                    _int_error = f"Line {lineno}: range.{name} must be an int"
-                    break
-            if _int_error:
-                yield _ChunkResult(None, _int_error, None)
-                continue
-
-            if (
-                not content_sha256
-                or not isinstance(content_sha256, str)
-                or not _SHA256_RE.fullmatch(content_sha256)
-            ):
-                yield _ChunkResult(
-                    None,
-                    f"Line {lineno}: range.content_sha256 is missing or invalid",
-                    None,
-                )
-                continue
-
-            # --- verify byte range hash ---
-            try:
-                actual_sha = verify_byte_range_hash(
+                resolved = _resolve_chunk_range(
+                    chunk,
+                    norm_range,
                     canonical_md_bytes,
-                    start_byte,
-                    end_byte,
-                    content_sha256,
+                    canonical_md_rel,
                     lineno,
                 )
-            except CitationMapError as e:
+                row, range_ref = _build_chunk_base_row(
+                    resolved,
+                    canonical_md_bytes,
+                    canonical_md_rel,
+                    canonical_md_sha256,
+                    snapshot,
+                    lineno,
+                )
+            except _ChunkLineError as e:
                 yield _ChunkResult(None, str(e), None)
                 continue
-
-            # --- compute canonical_md-global line numbers (H5) ---
-            # Input start_line/end_line are ignored: they are source-file-local
-            # from the generator. Output line numbers are always canonical_md-global.
-            start_line, end_line = byte_range_to_line_range(
-                canonical_md_bytes, start_byte, end_byte
-            )
-
-            # --- derive citation_id ---
-            try:
-                citation_id = make_citation_id(
-                    canonical_md_sha256, start_byte, end_byte, actual_sha
-                )
-            except (ValueError, TypeError) as e:
-                yield _ChunkResult(
-                    None, f"Line {lineno}: make_citation_id failed: {e}", None
-                )
-                continue
-
-            range_ref: Dict[str, Any] = {
-                "artifact_role": "canonical_md",
-                "repo_id": repo_id,
-                "file_path": canonical_md_rel,
-                "start_byte": start_byte,
-                "end_byte": end_byte,
-                "start_line": start_line,
-                "end_line": end_line,
-                "content_sha256": actual_sha,
-            }
-
-            row: Dict[str, Any] = {
-                "citation_id": citation_id,
-                "repo_id": repo_id,
-                "snapshot": snapshot,
-                "canonical_range": {
-                    "file_path": canonical_md_rel,
-                    "start_byte": start_byte,
-                    "end_byte": end_byte,
-                    "start_line": start_line,
-                    "end_line": end_line,
-                    "content_sha256": actual_sha,
-                },
-                "range_ref": range_ref,
-                "produced_by": PRODUCED_BY,
-            }
 
             source_range = normalize_source_range(chunk, lineno)
             if source_range is not None:
@@ -666,7 +706,7 @@ def iter_chunk_results(
 
             live_repo_address = build_live_repo_address(
                 chunk,
-                repo_id,
+                resolved.repo_id,
                 source_range,
                 snapshot_provenance,
             )
@@ -678,7 +718,7 @@ def iter_chunk_results(
                 row["chunk_id"] = str(chunk_id)
                 range_ref["chunk_id"] = str(chunk_id)
 
-            yield _ChunkResult(row, None, repo_id_src)
+            yield _ChunkResult(row, None, resolved.repo_id_source)
 
 
 # ---------------------------------------------------------------------------
