@@ -18,7 +18,7 @@
       ],
       "postUpgradeTasks": {
         "commands": [
-          "python3 scripts/ci/refresh_workflow_control_plane.py"
+          "bash /home/alex/.local/share/renovate-fleet/current/automation/renovate/repoground-workflow-refresh.sh"
         ],
         "fileFilters": [
           ".github/workflows/*.yml",

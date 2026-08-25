@@ -109,7 +109,9 @@ def test_renovate_github_actions_updates_refresh_workflow_inventory() -> None:
     rules = [rule for rule in config["packageRules"] if rule.get("matchManagers") == ["github-actions"]]
     assert len(rules) == 1
     task = rules[0]["postUpgradeTasks"]
-    assert task["commands"] == ["python3 scripts/ci/refresh_workflow_control_plane.py"]
+    assert task["commands"] == [
+        "bash /home/alex/.local/share/renovate-fleet/current/automation/renovate/repoground-workflow-refresh.sh"
+    ]
     assert task["executionMode"] == "branch"
     assert task["fileFilters"] == [
         ".github/workflows/*.yml",
