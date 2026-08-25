@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 from pathlib import Path
 
 # Canonical Lens IDs (Contract: reading.lenses.v1)
@@ -9,8 +10,74 @@ LENS_IDS = [
     "data_models",
     "pipelines",
     "ui",
-    "guards"
+    "guards",
 ]
+
+_GUARD_PARTS = frozenset({".github", "wgx", "guards", "tests", "test"})
+_DATA_MODEL_PARTS = frozenset({"contracts", "schemas", "models", "types"})
+_PIPELINE_PARTS = frozenset({"pipelines", "jobs", "orchestration"})
+_ENTRYPOINT_PARTS = frozenset({"frontends", "cli", "bin"})
+_UI_PARTS = frozenset({"ui", "app", "web", "frontend", "views", "templates"})
+_INTERFACE_PARTS = frozenset({"adapters", "interfaces", "api", "ports", "routes"})
+_CORE_PARTS = frozenset({"core", "logic", "domain"})
+_CODE_SUFFIXES = (".py", ".rs", ".ts", ".js", ".go", ".java", ".c", ".cpp")
+_CONFIG_SUFFIXES = (".json", ".yaml", ".yml", ".toml")
+
+
+def _has_any_part(parts: tuple[str, ...], markers: frozenset[str]) -> bool:
+    return not markers.isdisjoint(parts)
+
+
+def _is_guard(parts: tuple[str, ...], name: str, path_str: str) -> bool:
+    return (
+        _has_any_part(parts, _GUARD_PARTS)
+        or name.startswith("test_")
+        or name.endswith(("_test.py", ".test.ts", ".spec.ts"))
+        or name.startswith("validate_")
+        or "validation" in path_str
+    )
+
+
+def _is_data_model(parts: tuple[str, ...], name: str) -> bool:
+    return (
+        _has_any_part(parts, _DATA_MODEL_PARTS)
+        or name.endswith((".schema.json", ".proto", ".thrift"))
+        or name in ("structs.rs", "types.ts", "models.py")
+    )
+
+
+def _is_pipeline(parts: tuple[str, ...], path_str: str) -> bool:
+    return _has_any_part(parts, _PIPELINE_PARTS) or "workflow" in path_str
+
+
+def _is_entrypoint(parts: tuple[str, ...], name: str) -> bool:
+    return (
+        _has_any_part(parts, _ENTRYPOINT_PARTS)
+        or name in ("__main__.py", "main.rs", "index.ts", "index.js")
+        or name.startswith(("run_", "start_"))
+        or name == "manage.py"
+    )
+
+
+def _is_ui(parts: tuple[str, ...], name: str) -> bool:
+    return _has_any_part(parts, _UI_PARTS) or name.endswith((".html", ".svelte", ".css"))
+
+
+def _is_interface(parts: tuple[str, ...]) -> bool:
+    return _has_any_part(parts, _INTERFACE_PARTS) or (
+        "service" in parts and "core" not in parts
+    )
+
+
+def _fallback_lens(parts: tuple[str, ...], suffix: str) -> str:
+    if _has_any_part(parts, _CORE_PARTS) or suffix in _CODE_SUFFIXES:
+        return "core"
+    if "docs" in parts:
+        return "entrypoints"
+    if suffix in _CONFIG_SUFFIXES:
+        return "data_models"
+    return "core"
+
 
 def infer_lens(path: Path) -> str:
     """
@@ -23,65 +90,16 @@ def infer_lens(path: Path) -> str:
     name = path.name.lower()
     path_str = str(path).lower()
 
-    # 1. Guards (Validation, Safety, CI)
-    # High priority to catch verification logic early
-    if ".github" in parts or "wgx" in parts or "guards" in parts:
+    if _is_guard(parts, name, path_str):
         return "guards"
-    if "tests" in parts or "test" in parts:
-        return "guards"
-    if name.startswith("test_") or name.endswith("_test.py") or name.endswith(".test.ts") or name.endswith(".spec.ts"):
-        return "guards"
-    if name.startswith("validate_") or "validation" in path_str:
-        return "guards"
-
-    # 2. Data Models (Truth, Schema, Types)
-    if "contracts" in parts or "schemas" in parts or "models" in parts or "types" in parts:
+    if _is_data_model(parts, name):
         return "data_models"
-    if name.endswith(".schema.json") or name.endswith(".proto") or name.endswith(".thrift"):
-        return "data_models"
-    if name in ("structs.rs", "types.ts", "models.py"):
-        return "data_models"
-
-    # 3. Pipelines (Flow, Orchestration)
-    if "pipelines" in parts or "jobs" in parts or "orchestration" in parts:
+    if _is_pipeline(parts, path_str):
         return "pipelines"
-    if "workflow" in path_str: # e.g. airflow/workflows
-        return "pipelines"
-
-    # 4. Entrypoints (Start, CLI, Public)
-    if "frontends" in parts or "cli" in parts or "bin" in parts:
+    if _is_entrypoint(parts, name):
         return "entrypoints"
-    if name == "__main__.py" or name == "main.rs" or name == "index.ts" or name == "index.js":
-        return "entrypoints"
-    if name.startswith("run_") or name.startswith("start_") or name == "manage.py":
-        return "entrypoints"
-
-    # 5. UI (Interaction, View)
-    if "ui" in parts or "app" in parts or "web" in parts or "frontend" in parts or "views" in parts:
+    if _is_ui(parts, name):
         return "ui"
-    if "templates" in parts or name.endswith(".html") or name.endswith(".svelte") or name.endswith(".css"):
-        return "ui"
-
-    # 6. Interfaces (Adapters, API, IO)
-    if "adapters" in parts or "interfaces" in parts or "api" in parts or "ports" in parts or "routes" in parts:
+    if _is_interface(parts):
         return "interfaces"
-    if "service" in parts and not "core" in parts:
-        return "interfaces"
-
-    # 7. Core (Logic, Domain) - Default for code
-    # If we haven't matched yet, and it looks like code, it's likely core logic.
-    if "core" in parts or "logic" in parts or "domain" in parts:
-        return "core"
-
-    # Fallback for generic source files not caught above
-    if path.suffix in (".py", ".rs", ".ts", ".js", ".go", ".java", ".c", ".cpp"):
-        return "core"
-
-    # Fallback for docs/configs not caught above
-    if "docs" in parts:
-        return "entrypoints" # Docs are often entrypoints for understanding
-
-    if path.suffix in (".json", ".yaml", ".yml", ".toml"):
-        return "data_models" # Configs often define structure/data
-
-    return "core" # Ultimate fallback
+    return _fallback_lens(parts, path.suffix)
