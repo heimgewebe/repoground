@@ -10,6 +10,22 @@
         "requirements/repoground-semantic-*"
       ],
       "enabled": false
+    },
+    {
+      "description": "Keep workflow control-plane identities coupled to GitHub Actions updates",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "postUpgradeTasks": {
+        "commands": [
+          "bash /home/alex/.local/share/renovate-fleet/current/automation/renovate/repoground-workflow-refresh.sh"
+        ],
+        "fileFilters": [
+          ".github/workflows/*.yml",
+          "config/workflow-control-plane.v1.json"
+        ],
+        "executionMode": "branch"
+      }
     }
   ],
   "postUpgradeTasks": {
