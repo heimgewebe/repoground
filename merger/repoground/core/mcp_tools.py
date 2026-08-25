@@ -11,6 +11,7 @@ import argparse
 import re
 import signal
 import threading
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
@@ -27,6 +28,7 @@ KIND = "repobrief.mcp.snapshot_create"
 VERSION = "v1"
 DEFAULT_TIMEOUT_SECONDS = 300
 MAX_TIMEOUT_SECONDS = 1800
+_MIN_ITIMER_DELAY_SECONDS = 1e-6
 DEFAULT_MAX_FILE_BYTES = "25MB"
 DEFAULT_MAX_TOTAL_BYTES = "512MB"
 DEFAULT_SPLIT_SIZE = "25MB"
@@ -69,6 +71,135 @@ class RepoGroundMcpToolTimeout(TimeoutError):
     """Raised when an explicit MCP tool exceeds its timeout guard."""
 
 
+class _NestedItimerGuard:
+    def __init__(self, seconds: int) -> None:
+        self.seconds = seconds
+        self.previous_handler = signal.getsignal(signal.SIGALRM)
+        self.started = time.monotonic()
+        previous_timer = signal.setitimer(signal.ITIMER_REAL, 0)
+        self.previous_interval = previous_timer[1]
+        self.inner_deadline = self.started + float(seconds)
+        self.outer_deadline = (
+            self.started + max(previous_timer[0], _MIN_ITIMER_DELAY_SECONDS)
+            if previous_timer[0] > 0
+            else None
+        )
+        self.outer_timer_native = False
+
+    def _inner_timeout(self) -> RepoGroundMcpToolTimeout:
+        return RepoGroundMcpToolTimeout(
+            f"snapshot_create exceeded {self.seconds}s timeout"
+        )
+
+    def _arm_inner_timer(self) -> None:
+        self.outer_timer_native = False
+        delay = max(
+            self.inner_deadline - time.monotonic(), _MIN_ITIMER_DELAY_SECONDS
+        )
+        signal.signal(signal.SIGALRM, self._handle_alarm)
+        signal.setitimer(signal.ITIMER_REAL, delay)
+
+    def _invoke_previous_handler(self, signum: int, frame: object) -> None:
+        handler = self.previous_handler
+        if handler == signal.SIG_DFL:
+            signal.raise_signal(signal.SIGALRM)
+            return
+        if handler == signal.SIG_IGN:
+            return
+        if not callable(handler):
+            raise RepoGroundMcpToolError("unsupported pre-existing SIGALRM handler")
+        handler(signum, frame)
+
+    def _dispatch_outer_alarm(self, signum: int, frame: object) -> None:
+        signal.signal(signal.SIGALRM, self.previous_handler)
+        try:
+            self._invoke_previous_handler(signum, frame)
+        finally:
+            self.previous_handler = signal.getsignal(signal.SIGALRM)
+
+    def _capture_suspended_outer(
+        self, observed_at: float, timer: tuple[float, float]
+    ) -> None:
+        if timer[0] <= 0 and timer[1] <= 0:
+            self.outer_deadline = None
+            self.previous_interval = 0.0
+            return
+        self.outer_deadline = observed_at + max(
+            timer[0], _MIN_ITIMER_DELAY_SECONDS
+        )
+        self.previous_interval = timer[1]
+
+    def _resume_after_outer_alarm(self, now: float) -> None:
+        current_outer = signal.getitimer(signal.ITIMER_REAL)
+        if current_outer[0] <= 0 and current_outer[1] <= 0:
+            self.outer_deadline = None
+            self.previous_interval = 0.0
+            self._arm_inner_timer()
+            return
+        self.previous_interval = current_outer[1]
+        if current_outer[0] <= self.inner_deadline - now:
+            self.outer_timer_native = True
+            signal.signal(signal.SIGALRM, self._handle_alarm)
+            return
+        observed_at = time.monotonic()
+        suspended_outer = signal.setitimer(signal.ITIMER_REAL, 0)
+        self._capture_suspended_outer(observed_at, suspended_outer)
+        self._arm_inner_timer()
+
+    def _handle_alarm(self, signum: int, frame: object) -> None:
+        if not self.outer_timer_native:
+            raise self._inner_timeout()
+        if self.previous_interval <= 0:
+            self.outer_deadline = None
+        self._dispatch_outer_alarm(signum, frame)
+        now = time.monotonic()
+        if now >= self.inner_deadline:
+            raise self._inner_timeout()
+        self._resume_after_outer_alarm(now)
+
+    def start(self) -> None:
+        signal.signal(signal.SIGALRM, self._handle_alarm)
+        if self.outer_deadline is None:
+            self._arm_inner_timer()
+            return
+        outer_delay = max(
+            self.outer_deadline - self.started, _MIN_ITIMER_DELAY_SECONDS
+        )
+        if outer_delay > float(self.seconds):
+            self._arm_inner_timer()
+            return
+        self.outer_timer_native = True
+        signal.setitimer(
+            signal.ITIMER_REAL, outer_delay, self.previous_interval
+        )
+
+    def _capture_native_outer_for_restore(self) -> None:
+        observed_at = time.monotonic()
+        current_outer = signal.setitimer(signal.ITIMER_REAL, 0)
+        if current_outer[0] <= 0 and current_outer[1] <= 0:
+            self.outer_deadline = None
+            return
+        self.outer_deadline = observed_at + max(
+            current_outer[0], _MIN_ITIMER_DELAY_SECONDS
+        )
+        self.previous_interval = current_outer[1]
+
+    def restore(self) -> None:
+        if self.outer_timer_native:
+            self._capture_native_outer_for_restore()
+        else:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, self.previous_handler)
+        if self.outer_deadline is None:
+            return
+        restore_after = max(
+            self.outer_deadline - time.monotonic(), _MIN_ITIMER_DELAY_SECONDS
+        )
+        signal.setitimer(
+            signal.ITIMER_REAL, restore_after, self.previous_interval
+        )
+
+
 @contextmanager
 def _timeout_guard(seconds: int) -> Iterator[None]:
     if seconds <= 0:
@@ -77,21 +208,12 @@ def _timeout_guard(seconds: int) -> Iterator[None]:
         raise RepoGroundMcpToolError(
             "timeout guard requires main thread or an external process-level timeout wrapper"
         )
-    previous_handler = signal.getsignal(signal.SIGALRM)
-    previous_timer = signal.setitimer(signal.ITIMER_REAL, 0)
-
-    def _handler(_signum: int, _frame: object) -> None:
-        raise RepoGroundMcpToolTimeout(f"snapshot_create exceeded {seconds}s timeout")
-
-    signal.signal(signal.SIGALRM, _handler)
-    signal.setitimer(signal.ITIMER_REAL, float(seconds))
+    timer_guard = _NestedItimerGuard(seconds)
+    timer_guard.start()
     try:
         yield
     finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
-        signal.signal(signal.SIGALRM, previous_handler)
-        if previous_timer[0] > 0:
-            signal.setitimer(signal.ITIMER_REAL, previous_timer[0], previous_timer[1])
+        timer_guard.restore()
 
 
 def _guarded_path(raw: str | Path, *, label: str) -> Path:
