@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 from scripts.docmeta.status_truth_followups import (
     EXPECTED_POLICY,
     validate_outcome_followups,
 )
+
+NOW = datetime(2026, 8, 26, 18, 0, tzinfo=timezone.utc)
+TASK_ROOT = "a" * 64
 
 
 def _truth(binding: dict | None = None) -> dict:
@@ -30,6 +35,29 @@ def _truth(binding: dict | None = None) -> dict:
     }
 
 
+def _snapshot(
+    *,
+    tasks: dict | None = None,
+    candidates: dict | None = None,
+    observed_at: datetime = NOW,
+    candidate_coverage_complete: bool = True,
+) -> dict:
+    return {
+        "kind": "bureau_status_truth_snapshot",
+        "schema_version": 1,
+        "available": True,
+        "observed_at": observed_at.isoformat().replace("+00:00", "Z"),
+        "source": {
+            "authority": "bureau-state-store",
+            "task_authority": "state-store",
+            "task_spec_root_sha256": TASK_ROOT,
+            "candidate_coverage_complete": candidate_coverage_complete,
+        },
+        "tasks": tasks or {},
+        "candidates": candidates or {},
+    }
+
+
 def _codes(
     truth: dict,
     bureau_snapshot: dict | None = None,
@@ -40,12 +68,13 @@ def _codes(
         truth,
         bureau_snapshot,
         local_tasks=local_tasks,
+        now=NOW,
     )
     return {item.code for item in findings}
 
 
 def test_no_task_rationale_needs_no_bureau_snapshot() -> None:
-    findings, resolution = validate_outcome_followups(_truth())
+    findings, resolution = validate_outcome_followups(_truth(), now=NOW)
     assert findings == []
     assert resolution == {
         "status": "not_required",
@@ -105,16 +134,14 @@ def test_noncompleted_task_missing_evidence_requires_coverage() -> None:
             "binding": {"kind": "bureau_task", "id": "REPOGROUND-OPEN-T001"},
         }
     )
-    snapshot = {
-        "available": True,
-        "tasks": {
+    snapshot = _snapshot(
+        tasks={
             "REPOGROUND-OPEN-T001": {
                 "canonical_id": "REPOGROUND-OPEN-T001",
                 "state": "ready",
             }
-        },
-        "candidates": {},
-    }
+        }
+    )
     assert _codes(truth, snapshot, local_tasks=local_tasks) == set()
 
 
@@ -138,17 +165,15 @@ def test_repo_cannot_claim_bureau_authority() -> None:
 
 def test_open_bureau_task_reference_is_valid_with_read_only_snapshot() -> None:
     truth = _truth({"kind": "bureau_task", "id": "REPOGROUND-TEST-T001"})
-    snapshot = {
-        "available": True,
-        "tasks": {
+    snapshot = _snapshot(
+        tasks={
             "REPOGROUND-TEST-T001": {
                 "canonical_id": "REPOGROUND-TEST-T001",
                 "state": "ready",
             }
-        },
-        "candidates": {},
-    }
-    findings, resolution = validate_outcome_followups(truth, snapshot)
+        }
+    )
+    findings, resolution = validate_outcome_followups(truth, snapshot, now=NOW)
     assert findings == []
     assert resolution["status"] == "verified"
     assert resolution["valid_reference_count"] == 1
@@ -156,90 +181,115 @@ def test_open_bureau_task_reference_is_valid_with_read_only_snapshot() -> None:
 
 def test_open_bureau_candidate_reference_is_valid() -> None:
     truth = _truth({"kind": "bureau_candidate", "id": "candidate-deadbeef"})
-    snapshot = {
-        "available": True,
-        "tasks": {},
-        "candidates": {
+    snapshot = _snapshot(
+        candidates={
             "candidate-deadbeef": {
                 "canonical_id": "candidate-deadbeef",
                 "status": "observed",
             }
-        },
-    }
+        }
+    )
     assert _codes(truth, snapshot) == set()
 
 
 def test_bureau_reference_fails_closed_when_snapshot_is_unavailable() -> None:
     truth = _truth({"kind": "bureau_task", "id": "REPOGROUND-TEST-T001"})
-    findings, resolution = validate_outcome_followups(truth)
+    findings, resolution = validate_outcome_followups(truth, now=NOW)
     assert {item.code for item in findings} == {"STATUS_TRUTH_BUREAU_UNAVAILABLE"}
     assert resolution["status"] == "unavailable"
     assert resolution["valid_reference_count"] == 0
 
 
+def test_stale_bureau_snapshot_is_rejected() -> None:
+    truth = _truth({"kind": "bureau_task", "id": "REPOGROUND-TEST-T001"})
+    snapshot = _snapshot(
+        observed_at=NOW - timedelta(seconds=301),
+        tasks={"REPOGROUND-TEST-T001": {"state": "ready"}},
+    )
+    findings, resolution = validate_outcome_followups(truth, snapshot, now=NOW)
+    assert {item.code for item in findings} == {"STATUS_TRUTH_BUREAU_SNAPSHOT_STALE"}
+    assert resolution["status"] == "stale"
+
+
+def test_undated_bureau_snapshot_is_rejected() -> None:
+    truth = _truth({"kind": "bureau_task", "id": "REPOGROUND-TEST-T001"})
+    snapshot = _snapshot(tasks={"REPOGROUND-TEST-T001": {"state": "ready"}})
+    snapshot.pop("observed_at")
+    assert "STATUS_TRUTH_BUREAU_SNAPSHOT_INVALID" in _codes(truth, snapshot)
+
+
+def test_future_bureau_snapshot_is_rejected() -> None:
+    truth = _truth({"kind": "bureau_task", "id": "REPOGROUND-TEST-T001"})
+    snapshot = _snapshot(
+        observed_at=NOW + timedelta(seconds=31),
+        tasks={"REPOGROUND-TEST-T001": {"state": "ready"}},
+    )
+    assert "STATUS_TRUTH_BUREAU_SNAPSHOT_FUTURE" in _codes(truth, snapshot)
+
+
+def test_candidate_snapshot_requires_complete_projection() -> None:
+    truth = _truth({"kind": "bureau_candidate", "id": "candidate-deadbeef"})
+    snapshot = _snapshot(
+        candidate_coverage_complete=False,
+        candidates={"candidate-deadbeef": {"status": "observed"}},
+    )
+    assert "STATUS_TRUTH_BUREAU_SNAPSHOT_INVALID" in _codes(truth, snapshot)
+
+
 def test_missing_bureau_reference_is_rejected() -> None:
     truth = _truth({"kind": "bureau_task", "id": "REPOGROUND-TEST-T001"})
-    snapshot = {"available": True, "tasks": {}, "candidates": {}}
-    assert "STATUS_TRUTH_BUREAU_REF_MISSING" in _codes(truth, snapshot)
+    assert "STATUS_TRUTH_BUREAU_REF_MISSING" in _codes(truth, _snapshot())
 
 
 def test_renamed_bureau_reference_is_rejected() -> None:
     truth = _truth({"kind": "bureau_task", "id": "REPOGROUND-TEST-T001"})
-    snapshot = {
-        "available": True,
-        "tasks": {
+    snapshot = _snapshot(
+        tasks={
             "REPOGROUND-TEST-T001": {
                 "canonical_id": "REPOGROUND-TEST-T002",
                 "state": "ready",
             }
-        },
-        "candidates": {},
-    }
+        }
+    )
     assert "STATUS_TRUTH_BUREAU_REF_RENAMED" in _codes(truth, snapshot)
 
 
 def test_verified_bureau_followup_is_rejected_as_closed() -> None:
     truth = _truth({"kind": "bureau_task", "id": "REPOGROUND-TEST-T001"})
-    snapshot = {
-        "available": True,
-        "tasks": {
+    snapshot = _snapshot(
+        tasks={
             "REPOGROUND-TEST-T001": {
                 "canonical_id": "REPOGROUND-TEST-T001",
                 "state": "verified",
             }
-        },
-        "candidates": {},
-    }
+        }
+    )
     assert "STATUS_TRUTH_BUREAU_REF_CLOSED" in _codes(truth, snapshot)
 
 
 def test_superseded_bureau_followup_is_rejected() -> None:
     truth = _truth({"kind": "bureau_task", "id": "REPOGROUND-TEST-T001"})
-    snapshot = {
-        "available": True,
-        "tasks": {
+    snapshot = _snapshot(
+        tasks={
             "REPOGROUND-TEST-T001": {
                 "canonical_id": "REPOGROUND-TEST-T001",
                 "state": "superseded",
             }
-        },
-        "candidates": {},
-    }
+        }
+    )
     assert "STATUS_TRUTH_BUREAU_REF_SUPERSEDED" in _codes(truth, snapshot)
 
 
 def test_unknown_bureau_state_is_rejected() -> None:
     truth = _truth({"kind": "bureau_task", "id": "REPOGROUND-TEST-T001"})
-    snapshot = {
-        "available": True,
-        "tasks": {
+    snapshot = _snapshot(
+        tasks={
             "REPOGROUND-TEST-T001": {
                 "canonical_id": "REPOGROUND-TEST-T001",
                 "state": "mystery",
             }
-        },
-        "candidates": {},
-    }
+        }
+    )
     assert "STATUS_TRUTH_BUREAU_REF_STATE_UNKNOWN" in _codes(truth, snapshot)
 
 
