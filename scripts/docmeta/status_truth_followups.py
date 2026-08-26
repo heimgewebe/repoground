@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 EXPECTED_POLICY = {
@@ -35,6 +37,11 @@ BUREAU_CANDIDATE_TERMINAL_STATES = {
     "superseded",
     "cancelled",
 }
+BUREAU_SNAPSHOT_KIND = "bureau_status_truth_snapshot"
+BUREAU_SNAPSHOT_SCHEMA_VERSION = 1
+BUREAU_SNAPSHOT_MAX_AGE_SECONDS = 300.0
+BUREAU_SNAPSHOT_FUTURE_TOLERANCE_SECONDS = 30.0
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 @dataclass(frozen=True)
@@ -178,9 +185,91 @@ def _reference_state_finding(
     return None
 
 
+def _parse_observed_at(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed.astimezone(timezone.utc)
+
+
+def _snapshot_contract_finding(
+    bindings: list[dict[str, Any]],
+    bureau_snapshot: dict[str, Any],
+    *,
+    now: datetime | None = None,
+) -> FollowupFinding | None:
+    if (
+        bureau_snapshot.get("kind") != BUREAU_SNAPSHOT_KIND
+        or bureau_snapshot.get("schema_version") != BUREAU_SNAPSHOT_SCHEMA_VERSION
+    ):
+        return FollowupFinding(
+            "STATUS_TRUTH_BUREAU_SNAPSHOT_INVALID",
+            "expected a versioned bureau_status_truth_snapshot",
+        )
+
+    source = bureau_snapshot.get("source")
+    if not isinstance(source, dict):
+        return FollowupFinding(
+            "STATUS_TRUTH_BUREAU_SNAPSHOT_INVALID",
+            "missing source metadata",
+        )
+    if (
+        source.get("authority") != "bureau-state-store"
+        or source.get("task_authority") != "state-store"
+    ):
+        return FollowupFinding(
+            "STATUS_TRUTH_BUREAU_SNAPSHOT_INVALID",
+            "snapshot must be read from the authoritative Bureau StateStore task projection",
+        )
+    task_root = source.get("task_spec_root_sha256")
+    if not isinstance(task_root, str) or _SHA256_RE.fullmatch(task_root) is None:
+        return FollowupFinding(
+            "STATUS_TRUTH_BUREAU_SNAPSHOT_INVALID",
+            "missing state-store task_spec_root_sha256 revision binding",
+        )
+    if (
+        any(binding.get("kind") == "bureau_candidate" for binding in bindings)
+        and source.get("candidate_coverage_complete") is not True
+    ):
+        return FollowupFinding(
+            "STATUS_TRUTH_BUREAU_SNAPSHOT_INVALID",
+            "candidate references require a complete Bureau Live Register projection",
+        )
+
+    observed_at = _parse_observed_at(bureau_snapshot.get("observed_at"))
+    if observed_at is None:
+        return FollowupFinding(
+            "STATUS_TRUTH_BUREAU_SNAPSHOT_INVALID",
+            "snapshot observed_at must be an offset-aware ISO-8601 timestamp",
+        )
+    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    age_seconds = (current - observed_at).total_seconds()
+    if age_seconds < -BUREAU_SNAPSHOT_FUTURE_TOLERANCE_SECONDS:
+        return FollowupFinding(
+            "STATUS_TRUTH_BUREAU_SNAPSHOT_FUTURE",
+            f"snapshot observed_at is {-age_seconds:.1f}s in the future",
+        )
+    if age_seconds > BUREAU_SNAPSHOT_MAX_AGE_SECONDS:
+        return FollowupFinding(
+            "STATUS_TRUTH_BUREAU_SNAPSHOT_STALE",
+            f"snapshot age {age_seconds:.1f}s exceeds {BUREAU_SNAPSHOT_MAX_AGE_SECONDS:.0f}s",
+        )
+    return None
+
+
 def _resolve_bureau_bindings(
     bindings: list[dict[str, Any]],
     bureau_snapshot: dict[str, Any] | None,
+    *,
+    now: datetime | None = None,
 ) -> tuple[list[FollowupFinding], dict[str, Any]]:
     resolution = {
         "status": "not_required",
@@ -195,6 +284,15 @@ def _resolve_bureau_bindings(
             FollowupFinding("STATUS_TRUTH_BUREAU_UNAVAILABLE", str(binding.get("id")))
             for binding in bindings
         ], resolution
+
+    contract_finding = _snapshot_contract_finding(bindings, bureau_snapshot, now=now)
+    if contract_finding is not None:
+        resolution["status"] = (
+            "stale"
+            if contract_finding.code == "STATUS_TRUTH_BUREAU_SNAPSHOT_STALE"
+            else "invalid"
+        )
+        return [contract_finding], resolution
 
     findings: list[FollowupFinding] = []
     resolution["status"] = "verified"
@@ -213,6 +311,7 @@ def validate_outcome_followups(
     bureau_snapshot: dict[str, Any] | None = None,
     *,
     local_tasks: list[dict[str, Any]] | None = None,
+    now: datetime | None = None,
 ) -> tuple[list[FollowupFinding], dict[str, Any]]:
     """Validate current outcome gaps and resolve Bureau references read-only.
 
@@ -221,9 +320,11 @@ def validate_outcome_followups(
     blocked audit-package promotions and non-established/partial maturity axes are
     current gaps and must be covered explicitly.
 
-    Absence of a Bureau snapshot never turns a Bureau reference into success.
-    Explicit ``no_task`` rationales require no Bureau access because they register
-    no task and grant no task/queue/claim authority to RepoGround.
+    Absence of a Bureau snapshot never turns a Bureau reference into success. A
+    supplied snapshot must be revision-bound to the authoritative StateStore task
+    projection and fresh enough to make drift claims meaningful. Explicit
+    ``no_task`` rationales require no Bureau access because they register no task
+    and grant no task/queue/claim authority to RepoGround.
     """
 
     findings: list[FollowupFinding] = []
@@ -240,6 +341,7 @@ def validate_outcome_followups(
     bureau_findings, resolution = _resolve_bureau_bindings(
         _bureau_bindings(structured),
         bureau_snapshot,
+        now=now,
     )
     findings.extend(bureau_findings)
     return findings, resolution
