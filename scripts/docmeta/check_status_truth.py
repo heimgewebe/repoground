@@ -15,6 +15,7 @@ from typing import Any
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from scripts.docmeta.status_truth_followups import validate_outcome_followups
 from scripts.release.build_release_candidate import (
     DISTRIBUTION_STATUS,
     LICENSE_EXPRESSION,
@@ -241,7 +242,12 @@ def _validate_release_truth(
     return findings
 
 
-def scan(root: Path, status_path: Path = DEFAULT_STATUS_PATH) -> dict[str, Any]:
+def scan(
+    root: Path,
+    status_path: Path = DEFAULT_STATUS_PATH,
+    *,
+    bureau_snapshot: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     root = root.resolve()
     findings: list[Finding] = []
     tasks, task_findings = _load_tasks(root)
@@ -384,13 +390,31 @@ def scan(root: Path, status_path: Path = DEFAULT_STATUS_PATH) -> dict[str, Any]:
     if len(package_ids) != len(packages):
         findings.append(Finding("STATUS_TRUTH_DUPLICATE_PACKAGE", status_path.as_posix(), "duplicate task_id"))
 
-    followups = truth.get("open_followups") if isinstance(truth.get("open_followups"), list) else []
-    for task_id in followups:
+    followups = (
+        truth.get("open_followups")
+        if isinstance(truth.get("open_followups"), list)
+        else []
+    )
+    for task_id in (item for item in followups if isinstance(item, str)):
         task = task_by_id.get(task_id)
         if task is None:
-            findings.append(Finding("STATUS_TRUTH_UNKNOWN_FOLLOWUP", status_path.as_posix(), str(task_id)))
+            findings.append(
+                Finding("STATUS_TRUTH_UNKNOWN_FOLLOWUP", status_path.as_posix(), task_id)
+            )
         elif task.get("status") == "done":
-            findings.append(Finding("STATUS_TRUTH_CLOSED_FOLLOWUP", status_path.as_posix(), str(task_id)))
+            findings.append(
+                Finding("STATUS_TRUTH_CLOSED_FOLLOWUP", status_path.as_posix(), task_id)
+            )
+
+    followup_findings, bureau_reference_resolution = validate_outcome_followups(
+        truth,
+        bureau_snapshot,
+        local_tasks=tasks,
+    )
+    findings.extend(
+        Finding(item.code, status_path.as_posix(), item.detail)
+        for item in followup_findings
+    )
 
     health = truth.get("health_semantics") if isinstance(truth.get("health_semantics"), dict) else {}
     forbidden = set(health.get("forbidden_inferences") or [])
@@ -409,6 +433,7 @@ def scan(root: Path, status_path: Path = DEFAULT_STATUS_PATH) -> dict[str, Any]:
             "finding_count": len(findings),
         },
         "findings": [asdict(item) for item in findings],
+        "bureau_reference_resolution": bureau_reference_resolution,
         "does_not_establish": [
             "documentation completeness or semantic correctness",
             "task evidence sufficiency beyond declared paths",
@@ -424,8 +449,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", type=Path, default=Path.cwd())
     parser.add_argument("--status-path", type=Path, default=DEFAULT_STATUS_PATH)
     parser.add_argument("--format", choices=("human", "json"), default="human")
+    parser.add_argument("--bureau-snapshot", type=Path)
     args = parser.parse_args(argv)
-    report = scan(args.root, args.status_path)
+    bureau_snapshot = None
+    if args.bureau_snapshot is not None:
+        try:
+            loaded = _load_json(args.bureau_snapshot)
+            bureau_snapshot = (
+                loaded if isinstance(loaded, dict) else {"available": False}
+            )
+        except Exception:  # noqa: BLE001 - optional external read-only snapshot
+            bureau_snapshot = {"available": False}
+    report = scan(
+        args.root,
+        args.status_path,
+        bureau_snapshot=bureau_snapshot,
+    )
     if args.format == "json":
         print(json.dumps(report, indent=2, sort_keys=True))
     elif report["findings"]:
