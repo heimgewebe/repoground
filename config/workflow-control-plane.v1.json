@@ -149,8 +149,8 @@
       "path": ".github/workflows/task-index.yml",
       "class": "diagnostic",
       "rationale": "Planning registration / task-index ratchet (repo-local projection).",
-      "sha256": "9ce27d7b3cbce97a78c0d4a9b20cdf81e541e8718e3bf28e54ffc7d2ac205e3c",
-      "bytes": 5092
+      "sha256": "eef2e72a0fac1094671f15c37997689dc3498f29b584e6ef64b7fd6dcd52125e",
+      "bytes": 5345
     },
     {
       "path": ".github/workflows/test-suite.yml",
