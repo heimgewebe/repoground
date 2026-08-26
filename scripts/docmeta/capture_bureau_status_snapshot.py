@@ -15,6 +15,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts.docmeta.status_truth_followups import (
+    BUREAU_CANDIDATE_PROJECTION_SOURCE,
     BUREAU_SNAPSHOT_KIND,
     BUREAU_SNAPSHOT_SCHEMA_VERSION,
 )
@@ -38,6 +39,26 @@ def _run_json(command: list[str]) -> dict[str, Any]:
         timeout=30,
     )
     return _unwrap(json.loads(completed.stdout))
+
+
+def _candidate_projection_metadata(
+    candidates: dict[str, Any],
+    summary: dict[str, Any],
+) -> tuple[bool, str, int]:
+    coverage_complete = candidates.get("coverage_complete") is True
+    projection_source = candidates.get("projection_source")
+    projection_records = summary.get("projection_records")
+    if not coverage_complete:
+        raise ValueError("Bureau candidate projection coverage is incomplete")
+    if projection_source != BUREAU_CANDIDATE_PROJECTION_SOURCE:
+        raise ValueError("Bureau candidate projection is not the authoritative complete event scan")
+    if (
+        isinstance(projection_records, bool)
+        or not isinstance(projection_records, int)
+        or projection_records < 0
+    ):
+        raise ValueError("Bureau candidate projection lacks an event-count revision")
+    return coverage_complete, projection_source, projection_records
 
 
 def build_snapshot(
@@ -66,9 +87,13 @@ def build_snapshot(
             "state": item.get("effective_state"),
         }
 
-    coverage_complete = candidates.get("coverage_complete") is True
     summary = candidates.get("summary")
     summary = summary if isinstance(summary, dict) else {}
+    (
+        coverage_complete,
+        projection_source,
+        projection_records,
+    ) = _candidate_projection_metadata(candidates, summary)
     candidate_records: dict[str, dict[str, Any]] = {}
     for item in summary.get("latest_candidates", []):
         if not isinstance(item, dict):
@@ -94,7 +119,8 @@ def build_snapshot(
             "task_authority": "state-store",
             "task_spec_root_sha256": task_root,
             "candidate_coverage_complete": coverage_complete,
-            "candidate_projection_source": candidates.get("projection_source"),
+            "candidate_projection_source": projection_source,
+            "candidate_projection_records": projection_records,
         },
         "tasks": task_records,
         "candidates": candidate_records,
@@ -106,7 +132,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--bureau-root", type=Path, required=True)
     parser.add_argument("--bureau-command", default="bureau")
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--candidate-limit", type=int, default=5000)
+    parser.add_argument("--candidate-limit", type=int, default=500)
     args = parser.parse_args(argv)
 
     base = [args.bureau_command, "--root", str(args.bureau_root), "--json"]
