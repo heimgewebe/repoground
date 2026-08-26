@@ -6,9 +6,13 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts.docmeta.status_truth_followups import (
     BUREAU_SNAPSHOT_KIND,
@@ -26,7 +30,13 @@ def _unwrap(value: Any) -> dict[str, Any]:
 
 
 def _run_json(command: list[str]) -> dict[str, Any]:
-    completed = subprocess.run(command, check=True, capture_output=True, text=True)
+    completed = subprocess.run(
+        command,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
     return _unwrap(json.loads(completed.stdout))
 
 
