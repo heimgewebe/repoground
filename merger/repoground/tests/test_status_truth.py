@@ -391,5 +391,6 @@ def test_task_workflow_runs_status_truth_check() -> None:
     workflow = (ROOT / ".github/workflows/task-index.yml").read_text(
         encoding="utf-8"
     )
-    assert "python3 scripts/docmeta/check_status_truth.py --format json" in workflow
+    assert "python3 scripts/docmeta/check_status_truth_ci.py --format json" in workflow
+    assert "python3 scripts/docmeta/check_status_truth.py --format json" not in workflow
     assert "status-truth-report.json" in workflow

@@ -114,7 +114,10 @@ jobs:
       - name: Status truth drift check
         run: |
           set -euo pipefail
-          python3 scripts/docmeta/check_status_truth.py --format json \
+          # GitHub-hosted CI cannot see Bureau's authoritative local StateStore.
+          # Keep this repository gate structural; strict live resolution is an
+          # operator-side check using a fresh capture_bureau_status_snapshot.py artifact.
+          python3 scripts/docmeta/check_status_truth_ci.py --format json \
             | tee status-truth-report.json
 
       - name: Upload status truth report
