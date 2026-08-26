@@ -138,7 +138,40 @@ def _fixture(root: Path) -> None:
             "limitations": ["Not implemented."],
         }
     ]
-    truth["open_followups"] = ["TASK-X-001"]
+    truth["open_followups"] = [
+        {
+            "axis": "operational_readiness",
+            "reason": "Synthetic operational maturity remains partial.",
+            "covers": ["system_maturity:operational_readiness"],
+            "binding": {
+                "kind": "no_task",
+                "rationale": "Synthetic fixture has no external Bureau task for this aggregate gap.",
+            },
+        },
+        {
+            "axis": "product_readiness",
+            "reason": "Synthetic product readiness and task evidence remain open.",
+            "covers": [
+                "system_maturity:product_readiness",
+                "audit_package:TASK-X-001:promotion",
+                "task:TASK-X-001:missing_evidence",
+            ],
+            "binding": {
+                "kind": "no_task",
+                "rationale": "Synthetic fixture intentionally has no external Bureau task.",
+            },
+        },
+        {
+            "axis": "release_readiness",
+            "reason": "Synthetic release readiness remains not established.",
+            "covers": ["system_maturity:release_readiness"],
+            "binding": {
+                "kind": "no_task",
+                "rationale": "Synthetic fixture has no external Bureau release task.",
+            },
+        },
+        "TASK-X-001",
+    ]
     truth["release_identity"] = dict(RELEASE_IDENTITY)
     _write(root, "docs/status/repobrief-status-truth.v1.json", json.dumps(truth))
 
@@ -341,6 +374,14 @@ def test_release_readiness_can_progress_after_release_task_done(
         }
     )
     truth["system_maturity"]["release_readiness"] = "established"
+    truth["open_followups"] = [
+        item
+        for item in truth["open_followups"]
+        if not (
+            isinstance(item, dict)
+            and "system_maturity:release_readiness" in item.get("covers", [])
+        )
+    ]
     status_path.write_text(json.dumps(truth))
     report = scan(tmp_path)
     assert report["status"] == "pass", report["findings"]

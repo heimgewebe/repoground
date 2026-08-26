@@ -158,8 +158,99 @@
     },
     "open_followups": {
       "items": {
-        "pattern": "^TASK-",
-        "type": "string"
+        "oneOf": [
+          {
+            "pattern": "^TASK-",
+            "type": "string"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "axis": {
+                "enum": [
+                  "operational_readiness",
+                  "product_readiness",
+                  "release_readiness"
+                ]
+              },
+              "reason": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "binding": {
+                "oneOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "kind": {
+                        "const": "bureau_task"
+                      },
+                      "id": {
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "id"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "kind": {
+                        "const": "bureau_candidate"
+                      },
+                      "id": {
+                        "pattern": "^candidate-[0-9a-f]+$",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "id"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "kind": {
+                        "const": "no_task"
+                      },
+                      "rationale": {
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "rationale"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
+              "covers": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "minItems": 1,
+                "type": "array",
+                "uniqueItems": true
+              }
+            },
+            "required": [
+              "axis",
+              "reason",
+              "covers",
+              "binding"
+            ],
+            "type": "object"
+          }
+        ]
       },
       "type": "array",
       "uniqueItems": true
@@ -417,6 +508,30 @@
     },
     "version": {
       "const": "1.0"
+    },
+    "outcome_followup_policy": {
+      "additionalProperties": false,
+      "properties": {
+        "bureau_authority": {
+          "const": "external_only"
+        },
+        "offline_reference_state": {
+          "const": "unavailable_not_valid"
+        },
+        "repoground_role": {
+          "const": "read_only_reference_and_drift"
+        },
+        "task_done_does_not_imply_outcome_ready": {
+          "const": true
+        }
+      },
+      "required": [
+        "bureau_authority",
+        "offline_reference_state",
+        "repoground_role",
+        "task_done_does_not_imply_outcome_ready"
+      ],
+      "type": "object"
     }
   },
   "required": [
@@ -434,6 +549,7 @@
     "audit_package_coverage",
     "audit_packages",
     "open_followups",
+    "outcome_followup_policy",
     "release_identity",
     "health_semantics",
     "does_not_establish"

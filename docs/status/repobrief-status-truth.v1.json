@@ -156,8 +156,53 @@
     "pass_means": "Only the checks declared by that specific health or CI report passed for the observed artifact or commit."
   },
   "kind": "lenskit.repobrief_status_truth",
-  "observed_on": "2026-07-23",
-  "open_followups": [],
+  "observed_on": "2026-08-26",
+  "open_followups": [
+    {
+      "axis": "operational_readiness",
+      "reason": "Operational readiness remains partial because this projection aggregates bounded runtime surfaces rather than one actionable host defect.",
+      "binding": {
+        "kind": "no_task",
+        "rationale": "No single Bureau task is registered from this aggregate status alone; a concrete fresh runtime defect must enter Bureau through separate evidence-bound intake."
+      },
+      "covers": [
+        "system_maturity:operational_readiness"
+      ]
+    },
+    {
+      "axis": "product_readiness",
+      "reason": "Product readiness is intentionally not established by completion of bounded implementation slices.",
+      "binding": {
+        "kind": "no_task",
+        "rationale": "A future product-readiness promotion requires a separate accepted product-level contract and evidence; this projection must not manufacture that task or infer readiness from done slices."
+      },
+      "covers": [
+        "system_maturity:product_readiness"
+      ]
+    },
+    {
+      "axis": "release_readiness",
+      "reason": "Release readiness is intentionally not established merely because source distribution is permitted and release-candidate checks are green.",
+      "binding": {
+        "kind": "no_task",
+        "rationale": "A concrete release decision belongs to separate operator/Bureau intake when requested; historical or bounded release checks are not reopened as synthetic follow-up work."
+      },
+      "covers": [
+        "system_maturity:release_readiness"
+      ]
+    },
+    {
+      "axis": "product_readiness",
+      "reason": "Canonical review retrieval remains measured below its acceptance thresholds and default promotion is blocked.",
+      "covers": [
+        "audit_package:TASK-REPOBRIEF-AUDIT-RETRIEVAL-MEASUREMENT-001:promotion"
+      ],
+      "binding": {
+        "kind": "no_task",
+        "rationale": "The measured retrieval slice and its default-promotion decision are already completed for their bounded scopes. A new Bureau task is not created from the unchanged blocked result alone; fresh materially improved retrieval evidence or an explicit promotion request is required before new work is registered."
+      }
+    }
+  ],
   "release_identity": {
     "license_expression": "Apache-2.0",
     "license_file": "LICENSE",
@@ -249,5 +294,11 @@
       "done": 92
     }
   },
-  "version": "1.0"
+  "version": "1.0",
+  "outcome_followup_policy": {
+    "bureau_authority": "external_only",
+    "offline_reference_state": "unavailable_not_valid",
+    "repoground_role": "read_only_reference_and_drift",
+    "task_done_does_not_imply_outcome_ready": true
+  }
 }
