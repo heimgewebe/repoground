@@ -41,6 +41,7 @@ BUREAU_SNAPSHOT_KIND = "bureau_status_truth_snapshot"
 BUREAU_SNAPSHOT_SCHEMA_VERSION = 1
 BUREAU_SNAPSHOT_MAX_AGE_SECONDS = 300.0
 BUREAU_SNAPSHOT_FUTURE_TOLERANCE_SECONDS = 30.0
+BUREAU_CANDIDATE_PROJECTION_SOURCE = "complete_event_scan"
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -200,6 +201,35 @@ def _parse_observed_at(value: Any) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
+def _candidate_snapshot_contract_finding(
+    source: dict[str, Any],
+    bureau_snapshot: dict[str, Any],
+) -> FollowupFinding | None:
+    if source.get("candidate_coverage_complete") is not True:
+        return FollowupFinding(
+            "STATUS_TRUTH_BUREAU_SNAPSHOT_INVALID",
+            "candidate references require a complete Bureau Live Register projection",
+        )
+    if source.get("candidate_projection_source") != BUREAU_CANDIDATE_PROJECTION_SOURCE:
+        return FollowupFinding(
+            "STATUS_TRUTH_BUREAU_SNAPSHOT_INVALID",
+            "candidate references require the authoritative complete_event_scan projection",
+        )
+    projection_records = source.get("candidate_projection_records")
+    candidates = bureau_snapshot.get("candidates")
+    candidate_count = len(candidates) if isinstance(candidates, dict) else 0
+    if (
+        isinstance(projection_records, bool)
+        or not isinstance(projection_records, int)
+        or projection_records < candidate_count
+    ):
+        return FollowupFinding(
+            "STATUS_TRUTH_BUREAU_SNAPSHOT_INVALID",
+            "candidate projection must carry a non-negative event-count revision binding",
+        )
+    return None
+
+
 def _snapshot_contract_finding(
     bindings: list[dict[str, Any]],
     bureau_snapshot: dict[str, Any],
@@ -235,14 +265,10 @@ def _snapshot_contract_finding(
             "STATUS_TRUTH_BUREAU_SNAPSHOT_INVALID",
             "missing state-store task_spec_root_sha256 revision binding",
         )
-    if (
-        any(binding.get("kind") == "bureau_candidate" for binding in bindings)
-        and source.get("candidate_coverage_complete") is not True
-    ):
-        return FollowupFinding(
-            "STATUS_TRUTH_BUREAU_SNAPSHOT_INVALID",
-            "candidate references require a complete Bureau Live Register projection",
-        )
+    if any(binding.get("kind") == "bureau_candidate" for binding in bindings):
+        candidate_finding = _candidate_snapshot_contract_finding(source, bureau_snapshot)
+        if candidate_finding is not None:
+            return candidate_finding
 
     observed_at = _parse_observed_at(bureau_snapshot.get("observed_at"))
     if observed_at is None:
@@ -322,9 +348,10 @@ def validate_outcome_followups(
 
     Absence of a Bureau snapshot never turns a Bureau reference into success. A
     supplied snapshot must be revision-bound to the authoritative StateStore task
-    projection and fresh enough to make drift claims meaningful. Explicit
-    ``no_task`` rationales require no Bureau access because they register no task
-    and grant no task/queue/claim authority to RepoGround.
+    projection and fresh enough to make drift claims meaningful. Candidate state
+    additionally requires Bureau's complete event-scan projection plus its event
+    count revision. Explicit ``no_task`` rationales require no Bureau access because
+    they register no task and grant no task/queue/claim authority to RepoGround.
     """
 
     findings: list[FollowupFinding] = []
