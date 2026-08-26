@@ -42,6 +42,7 @@ def _snapshot(
     observed_at: datetime = NOW,
     candidate_coverage_complete: bool = True,
 ) -> dict:
+    candidate_records = candidates or {}
     return {
         "kind": "bureau_status_truth_snapshot",
         "schema_version": 1,
@@ -52,9 +53,11 @@ def _snapshot(
             "task_authority": "state-store",
             "task_spec_root_sha256": TASK_ROOT,
             "candidate_coverage_complete": candidate_coverage_complete,
+            "candidate_projection_source": "complete_event_scan",
+            "candidate_projection_records": len(candidate_records),
         },
         "tasks": tasks or {},
-        "candidates": candidates or {},
+        "candidates": candidate_records,
     }
 
 
