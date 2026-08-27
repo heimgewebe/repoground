@@ -274,6 +274,7 @@ def _execute_federated_query_data(
                 trace=trace,
                 build_context=build_context,
                 read_only=True,
+                _repository_identity=repo_id,
             )
 
             # Score normalisation and integration per bundle
