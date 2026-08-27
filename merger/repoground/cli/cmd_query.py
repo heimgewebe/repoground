@@ -28,7 +28,8 @@ def run_query(args: argparse.Namespace) -> int:
         "path": args.path,
         "ext": args.ext,
         "layer": args.layer,
-        "artifact_type": getattr(args, "artifact_type", None)
+        "artifact_type": getattr(args, "artifact_type", None),
+        "archive_scope": getattr(args, "archive_scope", "current"),
     }
 
     policy_instance = None
