@@ -36,6 +36,11 @@ _SEMANTIC_FALLBACK_UNSUPPORTED_METRIC = "semantic_fallback_unsupported_metric"
 _SEMANTIC_FALLBACK_DIMENSION_MISMATCH = "semantic_fallback_dimension_mismatch"
 _SEMANTIC_FALLBACK_ENCODING_ERROR = "semantic_fallback_encoding_error"
 
+_ARCHIVE_SCOPE_CURRENT = "current"
+_ARCHIVE_SCOPE_HISTORY = "history"
+_SYSTEMKATALOG_REPOSITORY_IDENTITIES = frozenset({"heimgewebe/systemkatalog", "systemkatalog"})
+_SYSTEMKATALOG_ARCHIVE_PREFIX = "docs/archive/cabinet-era/"
+
 logger = logging.getLogger(__name__)
 
 
@@ -496,6 +501,74 @@ def _apply_semantic_reranking(
         )
 
 
+def _resolve_archive_retrieval_policy(
+    conn: sqlite3.Connection,
+    filters: Dict[str, Optional[str]],
+    repository_identity: Optional[str],
+) -> tuple[Optional[str], bool, bool]:
+    archive_scope = filters.get("archive_scope", _ARCHIVE_SCOPE_CURRENT)
+    if archive_scope not in {_ARCHIVE_SCOPE_CURRENT, _ARCHIVE_SCOPE_HISTORY}:
+        raise ValueError("archive_scope must be current or history")
+
+    resolved_identity = repository_identity or filters.get("repo")
+    if not resolved_identity:
+        repo_rows = conn.execute(
+            "SELECT DISTINCT repo_id FROM chunks WHERE repo_id IS NOT NULL ORDER BY repo_id LIMIT 2"
+        ).fetchall()
+        if len(repo_rows) == 1:
+            resolved_identity = repo_rows[0]["repo_id"]
+
+    systemkatalog_boundary = resolved_identity in _SYSTEMKATALOG_REPOSITORY_IDENTITIES
+    if systemkatalog_boundary:
+        filters.setdefault("archive_scope", archive_scope)
+    else:
+        filters.pop("archive_scope", None)
+    return (
+        resolved_identity,
+        systemkatalog_boundary,
+        systemkatalog_boundary and archive_scope == _ARCHIVE_SCOPE_CURRENT,
+    )
+
+
+def _record_archive_trace(
+    trace_data: Optional[Dict[str, Any]],
+    filters: Dict[str, Optional[str]],
+    repository_identity: Optional[str],
+    systemkatalog_boundary: bool,
+) -> None:
+    if trace_data is None:
+        return
+    trace_data["filters"] = dict(filters)
+    if systemkatalog_boundary:
+        trace_data["repository_identity"] = repository_identity
+
+
+def _append_archive_boundary(
+    where_clauses: List[str],
+    params: List[Any],
+    archive_default_excluded: bool,
+) -> None:
+    if not archive_default_excluded:
+        return
+    archive_root = _SYSTEMKATALOG_ARCHIVE_PREFIX.rstrip("/")
+    where_clauses.append("(c.path_norm <> ? AND c.path_norm NOT LIKE ?)")
+    params.extend([archive_root, f"{_SYSTEMKATALOG_ARCHIVE_PREFIX}%"])
+
+
+def _append_archive_claim_boundaries(
+    evidence: List[str],
+    does_not_prove: List[str],
+    systemkatalog_boundary: bool,
+    archive_default_excluded: bool,
+) -> None:
+    if systemkatalog_boundary:
+        evidence.append("archive_scope")
+    if archive_default_excluded:
+        does_not_prove.append(
+            "Systemkatalog cabinet-era archive paths excluded from current retrieval are not established as irrelevant to explicit history retrieval."
+        )
+
+
 def execute_query(
     index_path: Path,
     query_text: str,
@@ -517,13 +590,13 @@ def execute_query(
     _prepared_router_output: Optional[Dict[str, Any]] = None,
     read_only: bool = False,
     _validated_read_only_source_path: Optional[Path] = None,
+    _repository_identity: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Executes a query against the SQLite index.
     Returns a dictionary containing query metadata and results.
     """
-    if not filters:
-        filters = {}
+    filters = dict(filters or {})
     normalized_excluded_paths = normalize_excluded_paths(excluded_paths)
 
     trace_data = None
@@ -556,6 +629,15 @@ def execute_query(
             validated_source_path=validated_source_path,
         )
         conn.row_factory = sqlite3.Row
+
+        (
+            repository_identity,
+            systemkatalog_archive_boundary,
+            archive_default_excluded,
+        ) = _resolve_archive_retrieval_policy(conn, filters, _repository_identity)
+        _record_archive_trace(
+            trace_data, filters, repository_identity, systemkatalog_archive_boundary
+        )
 
         where_clauses = []
         params = []
@@ -669,6 +751,8 @@ def execute_query(
         if filters.get("artifact_type"):
             where_clauses.append("c.artifact_type = ?")
             params.append(filters["artifact_type"])
+
+        _append_archive_boundary(where_clauses, params, archive_default_excluded)
 
         if normalized_excluded_paths:
             placeholders = ", ".join("?" for _ in normalized_excluded_paths)
@@ -1095,6 +1179,12 @@ def execute_query(
             does_not_prove.append(
                 "A path excluded from this query run is not established as irrelevant."
             )
+        _append_archive_claim_boundaries(
+            evidence,
+            does_not_prove,
+            systemkatalog_archive_boundary,
+            archive_default_excluded,
+        )
         out["claim_boundaries"] = {
             "proves": [
                 "These hits were returned by this index under this query and these filters."

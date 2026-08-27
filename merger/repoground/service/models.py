@@ -295,6 +295,7 @@ class FederationQueryRequest(BaseModel):
     ext: Optional[str] = None
     layer: Optional[str] = None
     artifact_type: Optional[str] = None
+    archive_scope: Literal["current", "history"] = "current"
     embedding_policy: Optional[str] = None
     explain: bool = False
     trace: bool = False
@@ -325,6 +326,7 @@ class QueryRequest(BaseModel):
     ext: Optional[str] = None
     layer: Optional[str] = None
     artifact_type: Optional[str] = None
+    archive_scope: Literal["current", "history"] = "current"
     output_profile: Optional[Literal["human_review", "agent_minimal", "ui_navigation", "lookup_minimal", "review_context"]] = None
     context_mode: Literal["exact", "block", "window", "file"] = "exact"
     context_window_lines: int = 0

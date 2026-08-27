@@ -36,6 +36,7 @@ def _query_filters(request: FederationQueryRequest | QueryRequest) -> Dict[str, 
         "ext": request.ext,
         "layer": request.layer,
         "artifact_type": request.artifact_type,
+        "archive_scope": request.archive_scope,
     }
 
 

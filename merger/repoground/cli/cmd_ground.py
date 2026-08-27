@@ -615,6 +615,12 @@ def register_ground_command_groups(ground_parser: argparse.ArgumentParser) -> No
     query_parser.add_argument("--layer", help="Filter by layer")
     query_parser.add_argument("--artifact-type", help="Filter by artifact_type")
     query_parser.add_argument(
+        "--archive-scope",
+        choices=["current", "history"],
+        default="current",
+        help="Systemkatalog archive scope; history explicitly includes cabinet-era archive content",
+    )
+    query_parser.add_argument(
         "--raw-index-result",
         action="store_true",
         help="Disable resolved evidence and return only the bounded raw index result",
@@ -1307,6 +1313,7 @@ def run_query_existing_index(args: argparse.Namespace) -> int:
         "ext": args.ext,
         "layer": args.layer,
         "artifact_type": getattr(args, "artifact_type", None),
+        "archive_scope": getattr(args, "archive_scope", "current"),
     }
     try:
         result = query_existing_index(

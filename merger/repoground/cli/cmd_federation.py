@@ -44,7 +44,13 @@ def register_federation_commands(subparsers) -> None:
     )
     query_parser.add_argument("-q", "--query", required=True, help="Query string")
     query_parser.add_argument("-k", type=int, default=10, help="Number of final results to return (top-k across all bundles)")
-    query_parser.add_argument("--repo", type=str, help="Filter by repository ID (currently the only supported filter)")
+    query_parser.add_argument("--repo", type=str, help="Filter by repository ID")
+    query_parser.add_argument(
+        "--archive-scope",
+        choices=["current", "history"],
+        default="current",
+        help="Systemkatalog archive scope; history explicitly includes cabinet-era archive content",
+    )
     query_parser.add_argument("--trace", action="store_true", help="Include diagnostic trace and generate federation_trace.json (and federation_conflicts.json if applicable) in CWD")
 
 
@@ -118,9 +124,9 @@ def handle_federation_command(args: argparse.Namespace) -> int:
         from merger.repoground.retrieval.federation_query import execute_federated_query_from_bundles
         index_path = Path(args.index) if args.index else None
         inline_bundles = getattr(args, "bundle", []) or []
-        filters = None
+        filters = {"archive_scope": getattr(args, "archive_scope", "current")}
         if args.repo:
-            filters = {"repo": args.repo}
+            filters["repo"] = args.repo
 
         try:
             if bool(index_path) == bool(inline_bundles):

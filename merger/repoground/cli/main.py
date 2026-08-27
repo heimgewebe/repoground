@@ -116,6 +116,12 @@ def main(args: Optional[List[str]] = None) -> int:
     query_parser.add_argument("--ext", help="Filter by file extension")
     query_parser.add_argument("--layer", help="Filter by layer")
     query_parser.add_argument("--artifact-type", help="Filter by artifact_type")
+    query_parser.add_argument(
+        "--archive-scope",
+        choices=["current", "history"],
+        default="current",
+        help="Systemkatalog archive scope; history explicitly includes cabinet-era archive content",
+    )
     query_parser.add_argument("--emit", choices=["text", "json"], default="text", help="Output format")
     query_parser.add_argument("--stale-policy", choices=["warn", "fail", "ignore"], default="fail", help="Policy for handling stale indices")
     query_parser.add_argument("--embedding-policy", help="Path to embedding-policy.v1 JSON policy instance (requests semantic pipeline; currently candidate overfetch only)")

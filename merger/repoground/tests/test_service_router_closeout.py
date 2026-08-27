@@ -169,6 +169,12 @@ def _normalized_openapi(openapi: dict[str, object]) -> dict[str, object]:
     if isinstance(properties, dict):
         properties.pop("ctx", None)
         properties.pop("input", None)
+    # archive_scope is an intentional additive API extension covered separately.
+    for schema_name in ("QueryRequest", "FederationQueryRequest"):
+        schema = schemas.get(schema_name) if isinstance(schemas, dict) else None
+        schema_properties = schema.get("properties") if isinstance(schema, dict) else None
+        if isinstance(schema_properties, dict):
+            schema_properties.pop("archive_scope", None)
     return normalized
 
 
