@@ -551,7 +551,7 @@ def _append_archive_boundary(
     if not archive_default_excluded:
         return
     archive_root = _SYSTEMKATALOG_ARCHIVE_PREFIX.rstrip("/")
-    where_clauses.append("(c.path <> ? AND c.path NOT LIKE ?)")
+    where_clauses.append("(c.path_norm <> ? AND c.path_norm NOT LIKE ?)")
     params.extend([archive_root, f"{_SYSTEMKATALOG_ARCHIVE_PREFIX}%"])
 
 

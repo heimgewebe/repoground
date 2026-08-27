@@ -40,6 +40,20 @@ def _build_systemkatalog_index(tmp_path, *, repo_id="heimgewebe/systemkatalog"):
             "start_byte": 0,
             "end_byte": 45,
         },
+        {
+            "chunk_id": "archive-windows",
+            "repo_id": repo_id,
+            "path": r"docs\archive\cabinet-era\legacy.md",
+            "content": "maintenance archived legacy system catalog procedure",
+            "start_line": 1,
+            "end_line": 1,
+            "layer": "docs",
+            "artifact_type": "doc",
+            "content_sha256": "c" * 64,
+            "source_file": r"docs\archive\cabinet-era\legacy.md",
+            "start_byte": 0,
+            "end_byte": 52,
+        },
     ]
     with chunks_path.open("w", encoding="utf-8") as handle:
         for chunk in chunks:
@@ -68,7 +82,11 @@ def test_systemkatalog_history_scope_explicitly_opts_archive_back_in(tmp_path):
         filters={"archive_scope": "history"},
     )
 
-    assert {hit["chunk_id"] for hit in result["results"]} == {"active", "archive"}
+    assert {hit["chunk_id"] for hit in result["results"]} == {
+        "active",
+        "archive",
+        "archive-windows",
+    }
     assert result["applied_filters"]["archive_scope"] == "history"
 
 
@@ -91,7 +109,11 @@ def test_federation_uses_published_systemkatalog_identity_for_archive_boundary(t
     )
 
     assert [hit["chunk_id"] for hit in current["results"]] == ["active"]
-    assert {hit["chunk_id"] for hit in history["results"]} == {"active", "archive"}
+    assert {hit["chunk_id"] for hit in history["results"]} == {
+        "active",
+        "archive",
+        "archive-windows",
+    }
 
 
 def test_query_models_default_to_current_and_allow_explicit_history():
