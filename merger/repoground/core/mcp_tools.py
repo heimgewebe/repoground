@@ -732,6 +732,8 @@ def query_existing_index(
         "mutation_boundary": _read_only_boundary(verbose=verbose),
         "does_not_establish": _read_only_does_not_establish(verbose=verbose),
     }
+    if "structured_evidence" in pack:
+        result["structured_evidence"] = pack["structured_evidence"]
     if verbose:
         result["context_pack"] = pack
     return result

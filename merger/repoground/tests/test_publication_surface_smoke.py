@@ -84,6 +84,10 @@ def _git(repo: Path, *args: str) -> None:
 def _source_repo(tmp_path: Path) -> Path:
     repo = tmp_path / "src"
     (repo / "pkg").mkdir(parents=True)
+    (repo / "src").mkdir()
+    (repo / "src" / "lib.rs").write_text(
+        'pub fn rust_helper() {\n    println!("ok");\n}\n', encoding="utf-8"
+    )
     (repo / "pkg" / "core.py").write_text(CORE_MODULE, encoding="utf-8")
     (repo / "pkg" / "caller.py").write_text(CALLER_MODULE, encoding="utf-8")
     (repo / "README.md").write_text("# demo\n", encoding="utf-8")
@@ -135,6 +139,8 @@ def _publish(tmp_path: Path, repo: Path) -> tuple[dict, dict[str, object]]:
     ]
     if config.redact_secrets:
         argv.append("--redact-secrets")
+    if config.language_structure:
+        argv.append("--language-structure")
     completed = subprocess.run(
         argv,
         cwd=REPO_ROOT,
@@ -229,6 +235,50 @@ def test_query_answers_against_the_published_bundle(published_bundle):
         entry.get("source_path") == "pkg/core.py"
         for entry in response["resolved_ranges"]
     ), response["resolved_ranges"]
+
+
+@pytest.mark.publication_surface
+def test_query_preserves_structured_evidence_from_published_bundle(published_bundle):
+    """The query frontdoor must not drop structure emitted by the real publisher."""
+    manifest_path, _, _ = published_bundle
+
+    response = mcp_tools.query_existing_index(
+        bundle_manifest=manifest_path, query="rust_helper", k=5
+    )
+
+    assert response["status"] == "available"
+    language = response["structured_evidence"]["language_structure"]
+    records = language["evidence"]["records"]
+    assert records
+    assert any(
+        record["language"] == "rust" and record["symbol"] == "rust_helper"
+        for record in records
+    )
+
+
+def test_query_preserves_explicit_empty_structured_evidence(monkeypatch):
+    def fake_pack(*args, **kwargs):
+        return {
+            "retrieval_infrastructure": {"index_resolved": True, "status": "available"},
+            "retrieval": {"strategy": "none", "match_count": 0},
+            "retrieval_hits": [],
+            "resolved_ranges": [],
+            "budget": {},
+            "availability": {},
+            "freshness": {},
+            "answer_scaffold": {"caveats_to_surface": []},
+            "structured_evidence": {},
+        }
+
+    monkeypatch.setattr(
+        "merger.repoground.core.ask_context.build_ask_context_pack", fake_pack
+    )
+
+    response = mcp_tools.query_existing_index(
+        bundle_manifest="unused", query="no symbol intent"
+    )
+
+    assert response["structured_evidence"] == {}
 
 
 @pytest.mark.publication_surface
