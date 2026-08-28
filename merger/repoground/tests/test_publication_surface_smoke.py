@@ -35,6 +35,10 @@ def helper(value):
     return value + 1
 
 
+def rust_helper(value):
+    return value
+
+
 def target(value):
     return helper(value)
 """
@@ -243,10 +247,16 @@ def test_query_preserves_structured_evidence_from_published_bundle(published_bun
     manifest_path, _, _ = published_bundle
 
     response = mcp_tools.query_existing_index(
-        bundle_manifest=manifest_path, query="rust_helper", k=5
+        bundle_manifest=manifest_path, query="Where is rust_helper defined?", k=5
     )
 
     assert response["status"] == "available"
+    assert response["route"] == "symbol_definition"
+    assert response["retrieval"]["strategy"] == "symbol_definition"
+    assert any(
+        hit["path"] == "pkg/core.py" and hit["name"] == "rust_helper"
+        for hit in response["navigation_hits"]
+    )
     language = response["structured_evidence"]["language_structure"]
     records = language["evidence"]["records"]
     assert records
