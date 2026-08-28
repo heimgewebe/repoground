@@ -611,8 +611,12 @@ def _symbol_query_result(
     inner = symbol_result.get("result") if isinstance(symbol_result, dict) else {}
     from merger.repoground.core.ask_context import (
         _availability_block,
+        _context_budget,
         _freshness_block,
+        _language_structure_for_query,
+        _merge_language_context,
     )
+    from merger.repoground.core.manifest_snapshot import resolve_manifest_path
 
     availability = _availability_block(
         {"availability_model": inner.get("availability")}
@@ -622,7 +626,37 @@ def _symbol_query_result(
     freshness = _freshness_block(
         {"freshness": inner.get("freshness")} if isinstance(inner, dict) else {}
     )
-    return {
+    token_derived_byte_ceiling, total_context_bytes = _context_budget(
+        max_context_tokens, None
+    )
+    navigation_retrieval_hits = [
+        {
+            "artifact_role": "python_symbol_index_json",
+            "ref": str(hit.get("id") or hit.get("range_ref") or "symbol"),
+            "score": 0.0,
+            "purpose": "exact symbol-definition navigation candidate",
+        }
+        for hit in navigation_hits
+    ]
+    state: dict[str, Any] = {
+        "retrieval_hits": navigation_retrieval_hits,
+        "resolved_ranges": [],
+        "used_bytes": 0,
+        "used_characters": 0,
+        "omissions": [],
+        "truncated": exact_hit_count > len(navigation_hits),
+    }
+    language_context = _language_structure_for_query(
+        resolve_manifest_path(bundle_manifest),
+        query=query,
+        k=k,
+        max_bytes=total_context_bytes,
+    )
+    language_caveats: list[dict[str, Any]] = []
+    structured_evidence = _merge_language_context(
+        state, language_caveats, language_context
+    )
+    result = {
         "kind": READ_ONLY_KIND,
         "version": READ_ONLY_VERSION,
         "tool": "query_existing_index",
@@ -633,23 +667,27 @@ def _symbol_query_result(
             "raw_query": query,
             "fts_query": None,
             "strategy": "symbol_definition",
-            "match_count": len(navigation_hits),
+            "match_count": len(navigation_hits) + len(state["resolved_ranges"]),
         },
-        "retrieval_hits": [
-            {
-                "artifact_role": "python_symbol_index_json",
-                "ref": str(hit.get("id") or hit.get("range_ref") or "symbol"),
-                "score": 0.0,
-                "purpose": "exact symbol-definition navigation candidate",
-            }
-            for hit in navigation_hits
-        ],
+        "retrieval_hits": state["retrieval_hits"],
         "navigation_hits": navigation_hits,
-        "resolved_ranges": [],
+        "resolved_ranges": state["resolved_ranges"],
         "budget": {
             "max_context_tokens": max_context_tokens,
-            "approx_context_chars_used": 0,
-            "truncated": exact_hit_count > len(navigation_hits),
+            "token_derived_byte_ceiling": token_derived_byte_ceiling,
+            "max_context_bytes": total_context_bytes,
+            "context_bytes_used": state["used_bytes"],
+            "context_unicode_characters_used": state["used_characters"],
+            "approx_context_chars_used": state["used_characters"],
+            "byte_budget_is_hard": True,
+            "unit": "utf8_bytes",
+            "accounting": (
+                "canonical JSON UTF-8 bytes of emitted language_structure.evidence; "
+                "symbol navigation addresses and envelope metadata are outside the "
+                "evidence payload budget"
+            ),
+            "omissions": state["omissions"],
+            "truncated": state["truncated"],
             "does_not_establish_quality": True,
         },
         "availability": availability,
@@ -661,12 +699,16 @@ def _symbol_query_result(
                     "Symbol-index hits establish a snapshot path and source line range, "
                     "not source semantics or runtime behavior."
                 ),
-            }
+            },
+            *language_caveats,
         ],
         "result_semantics": "repobrief.query_existing_index.agent_frontdoor.v1",
         "mutation_boundary": _read_only_boundary(verbose=verbose),
         "does_not_establish": _read_only_does_not_establish(verbose=verbose),
     }
+    if structured_evidence:
+        result["structured_evidence"] = structured_evidence
+    return result
 
 
 def query_existing_index(
@@ -732,6 +774,8 @@ def query_existing_index(
         "mutation_boundary": _read_only_boundary(verbose=verbose),
         "does_not_establish": _read_only_does_not_establish(verbose=verbose),
     }
+    if "structured_evidence" in pack:
+        result["structured_evidence"] = pack["structured_evidence"]
     if verbose:
         result["context_pack"] = pack
     return result
