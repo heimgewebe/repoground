@@ -143,6 +143,19 @@ def test_download_dirs_inventory(lifecycle_client: TestClient):
     cd = response.headers.get("content-disposition", "")
     assert "atlas-2000.dirs_inventory.jsonl" in cd
 
+def test_download_prefers_planner_summary_over_legacy_markdown(
+    lifecycle_client: TestClient,
+):
+    merges = service_app_module.state.merges_dir
+    assert merges is not None
+    (merges / "atlas-2000.summary.md").write_text("# Planner summary", encoding="utf-8")
+
+    response = lifecycle_client.get("/api/atlas/atlas-2000/download?key=md")
+
+    assert response.status_code == 200
+    assert response.text == "# Planner summary"
+    assert "atlas-2000.summary.md" in response.headers.get("content-disposition", "")
+
 def test_get_latest_artifact_404_if_none_completed(tmp_path: Path):
     # Setup hub with NO completed artifacts
     hub = tmp_path / "hub2"

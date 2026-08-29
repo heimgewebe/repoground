@@ -28,6 +28,16 @@ from merger.repoground.atlas.planner import plan_atlas_outputs, write_mode_outpu
 from merger.repoground.core.merge import get_merges_dir
 
 _ATLAS_PRIMARY_ARTIFACT_RE = re.compile(r"^atlas-[0-9]+[.]json$")
+_ATLAS_DOWNLOAD_SUFFIXES = {
+    "json": (".json",),
+    "md": (".summary.md", ".md"),
+    "inventory": (".inventory.jsonl",),
+    "dirs_inventory": (".dirs.jsonl", ".dirs_inventory.jsonl"),
+    "topology": (".topology.json",),
+    "content": (".content.json",),
+    "workspaces": (".workspaces.json",),
+    "hotspots": (".hotspots.json",),
+}
 
 router = APIRouter()
 
@@ -575,13 +585,29 @@ def get_latest_atlas():
         effective=effective
     )
 
+def _resolve_atlas_download_file(merges_dir: Path, atlas_id: str, key: str) -> Path | None:
+    """Return the first contained artifact matching the key's suffix precedence."""
+    # Do not build a path from user input. Enumerate allowlisted suffixes and
+    # keep the planner-first/legacy-second precedence used by the API.
+    for suffix in _ATLAS_DOWNLOAD_SUFFIXES[key]:
+        for candidate in merges_dir.glob(f"atlas-*{suffix}"):
+            try:
+                resolved = candidate.resolve()
+                resolved.relative_to(merges_dir)  # containment even under symlinks
+            except Exception:
+                continue
+            if candidate.name.startswith(atlas_id + "."):
+                return resolved
+    return None
+
+
 @router.get('/api/atlas/{id}/download', dependencies=[Depends(verify_token)])
 def download_atlas(id: str, key: str = "md"):
     # Hard allowlist: atlas ids are generated as "atlas-<unix_ts>"
     if not re.fullmatch(r"atlas-\d+", (id or "").strip()):
         raise HTTPException(status_code=400, detail="Invalid atlas id format")
 
-    allowed_keys = ("json", "md", "inventory", "dirs_inventory", "topology", "content", "workspaces", "hotspots")
+    allowed_keys = tuple(_ATLAS_DOWNLOAD_SUFFIXES)
     if key not in allowed_keys:
         raise HTTPException(status_code=400, detail=f"Invalid key. Use one of {allowed_keys}.")
 
@@ -592,39 +618,7 @@ def download_atlas(id: str, key: str = "md"):
     if not merges_dir.exists():
         raise HTTPException(status_code=404, detail="Merges directory not found")
 
-    # IMPORTANT: do NOT build a path from user input.
-    # Enumerate allowed files and then select by id.
-    candidates = {}
-
-    # Map key to extension, supporting new planner names and legacy fallbacks
-    ext_map = {
-        "json": [".json"],
-        "md": [".summary.md", ".md"],
-        "inventory": [".inventory.jsonl"],
-        "dirs_inventory": [".dirs.jsonl", ".dirs_inventory.jsonl"],
-        "topology": [".topology.json"],
-        "content": [".content.json"],
-        "workspaces": [".workspaces.json"],
-        "hotspots": [".hotspots.json"]
-    }
-    exts = ext_map[key]
-
-    # Glob pattern needs to match suffix carefully
-    for ext in exts:
-        for p in merges_dir.glob(f"atlas-*{ext}"):
-            try:
-                rp = p.resolve()
-                rp.relative_to(merges_dir)  # containment even under symlinks
-            except Exception:
-                continue
-
-            # Robust ID matching:
-            if p.name.startswith(id + "."):
-                 # if multiple extensions match, the first one found wins
-                 if id not in candidates:
-                     candidates[id] = rp
-
-    file_path = candidates.get(id)
+    file_path = _resolve_atlas_download_file(merges_dir, id, key)
     if not file_path:
         raise HTTPException(status_code=404, detail="File not found")
 
