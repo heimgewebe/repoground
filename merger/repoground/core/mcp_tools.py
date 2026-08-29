@@ -648,7 +648,7 @@ def _symbol_query_result(
     }
     language_context = _language_structure_for_query(
         resolve_manifest_path(bundle_manifest),
-        query=query,
+        query=symbol_name,
         k=k,
         max_bytes=total_context_bytes,
     )

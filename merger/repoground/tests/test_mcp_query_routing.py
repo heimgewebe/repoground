@@ -107,6 +107,61 @@ def test_query_routes_exact_definition_question_to_symbol_index(monkeypatch):
     assert result["budget"]["truncated"] is False
 
 
+def test_symbol_definition_scopes_structure_lookup_to_symbol_name(monkeypatch):
+    observed_queries: list[str] = []
+    monkeypatch.setattr(
+        mcp_tools,
+        "find_symbol",
+        lambda **_arguments: {
+            "status": "available",
+            "result": {
+                "status": "available",
+                "availability": {"status": "pass"},
+                "freshness": {"status": "not_comparable"},
+                "hits": [
+                    {
+                        "id": "render-service-unit",
+                        "kind": "function",
+                        "name": "render_service_unit",
+                        "qualified_name": "render_service_unit",
+                        "path": "src/render.py",
+                        "start_line": 10,
+                        "end_line": 20,
+                        "range_ref": "file:src/render.py#L10-L20",
+                    }
+                ],
+            },
+        },
+    )
+
+    def fake_language_structure(_manifest_path, *, query, **_kwargs):
+        observed_queries.append(query)
+        return {
+            "status": "available",
+            "reason": None,
+            "retrieval_hits": [],
+            "resolved_ranges": [],
+            "structured_evidence": None,
+            "used_bytes": 0,
+            "used_unicode_characters": 0,
+            "omissions": [],
+            "truncated": False,
+        }
+
+    monkeypatch.setattr(
+        ask_context, "_language_structure_for_query", fake_language_structure
+    )
+    result = mcp_tools.query_existing_index(
+        bundle_manifest="demo.bundle.manifest.json",
+        query="Where is the function render_service_unit defined?",
+        k=5,
+    )
+
+    assert result["route"] == "symbol_definition"
+    assert result["navigation_hits"][0]["name"] == "render_service_unit"
+    assert observed_queries == ["render_service_unit"]
+
+
 def test_compact_symbol_hits_reports_total_before_limit():
     result = {
         "result": {

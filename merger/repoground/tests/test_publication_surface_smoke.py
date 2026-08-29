@@ -266,6 +266,29 @@ def test_query_preserves_structured_evidence_from_published_bundle(published_bun
     )
 
 
+@pytest.mark.publication_surface
+def test_symbol_definition_excludes_unrelated_structure_from_published_bundle(
+    published_bundle,
+):
+    manifest_path, _, _ = published_bundle
+
+    response = mcp_tools.query_existing_index(
+        bundle_manifest=manifest_path,
+        query="Where is the function target defined?",
+        k=5,
+    )
+
+    assert response["status"] == "available"
+    assert response["route"] == "symbol_definition"
+    assert any(
+        hit["path"] == "pkg/core.py" and hit["name"] == "target"
+        for hit in response["navigation_hits"]
+    )
+    assert not response.get("structured_evidence")
+    assert response["resolved_ranges"] == []
+    assert response["retrieval"]["match_count"] == len(response["navigation_hits"])
+
+
 def test_query_preserves_explicit_empty_structured_evidence(monkeypatch):
     def fake_pack(*args, **kwargs):
         return {
