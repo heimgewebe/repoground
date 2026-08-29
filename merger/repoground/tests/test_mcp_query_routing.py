@@ -162,6 +162,35 @@ def test_symbol_definition_scopes_structure_lookup_to_symbol_name(monkeypatch):
     assert observed_queries == ["render_service_unit"]
 
 
+def test_exact_symbol_structure_filter_rejects_component_only_matches():
+    response = {
+        "status": "available",
+        "content_json": {
+            "record_count": 3,
+            "records": [
+                {"id": "definition", "symbol": "render_service_unit"},
+                {
+                    "id": "relation",
+                    "symbol": "caller",
+                    "target_symbol": "render_service_unit",
+                },
+                {"id": "component-noise", "symbol": "render_report"},
+            ],
+        },
+    }
+
+    filtered = mcp_tools._filter_language_structure_for_exact_symbol(
+        response, symbol_name="render_service_unit"
+    )
+
+    assert response["content_json"]["record_count"] == 3
+    assert filtered["content_json"]["record_count"] == 2
+    assert [record["id"] for record in filtered["content_json"]["records"]] == [
+        "definition",
+        "relation",
+    ]
+
+
 def test_compact_symbol_hits_reports_total_before_limit():
     result = {
         "result": {

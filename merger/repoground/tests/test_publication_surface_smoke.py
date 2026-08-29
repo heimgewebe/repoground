@@ -41,6 +41,10 @@ def rust_helper(value):
 
 def target(value):
     return helper(value)
+
+
+def render_service_unit():
+    return "unit"
 """
 
 CALLER_MODULE = """\
@@ -90,7 +94,11 @@ def _source_repo(tmp_path: Path) -> Path:
     (repo / "pkg").mkdir(parents=True)
     (repo / "src").mkdir()
     (repo / "src" / "lib.rs").write_text(
-        'pub fn rust_helper() {\n    println!("ok");\n}\n', encoding="utf-8"
+        (
+            'pub fn rust_helper() {\n    println!("ok");\n}\n'
+            'pub fn render_report() {\n    println!("noise");\n}\n'
+        ),
+        encoding="utf-8",
     )
     (repo / "pkg" / "core.py").write_text(CORE_MODULE, encoding="utf-8")
     (repo / "pkg" / "caller.py").write_text(CALLER_MODULE, encoding="utf-8")
@@ -274,19 +282,28 @@ def test_symbol_definition_excludes_unrelated_structure_from_published_bundle(
 
     response = mcp_tools.query_existing_index(
         bundle_manifest=manifest_path,
-        query="Where is the function target defined?",
+        query="Where is the function render_service_unit defined?",
         k=5,
     )
 
     assert response["status"] == "available"
     assert response["route"] == "symbol_definition"
     assert any(
-        hit["path"] == "pkg/core.py" and hit["name"] == "target"
+        hit["path"] == "pkg/core.py" and hit["name"] == "render_service_unit"
         for hit in response["navigation_hits"]
     )
-    assert not response.get("structured_evidence")
-    assert response["resolved_ranges"] == []
-    assert response["retrieval"]["match_count"] == len(response["navigation_hits"])
+    records = (
+        response.get("structured_evidence", {})
+        .get("language_structure", {})
+        .get("evidence", {})
+        .get("records", [])
+    )
+    assert all(
+        record.get("symbol") == "render_service_unit"
+        or record.get("target_symbol") == "render_service_unit"
+        for record in records
+    )
+    assert not any(record.get("symbol") == "render_report" for record in records)
 
 
 def test_query_preserves_explicit_empty_structured_evidence(monkeypatch):
