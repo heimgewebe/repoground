@@ -588,6 +588,32 @@ def _compact_symbol_hits(
     return exact[:k], len(exact)
 
 
+def _filter_language_structure_for_exact_symbol(
+    response: dict[str, Any], *, symbol_name: str
+) -> dict[str, Any]:
+    document = response.get("content_json")
+    if not isinstance(document, dict):
+        return response
+    records = document.get("records")
+    if not isinstance(records, list):
+        return response
+    expected = symbol_name.casefold()
+    exact_records = [
+        record
+        for record in records
+        if isinstance(record, dict)
+        and any(
+            isinstance(record.get(field), str)
+            and record[field].casefold() == expected
+            for field in ("symbol", "target_symbol")
+        )
+    ]
+    filtered_document = {**document, "records": exact_records}
+    if "record_count" in filtered_document:
+        filtered_document["record_count"] = len(exact_records)
+    return {**response, "content_json": filtered_document}
+
+
 def _symbol_query_result(
     *,
     bundle_manifest: str | Path,
@@ -615,6 +641,9 @@ def _symbol_query_result(
         _freshness_block,
         _language_structure_for_query,
         _merge_language_context,
+    )
+    from merger.repoground.core.language_structure_access import (
+        load_language_structure_artifact,
     )
     from merger.repoground.core.manifest_snapshot import resolve_manifest_path
 
@@ -646,11 +675,16 @@ def _symbol_query_result(
         "omissions": [],
         "truncated": exact_hit_count > len(navigation_hits),
     }
+    manifest_path = resolve_manifest_path(bundle_manifest)
+    language_response = _filter_language_structure_for_exact_symbol(
+        load_language_structure_artifact(manifest_path), symbol_name=symbol_name
+    )
     language_context = _language_structure_for_query(
-        resolve_manifest_path(bundle_manifest),
-        query=query,
+        manifest_path,
+        query=symbol_name,
         k=k,
         max_bytes=total_context_bytes,
+        preloaded=language_response,
     )
     language_caveats: list[dict[str, Any]] = []
     structured_evidence = _merge_language_context(
