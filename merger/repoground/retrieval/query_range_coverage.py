@@ -175,6 +175,15 @@ def _classify_hit(hit: Dict[str, Any]) -> Tuple[str, Optional[str], Optional[str
     return "unresolved", None, None
 
 
+def _normalize_and_classify_hit(
+    raw_hit: Any,
+) -> Tuple[Dict[str, Any], str, Optional[str], Optional[str]]:
+    if not isinstance(raw_hit, dict):
+        return {}, "malformed", None, "query result hit is not an object"
+    status, ref_kind, error = _classify_hit(raw_hit)
+    return raw_hit, status, ref_kind, error
+
+
 def _load_citation_rows(
     citation_map_jsonl: Path,
 ) -> Tuple[Dict[str, List[Dict[str, Any]]], Dict[Tuple[str, int, int, str], List[Dict[str, Any]]], List[str]]:
@@ -298,8 +307,7 @@ def build_query_range_coverage_report(
     per_hit: List[Dict[str, Any]] = []
 
     for idx, raw_hit in enumerate(hits):
-        hit = raw_hit if isinstance(raw_hit, dict) else {}
-        status, ref_kind, error = _classify_hit(hit)
+        hit, status, ref_kind, error = _normalize_and_classify_hit(raw_hit)
         status_counts[status] = status_counts.get(status, 0) + 1
 
         if status in {"canonical_explicit", "explicit_noncanonical"}:
