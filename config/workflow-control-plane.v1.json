@@ -37,7 +37,7 @@
       "path": ".github/workflows/codeql.yml",
       "class": "required_protection",
       "rationale": "Security analysis gate for Python.",
-      "sha256": "f49ed3e2109e1f4e0432cdadc23d2cc280469703d144d313fb54a1b8a6e3f604",
+      "sha256": "fc52c0337a563a42c5caae1c0bed1bf4304236c8eb7cee936ca145dc95058323",
       "bytes": 1931
     },
     {
