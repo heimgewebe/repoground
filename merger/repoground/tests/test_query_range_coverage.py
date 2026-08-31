@@ -23,19 +23,20 @@ def test_query_range_coverage_counts_per_hit_statuses():
             {'chunk_id': 'noncanonical', 'path': 'src/example.py', 'range': '1-2', 'range_ref': _ref('source_file', file_path='src/example.py')},
             {'chunk_id': 'derived', 'path': 'src/derived.py', 'range': '1-2', 'derived_range_ref': _ref('source_file', file_path='src/derived.py')},
             {'chunk_id': 'unresolved', 'path': 'src/unresolved.py', 'range': '1-2'},
+            'not-an-object',
             {'chunk_id': 'malformed', 'path': 'src/broken.py', 'range': '1-2', 'range_ref': {'artifact_role': 'canonical_md'}},
         ]
     }
 
     report = build_query_range_coverage_report(result)
 
-    assert report['total_hits'] == 5
+    assert report['total_hits'] == 6
     assert report['counts'] == {
         'hits_with_explicit_range_ref': 2,
         'hits_with_explicit_canonical_md_range_ref': 1,
         'hits_with_derived_range_ref': 1,
         'unresolved_hits': 1,
-        'malformed_hits': 1,
+        'malformed_hits': 2,
         'citation_id_candidate_hits': 0,
     }
     assert report['status_counts'] == {
@@ -43,7 +44,7 @@ def test_query_range_coverage_counts_per_hit_statuses():
         'explicit_noncanonical': 1,
         'derived_source': 1,
         'unresolved': 1,
-        'malformed': 1,
+        'malformed': 2,
     }
     assert [hit['status'] for hit in report['per_hit']] == [
         'canonical_explicit',
@@ -51,7 +52,9 @@ def test_query_range_coverage_counts_per_hit_statuses():
         'derived_source',
         'unresolved',
         'malformed',
+        'malformed',
     ]
+    assert report['per_hit'][4]['error'] == 'query result hit is not an object'
     assert 'truth' in report['diagnostic_semantics']['does_not_establish']
     assert report['diagnostic_semantics']['canonical_preference'] == 'explicit canonical_md range_ref'
 

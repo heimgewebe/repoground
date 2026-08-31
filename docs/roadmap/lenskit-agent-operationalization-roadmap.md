@@ -140,7 +140,7 @@ Status: umgesetzt. Beleg: `docs/proofs/query-range-ref-audit-proof.md`.
 
 Ziel: Vor einem neuen Proof-Carrying-Query-Contract pruefen, welche Query-Treffer bereits aufloesbare Range-Refs tragen.
 
-Umgesetzt: Query-Result-Schema und Runtime-Ausgabe gegen Range-Ref-Faehigkeit auditiert; vorhandene Roundtrip-/Resolver-Tests gruen; Citation-Map-Kompatibilitaet als indirekte Chunk-/Range-Bruecke bewertet; naechster minimaler Adapter `query-range-coverage report` geplant.
+Umgesetzt: Query-Result-Schema und Runtime-Ausgabe gegen Range-Ref-Faehigkeit auditiert; vorhandene Roundtrip-/Resolver-Tests gruen; Citation-Map-Kompatibilitaet als indirekte Chunk-/Range-Bruecke bewertet. Der vormals geplante minimale Adapter `query-range-coverage report` ist inzwischen in `merger/repoground/retrieval/query_range_coverage.py` umgesetzt und ueber die Query-CLI erreichbar; er bleibt rein diagnostisch.
 
 Nichtziele: kein grosser neuer Query-Contract ohne Gap-Beweis, kein Graph-/Symbol-Boost in diesem Slice.
 
