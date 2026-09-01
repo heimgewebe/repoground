@@ -1,186 +1,287 @@
 from __future__ import annotations
 
 import ast
+import enum
+import functools
 import hashlib
 import inspect
-import io
 import json
+import re
 import textwrap
-import tokenize
+import types
+from collections.abc import Mapping
 from functools import lru_cache
 from typing import Any, Callable
 
+import pydantic
 from pydantic import BaseModel
 
-# The persisted state contract is intentionally tied to the exact validation
-# semantics shipped when JobStore v2 was introduced. These fingerprints were
-# produced with the repository-pinned Pydantic 2.13.4 runtime. A model-schema
-# change must introduce an explicit state migration/version instead of silently
-# reinterpreting old bytes under new Pydantic semantics.
+# Frozen under the repository-pinned Pydantic 2.13.4 runtime. The fingerprint is
+# deliberately based on pydantic-core's *actual validation schema* plus the full
+# model_config and project-validator dependency graph. Changing validation
+# semantics requires an explicit JobStore migration/version instead of silently
+# reinterpreting old bytes.
 _FROZEN_MODEL_FINGERPRINTS = {
-    "JobRequest": "36fefe1150a042be4063c602082073a630b1db99974ed481b3c7ca4a2a6851b1",
-    "Job": "029357f703fd9070477788474ecb4cc975502de1e3af8983f845ae0e32f9d911",
-    "Artifact": "20b6999a70176b5ea3ab3e008e847026ca2e75f374b6f89f072d00470164b806",
+    "JobRequest": "51905c46e5c8e0bc9e5a33ffd4b5309f9f16fa3f309d880d23ea4073ae245c25",
+    "Job": "979ea892ede8830d8ec3f037d427907c24f862cedbade69cd09d14cc2661c084",
+    "Artifact": "9a35d00c0c76d20883366f0612b058a32a95030fed4e6e54598527b16b77eea0",
 }
-_SEMANTIC_CONFIG_KEYS = frozenset(
-    {
-        "extra",
-        "strict",
-        "populate_by_name",
-        "validate_by_alias",
-        "validate_by_name",
-        "use_enum_values",
-        "coerce_numbers_to_str",
-        "regex_engine",
-    }
-)
-_VALIDATOR_GROUPS = (
-    "validators",
-    "field_validators",
-    "root_validators",
-    "model_validators",
-)
-_PROJECT_VALIDATOR_PREFIX = "merger.repoground.service"
-_SCHEMA_NOISE_KEYS = frozenset({"title", "description"})
+_PROJECT_PREFIX = "merger.repoground.service"
+_REF_RE = re.compile(r"^(?:.+\.)?([A-Za-z_][\w]*):\d+$")
+_ADDRESS_RE = re.compile(r"0x[0-9a-fA-F]+")
 
 
-def _strip_schema_noise(value: Any) -> Any:
-    """Drop presentation-only JSON-Schema text while retaining semantics."""
-    if isinstance(value, dict):
-        return {
-            key: _strip_schema_noise(item)
-            for key, item in sorted(value.items())
-            if key not in _SCHEMA_NOISE_KEYS
-        }
-    if isinstance(value, list):
-        return [_strip_schema_noise(item) for item in value]
-    return value
+class _NormalizeAst(ast.NodeTransformer):
+    """Remove non-semantic source noise while retaining executable structure."""
 
-
-def _docstring_lines(source: str) -> set[int]:
-    tree = ast.parse(source)
-    lines: set[int] = set()
-    for node in ast.walk(tree):
+    @staticmethod
+    def _drop_docstring(node: ast.AST) -> None:
         body = getattr(node, "body", None)
         if not isinstance(body, list) or not body:
-            continue
+            return
         first = body[0]
-        if not (
+        if (
             isinstance(first, ast.Expr)
             and isinstance(first.value, ast.Constant)
             and isinstance(first.value.value, str)
         ):
-            continue
-        lines.update(range(first.lineno, getattr(first, "end_lineno", first.lineno) + 1))
-    return lines
+            node.body = body[1:]  # type: ignore[attr-defined]
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.AST:
+        self.generic_visit(node)
+        node.name = "<callable>"
+        node.decorator_list = []
+        node.returns = None
+        node.type_comment = None
+        for arg in [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]:
+            arg.annotation = None
+            arg.type_comment = None
+        if node.args.vararg is not None:
+            node.args.vararg.annotation = None
+        if node.args.kwarg is not None:
+            node.args.kwarg.annotation = None
+        self._drop_docstring(node)
+        return node
+
+    visit_AsyncFunctionDef = visit_FunctionDef
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> ast.AST:
+        self.generic_visit(node)
+        node.name = "<class>"
+        node.decorator_list = []
+        self._drop_docstring(node)
+        return node
 
 
-def _normalized_source_tokens(obj: Callable[..., Any] | type) -> list[tuple[str, str]]:
-    """Fingerprint callable semantics without comments, docstrings or formatting."""
-    target = obj.__func__ if inspect.ismethod(obj) else obj
+def _target(obj: Callable[..., Any] | type) -> Callable[..., Any] | type:
+    return obj.__func__ if inspect.ismethod(obj) else obj
+
+
+def _normalized_ast(obj: Callable[..., Any] | type) -> str:
+    target = _target(obj)
     try:
         source = textwrap.dedent(inspect.getsource(target))
     except (OSError, TypeError) as exc:
         raise ValueError(f"cannot inspect persisted-state validator: {target!r}") from exc
+    tree = _NormalizeAst().visit(ast.parse(source))
+    ast.fix_missing_locations(tree)
+    return ast.dump(tree, include_attributes=False)
 
-    doc_lines = _docstring_lines(source)
-    tokens: list[tuple[str, str]] = []
-    replace_definition_name = False
-    for token in tokenize.generate_tokens(io.StringIO(source).readline):
-        if token.start[0] in doc_lines:
+
+def _qualified_name(obj: Any) -> str:
+    return (
+        f"{getattr(obj, '__module__', '')}:"
+        f"{getattr(obj, '__qualname__', getattr(obj, '__name__', type(obj).__name__))}"
+    )
+
+
+def _is_project_object(obj: Any) -> bool:
+    return str(getattr(obj, "__module__", "")).startswith(_PROJECT_PREFIX)
+
+
+def _attribute_chain(node: ast.Attribute) -> tuple[str, list[str]] | None:
+    attrs: list[str] = []
+    current: ast.AST = node
+    while isinstance(current, ast.Attribute):
+        attrs.append(current.attr)
+        current = current.value
+    if not isinstance(current, ast.Name):
+        return None
+    return current.id, list(reversed(attrs))
+
+
+def _module_attribute_dependencies(
+    target: Callable[..., Any],
+    globals_map: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Resolve module-qualified globals actually referenced by a validator."""
+    try:
+        tree = ast.parse(textwrap.dedent(inspect.getsource(target)))
+    except (OSError, TypeError) as exc:
+        raise ValueError(f"cannot inspect persisted-state validator: {target!r}") from exc
+
+    dependencies: dict[str, Any] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Attribute):
             continue
-        if token.type in {
-            tokenize.ENDMARKER,
-            tokenize.NL,
-            tokenize.NEWLINE,
-            tokenize.COMMENT,
-            tokenize.ENCODING,
-        }:
+        chain = _attribute_chain(node)
+        if chain is None:
             continue
-        if token.type == tokenize.INDENT:
-            tokens.append(("INDENT", ""))
+        root, attrs = chain
+        value = globals_map.get(root)
+        if not isinstance(value, types.ModuleType):
             continue
-        if token.type == tokenize.DEDENT:
-            tokens.append(("DEDENT", ""))
-            continue
-        if token.type == tokenize.NAME and token.string in {"def", "class"}:
-            tokens.append(("NAME", token.string))
-            replace_definition_name = True
-            continue
-        if replace_definition_name and token.type == tokenize.NAME:
-            # A pure helper/validator rename is not persisted-state semantics.
-            tokens.append(("NAME", "<callable>"))
-            replace_definition_name = False
-            continue
-        tokens.append((tokenize.tok_name[token.type], token.string))
-    return tokens
+        current: Any = value
+        resolved = True
+        for attr in attrs:
+            if not hasattr(current, attr):
+                resolved = False
+                break
+            current = getattr(current, attr)
+        if resolved:
+            dependencies[f"{root}.{'.'.join(attrs)}"] = current
+    return dependencies
+
+
+def _normalize_ref(value: str) -> str:
+    match = _REF_RE.match(value)
+    return f"<model>:{match.group(1)}" if match else value
+
+
+def _stable_value(
+    value: Any,
+    *,
+    seen: frozenset[int] = frozenset(),
+) -> Any:
+    if value is None or isinstance(value, (bool, int, str)):
+        return value
+    if isinstance(value, float):
+        if value != value:
+            return {"float": "nan"}
+        if value == float("inf"):
+            return {"float": "inf"}
+        if value == float("-inf"):
+            return {"float": "-inf"}
+        return value
+    if isinstance(value, bytes):
+        return {"bytes": value.hex()}
+    if isinstance(value, enum.Enum):
+        return {"enum": _qualified_name(type(value)), "value": _stable_value(value.value)}
+    if isinstance(value, re.Pattern):
+        return {"regex": value.pattern, "flags": value.flags}
+    if isinstance(value, Mapping):
+        return {
+            str(key): _stable_value(item, seen=seen)
+            for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+        }
+    if isinstance(value, (list, tuple)):
+        return [_stable_value(item, seen=seen) for item in value]
+    if isinstance(value, (set, frozenset)):
+        items = [_stable_value(item, seen=seen) for item in value]
+        return sorted(items, key=lambda item: json.dumps(item, sort_keys=True, default=str))
+    if isinstance(value, types.ModuleType):
+        return {"module": value.__name__}
+    if isinstance(value, type):
+        if issubclass(value, BaseModel):
+            # pydantic-core refs already bind nested model structure; memory/module
+            # identity itself is irrelevant to persisted JSON semantics.
+            return {"model_class": value.__name__}
+        if _is_project_object(value):
+            return {"project_class": _normalized_ast(value)}
+        return {"type": _qualified_name(value)}
+    if inspect.isfunction(value) or inspect.ismethod(value):
+        target = _target(value)
+        if _is_project_object(target):
+            return {"project_callable": _callable_graph(target, seen=seen)}
+        return {"callable": _qualified_name(target)}
+    if isinstance(value, functools.partial):
+        return {
+            "partial": _stable_value(value.func, seen=seen),
+            "args": _stable_value(value.args, seen=seen),
+            "keywords": _stable_value(value.keywords or {}, seen=seen),
+        }
+
+    # Fail deterministically on otherwise stable pydantic/core objects while
+    # stripping process-local memory addresses from repr output.
+    return {
+        "object": f"{type(value).__module__}:{type(value).__qualname__}",
+        "repr": _ADDRESS_RE.sub("<addr>", repr(value)),
+    }
 
 
 def _callable_graph(
-    obj: Callable[..., Any] | type,
+    obj: Callable[..., Any],
     *,
     seen: frozenset[int] = frozenset(),
 ) -> dict[str, Any]:
-    target = obj.__func__ if inspect.ismethod(obj) else obj
+    target = _target(obj)
     identity = id(target)
     if identity in seen:
         return {"recursive": True}
+    if not inspect.isfunction(target):
+        raise ValueError(f"persisted-state validator is not inspectable: {target!r}")
 
     next_seen = seen | {identity}
-    graph: dict[str, Any] = {
-        "tokens": _normalized_source_tokens(target),
-        "dependencies": [],
+    closure = inspect.getclosurevars(target)
+    dependencies: dict[str, Any] = {}
+    for name, value in sorted(closure.globals.items()):
+        dependencies[name] = _stable_value(value, seen=next_seen)
+    for name, value in sorted(closure.nonlocals.items()):
+        dependencies[f"nonlocal:{name}"] = _stable_value(value, seen=next_seen)
+    for name, value in sorted(
+        _module_attribute_dependencies(target, closure.globals).items()
+    ):
+        dependencies[f"module_attr:{name}"] = _stable_value(value, seen=next_seen)
+
+    return {
+        "ast": _normalized_ast(target),
+        "dependencies": dependencies,
+        "defaults": _stable_value(target.__defaults__, seen=next_seen),
+        "kwdefaults": _stable_value(target.__kwdefaults__, seen=next_seen),
     }
-    code = getattr(target, "__code__", None)
-    globals_map = getattr(target, "__globals__", {})
-    if code is None:
-        return graph
-
-    dependencies = []
-    for name in sorted(set(code.co_names)):
-        dependency = globals_map.get(name)
-        dependency_target = (
-            dependency.__func__ if inspect.ismethod(dependency) else dependency
-        )
-        if not (inspect.isfunction(dependency_target) or inspect.isclass(dependency_target)):
-            continue
-        if not str(getattr(dependency_target, "__module__", "")).startswith(
-            _PROJECT_VALIDATOR_PREFIX
-        ):
-            continue
-        dependencies.append(_callable_graph(dependency_target, seen=next_seen))
-    graph["dependencies"] = dependencies
-    return graph
 
 
-def _validator_graphs(model: type[BaseModel]) -> list[dict[str, Any]]:
-    decorators = model.__pydantic_decorators__
-    graphs: list[dict[str, Any]] = []
-    for group_name in _VALIDATOR_GROUPS:
-        group = getattr(decorators, group_name)
-        for _name, decorator in sorted(group.items()):
-            graphs.append(
-                {
-                    "group": group_name,
-                    "info": repr(decorator.info),
-                    "source": _callable_graph(decorator.func),
+def _canonical_core_schema(value: Any, *, key: str | None = None) -> Any:
+    if isinstance(value, dict):
+        result: dict[str, Any] = {}
+        for child_key, child in sorted(value.items()):
+            if child_key == "metadata":
+                # CoreSchema metadata feeds JSON-schema/annotations and is not
+                # consumed by pydantic-core's input validation.
+                continue
+            if child_key in {"ref", "schema_ref"} and isinstance(child, str):
+                result[child_key] = _normalize_ref(child)
+                continue
+            if child_key == "config" and isinstance(child, dict):
+                # Core validation config is complete here; only `title` is a
+                # presentation label and does not participate in validation.
+                result[child_key] = {
+                    config_key: _canonical_core_schema(config_value, key=config_key)
+                    for config_key, config_value in sorted(child.items())
+                    if config_key != "title"
                 }
-            )
-    return graphs
+                continue
+            result[child_key] = _canonical_core_schema(child, key=child_key)
+        return result
+    if isinstance(value, (list, tuple)):
+        return [_canonical_core_schema(item, key=key) for item in value]
+    if isinstance(value, (set, frozenset)):
+        items = [_canonical_core_schema(item, key=key) for item in value]
+        return sorted(items, key=lambda item: json.dumps(item, sort_keys=True, default=str))
+    if key in {"ref", "schema_ref"} and isinstance(value, str):
+        return _normalize_ref(value)
+    return _stable_value(value)
 
 
 @lru_cache(maxsize=None)
 def model_schema_fingerprint(model: type[BaseModel]) -> str:
-    """Return a deterministic persisted-state validation fingerprint."""
-    semantic_config = {
-        key: model.model_config[key]
-        for key in sorted(model.model_config)
-        if key in _SEMANTIC_CONFIG_KEYS
-    }
+    """Return the deterministic persisted-state validation fingerprint."""
     payload = {
-        "schema": _strip_schema_noise(model.model_json_schema(mode="validation")),
-        "config": semantic_config,
-        "validators": _validator_graphs(model),
+        "pydantic_version": pydantic.__version__,
+        "core_schema": _canonical_core_schema(model.__pydantic_core_schema__),
+        # Use the complete model_config, not a hand-maintained allowlist: options
+        # such as str_strip_whitespace/validate_default affect input semantics.
+        "model_config": _stable_value(dict(model.model_config)),
     }
     encoded = json.dumps(
         payload,
@@ -193,7 +294,7 @@ def model_schema_fingerprint(model: type[BaseModel]) -> str:
 
 
 def assert_frozen_model_schema(model: type[BaseModel]) -> None:
-    """Fail closed when live model semantics no longer match JobStore v1/v2."""
+    """Fail closed when live semantics no longer match JobStore v1/v2."""
     expected = _FROZEN_MODEL_FINGERPRINTS.get(model.__name__)
     if expected is None:
         raise ValueError(f"unsupported persisted-state model: {model.__name__}")
