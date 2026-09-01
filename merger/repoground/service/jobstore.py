@@ -55,6 +55,8 @@ class JobStore:
                     record_type=record_type,
                     request_key=request_key,
                 )
+                if record.id in loaded:
+                    raise ValueError(f"duplicate {label} state id: {record.id}")
                 loaded[record.id] = record
         except Exception as exc:
             raise RuntimeError(
