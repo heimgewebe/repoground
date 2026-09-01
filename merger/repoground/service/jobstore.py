@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import os
-from typing import List, Optional, Dict, Tuple, Callable
+from typing import Any, List, Optional, Dict, Tuple, Callable
 from .models import Job, Artifact
 
 from merger.repoground.core.merge import MERGES_DIR_NAME, get_merges_dir
@@ -33,43 +33,35 @@ class JobStore:
 
         self._load()
 
+    @staticmethod
+    def _load_state_file(path: Path, *, label: str, record_type: Any) -> Dict[str, Any]:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(data, list):
+                raise ValueError(f"{label} state must be a JSON array")
+            loaded: Dict[str, Any] = {}
+            for raw_record in data:
+                if not isinstance(raw_record, dict):
+                    raise ValueError(f"each {label} state entry must be an object")
+                record = record_type(**raw_record)
+                loaded[record.id] = record
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to load existing {label} state from {path}; "
+                "refusing to start to avoid overwriting persistent state"
+            ) from exc
+        return loaded
+
     def _load(self) -> None:
         with self._lock:
             if self.jobs_file.exists():
-                try:
-                    data = json.loads(self.jobs_file.read_text(encoding="utf-8"))
-                    if not isinstance(data, list):
-                        raise ValueError("jobs state must be a JSON array")
-                    loaded_jobs: Dict[str, Job] = {}
-                    for raw_job in data:
-                        if not isinstance(raw_job, dict):
-                            raise ValueError("each jobs state entry must be an object")
-                        job = Job(**raw_job)
-                        loaded_jobs[job.id] = job
-                except Exception as exc:
-                    raise RuntimeError(
-                        f"Failed to load existing jobs state from {self.jobs_file}; "
-                        "refusing to start to avoid overwriting persistent state"
-                    ) from exc
-                self._jobs_cache = loaded_jobs
-
+                self._jobs_cache = self._load_state_file(
+                    self.jobs_file, label="jobs", record_type=Job
+                )
             if self.artifacts_file.exists():
-                try:
-                    data = json.loads(self.artifacts_file.read_text(encoding="utf-8"))
-                    if not isinstance(data, list):
-                        raise ValueError("artifacts state must be a JSON array")
-                    loaded_artifacts: Dict[str, Artifact] = {}
-                    for raw_artifact in data:
-                        if not isinstance(raw_artifact, dict):
-                            raise ValueError("each artifacts state entry must be an object")
-                        artifact = Artifact(**raw_artifact)
-                        loaded_artifacts[artifact.id] = artifact
-                except Exception as exc:
-                    raise RuntimeError(
-                        f"Failed to load existing artifacts state from {self.artifacts_file}; "
-                        "refusing to start to avoid overwriting persistent state"
-                    ) from exc
-                self._artifacts_cache = loaded_artifacts
+                self._artifacts_cache = self._load_state_file(
+                    self.artifacts_file, label="artifacts", record_type=Artifact
+                )
 
     def _save_jobs(self) -> None:
         tmp_file = self.jobs_file.with_suffix(".tmp")
