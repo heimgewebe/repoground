@@ -4,6 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel, TypeAdapter
 
+from .jobstore_schema import assert_frozen_model_schema
 from .models import JobRequest
 
 _STATE_META_KEY = "_jobstore"
@@ -139,6 +140,14 @@ def _field_name_set(value: Any, *, label: str) -> frozenset[str]:
     return frozenset(value)
 
 
+def _assert_live_state_models(record_type: type[BaseModel]) -> None:
+    # Names alone are insufficient: type/default/alias/constraint/validator drift
+    # can reinterpret the same persisted keys. Fingerprint both the outer model
+    # and nested JobRequest before any Pydantic validation is allowed to run.
+    assert_frozen_model_schema(record_type)
+    assert_frozen_model_schema(JobRequest)
+
+
 def _v2_fields_set(
     raw_record: dict[str, Any],
     raw_request: dict[str, Any],
@@ -151,6 +160,7 @@ def _v2_fields_set(
     if expected_record_fields is None or frozenset(raw_record) != expected_record_fields:
         raise ValueError("JobStore v2 record does not match frozen v2 shape")
 
+    _assert_live_state_models(record_type)
     expected_model_fields = expected_record_fields - {_STATE_META_KEY}
     if frozenset(record_type.model_fields) != expected_model_fields:
         raise ValueError("current record schema requires a JobStore state-version migration")
@@ -192,6 +202,8 @@ def _legacy_v1_fields_set(
         raise ValueError("unversioned JobStore record does not match legacy v1")
     if frozenset(raw_request) != _LEGACY_JOB_REQUEST_FIELDS_V1:
         raise ValueError("unversioned JobStore request does not match legacy v1")
+
+    _assert_live_state_models(record_type)
     if frozenset(record_type.model_fields) != expected_record_fields:
         raise ValueError("current record schema requires an explicit legacy v1 migration")
     if frozenset(JobRequest.model_fields) != _LEGACY_JOB_REQUEST_FIELDS_V1:
@@ -274,6 +286,7 @@ def dump_record(record: BaseModel, *, request_key: str) -> dict[str, Any]:
     if not isinstance(request, JobRequest):
         raise TypeError(f"{request_key} must be a JobRequest")
 
+    _assert_live_state_models(type(record))
     current_fields = frozenset(JobRequest.model_fields)
     request_payload = request.model_dump()
     if frozenset(request_payload) != current_fields:
