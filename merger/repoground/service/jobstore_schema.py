@@ -235,7 +235,7 @@ def _callable_graph(
 
     return {
         "ast": _normalized_ast(target),
-        "dependencies": dependencies,
+        "deps": dependencies,
         "defaults": _stable_value(target.__defaults__, seen=next_seen),
         "kwdefaults": _stable_value(target.__kwdefaults__, seen=next_seen),
     }
