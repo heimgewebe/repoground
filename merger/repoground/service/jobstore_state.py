@@ -184,6 +184,7 @@ def _legacy_v1_fields_set(
     raw_record: dict[str, Any],
     raw_request: dict[str, Any],
     *,
+    record_type: type[BaseModel],
     request_key: str,
 ) -> frozenset[str]:
     expected_record_fields = _LEGACY_RECORD_FIELDS_V1.get(request_key)
@@ -191,6 +192,10 @@ def _legacy_v1_fields_set(
         raise ValueError("unversioned JobStore record does not match legacy v1")
     if frozenset(raw_request) != _LEGACY_JOB_REQUEST_FIELDS_V1:
         raise ValueError("unversioned JobStore request does not match legacy v1")
+    if frozenset(record_type.model_fields) != expected_record_fields:
+        raise ValueError("current record schema requires an explicit legacy v1 migration")
+    if frozenset(JobRequest.model_fields) != _LEGACY_JOB_REQUEST_FIELDS_V1:
+        raise ValueError("current JobRequest schema requires an explicit legacy v1 migration")
 
     fields_set = set(_LEGACY_JOB_REQUEST_FIELDS_V1)
     # v1 wrote a full model_dump and therefore lost Pydantic's distinction
@@ -247,6 +252,7 @@ def load_record(
         fields_set = _legacy_v1_fields_set(
             raw_record,
             raw_request,
+            record_type=record_type,
             request_key=request_key,
         )
 
