@@ -38,20 +38,38 @@ class JobStore:
             if self.jobs_file.exists():
                 try:
                     data = json.loads(self.jobs_file.read_text(encoding="utf-8"))
-                    for j in data:
-                        job = Job(**j)
-                        self._jobs_cache[job.id] = job
-                except Exception as e:
-                    logger.error("Error loading jobs: %s", e)
+                    if not isinstance(data, list):
+                        raise ValueError("jobs state must be a JSON array")
+                    loaded_jobs: Dict[str, Job] = {}
+                    for raw_job in data:
+                        if not isinstance(raw_job, dict):
+                            raise ValueError("each jobs state entry must be an object")
+                        job = Job(**raw_job)
+                        loaded_jobs[job.id] = job
+                except Exception as exc:
+                    raise RuntimeError(
+                        f"Failed to load existing jobs state from {self.jobs_file}; "
+                        "refusing to start to avoid overwriting persistent state"
+                    ) from exc
+                self._jobs_cache = loaded_jobs
 
             if self.artifacts_file.exists():
                 try:
                     data = json.loads(self.artifacts_file.read_text(encoding="utf-8"))
-                    for a in data:
-                        art = Artifact(**a)
-                        self._artifacts_cache[art.id] = art
-                except Exception as e:
-                    logger.error("Error loading artifacts: %s", e)
+                    if not isinstance(data, list):
+                        raise ValueError("artifacts state must be a JSON array")
+                    loaded_artifacts: Dict[str, Artifact] = {}
+                    for raw_artifact in data:
+                        if not isinstance(raw_artifact, dict):
+                            raise ValueError("each artifacts state entry must be an object")
+                        artifact = Artifact(**raw_artifact)
+                        loaded_artifacts[artifact.id] = artifact
+                except Exception as exc:
+                    raise RuntimeError(
+                        f"Failed to load existing artifacts state from {self.artifacts_file}; "
+                        "refusing to start to avoid overwriting persistent state"
+                    ) from exc
+                self._artifacts_cache = loaded_artifacts
 
     def _save_jobs(self) -> None:
         tmp_file = self.jobs_file.with_suffix(".tmp")
