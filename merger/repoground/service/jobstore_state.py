@@ -10,9 +10,9 @@ _STATE_META_KEY = "_jobstore"
 _STATE_VERSION = 2
 _META_FIELDS = frozenset({"version", "request_fields", "request_fields_set"})
 
-# Frozen signature of the unversioned JobStore serializer that predates v2.
-# Do not derive this from JobRequest.model_fields: compatibility must remain
-# bound to the historical format even when the live request schema evolves.
+# Frozen signatures of the unversioned JobStore serializer that predates v2.
+# Do not derive these from live Pydantic model fields: compatibility must remain
+# bound to the historical format even when the current schemas evolve.
 _LEGACY_JOB_REQUEST_FIELDS_V1 = frozenset(
     {
         "hub",
@@ -42,6 +42,36 @@ _LEGACY_JOB_REQUEST_FIELDS_V1 = frozenset(
         "remote_ref_policy",
     }
 )
+_LEGACY_RECORD_FIELDS_V1 = {
+    "request": frozenset(
+        {
+            "id",
+            "status",
+            "created_at",
+            "started_at",
+            "finished_at",
+            "request",
+            "hub_resolved",
+            "content_hash",
+            "logs",
+            "warnings",
+            "artifact_ids",
+            "error",
+        }
+    ),
+    "params": frozenset(
+        {
+            "id",
+            "job_id",
+            "hub",
+            "repos",
+            "created_at",
+            "paths",
+            "params",
+            "merges_dir",
+        }
+    ),
+}
 _BOOL_ADAPTER = TypeAdapter(bool)
 
 
@@ -87,7 +117,15 @@ def _v2_fields_set(
     return fields_set
 
 
-def _legacy_v1_fields_set(raw_request: dict[str, Any]) -> frozenset[str]:
+def _legacy_v1_fields_set(
+    raw_record: dict[str, Any],
+    raw_request: dict[str, Any],
+    *,
+    request_key: str,
+) -> frozenset[str]:
+    expected_record_fields = _LEGACY_RECORD_FIELDS_V1.get(request_key)
+    if expected_record_fields is None or frozenset(raw_record) != expected_record_fields:
+        raise ValueError("unversioned JobStore record does not match legacy v1")
     if frozenset(raw_request) != _LEGACY_JOB_REQUEST_FIELDS_V1:
         raise ValueError("unversioned JobStore request does not match legacy v1")
 
@@ -95,8 +133,8 @@ def _legacy_v1_fields_set(raw_request: dict[str, Any]) -> frozenset[str]:
     # v1 wrote a full model_dump and therefore lost Pydantic's distinction
     # between an explicit pre_pull and its default. The public source-mode
     # validator could never have accepted explicit pre_pull=True together with
-    # local_current or remote_snapshot, while a bare mode was valid. This is the
-    # only ambiguity we repair; all other v1 values stay conservative/explicit.
+    # local_current or remote_snapshot, while a bare mode was valid. This exact
+    # historical-record carve-out is the only ambiguity we repair.
     if (
         raw_request.get("repo_source_mode") in {"local_current", "remote_snapshot"}
         and raw_request.get("pre_pull") is True
@@ -137,7 +175,11 @@ def load_record(
     if _STATE_META_KEY in raw_record:
         fields_set = _v2_fields_set(raw_request, raw_record[_STATE_META_KEY])
     else:
-        fields_set = _legacy_v1_fields_set(raw_request)
+        fields_set = _legacy_v1_fields_set(
+            raw_record,
+            raw_request,
+            request_key=request_key,
+        )
 
     request = _validate_request(raw_request, fields_set=fields_set)
     record_payload = dict(raw_record)
