@@ -22,8 +22,8 @@ from pydantic import BaseModel
 # semantics requires an explicit JobStore migration/version instead of silently
 # reinterpreting old bytes.
 _FROZEN_MODEL_FINGERPRINTS = {
-    "JobRequest": "51905c46e5c8e0bc9e5a33ffd4b5309f9f16fa3f309d880d23ea4073ae245c25",
-    "Job": "979ea892ede8830d8ec3f037d427907c24f862cedbade69cd09d14cc2661c084",
+    "JobRequest": "649a27a1aa9f14984373faae53013a338301abb4220cd140b55a6af5e0075ae2",
+    "Job": "f0992e03ffc1b56aecbed0afb2ce5ca5911566813c908077d2cfab8240d1369b",
     "Artifact": "9a35d00c0c76d20883366f0612b058a32a95030fed4e6e54598527b16b77eea0",
 }
 _PROJECT_PREFIX = "merger.repoground.service"
