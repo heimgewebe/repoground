@@ -2,9 +2,11 @@ import json
 from pathlib import Path
 
 import pytest
+from pydantic import model_validator
 
 from merger.repoground.core.merge import MERGES_DIR_NAME
 from merger.repoground.service.jobstore import JobStore
+from merger.repoground.service.jobstore_schema import assert_frozen_model_schema
 from merger.repoground.service.models import Artifact, Job, JobRequest
 
 
@@ -152,3 +154,30 @@ def test_v2_rejects_self_consistent_incomplete_request_shape(
         JobStore(tmp_path)
 
     assert state_path.read_bytes() == original
+
+
+def test_schema_fingerprint_rejects_same_name_type_and_default_drift() -> None:
+    class DriftedJobRequest(JobRequest):
+        include_hidden: int = 1
+
+    # Simulate an in-place future edit: the persisted model identity is unchanged,
+    # but the same field name now means a different type/default.
+    DriftedJobRequest.__name__ = "JobRequest"
+
+    with pytest.raises(ValueError, match="schema fingerprint changed"):
+        assert_frozen_model_schema(DriftedJobRequest)
+
+
+def test_schema_fingerprint_rejects_validator_drift_without_field_drift() -> None:
+    class DriftedJobRequest(JobRequest):
+        @model_validator(mode="after")
+        def _new_state_rule(self) -> "DriftedJobRequest":
+            if self.plan_only and self.force_new:
+                raise ValueError("new persisted-state rule")
+            return self
+
+    DriftedJobRequest.__name__ = "JobRequest"
+    assert set(DriftedJobRequest.model_fields) == set(JobRequest.model_fields)
+
+    with pytest.raises(ValueError, match="schema fingerprint changed"):
+        assert_frozen_model_schema(DriftedJobRequest)
