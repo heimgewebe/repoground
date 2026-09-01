@@ -13,6 +13,12 @@ _META_FIELDS = frozenset({"version", "request_fields", "request_fields_set"})
 # Frozen signatures of the unversioned JobStore serializer that predates v2.
 # Do not derive these from live Pydantic model fields: compatibility must remain
 # bound to the historical format even when the current schemas evolve.
+#
+# The active RepoGround state path was hard-cut from `.rlens-service` to
+# `.repoground-service` on 2026-07-19 (fa5b1e897929e41488a661916ec218cb0cf25c09).
+# At that boundary JobRequest, Job and Artifact already had the exact shapes
+# frozen below. Older `.rlens-service` files are a retired runtime path rather
+# than earlier generations of this active state file.
 _LEGACY_JOB_REQUEST_FIELDS_V1 = frozenset(
     {
         "hub",
@@ -72,6 +78,44 @@ _LEGACY_RECORD_FIELDS_V1 = {
         }
     ),
 }
+
+# v2 intentionally freezes the *outer* record shape too. Pydantic defaults must
+# never turn a malformed persisted record into an apparently valid one (for
+# example, a missing artifact_ids must not silently become []). Future top-level
+# schema evolution therefore requires an explicit JobStore state-version change
+# or migration instead of inheriting whatever the live model happens to accept.
+_V2_RECORD_FIELDS = {
+    "request": frozenset(
+        {
+            "id",
+            "status",
+            "created_at",
+            "started_at",
+            "finished_at",
+            "request",
+            "hub_resolved",
+            "content_hash",
+            "logs",
+            "warnings",
+            "artifact_ids",
+            "error",
+            _STATE_META_KEY,
+        }
+    ),
+    "params": frozenset(
+        {
+            "id",
+            "job_id",
+            "hub",
+            "repos",
+            "created_at",
+            "paths",
+            "params",
+            "merges_dir",
+            _STATE_META_KEY,
+        }
+    ),
+}
 _BOOL_ADAPTER = TypeAdapter(bool)
 
 
@@ -91,8 +135,15 @@ def _field_name_set(value: Any, *, label: str) -> frozenset[str]:
 
 
 def _v2_fields_set(
-    raw_request: dict[str, Any], raw_meta: Any
+    raw_record: dict[str, Any],
+    raw_request: dict[str, Any],
+    raw_meta: Any,
+    *,
+    request_key: str,
 ) -> frozenset[str]:
+    expected_record_fields = _V2_RECORD_FIELDS.get(request_key)
+    if expected_record_fields is None or frozenset(raw_record) != expected_record_fields:
+        raise ValueError("JobStore v2 record does not match frozen v2 shape")
     if not isinstance(raw_meta, dict):
         raise ValueError("JobStore v2 metadata must be an object")
     if set(raw_meta) != _META_FIELDS:
@@ -173,7 +224,12 @@ def load_record(
         raise ValueError(f"{request_key} must be an object")
 
     if _STATE_META_KEY in raw_record:
-        fields_set = _v2_fields_set(raw_request, raw_record[_STATE_META_KEY])
+        fields_set = _v2_fields_set(
+            raw_record,
+            raw_request,
+            raw_record[_STATE_META_KEY],
+            request_key=request_key,
+        )
     else:
         fields_set = _legacy_v1_fields_set(
             raw_record,
