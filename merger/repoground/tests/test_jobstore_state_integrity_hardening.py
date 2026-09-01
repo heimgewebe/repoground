@@ -117,3 +117,38 @@ def test_v2_requires_exact_top_level_record_shape(
         JobStore(tmp_path)
 
     assert state_path.read_bytes() == original
+
+
+@pytest.mark.parametrize("kind", ["job", "artifact"])
+def test_v2_rejects_self_consistent_incomplete_request_shape(
+    tmp_path: Path,
+    kind: str,
+) -> None:
+    request = JobRequest(hub=str(tmp_path), repos=["demo"])
+    store = JobStore(tmp_path)
+    if kind == "job":
+        store.add_job(Job.create(request))
+        state_path = _state_dir(tmp_path) / "jobs.json"
+        request_key = "request"
+    else:
+        store.add_artifact(_artifact(request))
+        state_path = _state_dir(tmp_path) / "artifacts.json"
+        request_key = "params"
+
+    entries = json.loads(state_path.read_text(encoding="utf-8"))
+    entry = entries[0]
+    entry[request_key].pop("include_hidden")
+    entry["_jobstore"]["request_fields"].remove("include_hidden")
+
+    # The request bytes and request_fields metadata still agree with each other.
+    # The frozen v2 shape must nevertheless reject the missing field instead of
+    # allowing Pydantic to reintroduce today's include_hidden default.
+    assert set(entry[request_key]) == set(entry["_jobstore"]["request_fields"])
+
+    original = json.dumps(entries, indent=2).encode("utf-8")
+    state_path.write_bytes(original)
+
+    with pytest.raises(RuntimeError, match="refusing to start"):
+        JobStore(tmp_path)
+
+    assert state_path.read_bytes() == original
