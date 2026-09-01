@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import os
 from typing import Any, List, Optional, Dict, Tuple, Callable
-from .models import Job, Artifact
+from .models import Job, Artifact, JobRequest
 
 from merger.repoground.core.merge import MERGES_DIR_NAME, get_merges_dir
 from .source_acquisition import prune_source_snapshots, remove_source_snapshot
@@ -34,7 +34,42 @@ class JobStore:
         self._load()
 
     @staticmethod
-    def _load_state_file(path: Path, *, label: str, record_type: Any) -> Dict[str, Any]:
+    def _normalize_legacy_request_state(
+        raw_record: Dict[str, Any], *, request_key: str
+    ) -> Dict[str, Any]:
+        request = raw_record.get(request_key)
+        if not isinstance(request, dict):
+            return raw_record
+
+        # Before this migration JobStore persisted JobRequest with plain
+        # model_dump(), which materialized every default. A bare explicit source
+        # mode therefore came back with pre_pull=True marked as explicitly set,
+        # even though the API could never have accepted that contradiction.
+        # Recognize only that exact legacy full-field shape; arbitrary partial or
+        # malformed state remains fail-closed.
+        if set(request) != set(JobRequest.model_fields):
+            return raw_record
+        if (
+            request.get("repo_source_mode") not in {"local_current", "remote_snapshot"}
+            or request.get("pre_pull") is not True
+        ):
+            return raw_record
+
+        normalized_record = dict(raw_record)
+        normalized_request = dict(request)
+        normalized_request.pop("pre_pull")
+        normalized_record[request_key] = normalized_request
+        return normalized_record
+
+    @classmethod
+    def _load_state_file(
+        cls,
+        path: Path,
+        *,
+        label: str,
+        record_type: Any,
+        request_key: str,
+    ) -> Dict[str, Any]:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             if not isinstance(data, list):
@@ -43,7 +78,10 @@ class JobStore:
             for raw_record in data:
                 if not isinstance(raw_record, dict):
                     raise ValueError(f"each {label} state entry must be an object")
-                record = record_type(**raw_record)
+                normalized_record = cls._normalize_legacy_request_state(
+                    raw_record, request_key=request_key
+                )
+                record = record_type(**normalized_record)
                 loaded[record.id] = record
         except Exception as exc:
             raise RuntimeError(
@@ -52,28 +90,46 @@ class JobStore:
             ) from exc
         return loaded
 
+    @staticmethod
+    def _dump_job(job: Job) -> Dict[str, Any]:
+        data = job.model_dump()
+        data["request"] = job.request.model_dump(exclude_unset=True)
+        return data
+
+    @staticmethod
+    def _dump_artifact(artifact: Artifact) -> Dict[str, Any]:
+        data = artifact.model_dump()
+        data["params"] = artifact.params.model_dump(exclude_unset=True)
+        return data
+
     def _load(self) -> None:
         with self._lock:
             if self.jobs_file.exists():
                 self._jobs_cache = self._load_state_file(
-                    self.jobs_file, label="jobs", record_type=Job
+                    self.jobs_file,
+                    label="jobs",
+                    record_type=Job,
+                    request_key="request",
                 )
             if self.artifacts_file.exists():
                 self._artifacts_cache = self._load_state_file(
-                    self.artifacts_file, label="artifacts", record_type=Artifact
+                    self.artifacts_file,
+                    label="artifacts",
+                    record_type=Artifact,
+                    request_key="params",
                 )
 
     def _save_jobs(self) -> None:
         tmp_file = self.jobs_file.with_suffix(".tmp")
         tmp_file.parent.mkdir(parents=True, exist_ok=True)
-        data = [j.model_dump() for j in self._jobs_cache.values()]
+        data = [self._dump_job(job) for job in self._jobs_cache.values()]
         tmp_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
         tmp_file.rename(self.jobs_file)
 
     def _save_artifacts(self) -> None:
         tmp_file = self.artifacts_file.with_suffix(".tmp")
         tmp_file.parent.mkdir(parents=True, exist_ok=True)
-        data = [a.model_dump() for a in self._artifacts_cache.values()]
+        data = [self._dump_artifact(artifact) for artifact in self._artifacts_cache.values()]
         tmp_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
         tmp_file.rename(self.artifacts_file)
 
