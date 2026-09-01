@@ -1,13 +1,24 @@
 import json
+import types
 from pathlib import Path
 
 import pytest
-from pydantic import model_validator
+from pydantic import ConfigDict, model_validator
 
 from merger.repoground.core.merge import MERGES_DIR_NAME
 from merger.repoground.service.jobstore import JobStore
-from merger.repoground.service.jobstore_schema import assert_frozen_model_schema
+from merger.repoground.service.jobstore_schema import (
+    _callable_graph,
+    assert_frozen_model_schema,
+)
 from merger.repoground.service.models import Artifact, Job, JobRequest
+
+_SCHEMA_DEPENDENCY_MODULE = types.ModuleType("jobstore_schema_dependency")
+_SCHEMA_DEPENDENCY_MODULE.FLAG = "alpha"
+
+
+def _uses_module_dependency() -> str:
+    return _SCHEMA_DEPENDENCY_MODULE.FLAG
 
 
 def _state_dir(hub: Path) -> Path:
@@ -160,9 +171,18 @@ def test_schema_fingerprint_rejects_same_name_type_and_default_drift() -> None:
     class DriftedJobRequest(JobRequest):
         include_hidden: int = 1
 
-    # Simulate an in-place future edit: the persisted model identity is unchanged,
-    # but the same field name now means a different type/default.
     DriftedJobRequest.__name__ = "JobRequest"
+
+    with pytest.raises(ValueError, match="schema fingerprint changed"):
+        assert_frozen_model_schema(DriftedJobRequest)
+
+
+def test_schema_fingerprint_rejects_validation_config_drift() -> None:
+    class DriftedJobRequest(JobRequest):
+        model_config = ConfigDict(str_strip_whitespace=True)
+
+    DriftedJobRequest.__name__ = "JobRequest"
+    assert set(DriftedJobRequest.model_fields) == set(JobRequest.model_fields)
 
     with pytest.raises(ValueError, match="schema fingerprint changed"):
         assert_frozen_model_schema(DriftedJobRequest)
@@ -181,3 +201,11 @@ def test_schema_fingerprint_rejects_validator_drift_without_field_drift() -> Non
 
     with pytest.raises(ValueError, match="schema fingerprint changed"):
         assert_frozen_model_schema(DriftedJobRequest)
+
+
+def test_callable_fingerprint_tracks_module_attribute_values(monkeypatch) -> None:
+    before = _callable_graph(_uses_module_dependency)
+    monkeypatch.setattr(_SCHEMA_DEPENDENCY_MODULE, "FLAG", "beta")
+    after = _callable_graph(_uses_module_dependency)
+
+    assert before != after
