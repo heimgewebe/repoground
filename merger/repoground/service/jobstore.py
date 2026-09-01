@@ -7,7 +7,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import os
 from typing import Any, List, Optional, Dict, Tuple, Callable
-from .models import Job, Artifact, JobRequest
+from .models import Job, Artifact
+from .jobstore_state import dump_record, load_record
 
 from merger.repoground.core.merge import MERGES_DIR_NAME, get_merges_dir
 from .source_acquisition import prune_source_snapshots, remove_source_snapshot
@@ -34,36 +35,7 @@ class JobStore:
         self._load()
 
     @staticmethod
-    def _normalize_legacy_request_state(
-        raw_record: Dict[str, Any], *, request_key: str
-    ) -> Dict[str, Any]:
-        request = raw_record.get(request_key)
-        if not isinstance(request, dict):
-            return raw_record
-
-        # Before this migration JobStore persisted JobRequest with plain
-        # model_dump(), which materialized every default. A bare explicit source
-        # mode therefore came back with pre_pull=True marked as explicitly set,
-        # even though the API could never have accepted that contradiction.
-        # Recognize only that exact legacy full-field shape; arbitrary partial or
-        # malformed state remains fail-closed.
-        if set(request) != set(JobRequest.model_fields):
-            return raw_record
-        if (
-            request.get("repo_source_mode") not in {"local_current", "remote_snapshot"}
-            or request.get("pre_pull") is not True
-        ):
-            return raw_record
-
-        normalized_record = dict(raw_record)
-        normalized_request = dict(request)
-        normalized_request.pop("pre_pull")
-        normalized_record[request_key] = normalized_request
-        return normalized_record
-
-    @classmethod
     def _load_state_file(
-        cls,
         path: Path,
         *,
         label: str,
@@ -78,10 +50,13 @@ class JobStore:
             for raw_record in data:
                 if not isinstance(raw_record, dict):
                     raise ValueError(f"each {label} state entry must be an object")
-                normalized_record = cls._normalize_legacy_request_state(
-                    raw_record, request_key=request_key
+                record = load_record(
+                    raw_record,
+                    record_type=record_type,
+                    request_key=request_key,
                 )
-                record = record_type(**normalized_record)
+                if record.id in loaded:
+                    raise ValueError(f"duplicate {label} state id: {record.id}")
                 loaded[record.id] = record
         except Exception as exc:
             raise RuntimeError(
@@ -92,15 +67,11 @@ class JobStore:
 
     @staticmethod
     def _dump_job(job: Job) -> Dict[str, Any]:
-        data = job.model_dump()
-        data["request"] = job.request.model_dump(exclude_unset=True)
-        return data
+        return dump_record(job, request_key="request")
 
     @staticmethod
     def _dump_artifact(artifact: Artifact) -> Dict[str, Any]:
-        data = artifact.model_dump()
-        data["params"] = artifact.params.model_dump(exclude_unset=True)
-        return data
+        return dump_record(artifact, request_key="params")
 
     def _load(self) -> None:
         with self._lock:
