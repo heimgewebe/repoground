@@ -29,6 +29,7 @@ _FROZEN_MODEL_FINGERPRINTS = {
 _PROJECT_PREFIX = "merger.repoground.service"
 _REF_RE = re.compile(r"^(?:.+\.)?([A-Za-z_][\w]*):\d+$")
 _ADDRESS_RE = re.compile(r"0x[0-9a-fA-F]+")
+_UNHANDLED = object()
 
 
 class _NormalizeAst(ast.NodeTransformer):
@@ -148,27 +149,31 @@ def _normalize_ref(value: str) -> str:
     return f"<model>:{match.group(1)}" if match else value
 
 
-def _stable_value(
-    value: Any,
-    *,
-    seen: frozenset[int] = frozenset(),
-) -> Any:
+def _stable_float(value: float) -> Any:
+    if value != value:
+        return {"float": "nan"}
+    if value == float("inf"):
+        return {"float": "inf"}
+    if value == float("-inf"):
+        return {"float": "-inf"}
+    return value
+
+
+def _stable_scalar(value: Any) -> Any:
     if value is None or isinstance(value, (bool, int, str)):
         return value
     if isinstance(value, float):
-        if value != value:
-            return {"float": "nan"}
-        if value == float("inf"):
-            return {"float": "inf"}
-        if value == float("-inf"):
-            return {"float": "-inf"}
-        return value
+        return _stable_float(value)
     if isinstance(value, bytes):
         return {"bytes": value.hex()}
     if isinstance(value, enum.Enum):
         return {"enum": _qualified_name(type(value)), "value": _stable_value(value.value)}
     if isinstance(value, re.Pattern):
         return {"regex": value.pattern, "flags": value.flags}
+    return _UNHANDLED
+
+
+def _stable_container(value: Any, *, seen: frozenset[int]) -> Any:
     if isinstance(value, Mapping):
         return {
             str(key): _stable_value(item, seen=seen)
@@ -181,14 +186,20 @@ def _stable_value(
         return sorted(items, key=lambda item: json.dumps(item, sort_keys=True, default=str))
     if isinstance(value, types.ModuleType):
         return {"module": value.__name__}
+    return _UNHANDLED
+
+
+def _stable_type(value: type) -> Any:
+    if issubclass(value, BaseModel):
+        return {"model_class": value.__name__}
+    if _is_project_object(value):
+        return {"project_class": _normalized_ast(value)}
+    return {"type": _qualified_name(value)}
+
+
+def _stable_callable(value: Any, *, seen: frozenset[int]) -> Any:
     if isinstance(value, type):
-        if issubclass(value, BaseModel):
-            # pydantic-core refs already bind nested model structure; memory/module
-            # identity itself is irrelevant to persisted JSON semantics.
-            return {"model_class": value.__name__}
-        if _is_project_object(value):
-            return {"project_class": _normalized_ast(value)}
-        return {"type": _qualified_name(value)}
+        return _stable_type(value)
     if inspect.isfunction(value) or inspect.ismethod(value):
         target = _target(value)
         if _is_project_object(target):
@@ -200,9 +211,24 @@ def _stable_value(
             "args": _stable_value(value.args, seen=seen),
             "keywords": _stable_value(value.keywords or {}, seen=seen),
         }
+    return _UNHANDLED
 
-    # Fail deterministically on otherwise stable pydantic/core objects while
-    # stripping process-local memory addresses from repr output.
+
+def _stable_value(
+    value: Any,
+    *,
+    seen: frozenset[int] = frozenset(),
+) -> Any:
+    scalar = _stable_scalar(value)
+    if scalar is not _UNHANDLED:
+        return scalar
+    container = _stable_container(value, seen=seen)
+    if container is not _UNHANDLED:
+        return container
+    callable_value = _stable_callable(value, seen=seen)
+    if callable_value is not _UNHANDLED:
+        return callable_value
+
     return {
         "object": f"{type(value).__module__}:{type(value).__qualname__}",
         "repr": _ADDRESS_RE.sub("<addr>", repr(value)),
