@@ -1,12 +1,31 @@
-import sys
-from pathlib import Path
 import json
+from pathlib import Path
 
-project_root = str(Path(__file__).resolve().parent.parent.parent.parent)
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
+import pytest
 
 from merger.repoground.core.constants import ArtifactRole
+
+
+def _extract_enum_roles(schema: object, keys: tuple[str, ...], schema_name: str) -> set[str]:
+    node = schema
+    try:
+        for key in keys:
+            if not isinstance(node, dict):
+                raise TypeError(f"expected object before {key!r}")
+            node = node[key]
+    except (KeyError, TypeError) as exc:
+        path = ".".join(keys)
+        raise AssertionError(
+            f"{schema_name} no longer exposes the expected role enum at {path}"
+        ) from exc
+
+    if not isinstance(node, list) or not node or not all(isinstance(role, str) for role in node):
+        path = ".".join(keys)
+        raise AssertionError(
+            f"{schema_name} role enum at {path} must be a non-empty list of strings"
+        )
+    return set(node)
+
 
 def test_role_completeness():
     """
@@ -14,53 +33,58 @@ def test_role_completeness():
     Checks for bidirectional drift against bundle-manifest and range-ref schemas.
     """
     contracts_dir = Path(__file__).parent.parent / "contracts"
+    python_roles = {role.value for role in ArtifactRole}
 
-    # Schemas to check
-    schema_files = [
-        "bundle-manifest.v1.schema.json",
-        "range-ref.v1.schema.json"
-    ]
+    bundle_schema_path = contracts_dir / "bundle-manifest.v1.schema.json"
+    range_ref_schema_path = contracts_dir / "range-ref.v1.schema.json"
+    assert bundle_schema_path.is_file(), f"Required schema is missing: {bundle_schema_path}"
+    assert range_ref_schema_path.is_file(), f"Required schema is missing: {range_ref_schema_path}"
 
-    # Collect all roles from python enum
-    python_roles = {r.value for r in ArtifactRole}
+    with bundle_schema_path.open() as handle:
+        bundle_schema = json.load(handle)
+    with range_ref_schema_path.open() as handle:
+        range_ref_schema = json.load(handle)
 
-    # Known exclusions per schema context
+    bundle_roles = _extract_enum_roles(
+        bundle_schema,
+        ("properties", "artifacts", "items", "properties", "role", "enum"),
+        bundle_schema_path.name,
+    )
     # source_file is a virtual role used in derived_range_ref, not an actual bundle artifact.
-    exclude_from_bundle_manifest = {"source_file"}
-    # range-ref can point to source files or actual artifacts, but it doesn't need to support *all* abstract roles (like a sqlite index which isn't text)
-    # However, for simplicity and drift prevention, the enum there usually covers the textual ones. Let's see what's actually there.
+    expected_bundle_roles = python_roles - {"source_file"}
+    missing_in_bundle_schema = expected_bundle_roles - bundle_roles
+    assert not missing_in_bundle_schema, (
+        f"Roles defined in code but missing from {bundle_schema_path.name}: "
+        f"{missing_in_bundle_schema}"
+    )
+    missing_in_python = bundle_roles - python_roles
+    assert not missing_in_python, (
+        f"Roles defined in {bundle_schema_path.name} but missing from code enum: "
+        f"{missing_in_python}"
+    )
 
-    for schema_name in schema_files:
-        schema_path = contracts_dir / schema_name
-        if not schema_path.exists():
-            continue
+    # range-ref intentionally supports only a subset of ArtifactRole values, but every
+    # role it names must still exist in the Python enum. Structural schema drift must
+    # fail closed instead of silently skipping this check.
+    range_ref_roles = _extract_enum_roles(
+        range_ref_schema,
+        ("properties", "artifact_role", "enum"),
+        range_ref_schema_path.name,
+    )
+    missing_in_python = range_ref_roles - python_roles
+    assert not missing_in_python, (
+        f"Roles defined in {range_ref_schema_path.name} but missing from code enum: "
+        f"{missing_in_python}"
+    )
 
-        with schema_path.open() as f:
-            schema = json.load(f)
 
-        schema_roles = set()
-
-        if "bundle-manifest" in schema_name:
-            schema_roles = set(schema["properties"]["artifacts"]["items"]["properties"]["role"]["enum"])
-
-            # 1. Missing in schema (defined in Python but not in Schema)
-            expected_in_schema = python_roles - exclude_from_bundle_manifest
-            missing_in_schema = expected_in_schema - schema_roles
-            assert not missing_in_schema, f"Roles defined in code but missing from {schema_name}: {missing_in_schema}"
-
-            # 2. Missing in Python (defined in Schema but not in Python)
-            missing_in_python = schema_roles - python_roles
-            assert not missing_in_python, f"Roles defined in {schema_name} but missing from code enum: {missing_in_python}"
-
-        elif "range-ref" in schema_name:
-            # Note: The range-ref schema intentionally models only a SUBSET of roles
-            # (specifically those that can be referenced as artifacts or sources).
-            # Therefore, we do NOT check for full bidirectionality here.
-            # We ONLY check for unidirectional drift: Ensure the schema does not contain
-            # any roles that are completely unknown to the Python ArtifactRole enum.
-            try:
-                schema_roles = set(schema["properties"]["artifact_role"]["enum"])
-                missing_in_python = schema_roles - python_roles
-                assert not missing_in_python, f"Roles defined in {schema_name} but missing from code enum: {missing_in_python}"
-            except KeyError:
-                pass # If structure differs, we skip strict check or adjust extraction
+@pytest.mark.parametrize(
+    ("schema", "keys"),
+    [
+        ({"properties": {}}, ("properties", "artifact_role", "enum")),
+        ({"properties": {"artifact_role": {"enum": []}}}, ("properties", "artifact_role", "enum")),
+    ],
+)
+def test_role_enum_extraction_fails_closed(schema: object, keys: tuple[str, ...]):
+    with pytest.raises(AssertionError, match="role enum"):
+        _extract_enum_roles(schema, keys, "range-ref.v1.schema.json")
