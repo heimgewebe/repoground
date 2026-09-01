@@ -79,6 +79,11 @@ _LEGACY_RECORD_FIELDS_V1 = {
     ),
 }
 
+# v2 was introduced while the active request schema still matched the frozen v1
+# request shape. Keep a distinct semantic name anyway: a future request-schema
+# change must bump/migrate the JobStore state version rather than broadening v2.
+_V2_JOB_REQUEST_FIELDS = _LEGACY_JOB_REQUEST_FIELDS_V1
+
 # v2 intentionally freezes the *outer* record shape too. Pydantic defaults must
 # never turn a malformed persisted record into an apparently valid one (for
 # example, a missing artifact_ids must not silently become []). Future top-level
@@ -139,11 +144,16 @@ def _v2_fields_set(
     raw_request: dict[str, Any],
     raw_meta: Any,
     *,
+    record_type: type[BaseModel],
     request_key: str,
 ) -> frozenset[str]:
     expected_record_fields = _V2_RECORD_FIELDS.get(request_key)
     if expected_record_fields is None or frozenset(raw_record) != expected_record_fields:
         raise ValueError("JobStore v2 record does not match frozen v2 shape")
+
+    expected_model_fields = expected_record_fields - {_STATE_META_KEY}
+    if frozenset(record_type.model_fields) != expected_model_fields:
+        raise ValueError("current record schema requires a JobStore state-version migration")
     if not isinstance(raw_meta, dict):
         raise ValueError("JobStore v2 metadata must be an object")
     if set(raw_meta) != _META_FIELDS:
@@ -161,8 +171,10 @@ def _v2_fields_set(
 
     if request_fields != frozenset(raw_request):
         raise ValueError("persisted request fields do not match JobStore metadata")
-    if not request_fields.issubset(current_fields):
-        raise ValueError("persisted request uses fields unknown to this RepoGround")
+    if request_fields != _V2_JOB_REQUEST_FIELDS:
+        raise ValueError("JobStore v2 request does not match frozen v2 shape")
+    if current_fields != _V2_JOB_REQUEST_FIELDS:
+        raise ValueError("current JobRequest schema requires a JobStore state-version migration")
     if not fields_set.issubset(request_fields):
         raise ValueError("request_fields_set contains a field absent from the request")
     return fields_set
@@ -228,6 +240,7 @@ def load_record(
             raw_record,
             raw_request,
             raw_record[_STATE_META_KEY],
+            record_type=record_type,
             request_key=request_key,
         )
     else:
@@ -259,12 +272,20 @@ def dump_record(record: BaseModel, *, request_key: str) -> dict[str, Any]:
     request_payload = request.model_dump()
     if frozenset(request_payload) != current_fields:
         raise ValueError("JobRequest dump is not complete")
+    if current_fields != _V2_JOB_REQUEST_FIELDS:
+        raise ValueError("current JobRequest schema requires a JobStore state-version migration")
 
     fields_set = frozenset(request.model_fields_set)
     if not fields_set.issubset(current_fields):
         raise ValueError("JobRequest fields_set contains an unknown field")
 
     data = record.model_dump()
+    expected_record_fields = _V2_RECORD_FIELDS.get(request_key)
+    if expected_record_fields is None:
+        raise ValueError(f"unsupported JobStore request key: {request_key}")
+    if frozenset(data) != expected_record_fields - {_STATE_META_KEY}:
+        raise ValueError("current record schema requires a JobStore state-version migration")
+
     data[request_key] = request_payload
     data[_STATE_META_KEY] = {
         "version": _STATE_VERSION,
