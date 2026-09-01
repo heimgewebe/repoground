@@ -7,6 +7,7 @@ import io
 import json
 import textwrap
 import tokenize
+from functools import lru_cache
 from typing import Any, Callable
 
 from pydantic import BaseModel
@@ -168,6 +169,7 @@ def _validator_graphs(model: type[BaseModel]) -> list[dict[str, Any]]:
     return graphs
 
 
+@lru_cache(maxsize=None)
 def model_schema_fingerprint(model: type[BaseModel]) -> str:
     """Return a deterministic persisted-state validation fingerprint."""
     semantic_config = {
