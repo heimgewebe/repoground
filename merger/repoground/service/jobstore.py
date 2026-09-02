@@ -6,13 +6,23 @@ import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import os
-from typing import List, Optional, Dict, Tuple, Callable
+from typing import Any, List, Optional, Dict, Tuple, Callable
 from .models import Job, Artifact
+from .jobstore_state import dump_record, load_record
 
 from merger.repoground.core.merge import MERGES_DIR_NAME, get_merges_dir
 from .source_acquisition import prune_source_snapshots, remove_source_snapshot
 
 logger = logging.getLogger(__name__)
+
+
+def _reject_duplicate_json_keys(pairs: List[Tuple[str, Any]]) -> Dict[str, Any]:
+    result: Dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON object key: {key}")
+        result[key] = value
+    return result
 
 
 class JobStore:
@@ -33,37 +43,84 @@ class JobStore:
 
         self._load()
 
+    @staticmethod
+    def _load_state_file(
+        path: Path,
+        *,
+        label: str,
+        record_type: Any,
+        request_key: str,
+    ) -> Dict[str, Any]:
+        try:
+            data = json.loads(
+                path.read_text(encoding="utf-8"),
+                object_pairs_hook=_reject_duplicate_json_keys,
+            )
+            if not isinstance(data, list):
+                raise ValueError(f"{label} state must be a JSON array")
+            loaded: Dict[str, Any] = {}
+            state_format: str | None = None
+            for raw_record in data:
+                if not isinstance(raw_record, dict):
+                    raise ValueError(f"each {label} state entry must be an object")
+                record_format = "v2" if "_jobstore" in raw_record else "v1"
+                if state_format is None:
+                    state_format = record_format
+                elif record_format != state_format:
+                    raise ValueError(
+                        f"{label} state must not mix legacy v1 and v2 records"
+                    )
+                record = load_record(
+                    raw_record,
+                    record_type=record_type,
+                    request_key=request_key,
+                )
+                if record.id in loaded:
+                    raise ValueError(f"duplicate {label} state id: {record.id}")
+                loaded[record.id] = record
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to load existing {label} state from {path}; "
+                "refusing to start to avoid overwriting persistent state"
+            ) from exc
+        return loaded
+
+    @staticmethod
+    def _dump_job(job: Job) -> Dict[str, Any]:
+        return dump_record(job, request_key="request")
+
+    @staticmethod
+    def _dump_artifact(artifact: Artifact) -> Dict[str, Any]:
+        return dump_record(artifact, request_key="params")
+
     def _load(self) -> None:
         with self._lock:
             if self.jobs_file.exists():
-                try:
-                    data = json.loads(self.jobs_file.read_text(encoding="utf-8"))
-                    for j in data:
-                        job = Job(**j)
-                        self._jobs_cache[job.id] = job
-                except Exception as e:
-                    logger.error("Error loading jobs: %s", e)
-
+                self._jobs_cache = self._load_state_file(
+                    self.jobs_file,
+                    label="jobs",
+                    record_type=Job,
+                    request_key="request",
+                )
             if self.artifacts_file.exists():
-                try:
-                    data = json.loads(self.artifacts_file.read_text(encoding="utf-8"))
-                    for a in data:
-                        art = Artifact(**a)
-                        self._artifacts_cache[art.id] = art
-                except Exception as e:
-                    logger.error("Error loading artifacts: %s", e)
+                self._artifacts_cache = self._load_state_file(
+                    self.artifacts_file,
+                    label="artifacts",
+                    record_type=Artifact,
+                    request_key="params",
+                )
 
     def _save_jobs(self) -> None:
         tmp_file = self.jobs_file.with_suffix(".tmp")
         tmp_file.parent.mkdir(parents=True, exist_ok=True)
-        data = [j.model_dump() for j in self._jobs_cache.values()]
+        data = [self._dump_job(job) for job in self._jobs_cache.values()]
         tmp_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
         tmp_file.rename(self.jobs_file)
 
     def _save_artifacts(self) -> None:
         tmp_file = self.artifacts_file.with_suffix(".tmp")
         tmp_file.parent.mkdir(parents=True, exist_ok=True)
-        data = [a.model_dump() for a in self._artifacts_cache.values()]
+        data = [self._dump_artifact(artifact) for artifact in self._artifacts_cache.values()]
         tmp_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
         tmp_file.rename(self.artifacts_file)
 
