@@ -380,6 +380,38 @@ def test_malformed_v2_metadata_fails_closed_and_preserves_bytes(
     assert state_path.read_bytes() == original
 
 
+@pytest.mark.parametrize(
+    ("kind", "defaulted_field"),
+    [("job", "artifact_ids"), ("artifact", "merges_dir")],
+)
+@pytest.mark.parametrize("corruption", ["missing", "extra"])
+def test_malformed_v2_record_shape_fails_closed_and_preserves_bytes(
+    tmp_path: Path,
+    kind: str,
+    defaulted_field: str,
+    corruption: str,
+) -> None:
+    request = JobRequest(hub=str(tmp_path), repos=["demo"])
+    store = JobStore(tmp_path)
+    filename, _ = _persist_request(store, kind=kind, request=request)
+    state_path = _state_dir(tmp_path) / filename
+    persisted = json.loads(state_path.read_text(encoding="utf-8"))
+    entry = persisted[0]
+
+    if corruption == "missing":
+        entry.pop(defaulted_field)
+    else:
+        entry["future_record_field"] = "unknown"
+
+    original = json.dumps(persisted, indent=2).encode("utf-8")
+    state_path.write_bytes(original)
+
+    with pytest.raises(RuntimeError, match="refusing to start"):
+        JobStore(tmp_path)
+
+    assert state_path.read_bytes() == original
+
+
 @pytest.mark.parametrize("kind", ["job", "artifact"])
 def test_v2_explicit_source_mode_conflict_remains_fail_closed(
     tmp_path: Path,

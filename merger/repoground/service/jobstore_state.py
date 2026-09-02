@@ -72,6 +72,10 @@ _LEGACY_RECORD_FIELDS_V1 = {
         }
     ),
 }
+_V2_RECORD_FIELDS = {
+    request_key: fields | frozenset({_STATE_META_KEY})
+    for request_key, fields in _LEGACY_RECORD_FIELDS_V1.items()
+}
 _BOOL_ADAPTER = TypeAdapter(bool)
 
 
@@ -165,6 +169,16 @@ def _validate_request(
     return request
 
 
+def _validate_v2_record_shape(
+    raw_record: dict[str, Any], *, request_key: str
+) -> None:
+    expected_fields = _V2_RECORD_FIELDS.get(request_key)
+    if expected_fields is None or frozenset(raw_record) != expected_fields:
+        raise ValueError(
+            "JobStore v2 record has an unknown or missing top-level field"
+        )
+
+
 def load_record(
     raw_record: dict[str, Any], *, record_type: type[BaseModel], request_key: str
 ) -> BaseModel:
@@ -173,6 +187,7 @@ def load_record(
         raise ValueError(f"{request_key} must be an object")
 
     if _STATE_META_KEY in raw_record:
+        _validate_v2_record_shape(raw_record, request_key=request_key)
         fields_set = _v2_fields_set(raw_request, raw_record[_STATE_META_KEY])
     else:
         fields_set = _legacy_v1_fields_set(
@@ -215,4 +230,9 @@ def dump_record(record: BaseModel, *, request_key: str) -> dict[str, Any]:
         "request_fields": sorted(current_fields),
         "request_fields_set": sorted(fields_set),
     }
+
+    expected_fields = _V2_RECORD_FIELDS.get(request_key)
+    if expected_fields is None or frozenset(data) != expected_fields:
+        raise ValueError("record dump does not match JobStore v2 top-level shape")
+
     return data
