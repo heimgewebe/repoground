@@ -380,6 +380,34 @@ def test_malformed_v2_metadata_fails_closed_and_preserves_bytes(
     assert state_path.read_bytes() == original
 
 
+@pytest.mark.parametrize("kind", ["job", "artifact"])
+def test_v2_missing_request_field_with_matching_metadata_fails_closed(
+    tmp_path: Path,
+    kind: str,
+) -> None:
+    request = JobRequest(hub=str(tmp_path), repos=["demo"])
+    store = JobStore(tmp_path)
+    filename, _ = _persist_request(store, kind=kind, request=request)
+    state_path = _state_dir(tmp_path) / filename
+    persisted = json.loads(state_path.read_text(encoding="utf-8"))
+    entry = persisted[0]
+    request_key = "request" if kind == "job" else "params"
+
+    # Simulate a coordinated edit of both the request and its self-declared
+    # metadata. v2 must recognize its own complete frozen signature instead of
+    # trusting the declaration and silently restoring today's default.
+    entry[request_key].pop("include_hidden")
+    entry["_jobstore"]["request_fields"].remove("include_hidden")
+
+    original = json.dumps(persisted, indent=2).encode("utf-8")
+    state_path.write_bytes(original)
+
+    with pytest.raises(RuntimeError, match="refusing to start"):
+        JobStore(tmp_path)
+
+    assert state_path.read_bytes() == original
+
+
 @pytest.mark.parametrize(
     ("kind", "defaulted_field"),
     [("job", "artifact_ids"), ("artifact", "merges_dir")],
@@ -410,6 +438,52 @@ def test_malformed_v2_record_shape_fails_closed_and_preserves_bytes(
         JobStore(tmp_path)
 
     assert state_path.read_bytes() == original
+
+
+@pytest.mark.parametrize(
+    ("kind", "original_line", "shadow_line"),
+    [
+        (
+            "job",
+            '    "artifact_ids": [],',
+            '    "artifact_ids": ["shadowed"],',
+        ),
+        (
+            "artifact",
+            '    "paths": {},',
+            '    "paths": {"shadowed": "/tmp"},',
+        ),
+        (
+            "job",
+            '      "include_hidden": true,',
+            '      "include_hidden": false,',
+        ),
+        (
+            "artifact",
+            '      "version": 2,',
+            '      "version": 99,',
+        ),
+    ],
+)
+def test_duplicate_json_keys_fail_closed_before_state_validation(
+    tmp_path: Path,
+    kind: str,
+    original_line: str,
+    shadow_line: str,
+) -> None:
+    request = JobRequest(hub=str(tmp_path), repos=["demo"])
+    store = JobStore(tmp_path)
+    filename, _ = _persist_request(store, kind=kind, request=request)
+    state_path = _state_dir(tmp_path) / filename
+    original = state_path.read_text(encoding="utf-8")
+    assert original.count(original_line) == 1
+    corrupted = original.replace(original_line, f"{shadow_line}\n{original_line}", 1)
+    state_path.write_text(corrupted, encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="refusing to start"):
+        JobStore(tmp_path)
+
+    assert state_path.read_text(encoding="utf-8") == corrupted
 
 
 @pytest.mark.parametrize("kind", ["job", "artifact"])

@@ -16,6 +16,15 @@ from .source_acquisition import prune_source_snapshots, remove_source_snapshot
 logger = logging.getLogger(__name__)
 
 
+def _reject_duplicate_json_keys(pairs: List[Tuple[str, Any]]) -> Dict[str, Any]:
+    result: Dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON object key: {key}")
+        result[key] = value
+    return result
+
+
 class JobStore:
     def __init__(self, hub_path: Path):
         self.hub_path = hub_path
@@ -43,7 +52,10 @@ class JobStore:
         request_key: str,
     ) -> Dict[str, Any]:
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            data = json.loads(
+                path.read_text(encoding="utf-8"),
+                object_pairs_hook=_reject_duplicate_json_keys,
+            )
             if not isinstance(data, list):
                 raise ValueError(f"{label} state must be a JSON array")
             loaded: Dict[str, Any] = {}

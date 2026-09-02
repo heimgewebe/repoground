@@ -42,6 +42,12 @@ _LEGACY_JOB_REQUEST_FIELDS_V1 = frozenset(
         "remote_ref_policy",
     }
 )
+# v2 was introduced with the same complete JobRequest field set as legacy v1,
+# but it is a distinct versioned persistence contract. Keep a dedicated frozen
+# signature so both loading and writing stay bound to v2 rather than accepting
+# arbitrary subsets of the live Pydantic model.
+_V2_JOB_REQUEST_FIELDS = frozenset(_LEGACY_JOB_REQUEST_FIELDS_V1)
+
 _LEGACY_RECORD_FIELDS_V1 = {
     "request": frozenset(
         {
@@ -114,8 +120,10 @@ def _v2_fields_set(
 
     if request_fields != frozenset(raw_request):
         raise ValueError("persisted request fields do not match JobStore metadata")
-    if not request_fields.issubset(current_fields):
-        raise ValueError("persisted request uses fields unknown to this RepoGround")
+    if request_fields != _V2_JOB_REQUEST_FIELDS:
+        raise ValueError("persisted request does not match JobStore v2 field signature")
+    if current_fields != _V2_JOB_REQUEST_FIELDS:
+        raise ValueError("current JobRequest schema requires a JobStore state version bump")
     if not fields_set.issubset(request_fields):
         raise ValueError("request_fields_set contains a field absent from the request")
     return fields_set
@@ -215,6 +223,9 @@ def dump_record(record: BaseModel, *, request_key: str) -> dict[str, Any]:
         raise TypeError(f"{request_key} must be a JobRequest")
 
     current_fields = frozenset(JobRequest.model_fields)
+    if current_fields != _V2_JOB_REQUEST_FIELDS:
+        raise ValueError("current JobRequest schema requires a JobStore state version bump")
+
     request_payload = request.model_dump()
     if frozenset(request_payload) != current_fields:
         raise ValueError("JobRequest dump is not complete")
