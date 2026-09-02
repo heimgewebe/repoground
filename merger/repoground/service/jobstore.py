@@ -59,9 +59,17 @@ class JobStore:
             if not isinstance(data, list):
                 raise ValueError(f"{label} state must be a JSON array")
             loaded: Dict[str, Any] = {}
+            state_format: str | None = None
             for raw_record in data:
                 if not isinstance(raw_record, dict):
                     raise ValueError(f"each {label} state entry must be an object")
+                record_format = "v2" if "_jobstore" in raw_record else "v1"
+                if state_format is None:
+                    state_format = record_format
+                elif record_format != state_format:
+                    raise ValueError(
+                        f"{label} state must not mix legacy v1 and v2 records"
+                    )
                 record = load_record(
                     raw_record,
                     record_type=record_type,
