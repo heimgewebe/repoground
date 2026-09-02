@@ -487,6 +487,70 @@ def test_duplicate_json_keys_fail_closed_before_state_validation(
 
 
 @pytest.mark.parametrize("kind", ["job", "artifact"])
+@pytest.mark.parametrize(
+    ("field", "bad_value"),
+    [("include_hidden", 1), ("pre_pull", "false")],
+)
+def test_v2_scalar_coercion_fails_closed_and_preserves_bytes(
+    tmp_path: Path,
+    kind: str,
+    field: str,
+    bad_value: object,
+) -> None:
+    request = JobRequest(hub=str(tmp_path), repos=["demo"])
+    store = JobStore(tmp_path)
+    filename, _ = _persist_request(store, kind=kind, request=request)
+    state_path = _state_dir(tmp_path) / filename
+    persisted = json.loads(state_path.read_text(encoding="utf-8"))
+    request_key = "request" if kind == "job" else "params"
+    persisted[0][request_key][field] = bad_value
+
+    original = json.dumps(persisted, indent=2).encode("utf-8")
+    state_path.write_bytes(original)
+
+    with pytest.raises(RuntimeError, match="refusing to start"):
+        JobStore(tmp_path)
+
+    assert state_path.read_bytes() == original
+
+
+@pytest.mark.parametrize(
+    ("kind", "record_type"),
+    [("job", Job), ("artifact", Artifact)],
+)
+@pytest.mark.parametrize("drift_mode", ["validation", "serialization"])
+def test_v2_record_schema_drift_requires_version_bump(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    kind: str,
+    record_type: type[Job] | type[Artifact],
+    drift_mode: str,
+) -> None:
+    request = JobRequest(hub=str(tmp_path), repos=["demo"])
+    store = JobStore(tmp_path)
+    filename, _ = _persist_request(store, kind=kind, request=request)
+    state_path = _state_dir(tmp_path) / filename
+    original = state_path.read_bytes()
+    original_model_json_schema = record_type.model_json_schema
+
+    def drifted_schema(cls: object, *, mode: str = "validation") -> dict:
+        del cls
+        schema = json.loads(json.dumps(original_model_json_schema(mode=mode)))
+        if mode == drift_mode:
+            schema["$defs"]["JobRequest"]["properties"]["include_hidden"][
+                "type"
+            ] = "integer"
+        return schema
+
+    monkeypatch.setattr(record_type, "model_json_schema", classmethod(drifted_schema))
+
+    with pytest.raises(RuntimeError, match="refusing to start"):
+        JobStore(tmp_path)
+
+    assert state_path.read_bytes() == original
+
+
+@pytest.mark.parametrize("kind", ["job", "artifact"])
 def test_v2_explicit_source_mode_conflict_remains_fail_closed(
     tmp_path: Path,
     kind: str,

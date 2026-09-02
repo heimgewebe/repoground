@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any
 
 from pydantic import BaseModel, TypeAdapter
@@ -82,7 +84,55 @@ _V2_RECORD_FIELDS = {
     request_key: fields | frozenset({_STATE_META_KEY})
     for request_key, fields in _LEGACY_RECORD_FIELDS_V1.items()
 }
+_SCHEMA_COSMETIC_KEYS = frozenset({"title", "description"})
+_SCHEMA_MODES = ("validation", "serialization")
+_V2_RECORD_SCHEMA_SHA256 = {
+    "request": {
+        "validation": "7c2745e175f139292fa5829b57b8443d0ac168f79fda4ce9f3d0513e9e98a05b",
+        "serialization": "7c2745e175f139292fa5829b57b8443d0ac168f79fda4ce9f3d0513e9e98a05b",
+    },
+    "params": {
+        "validation": "34184f65512449db21dd8e07c97d4f7ee95668845590c0886f50a8ec89f44036",
+        "serialization": "34184f65512449db21dd8e07c97d4f7ee95668845590c0886f50a8ec89f44036",
+    },
+}
 _BOOL_ADAPTER = TypeAdapter(bool)
+
+
+def _persistence_schema(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _persistence_schema(item)
+            for key, item in value.items()
+            if key not in _SCHEMA_COSMETIC_KEYS
+        }
+    if isinstance(value, list):
+        return [_persistence_schema(item) for item in value]
+    return value
+
+
+def _model_schema_sha256(record_type: type[BaseModel], *, mode: str) -> str:
+    schema = _persistence_schema(record_type.model_json_schema(mode=mode))
+    payload = json.dumps(
+        schema,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _validate_v2_model_schema(
+    record_type: type[BaseModel], *, request_key: str
+) -> None:
+    expected = _V2_RECORD_SCHEMA_SHA256.get(request_key)
+    if expected is None:
+        raise ValueError(f"unsupported JobStore v2 request key: {request_key}")
+    observed = {
+        mode: _model_schema_sha256(record_type, mode=mode) for mode in _SCHEMA_MODES
+    }
+    if observed != expected:
+        raise ValueError("current persisted record schema requires a JobStore version bump")
 
 
 def _restore_fields_set(request: JobRequest, fields_set: frozenset[str]) -> None:
@@ -156,7 +206,10 @@ def _legacy_v1_fields_set(
 
 
 def _validate_request(
-    raw_request: dict[str, Any], *, fields_set: frozenset[str]
+    raw_request: dict[str, Any],
+    *,
+    fields_set: frozenset[str],
+    strict: bool,
 ) -> JobRequest:
     validation_payload = dict(raw_request)
     persisted_pre_pull: bool | None = None
@@ -167,10 +220,11 @@ def _validate_request(
     # implicit value explicit during Pydantic reconstruction.
     if "pre_pull" not in fields_set and "pre_pull" in validation_payload:
         persisted_pre_pull = _BOOL_ADAPTER.validate_python(
-            validation_payload.pop("pre_pull")
+            validation_payload.pop("pre_pull"),
+            strict=strict,
         )
 
-    request = JobRequest.model_validate(validation_payload)
+    request = JobRequest.model_validate(validation_payload, strict=strict)
     if persisted_pre_pull is not None:
         request.pre_pull = persisted_pre_pull
     _restore_fields_set(request, fields_set)
@@ -194,8 +248,10 @@ def load_record(
     if not isinstance(raw_request, dict):
         raise ValueError(f"{request_key} must be an object")
 
-    if _STATE_META_KEY in raw_record:
+    is_v2 = _STATE_META_KEY in raw_record
+    if is_v2:
         _validate_v2_record_shape(raw_record, request_key=request_key)
+        _validate_v2_model_schema(record_type, request_key=request_key)
         fields_set = _v2_fields_set(raw_request, raw_record[_STATE_META_KEY])
     else:
         fields_set = _legacy_v1_fields_set(
@@ -204,11 +260,11 @@ def load_record(
             request_key=request_key,
         )
 
-    request = _validate_request(raw_request, fields_set=fields_set)
+    request = _validate_request(raw_request, fields_set=fields_set, strict=is_v2)
     record_payload = dict(raw_record)
     record_payload.pop(_STATE_META_KEY, None)
     record_payload[request_key] = request
-    record = record_type.model_validate(record_payload)
+    record = record_type.model_validate(record_payload, strict=is_v2)
 
     # Pydantic may re-run nested model validators for an existing model instance;
     # bind the persisted explicit/default marker again after parent validation.
@@ -218,6 +274,8 @@ def load_record(
 
 
 def dump_record(record: BaseModel, *, request_key: str) -> dict[str, Any]:
+    _validate_v2_model_schema(type(record), request_key=request_key)
+
     request = getattr(record, request_key)
     if not isinstance(request, JobRequest):
         raise TypeError(f"{request_key} must be a JobRequest")
