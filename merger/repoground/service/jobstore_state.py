@@ -157,7 +157,8 @@ def _v2_fields_set(
         raise ValueError("JobStore v2 metadata must be an object")
     if set(raw_meta) != _META_FIELDS:
         raise ValueError("JobStore v2 metadata has an unknown or missing field")
-    if raw_meta.get("version") != _STATE_VERSION:
+    version = raw_meta.get("version")
+    if type(version) is not int or version != _STATE_VERSION:
         raise ValueError("unsupported JobStore state version")
 
     request_fields = _field_name_set(
