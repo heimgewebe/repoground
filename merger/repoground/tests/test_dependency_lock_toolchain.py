@@ -24,8 +24,8 @@ ROOT = Path(__file__).resolve().parents[3]
 SUPPORTED = ToolchainObservation(
     implementation="CPython",
     python="3.12.3",
-    pip="26.1.2",
-    pip_tools="7.6.0",
+    pip="26.2",
+    pip_tools="7.6.1",
 )
 
 
@@ -34,7 +34,7 @@ def _fixture_repo(tmp_path: Path) -> tuple[Path, dict[str, bytes]]:
     (repo / "requirements").mkdir(parents=True)
     (repo / "merger/repoground").mkdir(parents=True)
     (repo / "requirements/repoground-lock-tools.in").write_text(
-        "# lock-python==3.12.3\npip==26.1.2\npip-tools==7.6.0\n",
+        "# lock-python==3.12.3\npip==26.2\npip-tools==7.6.1\n",
         encoding="utf-8",
     )
     for name in ("runtime", "dev", "browser"):
@@ -75,8 +75,8 @@ def _write_tool_lock(repo: Path, *, pip: str, pip_tools: str) -> None:
 def test_repository_contract_binds_python_pip_and_pip_tools() -> None:
     contract = load_contract(ROOT)
     assert contract.python == "3.12.3"
-    assert contract.pip == "26.1.2"
-    assert contract.pip_tools == "7.6.0"
+    assert contract.pip == "26.2"
+    assert contract.pip_tools == "7.6.1"
     assert environment_findings(contract, SUPPORTED) == []
 
 
@@ -84,17 +84,17 @@ def test_toolchain_install_source_uses_hashed_lock_when_direct_pins_match(
     tmp_path: Path,
 ) -> None:
     repo, _original = _fixture_repo(tmp_path)
-    _write_tool_lock(repo, pip="26.1.2", pip_tools="7.6.0")
+    _write_tool_lock(repo, pip="26.2", pip_tools="7.6.1")
 
     locked = load_locked_toolchain(repo)
-    assert locked.pip == "26.1.2"
-    assert locked.pip_tools == "7.6.0"
+    assert locked.pip == "26.2"
+    assert locked.pip_tools == "7.6.1"
     assert toolchain_install_source(repo) == "lock"
 
 
 @pytest.mark.parametrize(
     ("pip", "pip_tools"),
-    (("25.3", "7.6.0"), ("26.1.2", "7.5.0")),
+    (("26.1.2", "7.6.1"), ("26.2", "7.6.0")),
 )
 def test_toolchain_install_source_bootstraps_exact_input_when_direct_pin_differs(
     tmp_path: Path,
@@ -112,7 +112,7 @@ def test_toolchain_install_source_rejects_missing_direct_tool_pin(
 ) -> None:
     repo, _original = _fixture_repo(tmp_path)
     (repo / "requirements/repoground-lock-tools.lock.txt").write_text(
-        "pip-tools==7.6.0 " + "\\" + "\n",
+        "pip-tools==7.6.1 " + "\\" + "\n",
         encoding="utf-8",
     )
 
@@ -126,9 +126,9 @@ def test_toolchain_install_source_rejects_ambiguous_tool_lock(
     repo, _original = _fixture_repo(tmp_path)
     path = repo / "requirements/repoground-lock-tools.lock.txt"
     path.write_text(
-        "pip==26.1.2 " + "\\" + "\n"
+        "pip==26.2 " + "\\" + "\n"
         + "pip==25.3 " + "\\" + "\n"
-        + "pip-tools==7.6.0 " + "\\" + "\n",
+        + "pip-tools==7.6.1 " + "\\" + "\n",
         encoding="utf-8",
     )
 
@@ -140,7 +140,7 @@ def test_bootstrap_tool_lock_is_derived_by_the_current_hashed_compiler(
     tmp_path: Path,
 ) -> None:
     repo, _original = _fixture_repo(tmp_path)
-    _write_tool_lock(repo, pip="25.3", pip_tools="7.6.0")
+    _write_tool_lock(repo, pip="26.1.2", pip_tools="7.6.0")
     checked_in = (repo / "requirements/repoground-lock-tools.lock.txt").read_bytes()
 
     def bootstrap_runner(
@@ -156,8 +156,8 @@ def test_bootstrap_tool_lock_is_derived_by_the_current_hashed_compiler(
         assert stdout is stderr
         output = cwd / args[args.index("--output-file") + 1]
         output.write_text(
-            "pip-tools==7.6.0 " + "\\" + "\n"
-            + "pip==26.1.2 " + "\\" + "\n",
+            "pip-tools==7.6.1 " + "\\" + "\n"
+            + "pip==26.2 " + "\\" + "\n",
             encoding="utf-8",
         )
         return subprocess.CompletedProcess(args, 0)
@@ -167,15 +167,15 @@ def test_bootstrap_tool_lock_is_derived_by_the_current_hashed_compiler(
         observation=ToolchainObservation(
             implementation="CPython",
             python="3.12.3",
-            pip="25.3",
+            pip="26.1.2",
             pip_tools="7.6.0",
         ),
         runner=bootstrap_runner,
         stderr=io.StringIO(),
     )
 
-    assert b"pip==26.1.2" in candidate
-    assert b"pip-tools==7.6.0" in candidate
+    assert b"pip==26.2" in candidate
+    assert b"pip-tools==7.6.1" in candidate
     assert (repo / "requirements/repoground-lock-tools.lock.txt").read_bytes() == checked_in
 
 
@@ -183,7 +183,7 @@ def test_bootstrap_tool_lock_rejects_an_environment_not_bound_by_old_lock(
     tmp_path: Path,
 ) -> None:
     repo, _original = _fixture_repo(tmp_path)
-    _write_tool_lock(repo, pip="25.3", pip_tools="7.6.0")
+    _write_tool_lock(repo, pip="26.1.2", pip_tools="7.6.0")
 
     def unexpected_runner(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess:
         raise AssertionError("bootstrap compiler must not run after environment drift")
@@ -201,7 +201,7 @@ def test_bootstrap_tool_lock_rejects_candidate_with_wrong_direct_pins(
     tmp_path: Path,
 ) -> None:
     repo, _original = _fixture_repo(tmp_path)
-    _write_tool_lock(repo, pip="25.3", pip_tools="7.6.0")
+    _write_tool_lock(repo, pip="26.1.2", pip_tools="7.6.0")
 
     def wrong_candidate_runner(
         args: list[str],
@@ -214,7 +214,7 @@ def test_bootstrap_tool_lock_rejects_candidate_with_wrong_direct_pins(
         output = cwd / args[args.index("--output-file") + 1]
         output.write_text(
             "pip-tools==7.6.0 " + "\\" + "\n"
-            + "pip==25.3 " + "\\" + "\n",
+            + "pip==26.1.2 " + "\\" + "\n",
             encoding="utf-8",
         )
         return subprocess.CompletedProcess(args, 0)
@@ -225,7 +225,7 @@ def test_bootstrap_tool_lock_rejects_candidate_with_wrong_direct_pins(
             observation=ToolchainObservation(
                 implementation="CPython",
                 python="3.12.3",
-                pip="25.3",
+                pip="26.1.2",
                 pip_tools="7.6.0",
             ),
             runner=wrong_candidate_runner,
@@ -238,17 +238,17 @@ def test_mismatch_report_includes_every_expected_and_observed_version() -> None:
     observed = ToolchainObservation(
         implementation="CPython",
         python="3.12.3",
-        pip="26.2",
-        pip_tools="7.6.0",
+        pip="26.1.2",
+        pip_tools="7.6.1",
     )
     stream = io.StringIO()
     report_environment(contract, observed, stream)
     report = stream.getvalue()
     assert "Python: expected=3.12.3 observed=3.12.3" in report
-    assert "pip: expected=26.1.2 observed=26.2" in report
-    assert "pip-tools: expected=7.6.0 observed=7.6.0" in report
+    assert "pip: expected=26.2 observed=26.1.2" in report
+    assert "pip-tools: expected=7.6.1 observed=7.6.1" in report
     assert environment_findings(contract, observed) == [
-        "pip version mismatch: expected=26.1.2 observed=26.2"
+        "pip version mismatch: expected=26.2 observed=26.1.2"
     ]
 
 
@@ -267,8 +267,8 @@ def test_environment_failure_precedes_generation_and_preserves_all_locks(
         observation=ToolchainObservation(
             implementation="CPython",
             python="3.12.3",
-            pip="26.2",
-            pip_tools="7.6.0",
+            pip="26.1.2",
+            pip_tools="7.6.1",
         ),
         runner=unexpected_runner,
         stdout=io.StringIO(),

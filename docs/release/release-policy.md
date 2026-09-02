@@ -60,8 +60,8 @@ Exactly one lock-generator contract is supported. Its version source is
 `requirements/repoground-lock-tools.in`:
 
 - CPython `3.12.3` from the digest-pinned container wrapper;
-- `pip==26.1.2`;
-- `pip-tools==7.6.0`.
+- `pip==26.2`;
+- `pip-tools==7.6.1`.
 
 The pip pin is part of the contract because pip-tools imports pip internals.
 Do not install an implicitly resolved or latest pip. Regenerate all four locks
