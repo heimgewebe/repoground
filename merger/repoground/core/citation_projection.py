@@ -14,6 +14,32 @@ SOURCE_CITATION_PROJECTION_KIND = "repobrief.source_citation_projection"
 SOURCE_CITATION_PROJECTION_VERSION = "v1"
 TEXT_EXCERPT_MAX_CHARS = 1200
 
+_SOURCE_AUTHORITY_CLASSIFICATIONS = frozenset(
+    {
+        "unclassified",
+        "current_candidate",
+        "historical_only",
+        "point_in_time_observation",
+    }
+)
+_SOURCE_AUTHORITY_OPTIONAL_STRING_FIELDS = (
+    "status",
+    "canonicality",
+    "role",
+    "temporal_scope",
+    "observed_at",
+    "last_reviewed",
+)
+_SOURCE_AUTHORITY_FIELDS = frozenset(
+    {
+        "classification",
+        "frontmatter_present",
+        "establishes_current_state",
+        "does_not_establish",
+        *_SOURCE_AUTHORITY_OPTIONAL_STRING_FIELDS,
+    }
+)
+
 _CITATION_ID_RE = re.compile(r"^cit_[a-f0-9]{16}$")
 _SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
 _CITATION_RANGE_KEY_FIELDS = ("file_path", "start_byte", "end_byte")
@@ -29,6 +55,53 @@ def is_sha256(value: Any) -> bool:
 
 def is_int_not_bool(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _unclassified_source_authority() -> dict[str, Any]:
+    return {
+        "classification": "unclassified",
+        "frontmatter_present": False,
+        "establishes_current_state": None,
+        "does_not_establish": ["current_state_without_fresh_verification"],
+    }
+
+
+def source_authority_projection(value: Any) -> dict[str, Any]:
+    """Project only schema-valid source-authority metadata, otherwise fail closed."""
+    if not isinstance(value, dict) or set(value).difference(_SOURCE_AUTHORITY_FIELDS):
+        return _unclassified_source_authority()
+
+    classification = value.get("classification")
+    frontmatter_present = value.get("frontmatter_present")
+    establishes_current_state = value.get("establishes_current_state")
+    does_not_establish = value.get("does_not_establish")
+    if classification not in _SOURCE_AUTHORITY_CLASSIFICATIONS:
+        return _unclassified_source_authority()
+    if not isinstance(frontmatter_present, bool):
+        return _unclassified_source_authority()
+    if establishes_current_state is not None and not isinstance(
+        establishes_current_state, bool
+    ):
+        return _unclassified_source_authority()
+    if not isinstance(does_not_establish, list) or not all(
+        isinstance(item, str) for item in does_not_establish
+    ):
+        return _unclassified_source_authority()
+
+    projected = {
+        "classification": classification,
+        "frontmatter_present": frontmatter_present,
+        "establishes_current_state": establishes_current_state,
+        "does_not_establish": list(does_not_establish),
+    }
+    for field in _SOURCE_AUTHORITY_OPTIONAL_STRING_FIELDS:
+        if field not in value:
+            continue
+        item = value[field]
+        if not isinstance(item, str):
+            return _unclassified_source_authority()
+        projected[field] = item
+    return projected
 
 
 def citation_range_key(value: Any) -> tuple[Any, ...] | None:
@@ -547,10 +620,12 @@ def _source_citation_item(ordinal: int, hit: dict[str, Any]) -> dict[str, Any]:
         and isinstance(citation_id, str)
         and _CITATION_ID_RE.fullmatch(citation_id) is not None
     )
+    source_authority = source_authority_projection(hit.get("source_authority"))
     return {
         "ordinal": ordinal,
         "chunk_id": hit.get("chunk_id"),
         "path": hit.get("path"),
+        "source_authority": source_authority,
         "range_status": range_status,
         "range_ref_source": hit.get("range_ref_source"),
         "source_range": source_range,

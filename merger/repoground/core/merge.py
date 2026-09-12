@@ -5210,6 +5210,22 @@ def _source_authority_metadata(file_path: str, content: str) -> Dict[str, Any]:
     return _source_authority_from_frontmatter(parsed) if parsed is not None else default
 
 
+def _redact_source_authority_metadata(
+    metadata: Dict[str, Any], redactor: Redactor
+) -> Dict[str, Any]:
+    """Redact copied frontmatter scalars without changing lifecycle classification."""
+    redacted = dict(metadata)
+    for key, value in metadata.items():
+        if isinstance(value, str):
+            redacted[key] = redactor.redact(value)[0]
+        elif isinstance(value, list):
+            redacted[key] = [
+                redactor.redact(item)[0] if isinstance(item, str) else item
+                for item in value
+            ]
+    return redacted
+
+
 def get_semantic_metadata_path_only(file_path: str) -> Dict[str, Any]:
     """
     Derives deterministic semantic metadata from file structure only (no content reading).
@@ -6151,6 +6167,7 @@ def _file_chunk_records(
     if redactor:
         content, _redacted_items = redactor.redact(content)
         was_redacted = bool(_redacted_items)
+        source_authority = _redact_source_authority_metadata(source_authority, redactor)
 
     content_bytes = content.encode("utf-8")
     source_git_blob_sha1 = (

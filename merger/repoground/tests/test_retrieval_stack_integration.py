@@ -175,3 +175,55 @@ def test_retrieval_preserves_historical_source_authority_end_to_end():
             context["hits"][0]["epistemics"]["current_state_authority"]
             == "historical_only"
         )
+
+def test_chunk_source_authority_uses_redacted_frontmatter():
+    with tempfile.TemporaryDirectory() as tmp_dir_str:
+        tmp_dir = Path(tmp_dir_str)
+        hub = tmp_dir / "hub"
+        hub.mkdir()
+        repo_root = hub / "test-repo"
+        repo_root.mkdir()
+        sensitive_value = "A" + "KIA" + ("Z" * 16)
+        (repo_root / "observed.md").write_text(
+            "---\ncanonicality: observation\ntemporal_scope: point_in_time\n"
+            f"observed_at: {sensitive_value}\n---\n# Snapshot\n",
+            encoding="utf-8",
+        )
+
+        merges_dir = tmp_dir / "merges"
+        merges_dir.mkdir()
+        artifacts = write_reports_v2(
+            merges_dir=merges_dir,
+            hub=hub,
+            repo_summaries=[scan_repo(repo_root, calculate_md5=True)],
+            detail="max",
+            mode="gesamt",
+            max_bytes=0,
+            plan_only=False,
+            output_mode="dual",
+            extras=ExtrasConfig(json_sidecar=True),
+            redact_secrets=True,
+            generator_info={
+                "name": "test-stack",
+                "platform": "test",
+                "config_sha256": TEST_CONFIG_SHA256,
+            },
+        )
+
+        assert artifacts.chunk_index is not None
+        raw_chunk_index = artifacts.chunk_index.read_text(encoding="utf-8")
+        assert sensitive_value not in raw_chunk_index
+        rows = [json.loads(line) for line in raw_chunk_index.splitlines() if line.strip()]
+        source_rows = [
+            row for row in rows if row.get("source_file", "").endswith("observed.md")
+        ]
+        assert source_rows
+        assert all(
+            row["source_authority"]["observed_at"] == "[AWS_KEY_REDACTED]"
+            for row in source_rows
+        )
+        assert all(
+            row["source_authority"]["classification"]
+            == "point_in_time_observation"
+            for row in source_rows
+        )

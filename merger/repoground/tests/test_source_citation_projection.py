@@ -366,3 +366,61 @@ def test_query_projection_exposes_live_repo_address_and_preserves_canonical_auth
     assert item["live_repo_address_status"] == "available"
     assert item["canonical_authority"]["authority"] == "canonical_brief_source"
     assert item["citation_range"]["file_path"] == bundle["canonical"].name
+
+def test_source_citation_projection_preserves_valid_source_authority():
+    authority = {
+        "classification": "historical_only",
+        "frontmatter_present": True,
+        "establishes_current_state": False,
+        "does_not_establish": ["current_state_without_fresh_verification"],
+        "status": "deprecated",
+    }
+    projection = bundle_access._project_source_citations(
+        {
+            "hits": [
+                {
+                    "chunk_id": "c-authority",
+                    "path": "legacy.md",
+                    "source_authority": authority,
+                    "range_status": "unresolved",
+                    "range": {"text": "legacy"},
+                    "citation_status": "unavailable",
+                    "citation_id": None,
+                    "citation": None,
+                }
+            ]
+        }
+    )
+
+    assert projection["items"][0]["source_authority"] == authority
+
+
+def test_source_citation_projection_fails_closed_on_invalid_source_authority():
+    projection = bundle_access._project_source_citations(
+        {
+            "hits": [
+                {
+                    "chunk_id": "c-invalid-authority",
+                    "path": "legacy.md",
+                    "source_authority": {
+                        "classification": "historical_only",
+                        "frontmatter_present": "yes",
+                        "establishes_current_state": False,
+                        "does_not_establish": [],
+                    },
+                    "range_status": "unresolved",
+                    "range": {"text": "legacy"},
+                    "citation_status": "unavailable",
+                    "citation_id": None,
+                    "citation": None,
+                }
+            ]
+        }
+    )
+
+    assert projection["items"][0]["source_authority"] == {
+        "classification": "unclassified",
+        "frontmatter_present": False,
+        "establishes_current_state": None,
+        "does_not_establish": ["current_state_without_fresh_verification"],
+    }
