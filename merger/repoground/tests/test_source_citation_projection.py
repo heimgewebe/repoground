@@ -34,6 +34,49 @@ def test_query_existing_index_projects_source_citations(tmp_path):
     assert item["citation_range"]["file_path"] == bundle["canonical"].name
 
 
+def test_query_existing_index_preserves_source_authority_through_resolution(tmp_path):
+    authority = {
+        "classification": "historical_only",
+        "frontmatter_present": True,
+        "establishes_current_state": False,
+        "does_not_establish": ["current_state", "current_architecture"],
+        "status": "deprecated",
+    }
+    bundle = _build_resolved_bundle(tmp_path, source_authority=authority)
+
+    result = bundle_access.query_existing_index(
+        bundle["manifest"], "hello", k=1, resolve_evidence=True, project_sources=True
+    )
+
+    assert result["query_result"]["results"][0]["source_authority"] == authority
+    assert result["resolved_evidence"]["hits"][0]["source_authority"] == authority
+    assert result["source_citation_projection"]["items"][0]["source_authority"] == authority
+
+
+def test_query_existing_index_fails_closed_on_invalid_stored_source_authority(tmp_path):
+    invalid_authority = {
+        "classification": "banana",
+        "frontmatter_present": True,
+        "establishes_current_state": True,
+        "does_not_establish": [],
+    }
+    bundle = _build_resolved_bundle(tmp_path, source_authority=invalid_authority)
+    expected = {
+        "classification": "unclassified",
+        "frontmatter_present": False,
+        "establishes_current_state": None,
+        "does_not_establish": ["current_state_without_fresh_verification"],
+    }
+
+    result = bundle_access.query_existing_index(
+        bundle["manifest"], "hello", k=1, resolve_evidence=True, project_sources=True
+    )
+
+    assert result["query_result"]["results"][0]["source_authority"] == expected
+    assert result["resolved_evidence"]["hits"][0]["source_authority"] == expected
+    assert result["source_citation_projection"]["items"][0]["source_authority"] == expected
+
+
 def test_query_existing_index_projection_is_read_only(tmp_path):
     bundle = _build_resolved_bundle(tmp_path)
     index_path = bundle["index_path"]

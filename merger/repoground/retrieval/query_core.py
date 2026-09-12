@@ -6,6 +6,7 @@ import time
 from typing import Dict, Any, Optional, List
 
 from .router import route_query
+from ..core.citation_projection import source_authority_projection
 from ..core.range_resolver import build_derived_range_ref
 from ..core.graph_degradation import graph_load_degradation
 from ..architecture.graph_index import load_graph_index
@@ -45,12 +46,7 @@ logger = logging.getLogger(__name__)
 
 
 def _unclassified_source_authority() -> Dict[str, Any]:
-    return {
-        "classification": "unclassified",
-        "frontmatter_present": False,
-        "establishes_current_state": None,
-        "does_not_establish": ["current_state_without_fresh_verification"],
-    }
+    return source_authority_projection(None)
 
 
 def _decode_source_authority(raw: Any) -> Dict[str, Any]:
@@ -60,9 +56,7 @@ def _decode_source_authority(raw: Any) -> Dict[str, Any]:
         decoded = json.loads(raw)
     except (TypeError, json.JSONDecodeError):
         return _unclassified_source_authority()
-    if not isinstance(decoded, dict) or not isinstance(decoded.get("classification"), str):
-        return _unclassified_source_authority()
-    return decoded
+    return source_authority_projection(decoded)
 
 
 def normalize_excluded_paths(excluded_paths: Optional[List[str]]) -> List[str]:

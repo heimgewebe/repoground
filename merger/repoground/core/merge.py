@@ -5113,6 +5113,11 @@ _SOURCE_AUTHORITY_UNCLASSIFIED_GAPS = ["current_state_without_fresh_verification
 _MAX_FRONTMATTER_BYTES = 64 * 1024
 
 
+def _is_frontmatter_delimiter(line: str) -> bool:
+    """Accept a column-zero YAML fence with only trailing horizontal whitespace."""
+    return line.rstrip("\r\n").rstrip(" \t") == "---"
+
+
 def _frontmatter_scalar(value: Any) -> Optional[str]:
     """Normalize one frontmatter scalar without leaking arbitrary YAML structures."""
     if value is None:
@@ -5137,7 +5142,7 @@ def _parse_source_frontmatter(content: str) -> Optional[Dict[str, Any]]:
         return None
 
     lines = content.splitlines(keepends=True)
-    if not lines or lines[0].strip() != "---":
+    if not lines or not _is_frontmatter_delimiter(lines[0]):
         return None
 
     consumed_bytes = len(lines[0].encode("utf-8"))
@@ -5145,7 +5150,7 @@ def _parse_source_frontmatter(content: str) -> Optional[Dict[str, Any]]:
         consumed_bytes += len(line.encode("utf-8"))
         if consumed_bytes > _MAX_FRONTMATTER_BYTES:
             return None
-        if line.strip() != "---":
+        if not _is_frontmatter_delimiter(line):
             continue
         try:
             ensure_pyyaml_collections_abc_compat()

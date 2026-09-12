@@ -495,3 +495,14 @@ def test_source_authority_without_frontmatter_is_unclassified():
         "establishes_current_state": None,
         "does_not_establish": ["current_state_without_fresh_verification"],
     }
+
+
+def test_source_authority_ignores_indented_yaml_literal_fence():
+    authority = _source_authority_metadata(
+        "architecture/old.md",
+        "---\nnote: |\n  ---\n  still part of the scalar\nstatus: deprecated\n---\n# Old\n",
+    )
+
+    assert authority["classification"] == "historical_only"
+    assert authority["status"] == "deprecated"
+    assert authority["establishes_current_state"] is False
