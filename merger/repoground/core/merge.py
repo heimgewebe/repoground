@@ -5095,6 +5095,118 @@ def extract_retrieval_metadata(content: str, lang: str) -> Dict[str, Any]:
 # Concepts are heuristic keyword hints; may include false positives.
 MAX_CONCEPTS_PER_FILE = 6
 
+_HISTORICAL_SOURCE_STATUSES = frozenset({
+    "deprecated",
+    "historical",
+    "superseded",
+    "retired",
+    "archived",
+})
+_HISTORICAL_CANONICALITY = frozenset({"deprecated", "historical", "superseded"})
+_SOURCE_AUTHORITY_CURRENT_STATE_GAPS = [
+    "current_state",
+    "current_architecture",
+    "current_service_necessity",
+    "preferred_access_path",
+]
+_SOURCE_AUTHORITY_UNCLASSIFIED_GAPS = ["current_state_without_fresh_verification"]
+_MAX_FRONTMATTER_BYTES = 64 * 1024
+
+
+def _frontmatter_scalar(value: Any) -> Optional[str]:
+    """Normalize one frontmatter scalar without leaking arbitrary YAML structures."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        normalized = value.strip()
+        return normalized or None
+    if isinstance(value, (bool, int, float)):
+        return str(value)
+    isoformat = getattr(value, "isoformat", None)
+    if callable(isoformat):
+        try:
+            return str(isoformat())
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _source_authority_metadata(file_path: str, content: str) -> Dict[str, Any]:
+    """Classify source-document lifecycle without turning repository text into runtime truth.
+
+    Historical and point-in-time documents remain retrievable.  This metadata only
+    carries their applicability boundary forward so later retrieval/context layers
+    cannot silently present them as evidence of current state.
+    """
+    default = {
+        "classification": "unclassified",
+        "frontmatter_present": False,
+        "establishes_current_state": None,
+        "does_not_establish": list(_SOURCE_AUTHORITY_UNCLASSIFIED_GAPS),
+    }
+    if Path(file_path).suffix.lower() not in {".md", ".mdx", ".markdown"}:
+        return default
+    if yaml is None or not content.startswith("---"):
+        return default
+
+    lines = content.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        return default
+
+    closing_index: Optional[int] = None
+    consumed_bytes = len(lines[0].encode("utf-8"))
+    for idx, line in enumerate(lines[1:], start=1):
+        consumed_bytes += len(line.encode("utf-8"))
+        if consumed_bytes > _MAX_FRONTMATTER_BYTES:
+            return default
+        if line.strip() == "---":
+            closing_index = idx
+            break
+    if closing_index is None:
+        return default
+
+    raw_frontmatter = "".join(lines[1:closing_index])
+    try:
+        ensure_pyyaml_collections_abc_compat()
+        parsed = yaml.safe_load(raw_frontmatter)
+    except Exception:
+        return default
+    if not isinstance(parsed, dict):
+        return default
+
+    metadata: Dict[str, Any] = {
+        "classification": "current_candidate",
+        "frontmatter_present": True,
+        "establishes_current_state": None,
+        "does_not_establish": list(_SOURCE_AUTHORITY_UNCLASSIFIED_GAPS),
+    }
+    for key in (
+        "status",
+        "canonicality",
+        "role",
+        "temporal_scope",
+        "observed_at",
+        "last_reviewed",
+    ):
+        value = _frontmatter_scalar(parsed.get(key))
+        if value is not None:
+            metadata[key] = value
+
+    status = str(metadata.get("status", "")).strip().lower()
+    canonicality = str(metadata.get("canonicality", "")).strip().lower()
+    temporal_scope = str(metadata.get("temporal_scope", "")).strip().lower()
+
+    if status in _HISTORICAL_SOURCE_STATUSES or canonicality in _HISTORICAL_CANONICALITY:
+        metadata["classification"] = "historical_only"
+        metadata["establishes_current_state"] = False
+        metadata["does_not_establish"] = list(_SOURCE_AUTHORITY_CURRENT_STATE_GAPS)
+    elif canonicality == "observation" or temporal_scope == "point_in_time":
+        metadata["classification"] = "point_in_time_observation"
+        metadata["establishes_current_state"] = False
+        metadata["does_not_establish"] = list(_SOURCE_AUTHORITY_CURRENT_STATE_GAPS)
+
+    return metadata
+
 
 def get_semantic_metadata_path_only(file_path: str) -> Dict[str, Any]:
     """
@@ -5880,6 +5992,7 @@ def _chunk_record(
     truncated: bool,
     trunc_msg: Optional[str],
     sem_meta: Dict[str, Any],
+    source_authority: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Build the machine-readable chunk row, including legacy field aliases."""
     d = asdict(chunk)
@@ -5893,6 +6006,7 @@ def _chunk_record(
     d["layer"] = sem_meta["layer"]
     d["artifact_type"] = sem_meta["artifact_type"]
     d["concepts"] = sem_meta["concepts"]
+    d["source_authority"] = source_authority
 
     if trunc_msg:
         d["truncation_msg"] = trunc_msg
@@ -6029,6 +6143,7 @@ def _file_chunk_records(
     """Chunk one included text file into fully annotated chunk rows."""
     # Read content for chunking using the same limit as report to ensure coherence
     content, truncated, trunc_msg = read_smart_content(fi, config.max_file_bytes)
+    source_authority = _source_authority_metadata(fi.rel_path.as_posix(), content)
 
     was_redacted = False
     if redactor:
@@ -6058,6 +6173,7 @@ def _file_chunk_records(
             truncated=truncated,
             trunc_msg=trunc_msg,
             sem_meta=sem_meta,
+            source_authority=source_authority,
         )
         offset = md_offsets.get(fid)
         if offset is not None and offset[0] == canonical_md_name:

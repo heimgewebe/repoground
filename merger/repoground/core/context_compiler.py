@@ -241,6 +241,19 @@ def _retrieval_candidates(
                 }
             )
         token_estimate = _estimate_tokens_from_text(text, bytes_per_token)
+        source_authority = item.get("source_authority")
+        if not isinstance(source_authority, Mapping):
+            source_authority = {
+                "classification": "unclassified",
+                "frontmatter_present": False,
+                "establishes_current_state": None,
+                "does_not_establish": [
+                    "current_state_without_fresh_verification"
+                ],
+            }
+        source_authority_class = source_authority.get("classification")
+        if not isinstance(source_authority_class, str) or not source_authority_class:
+            source_authority_class = "unclassified"
         candidates.append(
             _candidate(
                 candidate_id=f"resolved-evidence:{ordinal}",
@@ -266,7 +279,7 @@ def _retrieval_candidates(
                         if isinstance(item.get("canonical_authority"), str)
                         else "canonical_content"
                     ),
-                    canonicality="content_source",
+                    canonicality=source_authority_class,
                 ),
                 payload={
                     "title": item.get("path")
@@ -279,6 +292,7 @@ def _retrieval_candidates(
                     "text_truncated": item.get("text_truncated"),
                     "source_range": source_range,
                     "canonical_authority": item.get("canonical_authority"),
+                    "source_authority": dict(source_authority),
                 },
             )
         )
@@ -738,6 +752,19 @@ def _changed_path_candidates(
                 "citation_status": item.get("citation_status"),
             }
         ]
+        source_authority = item.get("source_authority")
+        if not isinstance(source_authority, Mapping):
+            source_authority = {
+                "classification": "unclassified",
+                "frontmatter_present": False,
+                "establishes_current_state": None,
+                "does_not_establish": [
+                    "current_state_without_fresh_verification"
+                ],
+            }
+        source_authority_class = source_authority.get("classification")
+        if not isinstance(source_authority_class, str) or not source_authority_class:
+            source_authority_class = "unclassified"
         candidates.append(
             _candidate(
                 candidate_id=f"changed-path:{ordinal}:{changed_path}",
@@ -760,7 +787,7 @@ def _changed_path_candidates(
                         if isinstance(item.get("canonical_authority"), str)
                         else "canonical_content"
                     ),
-                    canonicality="content_source",
+                    canonicality=source_authority_class,
                 ),
                 payload={
                     "title": item.get("path") or changed_path,
@@ -771,6 +798,7 @@ def _changed_path_candidates(
                     "source_range": source_range,
                     "declared_changed_path": changed_path,
                     "canonical_authority": item.get("canonical_authority"),
+                    "source_authority": dict(source_authority),
                 },
             )
         )

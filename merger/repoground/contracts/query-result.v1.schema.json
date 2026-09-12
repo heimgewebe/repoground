@@ -254,6 +254,9 @@
           "end_byte": {
             "type": "integer",
             "minimum": 0
+          },
+          "source_authority": {
+            "$ref": "#/definitions/sourceAuthority"
           }
         }
       }
@@ -483,6 +486,60 @@
           "minimum": 1
         },
         "chunk_id": {
+          "type": "string"
+        }
+      }
+    },
+    "sourceAuthority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "classification",
+        "frontmatter_present",
+        "establishes_current_state",
+        "does_not_establish"
+      ],
+      "properties": {
+        "classification": {
+          "type": "string",
+          "enum": [
+            "unclassified",
+            "current_candidate",
+            "historical_only",
+            "point_in_time_observation"
+          ]
+        },
+        "frontmatter_present": {
+          "type": "boolean"
+        },
+        "establishes_current_state": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "does_not_establish": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "status": {
+          "type": "string"
+        },
+        "canonicality": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "temporal_scope": {
+          "type": "string"
+        },
+        "observed_at": {
+          "type": "string"
+        },
+        "last_reviewed": {
           "type": "string"
         }
       }

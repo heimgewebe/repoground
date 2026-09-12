@@ -54,15 +54,24 @@
             "type": "string"
           },
           "surrounding_context": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "graph_context": {
-            "type": ["object", "null"],
+            "type": [
+              "object",
+              "null"
+            ],
             "additionalProperties": true
           },
           "provenance_type": {
             "type": "string",
-            "enum": ["explicit", "derived"]
+            "enum": [
+              "explicit",
+              "derived"
+            ]
           },
           "range_ref": {
             "type": "object",
@@ -119,9 +128,15 @@
                   "semantic_supported"
                 ],
                 "properties": {
-                  "explicit_provenance": { "type": "boolean" },
-                  "graph_used": { "type": "boolean" },
-                  "semantic_supported": { "type": "boolean" }
+                  "explicit_provenance": {
+                    "type": "boolean"
+                  },
+                  "graph_used": {
+                    "type": "boolean"
+                  },
+                  "semantic_supported": {
+                    "type": "boolean"
+                  }
                 }
               },
               "interpolation": {
@@ -132,11 +147,30 @@
                   "reason"
                 ],
                 "properties": {
-                  "used": { "type": "boolean" },
-                  "reason": { "type": ["string", "null"] }
+                  "used": {
+                    "type": "boolean"
+                  },
+                  "reason": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
                 }
+              },
+              "current_state_authority": {
+                "type": "string",
+                "enum": [
+                  "unclassified",
+                  "current_candidate",
+                  "historical_only",
+                  "point_in_time_observation"
+                ]
               }
             }
+          },
+          "source_authority": {
+            "$ref": "#/definitions/sourceAuthority"
           }
         }
       }
@@ -169,18 +203,89 @@
           "type": "object",
           "description": "Surface-local resolve pointers restating the existing reading policy. Not a new authority model and not shared across contracts. The runtime surface resolves to query_trace when present.",
           "additionalProperties": false,
-          "required": ["content", "metadata", "schema", "runtime"],
+          "required": [
+            "content",
+            "metadata",
+            "schema",
+            "runtime"
+          ],
           "properties": {
-            "content": { "const": "canonical_md" },
-            "metadata": { "const": "bundle_manifest" },
-            "schema": { "const": "schema" },
-            "runtime": { "const": "query_trace" }
+            "content": {
+              "const": "canonical_md"
+            },
+            "metadata": {
+              "const": "bundle_manifest"
+            },
+            "schema": {
+              "const": "schema"
+            },
+            "runtime": {
+              "const": "query_trace"
+            }
           }
         },
         "does_not_prove": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "Surface-local statements this bundle does not prove. Owned by this contract; phrases may echo other surfaces but are not a shared vocabulary."
+        }
+      }
+    }
+  },
+  "definitions": {
+    "sourceAuthority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "classification",
+        "frontmatter_present",
+        "establishes_current_state",
+        "does_not_establish"
+      ],
+      "properties": {
+        "classification": {
+          "type": "string",
+          "enum": [
+            "unclassified",
+            "current_candidate",
+            "historical_only",
+            "point_in_time_observation"
+          ]
+        },
+        "frontmatter_present": {
+          "type": "boolean"
+        },
+        "establishes_current_state": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "does_not_establish": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "status": {
+          "type": "string"
+        },
+        "canonicality": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "temporal_scope": {
+          "type": "string"
+        },
+        "observed_at": {
+          "type": "string"
+        },
+        "last_reviewed": {
+          "type": "string"
         }
       }
     }

@@ -5,6 +5,8 @@ import jsonschema
 import pytest
 from referencing import Registry, Resource
 
+from merger.repoground.core.merge import _source_authority_metadata
+
 from merger.repoground.core.repository_text_trust import (
     CONTROL_ACTIONS,
     build_agent_handoff,
@@ -443,3 +445,53 @@ def test_agent_handoff_rejects_missing_required_task_metadata():
 
     with pytest.raises(ValueError, match="task is required"):
         build_agent_handoff(plan)
+
+
+def test_source_authority_marks_deprecated_frontmatter_historical_only():
+    authority = _source_authority_metadata(
+        "architecture/old.md",
+        "---\nstatus: deprecated\ncanonicality: explanatory\nrole: norm\n---\n# Old\n",
+    )
+
+    assert authority["classification"] == "historical_only"
+    assert authority["establishes_current_state"] is False
+    assert authority["status"] == "deprecated"
+    assert "current_architecture" in authority["does_not_establish"]
+
+
+def test_source_authority_marks_point_in_time_observation_noncurrent():
+    authority = _source_authority_metadata(
+        "runtime/inventory.md",
+        "---\nstatus: canonical\ncanonicality: observation\n"
+        "temporal_scope: point_in_time\n"
+        "observed_at: \"2026-07-09T18:15:00Z\"\n---\n# Inventory\n",
+    )
+
+    assert authority["classification"] == "point_in_time_observation"
+    assert authority["establishes_current_state"] is False
+    assert authority["observed_at"] == "2026-07-09T18:15:00Z"
+    assert "preferred_access_path" in authority["does_not_establish"]
+
+
+def test_source_authority_active_frontmatter_is_only_current_candidate():
+    authority = _source_authority_metadata(
+        "docs/current.md",
+        "---\nstatus: active\ncanonicality: canonical\n---\n# Current\n",
+    )
+
+    assert authority["classification"] == "current_candidate"
+    assert authority["establishes_current_state"] is None
+    assert authority["does_not_establish"] == [
+        "current_state_without_fresh_verification"
+    ]
+
+
+def test_source_authority_without_frontmatter_is_unclassified():
+    authority = _source_authority_metadata("README.md", "# README\n")
+
+    assert authority == {
+        "classification": "unclassified",
+        "frontmatter_present": False,
+        "establishes_current_state": None,
+        "does_not_establish": ["current_state_without_fresh_verification"],
+    }
