@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -13,6 +14,9 @@ RESOLVED_EVIDENCE_VERSION = "v1"
 SOURCE_CITATION_PROJECTION_KIND = "repobrief.source_citation_projection"
 SOURCE_CITATION_PROJECTION_VERSION = "v1"
 TEXT_EXCERPT_MAX_CHARS = 1200
+SOURCE_AUTHORITY_SCALAR_MAX_BYTES = 256
+SOURCE_AUTHORITY_MAX_BYTES = 1024
+SOURCE_AUTHORITY_MAX_GAPS = 16
 
 _SOURCE_AUTHORITY_CLASSIFICATIONS = frozenset(
     {
@@ -66,8 +70,22 @@ def _unclassified_source_authority() -> dict[str, Any]:
     }
 
 
+def _source_authority_string_is_bounded(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value.encode("utf-8")) <= SOURCE_AUTHORITY_SCALAR_MAX_BYTES
+    )
+
+
+def _source_authority_is_aggregate_bounded(value: dict[str, Any]) -> bool:
+    encoded = json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return len(encoded) <= SOURCE_AUTHORITY_MAX_BYTES
+
+
 def source_authority_projection(value: Any) -> dict[str, Any]:
-    """Project only schema-valid source-authority metadata, otherwise fail closed."""
+    """Project only schema-valid, size-bounded metadata; otherwise fail closed."""
     if not isinstance(value, dict) or set(value).difference(_SOURCE_AUTHORITY_FIELDS):
         return _unclassified_source_authority()
 
@@ -83,8 +101,12 @@ def source_authority_projection(value: Any) -> dict[str, Any]:
         establishes_current_state, bool
     ):
         return _unclassified_source_authority()
-    if not isinstance(does_not_establish, list) or not all(
-        isinstance(item, str) for item in does_not_establish
+    if (
+        not isinstance(does_not_establish, list)
+        or len(does_not_establish) > SOURCE_AUTHORITY_MAX_GAPS
+        or not all(
+            _source_authority_string_is_bounded(item) for item in does_not_establish
+        )
     ):
         return _unclassified_source_authority()
 
@@ -98,9 +120,11 @@ def source_authority_projection(value: Any) -> dict[str, Any]:
         if field not in value:
             continue
         item = value[field]
-        if not isinstance(item, str):
+        if not _source_authority_string_is_bounded(item):
             return _unclassified_source_authority()
         projected[field] = item
+    if not _source_authority_is_aggregate_bounded(projected):
+        return _unclassified_source_authority()
     return projected
 
 

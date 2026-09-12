@@ -77,6 +77,31 @@ def test_query_existing_index_fails_closed_on_invalid_stored_source_authority(tm
     assert result["source_citation_projection"]["items"][0]["source_authority"] == expected
 
 
+def test_query_existing_index_fails_closed_on_oversized_stored_source_authority(tmp_path):
+    oversized_authority = {
+        "classification": "current_candidate",
+        "frontmatter_present": True,
+        "establishes_current_state": None,
+        "does_not_establish": ["current_state_without_fresh_verification"],
+        "role": "x" * 300,
+    }
+    bundle = _build_resolved_bundle(tmp_path, source_authority=oversized_authority)
+    expected = {
+        "classification": "unclassified",
+        "frontmatter_present": False,
+        "establishes_current_state": None,
+        "does_not_establish": ["current_state_without_fresh_verification"],
+    }
+
+    result = bundle_access.query_existing_index(
+        bundle["manifest"], "hello", k=1, resolve_evidence=True, project_sources=True
+    )
+
+    assert result["query_result"]["results"][0]["source_authority"] == expected
+    assert result["resolved_evidence"]["hits"][0]["source_authority"] == expected
+    assert result["source_citation_projection"]["items"][0]["source_authority"] == expected
+
+
 def test_query_existing_index_projection_is_read_only(tmp_path):
     bundle = _build_resolved_bundle(tmp_path)
     index_path = bundle["index_path"]

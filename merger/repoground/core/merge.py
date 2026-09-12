@@ -34,6 +34,7 @@ from .constants import (
 )
 from . import clock
 from .chunker import Chunker
+from .citation_projection import source_authority_projection
 from .redactor import Redactor
 from .range_resolver import build_explicit_range_ref
 from .yaml_compat import ensure_pyyaml_collections_abc_compat
@@ -5212,7 +5213,9 @@ def _source_authority_metadata(file_path: str, content: str) -> Dict[str, Any]:
     if Path(file_path).suffix.lower() not in {".md", ".mdx", ".markdown"}:
         return default
     parsed = _parse_source_frontmatter(content)
-    return _source_authority_from_frontmatter(parsed) if parsed is not None else default
+    if parsed is None:
+        return default
+    return source_authority_projection(_source_authority_from_frontmatter(parsed))
 
 
 def _redact_source_authority_metadata(
@@ -5228,7 +5231,7 @@ def _redact_source_authority_metadata(
                 redactor.redact(item)[0] if isinstance(item, str) else item
                 for item in value
             ]
-    return redacted
+    return source_authority_projection(redacted)
 
 
 def get_semantic_metadata_path_only(file_path: str) -> Dict[str, Any]:

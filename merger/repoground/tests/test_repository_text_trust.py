@@ -506,3 +506,18 @@ def test_source_authority_ignores_indented_yaml_literal_fence():
     assert authority["classification"] == "historical_only"
     assert authority["status"] == "deprecated"
     assert authority["establishes_current_state"] is False
+
+
+def test_source_authority_fails_closed_when_frontmatter_scalar_is_oversized():
+    oversized_role = "x" * (60 * 1024)
+    authority = _source_authority_metadata(
+        "docs/current.md",
+        f"---\nstatus: active\nrole: {oversized_role}\n---\n# Current\n",
+    )
+
+    assert authority == {
+        "classification": "unclassified",
+        "frontmatter_present": False,
+        "establishes_current_state": None,
+        "does_not_establish": ["current_state_without_fresh_verification"],
+    }
