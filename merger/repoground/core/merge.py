@@ -5131,49 +5131,33 @@ def _frontmatter_scalar(value: Any) -> Optional[str]:
     return None
 
 
-def _source_authority_metadata(file_path: str, content: str) -> Dict[str, Any]:
-    """Classify source-document lifecycle without turning repository text into runtime truth.
-
-    Historical and point-in-time documents remain retrievable.  This metadata only
-    carries their applicability boundary forward so later retrieval/context layers
-    cannot silently present them as evidence of current state.
-    """
-    default = {
-        "classification": "unclassified",
-        "frontmatter_present": False,
-        "establishes_current_state": None,
-        "does_not_establish": list(_SOURCE_AUTHORITY_UNCLASSIFIED_GAPS),
-    }
-    if Path(file_path).suffix.lower() not in {".md", ".mdx", ".markdown"}:
-        return default
+def _parse_source_frontmatter(content: str) -> Optional[Dict[str, Any]]:
+    """Return bounded Markdown frontmatter, or None when it is unavailable/invalid."""
     if yaml is None or not content.startswith("---"):
-        return default
+        return None
 
     lines = content.splitlines(keepends=True)
     if not lines or lines[0].strip() != "---":
-        return default
+        return None
 
-    closing_index: Optional[int] = None
     consumed_bytes = len(lines[0].encode("utf-8"))
     for idx, line in enumerate(lines[1:], start=1):
         consumed_bytes += len(line.encode("utf-8"))
         if consumed_bytes > _MAX_FRONTMATTER_BYTES:
-            return default
-        if line.strip() == "---":
-            closing_index = idx
-            break
-    if closing_index is None:
-        return default
+            return None
+        if line.strip() != "---":
+            continue
+        try:
+            ensure_pyyaml_collections_abc_compat()
+            parsed = yaml.safe_load("".join(lines[1:idx]))
+        except Exception:
+            return None
+        return parsed if isinstance(parsed, dict) else None
+    return None
 
-    raw_frontmatter = "".join(lines[1:closing_index])
-    try:
-        ensure_pyyaml_collections_abc_compat()
-        parsed = yaml.safe_load(raw_frontmatter)
-    except Exception:
-        return default
-    if not isinstance(parsed, dict):
-        return default
 
+def _source_authority_from_frontmatter(parsed: Dict[str, Any]) -> Dict[str, Any]:
+    """Translate frontmatter into an applicability boundary for retrieval."""
     metadata: Dict[str, Any] = {
         "classification": "current_candidate",
         "frontmatter_present": True,
@@ -5195,17 +5179,35 @@ def _source_authority_metadata(file_path: str, content: str) -> Dict[str, Any]:
     status = str(metadata.get("status", "")).strip().lower()
     canonicality = str(metadata.get("canonicality", "")).strip().lower()
     temporal_scope = str(metadata.get("temporal_scope", "")).strip().lower()
-
-    if status in _HISTORICAL_SOURCE_STATUSES or canonicality in _HISTORICAL_CANONICALITY:
+    historical = (
+        status in _HISTORICAL_SOURCE_STATUSES
+        or canonicality in _HISTORICAL_CANONICALITY
+    )
+    point_in_time = canonicality == "observation" or temporal_scope == "point_in_time"
+    if historical:
         metadata["classification"] = "historical_only"
-        metadata["establishes_current_state"] = False
-        metadata["does_not_establish"] = list(_SOURCE_AUTHORITY_CURRENT_STATE_GAPS)
-    elif canonicality == "observation" or temporal_scope == "point_in_time":
+    elif point_in_time:
         metadata["classification"] = "point_in_time_observation"
-        metadata["establishes_current_state"] = False
-        metadata["does_not_establish"] = list(_SOURCE_AUTHORITY_CURRENT_STATE_GAPS)
+    else:
+        return metadata
 
+    metadata["establishes_current_state"] = False
+    metadata["does_not_establish"] = list(_SOURCE_AUTHORITY_CURRENT_STATE_GAPS)
     return metadata
+
+
+def _source_authority_metadata(file_path: str, content: str) -> Dict[str, Any]:
+    """Classify source lifecycle without turning repository text into runtime truth."""
+    default = {
+        "classification": "unclassified",
+        "frontmatter_present": False,
+        "establishes_current_state": None,
+        "does_not_establish": list(_SOURCE_AUTHORITY_UNCLASSIFIED_GAPS),
+    }
+    if Path(file_path).suffix.lower() not in {".md", ".mdx", ".markdown"}:
+        return default
+    parsed = _parse_source_frontmatter(content)
+    return _source_authority_from_frontmatter(parsed) if parsed is not None else default
 
 
 def get_semantic_metadata_path_only(file_path: str) -> Dict[str, Any]:
