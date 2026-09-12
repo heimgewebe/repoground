@@ -1,3 +1,5 @@
+import pytest
+
 from merger.repoground.adapters.atlas import AtlasScanner
 
 def test_atlas_merge_single_folder(tmp_path):
@@ -62,3 +64,13 @@ def test_atlas_merge_recursive_and_limits(tmp_path):
 
     assert "MERGE TRUNCATED: max_files reached" in content_limit
     assert result_limit["truncated"] == "max_files"
+
+def test_atlas_merge_rejects_parent_traversal_without_leaking_path_error(tmp_path):
+    scanner = AtlasScanner(tmp_path)
+
+    with pytest.raises(ValueError, match="outside of root directory") as exc_info:
+        scanner.merge_folder("../outside", tmp_path / "merged.txt")
+
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__suppress_context__ is True
+
