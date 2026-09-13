@@ -63,6 +63,12 @@ _SOURCE_AUTHORITY_REQUIRED_GAPS = {
         }
     ),
 }
+_SOURCE_AUTHORITY_HISTORICAL_STATUSES = frozenset(
+    {"deprecated", "historical", "superseded", "retired", "archived"}
+)
+_SOURCE_AUTHORITY_HISTORICAL_CANONICALITY = frozenset(
+    {"deprecated", "historical", "superseded"}
+)
 
 _CITATION_ID_RE = re.compile(r"^cit_[a-f0-9]{16}$")
 _SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
@@ -98,6 +104,30 @@ def _source_authority_string_is_bounded(value: Any) -> bool:
         )
     except UnicodeEncodeError:
         return False
+
+
+def source_authority_classification_from_lifecycle(value: dict[str, Any]) -> str:
+    """Derive the producer classification from already-normalized lifecycle fields."""
+    status = str(value.get("status", "")).strip().lower()
+    canonicality = str(value.get("canonicality", "")).strip().lower()
+    temporal_scope = str(value.get("temporal_scope", "")).strip().lower()
+    if (
+        status in _SOURCE_AUTHORITY_HISTORICAL_STATUSES
+        or canonicality in _SOURCE_AUTHORITY_HISTORICAL_CANONICALITY
+    ):
+        return "historical_only"
+    if canonicality == "observation" or temporal_scope == "point_in_time":
+        return "point_in_time_observation"
+    return "current_candidate"
+
+
+def _source_authority_lifecycle_is_consistent(value: dict[str, Any]) -> bool:
+    classification = value["classification"]
+    if value["frontmatter_present"] is False:
+        return classification == "unclassified" and not any(
+            field in value for field in _SOURCE_AUTHORITY_OPTIONAL_STRING_FIELDS
+        )
+    return classification == source_authority_classification_from_lifecycle(value)
 
 
 def _source_authority_is_aggregate_bounded(value: dict[str, Any]) -> bool:
@@ -159,7 +189,10 @@ def source_authority_projection(value: Any) -> dict[str, Any]:
         if not _source_authority_string_is_bounded(item):
             return _unclassified_source_authority()
         projected[field] = item
-    if not _source_authority_is_aggregate_bounded(projected):
+    if (
+        not _source_authority_lifecycle_is_consistent(projected)
+        or not _source_authority_is_aggregate_bounded(projected)
+    ):
         return _unclassified_source_authority()
     return projected
 

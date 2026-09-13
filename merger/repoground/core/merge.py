@@ -34,7 +34,10 @@ from .constants import (
 )
 from . import clock
 from .chunker import Chunker
-from .citation_projection import source_authority_projection
+from .citation_projection import (
+    source_authority_classification_from_lifecycle,
+    source_authority_projection,
+)
 from .redactor import Redactor
 from .range_resolver import build_explicit_range_ref
 from .yaml_compat import ensure_pyyaml_collections_abc_compat
@@ -5096,14 +5099,6 @@ def extract_retrieval_metadata(content: str, lang: str) -> Dict[str, Any]:
 # Concepts are heuristic keyword hints; may include false positives.
 MAX_CONCEPTS_PER_FILE = 6
 
-_HISTORICAL_SOURCE_STATUSES = frozenset({
-    "deprecated",
-    "historical",
-    "superseded",
-    "retired",
-    "archived",
-})
-_HISTORICAL_CANONICALITY = frozenset({"deprecated", "historical", "superseded"})
 _SOURCE_AUTHORITY_CURRENT_STATE_GAPS = [
     "current_state",
     "current_architecture",
@@ -5239,19 +5234,9 @@ def _source_authority_from_frontmatter(parsed: Dict[str, Any]) -> Dict[str, Any]
         if value is not None:
             metadata[key] = value
 
-    status = str(metadata.get("status", "")).strip().lower()
-    canonicality = str(metadata.get("canonicality", "")).strip().lower()
-    temporal_scope = str(metadata.get("temporal_scope", "")).strip().lower()
-    historical = (
-        status in _HISTORICAL_SOURCE_STATUSES
-        or canonicality in _HISTORICAL_CANONICALITY
-    )
-    point_in_time = canonicality == "observation" or temporal_scope == "point_in_time"
-    if historical:
-        metadata["classification"] = "historical_only"
-    elif point_in_time:
-        metadata["classification"] = "point_in_time_observation"
-    else:
+    classification = source_authority_classification_from_lifecycle(metadata)
+    metadata["classification"] = classification
+    if classification == "current_candidate":
         return metadata
 
     metadata["establishes_current_state"] = False

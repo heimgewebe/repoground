@@ -156,6 +156,65 @@ def test_source_authority_projection_preserves_additional_conservative_caveats()
     assert citation_projection.source_authority_projection(authority) == authority
 
 
+def test_source_authority_projection_rejects_lifecycle_fields_that_contradict_classification():
+    expected = {
+        "classification": "unclassified",
+        "frontmatter_present": False,
+        "establishes_current_state": None,
+        "does_not_establish": ["current_state_without_fresh_verification"],
+    }
+    base = {
+        "classification": "current_candidate",
+        "frontmatter_present": True,
+        "establishes_current_state": None,
+        "does_not_establish": ["current_state_without_fresh_verification"],
+    }
+
+    for lifecycle in (
+        {"status": "deprecated"},
+        {"canonicality": "superseded"},
+        {"canonicality": "observation"},
+        {"temporal_scope": "point_in_time"},
+    ):
+        assert citation_projection.source_authority_projection(
+            {**base, **lifecycle}
+        ) == expected
+
+    assert citation_projection.source_authority_projection(
+        {**base, "frontmatter_present": False}
+    ) == expected
+
+
+def test_source_authority_projection_accepts_lifecycle_consistent_classifications():
+    historical = {
+        "classification": "historical_only",
+        "frontmatter_present": True,
+        "establishes_current_state": False,
+        "does_not_establish": [
+            "current_state",
+            "current_architecture",
+            "current_service_necessity",
+            "preferred_access_path",
+        ],
+        "status": "deprecated",
+    }
+    point_in_time = {
+        "classification": "point_in_time_observation",
+        "frontmatter_present": True,
+        "establishes_current_state": False,
+        "does_not_establish": [
+            "current_state",
+            "current_architecture",
+            "current_service_necessity",
+            "preferred_access_path",
+        ],
+        "canonicality": "observation",
+    }
+
+    assert citation_projection.source_authority_projection(historical) == historical
+    assert citation_projection.source_authority_projection(point_in_time) == point_in_time
+
+
 def test_source_authority_projection_fails_closed_on_unhashable_classification():
     expected = {
         "classification": "unclassified",
