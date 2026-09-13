@@ -139,6 +139,46 @@ def test_evidence_contracts_require_source_authority():
     ]["required"]
 
 
+def test_evidence_contracts_bound_source_authority_resources():
+    contracts = Path(__file__).parent.parent / "contracts"
+    schemas = [
+        json.loads((contracts / name).read_text(encoding="utf-8"))
+        for name in (
+            "query-result.v1.schema.json",
+            "query-context-bundle.v1.schema.json",
+            "repobrief-ask-context-pack.v1.schema.json",
+        )
+    ]
+    authority_schemas = [schema["definitions"]["sourceAuthority"] for schema in schemas]
+
+    assert authority_schemas[0] == authority_schemas[1] == authority_schemas[2]
+    for authority_schema in authority_schemas:
+        caveats = authority_schema["properties"]["does_not_establish"]
+        assert caveats["maxItems"] == 16
+        assert caveats["items"]["maxLength"] == 256
+        for field in (
+            "status",
+            "canonicality",
+            "role",
+            "temporal_scope",
+            "observed_at",
+            "last_reviewed",
+        ):
+            assert authority_schema["properties"][field]["maxLength"] == 256
+
+        oversized_scalar = dict(HISTORICAL_AUTHORITY, role="x" * 257)
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(instance=oversized_scalar, schema=authority_schema)
+
+        too_many_caveats = dict(HISTORICAL_AUTHORITY)
+        too_many_caveats["does_not_establish"] = (
+            HISTORICAL_AUTHORITY["does_not_establish"]
+            + ["current_state"] * 13
+        )
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(instance=too_many_caveats, schema=authority_schema)
+
+
 def test_ask_context_contract_enforces_source_authority_invariants():
     schema = json.loads(CONTEXT_SCHEMA.read_text(encoding="utf-8"))
     authority_schema = schema["definitions"]["sourceAuthority"]

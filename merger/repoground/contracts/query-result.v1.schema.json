@@ -522,26 +522,34 @@
         "does_not_establish": {
           "type": "array",
           "items": {
-            "type": "string"
-          }
+            "type": "string",
+            "maxLength": 256
+          },
+          "maxItems": 16
         },
         "status": {
-          "type": "string"
+          "type": "string",
+          "maxLength": 256
         },
         "canonicality": {
-          "type": "string"
+          "type": "string",
+          "maxLength": 256
         },
         "role": {
-          "type": "string"
+          "type": "string",
+          "maxLength": 256
         },
         "temporal_scope": {
-          "type": "string"
+          "type": "string",
+          "maxLength": 256
         },
         "observed_at": {
-          "type": "string"
+          "type": "string",
+          "maxLength": 256
         },
         "last_reviewed": {
-          "type": "string"
+          "type": "string",
+          "maxLength": 256
         }
       },
       "allOf": [
