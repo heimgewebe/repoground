@@ -6,7 +6,10 @@ import time
 from typing import Dict, Any, Optional, List
 
 from .router import route_query
-from ..core.citation_projection import source_authority_projection
+from ..core.citation_projection import (
+    SOURCE_AUTHORITY_MAX_BYTES,
+    source_authority_projection,
+)
 from ..core.range_resolver import build_derived_range_ref
 from ..core.graph_degradation import graph_load_degradation
 from ..architecture.graph_index import load_graph_index
@@ -53,8 +56,10 @@ def _decode_source_authority(raw: Any) -> Dict[str, Any]:
     if not isinstance(raw, str) or not raw.strip():
         return _unclassified_source_authority()
     try:
+        if len(raw.encode("utf-8")) > SOURCE_AUTHORITY_MAX_BYTES:
+            return _unclassified_source_authority()
         decoded = json.loads(raw)
-    except (TypeError, json.JSONDecodeError):
+    except (TypeError, ValueError, RecursionError, UnicodeEncodeError):
         return _unclassified_source_authority()
     return source_authority_projection(decoded)
 
@@ -1375,9 +1380,6 @@ def build_context_bundle(query_text: str, results: List[Dict[str, Any]], raw_con
                 "graph_status": hit.get("why", {}).get("diagnostics", {}).get("graph", {}).get("graph_status", "unknown"),
                 "semantic_status": _SEMANTIC_STATUS_UNKNOWN,
                 "federation_status": "federated" if hit.get("federation_bundle") else "local",
-                "current_state_authority": hit.get(
-                    "source_authority", _unclassified_source_authority()
-                ).get("classification", "unclassified"),
                 "uncertainty": {
                     "explicit_provenance": prov_type == "explicit",
                     "graph_used": hit.get("why", {}).get("diagnostics", {}).get("graph", {}).get("graph_used", False),

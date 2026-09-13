@@ -157,15 +157,6 @@
                     ]
                   }
                 }
-              },
-              "current_state_authority": {
-                "type": "string",
-                "enum": [
-                  "unclassified",
-                  "current_candidate",
-                  "historical_only",
-                  "point_in_time_observation"
-                ]
               }
             }
           },

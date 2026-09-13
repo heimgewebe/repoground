@@ -1467,3 +1467,28 @@ def test_source_authority_schema_rejects_lifecycle_classification_contradictions
         "does_not_establish": caveats,
         "status": " Deprecated ",
     })
+
+
+def test_decode_source_authority_rejects_oversized_raw_json_before_parsing(monkeypatch):
+    raw = '{"classification":' + ('9' * 5000) + '}'
+
+    def fail_if_called(_raw):
+        pytest.fail("oversized stored authority must be rejected before json.loads")
+
+    monkeypatch.setattr(query_core.json, "loads", fail_if_called)
+    decoded = query_core._decode_source_authority(raw)
+
+    assert decoded["classification"] == "unclassified"
+
+
+@pytest.mark.parametrize("decoder_error", [ValueError("integer limit"), RecursionError("depth")])
+def test_decode_source_authority_fails_closed_on_decoder_resource_errors(
+    monkeypatch, decoder_error
+):
+    def raise_decoder_error(_raw):
+        raise decoder_error
+
+    monkeypatch.setattr(query_core.json, "loads", raise_decoder_error)
+    decoded = query_core._decode_source_authority("{}")
+
+    assert decoded["classification"] == "unclassified"

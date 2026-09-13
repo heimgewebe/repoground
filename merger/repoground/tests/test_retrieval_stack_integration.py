@@ -171,10 +171,7 @@ def test_retrieval_preserves_historical_source_authority_end_to_end():
                 conn,
             )
         assert context["hits"][0]["source_authority"]["classification"] == "historical_only"
-        assert (
-            context["hits"][0]["epistemics"]["current_state_authority"]
-            == "historical_only"
-        )
+        assert "current_state_authority" not in context["hits"][0]["epistemics"]
 
 def test_chunk_source_authority_uses_redacted_frontmatter():
     with tempfile.TemporaryDirectory() as tmp_dir_str:
