@@ -382,6 +382,7 @@ def build_index(dump_path: Path, chunk_path: Path, db_path: Path, config_payload
                     chunk.get("source_file", path),
                     json.dumps(
                         chunk.get("source_authority") or {},
+                        ensure_ascii=False,
                         sort_keys=True,
                         separators=(",", ":"),
                     ),
