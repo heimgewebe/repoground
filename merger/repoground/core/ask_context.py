@@ -638,6 +638,7 @@ def _language_range_projection(record: dict[str, Any]) -> dict[str, Any] | None:
         "range": {
             "artifact_role": "language_structure_json",
             "status": "resolved",
+            "source_authority": source_authority_projection(None),
             "range_ref": {
                 "ref": record_id,
                 "path": path,
