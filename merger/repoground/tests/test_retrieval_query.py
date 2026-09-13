@@ -1425,4 +1425,45 @@ def test_source_authority_schema_requires_classification_caveats():
             "current_service_necessity",
             "preferred_access_path",
         ],
+        "status": "deprecated",
+    })
+
+
+def test_source_authority_schema_rejects_lifecycle_classification_contradictions():
+    import jsonschema
+    from pathlib import Path
+
+    schema_path = Path(__file__).parent.parent / "contracts" / "query-result.v1.schema.json"
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))["definitions"]["sourceAuthority"]
+    validator = jsonschema.Draft7Validator(schema)
+    caveats = ["current_state", "current_architecture", "current_service_necessity", "preferred_access_path"]
+
+    assert not validator.is_valid({
+        "classification": "current_candidate",
+        "frontmatter_present": True,
+        "establishes_current_state": None,
+        "does_not_establish": ["current_state_without_fresh_verification"],
+        "status": "deprecated",
+    })
+    assert not validator.is_valid({
+        "classification": "historical_only",
+        "frontmatter_present": True,
+        "establishes_current_state": False,
+        "does_not_establish": caveats,
+        "status": "active",
+    })
+    assert not validator.is_valid({
+        "classification": "point_in_time_observation",
+        "frontmatter_present": True,
+        "establishes_current_state": False,
+        "does_not_establish": caveats,
+        "status": "retired",
+        "canonicality": "observation",
+    })
+    assert validator.is_valid({
+        "classification": "historical_only",
+        "frontmatter_present": True,
+        "establishes_current_state": False,
+        "does_not_establish": caveats,
+        "status": " Deprecated ",
     })

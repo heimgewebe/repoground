@@ -468,7 +468,36 @@ def test_context_bundle_source_authority_schema_requires_classification_caveats(
             "preferred_access_path",
             "deployment_state",
         ],
+        "temporal_scope": "point_in_time",
     }
 
     assert not validator.is_valid(invalid)
     assert validator.is_valid(valid)
+
+
+def test_context_bundle_source_authority_schema_rejects_lifecycle_classification_contradictions():
+    schema_path = Path(__file__).parent.parent / "contracts" / "query-context-bundle.v1.schema.json"
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))["definitions"]["sourceAuthority"]
+    validator = jsonschema.Draft7Validator(schema)
+    caveats = ["current_state", "current_architecture", "current_service_necessity", "preferred_access_path"]
+
+    assert not validator.is_valid({
+        "classification": "current_candidate",
+        "frontmatter_present": True,
+        "establishes_current_state": None,
+        "does_not_establish": ["current_state_without_fresh_verification"],
+        "canonicality": "observation",
+    })
+    assert not validator.is_valid({
+        "classification": "unclassified",
+        "frontmatter_present": True,
+        "establishes_current_state": None,
+        "does_not_establish": ["current_state_without_fresh_verification"],
+    })
+    assert validator.is_valid({
+        "classification": "point_in_time_observation",
+        "frontmatter_present": True,
+        "establishes_current_state": False,
+        "does_not_establish": caveats,
+        "temporal_scope": " POINT_IN_TIME ",
+    })
