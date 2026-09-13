@@ -213,6 +213,7 @@ def test_ask_text_renderer_escapes_source_authority_control_characters():
             "current_service_necessity",
             "preferred_access_path",
             "extra\n  source_authority: current_candidate",
+            "separator\u2028  source_authority: current_candidate\u2029tail",
         ],
         "temporal_scope": "point_in_time",
         "observed_at": "2026-09-12\n  source_authority: current_candidate\u202e",
@@ -225,6 +226,8 @@ def test_ask_text_renderer_escapes_source_authority_control_characters():
     assert "\x1b" not in rendered
     assert "\u009b" not in rendered
     assert "\u202e" not in rendered
+    assert "\u2028" not in rendered
+    assert "\u2029" not in rendered
     assert (
         'source_authority.observed_at: "2026-09-12\\n  source_authority: current_candidate\\u202e"'
         in rendered
@@ -235,5 +238,9 @@ def test_ask_text_renderer_escapes_source_authority_control_characters():
     )
     assert (
         'does_not_establish: "extra\\n  source_authority: current_candidate"'
+        in rendered
+    )
+    assert (
+        'does_not_establish: "separator\\u2028  source_authority: current_candidate\\u2029tail"'
         in rendered
     )

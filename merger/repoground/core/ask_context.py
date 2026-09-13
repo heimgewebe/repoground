@@ -1161,7 +1161,7 @@ def _render_source_authority_text_scalar(value: str) -> str:
     rendered = json.dumps(value, ensure_ascii=False)
     parts: list[str] = []
     for character in rendered:
-        if unicodedata.category(character) in {"Cc", "Cf"}:
+        if unicodedata.category(character) in {"Cc", "Cf", "Zl", "Zp"}:
             codepoint = ord(character)
             escape = (
                 f"\\u{codepoint:04x}"
