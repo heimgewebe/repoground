@@ -5115,6 +5115,14 @@ _MAX_FRONTMATTER_BYTES = 64 * 1024
 # still admit pathological depth in what must be a shallow header.
 _MAX_FRONTMATTER_YAML_TOKENS = _MAX_FRONTMATTER_BYTES // 2
 _MAX_FRONTMATTER_YAML_DEPTH = 32
+_SOURCE_AUTHORITY_LIFECYCLE_FIELDS = (
+    "status",
+    "canonicality",
+    "role",
+    "temporal_scope",
+    "observed_at",
+    "last_reviewed",
+)
 _YAML_MERGE_KEY = "<<"
 if yaml is not None:
     _YAML_COLLECTION_START_TOKENS = (
@@ -5156,6 +5164,30 @@ def _frontmatter_scalar(value: Any) -> Optional[str]:
     return None
 
 
+def _frontmatter_lifecycle_key_scan_state(
+    token: Any,
+    *,
+    depth: int,
+    pending_top_level_key: bool,
+    seen_lifecycle_keys: set[str],
+) -> tuple[bool, bool]:
+    """Track top-level lifecycle keys without constructing YAML nodes."""
+    if isinstance(token, yaml.KeyToken):
+        return depth == 1, False
+    if not pending_top_level_key:
+        return False, False
+    if isinstance(token, yaml.ScalarToken):
+        key = token.value
+        if key not in _SOURCE_AUTHORITY_LIFECYCLE_FIELDS:
+            return False, False
+        duplicate = key in seen_lifecycle_keys
+        seen_lifecycle_keys.add(key)
+        return False, duplicate
+    if isinstance(token, (*_YAML_COLLECTION_START_TOKENS, yaml.ValueToken)):
+        return False, False
+    return True, False
+
+
 def _frontmatter_yaml_is_constructible(text: str) -> bool:
     """Reject alias expansion and unbounded structure before any node is built.
 
@@ -5166,6 +5198,8 @@ def _frontmatter_yaml_is_constructible(text: str) -> bool:
     """
     tokens = 0
     depth = 0
+    seen_lifecycle_keys: set[str] = set()
+    pending_top_level_key = False
     try:
         for token in yaml.scan(text, Loader=yaml.SafeLoader):
             tokens += 1
@@ -5174,6 +5208,16 @@ def _frontmatter_yaml_is_constructible(text: str) -> bool:
             if isinstance(token, (yaml.AliasToken, yaml.AnchorToken)):
                 return False
             if isinstance(token, yaml.ScalarToken) and token.value == _YAML_MERGE_KEY:
+                return False
+            pending_top_level_key, duplicate_lifecycle_key = (
+                _frontmatter_lifecycle_key_scan_state(
+                    token,
+                    depth=depth,
+                    pending_top_level_key=pending_top_level_key,
+                    seen_lifecycle_keys=seen_lifecycle_keys,
+                )
+            )
+            if duplicate_lifecycle_key:
                 return False
             if isinstance(token, _YAML_COLLECTION_START_TOKENS):
                 depth += 1
@@ -5222,14 +5266,7 @@ def _source_authority_from_frontmatter(parsed: Dict[str, Any]) -> Dict[str, Any]
         "establishes_current_state": None,
         "does_not_establish": list(_SOURCE_AUTHORITY_UNCLASSIFIED_GAPS),
     }
-    for key in (
-        "status",
-        "canonicality",
-        "role",
-        "temporal_scope",
-        "observed_at",
-        "last_reviewed",
-    ):
+    for key in _SOURCE_AUTHORITY_LIFECYCLE_FIELDS:
         value = _frontmatter_scalar(parsed.get(key))
         if value is not None:
             metadata[key] = value

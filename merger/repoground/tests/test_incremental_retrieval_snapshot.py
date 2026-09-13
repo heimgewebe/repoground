@@ -210,6 +210,23 @@ def test_chunks_persist_bounded_source_authority(tmp_path: Path) -> None:
     assert results["current.md"]["classification"] == "current_candidate"
 
 
+def test_incremental_chunks_fail_closed_on_duplicate_lifecycle_frontmatter(
+    tmp_path: Path,
+) -> None:
+    source, snapshot = _snapshot(tmp_path)
+    (source / "ambiguous.md").write_text(
+        "---\nstatus: deprecated\nstatus: active\n---\n"
+        "# Ambiguous\n\nThe ambiguous needle architecture note.\n",
+        encoding="utf-8",
+    )
+
+    snapshot.build()
+
+    assert _authority_by_path(snapshot)["ambiguous.md"] == (
+        _UNCLASSIFIED_SOURCE_AUTHORITY
+    )
+
+
 def test_reused_file_chunks_keep_stored_source_authority(tmp_path: Path) -> None:
     source, snapshot = _documented_snapshot(tmp_path)
     snapshot.build()

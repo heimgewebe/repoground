@@ -563,6 +563,19 @@ def test_source_authority_rejects_merge_key_frontmatter():
     )
 
 
+def test_source_authority_rejects_duplicate_lifecycle_frontmatter_keys():
+    ambiguous = (
+        "---\n"
+        "status: deprecated\n"
+        "status: active\n"
+        "---\n# Ambiguous\n"
+    )
+
+    assert _source_authority_metadata("architecture/ambiguous.md", ambiguous) == (
+        _UNCLASSIFIED_SOURCE_AUTHORITY
+    )
+
+
 def test_source_authority_rejects_overdeep_frontmatter_structure():
     depth = 64
     overdeep = (
