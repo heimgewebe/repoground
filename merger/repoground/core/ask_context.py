@@ -407,6 +407,14 @@ def _source_address_fields(hit: dict[str, Any]) -> dict[str, Any]:
     return fields
 
 
+def _source_projection_fields(hit: dict[str, Any]) -> dict[str, Any]:
+    fields = _source_address_fields(hit)
+    source_authority = hit.get("source_authority")
+    if source_authority is not None:
+        fields["source_authority"] = source_authority_projection(source_authority)
+    return fields
+
+
 def _resolved_ranges(
     query_result: dict[str, Any],
     max_context_tokens: int,
@@ -577,10 +585,7 @@ def _resolved_ranges_with_budget(
         content_sha = range_value.get("content_sha256") or range_value.get("sha256")
         if isinstance(content_sha, str) and len(content_sha) == 64:
             item["content_sha256"] = content_sha
-        source_authority = hit.get("source_authority")
-        if source_authority is not None:
-            item["source_authority"] = source_authority_projection(source_authority)
-        item.update(_source_address_fields(hit))
+        item.update(_source_projection_fields(hit))
         result.append(item)
     return result, used_bytes, used_characters, truncated, omissions
 
