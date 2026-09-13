@@ -521,3 +521,87 @@ def test_source_authority_fails_closed_when_frontmatter_scalar_is_oversized():
         "establishes_current_state": None,
         "does_not_establish": ["current_state_without_fresh_verification"],
     }
+
+
+_UNCLASSIFIED_SOURCE_AUTHORITY = {
+    "classification": "unclassified",
+    "frontmatter_present": False,
+    "establishes_current_state": None,
+    "does_not_establish": ["current_state_without_fresh_verification"],
+}
+
+
+def test_source_authority_rejects_alias_expanded_frontmatter():
+    body = ["status: deprecated", "a: &a [" + ", ".join(["0"] * 20) + "]"]
+    previous = "a"
+    for level in range(1, 6):
+        anchor = f"b{level}"
+        body.append(f"{anchor}: &{anchor} [" + ", ".join([f"*{previous}"] * 20) + "]")
+        previous = anchor
+    body.append(f"bomb: *{previous}")
+    bomb = "---\n" + "\n".join(body) + "\n---\n# Old\n"
+
+    assert len(bomb.encode("utf-8")) < 64 * 1024
+    assert _source_authority_metadata("architecture/old.md", bomb) == (
+        _UNCLASSIFIED_SOURCE_AUTHORITY
+    )
+
+
+def test_source_authority_rejects_merge_key_frontmatter():
+    merged = (
+        "---\n"
+        "base: &base\n"
+        "  status: active\n"
+        "child:\n"
+        "  <<: *base\n"
+        "status: deprecated\n"
+        "---\n# Old\n"
+    )
+
+    assert _source_authority_metadata("architecture/old.md", merged) == (
+        _UNCLASSIFIED_SOURCE_AUTHORITY
+    )
+
+
+def test_source_authority_rejects_overdeep_frontmatter_structure():
+    depth = 64
+    overdeep = (
+        "---\nstatus: active\nnested: " + "[" * depth + "]" * depth + "\n---\n# Current\n"
+    )
+
+    assert _source_authority_metadata("docs/current.md", overdeep) == (
+        _UNCLASSIFIED_SOURCE_AUTHORITY
+    )
+
+
+def test_source_authority_rejects_overcomplex_frontmatter_structure():
+    # Each ``0,`` pair is one scalar plus one entry token, so this exceeds the
+    # token budget while staying inside the 64 KiB frontmatter byte cap.
+    overcomplex = (
+        "---\nstatus: active\nnested: [" + "0," * 20000 + "0]\n---\n# Current\n"
+    )
+
+    assert len(overcomplex.encode("utf-8")) < 64 * 1024
+    assert _source_authority_metadata("docs/current.md", overcomplex) == (
+        _UNCLASSIFIED_SOURCE_AUTHORITY
+    )
+
+
+def test_source_authority_still_reads_ordinary_structured_frontmatter():
+    ordinary = (
+        "---\n"
+        "status: deprecated\n"
+        "canonicality: explanatory\n"
+        "tags:\n"
+        "  - architecture\n"
+        "  - retired\n"
+        "owners:\n"
+        "  team: platform\n"
+        "---\n# Old\n"
+    )
+
+    authority = _source_authority_metadata("architecture/old.md", ordinary)
+
+    assert authority["classification"] == "historical_only"
+    assert authority["status"] == "deprecated"
+    assert authority["establishes_current_state"] is False

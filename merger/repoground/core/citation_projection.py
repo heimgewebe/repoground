@@ -99,7 +99,11 @@ def source_authority_projection(value: Any) -> dict[str, Any]:
     frontmatter_present = value.get("frontmatter_present")
     establishes_current_state = value.get("establishes_current_state")
     does_not_establish = value.get("does_not_establish")
-    if classification not in _SOURCE_AUTHORITY_CLASSIFICATIONS:
+    # Membership alone would raise on unhashable stored values (list/dict).
+    if (
+        not isinstance(classification, str)
+        or classification not in _SOURCE_AUTHORITY_CLASSIFICATIONS
+    ):
         return _unclassified_source_authority()
     if not isinstance(frontmatter_present, bool):
         return _unclassified_source_authority()

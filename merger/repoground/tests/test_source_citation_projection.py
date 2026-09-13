@@ -105,6 +105,25 @@ def test_source_authority_projection_rejects_contradictory_current_state():
         assert citation_projection.source_authority_projection(authority) == expected
 
 
+def test_source_authority_projection_fails_closed_on_unhashable_classification():
+    expected = {
+        "classification": "unclassified",
+        "frontmatter_present": False,
+        "establishes_current_state": None,
+        "does_not_establish": ["current_state_without_fresh_verification"],
+    }
+    malformed = ([], ["current_candidate"], {}, {"current_candidate": True})
+
+    for classification in malformed:
+        authority = {
+            "classification": classification,
+            "frontmatter_present": True,
+            "establishes_current_state": None,
+            "does_not_establish": [],
+        }
+        assert citation_projection.source_authority_projection(authority) == expected
+
+
 def test_source_authority_projection_fails_closed_on_lone_surrogate():
     expected = {
         "classification": "unclassified",

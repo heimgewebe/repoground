@@ -5112,6 +5112,30 @@ _SOURCE_AUTHORITY_CURRENT_STATE_GAPS = [
 ]
 _SOURCE_AUTHORITY_UNCLASSIFIED_GAPS = ["current_state_without_fresh_verification"]
 _MAX_FRONTMATTER_BYTES = 64 * 1024
+# Bounds for the pre-construction YAML check, derived from the byte cap above.
+# Dense flow syntax emits about one token per input byte, so half the byte cap is
+# a deliberately conservative token ceiling: ordinary metadata headers stay
+# orders of magnitude below it, while token-dense payloads are refused.  Flow
+# indicators cost a single byte per nesting level, so the byte cap alone would
+# still admit pathological depth in what must be a shallow header.
+_MAX_FRONTMATTER_YAML_TOKENS = _MAX_FRONTMATTER_BYTES // 2
+_MAX_FRONTMATTER_YAML_DEPTH = 32
+_YAML_MERGE_KEY = "<<"
+if yaml is not None:
+    _YAML_COLLECTION_START_TOKENS = (
+        yaml.BlockMappingStartToken,
+        yaml.BlockSequenceStartToken,
+        yaml.FlowMappingStartToken,
+        yaml.FlowSequenceStartToken,
+    )
+    _YAML_COLLECTION_END_TOKENS = (
+        yaml.BlockEndToken,
+        yaml.FlowMappingEndToken,
+        yaml.FlowSequenceEndToken,
+    )
+else:  # pragma: no cover - PyYAML is optional
+    _YAML_COLLECTION_START_TOKENS = ()
+    _YAML_COLLECTION_END_TOKENS = ()
 
 
 def _is_frontmatter_delimiter(line: str) -> bool:
@@ -5137,6 +5161,36 @@ def _frontmatter_scalar(value: Any) -> Optional[str]:
     return None
 
 
+def _frontmatter_yaml_is_constructible(text: str) -> bool:
+    """Reject alias expansion and unbounded structure before any node is built.
+
+    ``yaml.scan`` is lexical only: it never resolves an alias, applies a merge key
+    or constructs a node, so this stays bounded by the frontmatter byte cap while
+    ``yaml.safe_load`` on the same text would not be.  Anchors are refused
+    together with aliases because frontmatter metadata has no use for either.
+    """
+    tokens = 0
+    depth = 0
+    try:
+        for token in yaml.scan(text, Loader=yaml.SafeLoader):
+            tokens += 1
+            if tokens > _MAX_FRONTMATTER_YAML_TOKENS:
+                return False
+            if isinstance(token, (yaml.AliasToken, yaml.AnchorToken)):
+                return False
+            if isinstance(token, yaml.ScalarToken) and token.value == _YAML_MERGE_KEY:
+                return False
+            if isinstance(token, _YAML_COLLECTION_START_TOKENS):
+                depth += 1
+                if depth > _MAX_FRONTMATTER_YAML_DEPTH:
+                    return False
+            elif isinstance(token, _YAML_COLLECTION_END_TOKENS):
+                depth -= 1
+    except Exception:
+        return False
+    return True
+
+
 def _parse_source_frontmatter(content: str) -> Optional[Dict[str, Any]]:
     """Return bounded Markdown frontmatter, or None when it is unavailable/invalid."""
     if yaml is None or not content.startswith("---"):
@@ -5153,9 +5207,12 @@ def _parse_source_frontmatter(content: str) -> Optional[Dict[str, Any]]:
             return None
         if not _is_frontmatter_delimiter(line):
             continue
+        body = "".join(lines[1:idx])
         try:
             ensure_pyyaml_collections_abc_compat()
-            parsed = yaml.safe_load("".join(lines[1:idx]))
+            if not _frontmatter_yaml_is_constructible(body):
+                return None
+            parsed = yaml.safe_load(body)
         except Exception:
             return None
         return parsed if isinstance(parsed, dict) else None
