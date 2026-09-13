@@ -951,6 +951,7 @@ def project_context_plan(
                 "source_path",
                 "target_path",
                 "source_range",
+                "source_authority",
                 "citations",
                 "estimated_tokens",
                 "estimated_bytes",
