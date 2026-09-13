@@ -1156,6 +1156,24 @@ def build_ask_context_pack(
     return result
 
 
+def _render_source_authority_text_scalar(value: str) -> str:
+    """Render one authority scalar without raw terminal/Unicode controls."""
+    rendered = json.dumps(value, ensure_ascii=False)
+    parts: list[str] = []
+    for character in rendered:
+        if unicodedata.category(character) in {"Cc", "Cf"}:
+            codepoint = ord(character)
+            escape = (
+                f"\\u{codepoint:04x}"
+                if codepoint <= 0xFFFF
+                else f"\\U{codepoint:08x}"
+            )
+            parts.append(escape)
+        else:
+            parts.append(character)
+    return "".join(parts)
+
+
 def render_ask_context_pack_text(pack: dict[str, Any]) -> str:
     lines = [
         "RepoGround Ask Context Pack",
@@ -1187,11 +1205,11 @@ def render_ask_context_pack_text(pack: dict[str, Any]) -> str:
             ):
                 value = source_authority.get(field)
                 if isinstance(value, str) and value:
-                    rendered_value = json.dumps(value, ensure_ascii=False)
+                    rendered_value = _render_source_authority_text_scalar(value)
                     lines.append(f"  source_authority.{field}: {rendered_value}")
             for caveat in source_authority.get("does_not_establish", []):
                 if isinstance(caveat, str):
-                    rendered_caveat = json.dumps(caveat, ensure_ascii=False)
+                    rendered_caveat = _render_source_authority_text_scalar(caveat)
                     lines.append(f"  does_not_establish: {rendered_caveat}")
         if excerpt:
             lines.append(f"  excerpt: {excerpt[:240].replace(chr(10), ' ')}")
