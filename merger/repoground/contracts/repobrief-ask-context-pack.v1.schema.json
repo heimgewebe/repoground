@@ -452,32 +452,54 @@
                 "type": "boolean"
               },
               "establishes_current_state": {
-                "type": ["boolean", "null"]
+                "type": [
+                  "boolean",
+                  "null"
+                ]
               },
               "does_not_establish": {
                 "type": "array",
                 "maxItems": 16,
-                "items": {"type": "string"}
+                "items": {
+                  "type": "string"
+                }
               },
-              "status": {"type": "string"},
-              "canonicality": {"type": "string"},
-              "role": {"type": "string"},
-              "temporal_scope": {"type": "string"},
-              "observed_at": {"type": "string"},
-              "last_reviewed": {"type": "string"}
+              "status": {
+                "type": "string"
+              },
+              "canonicality": {
+                "type": "string"
+              },
+              "role": {
+                "type": "string"
+              },
+              "temporal_scope": {
+                "type": "string"
+              },
+              "observed_at": {
+                "type": "string"
+              },
+              "last_reviewed": {
+                "type": "string"
+              }
             },
             "allOf": [
               {
                 "if": {
                   "properties": {
                     "classification": {
-                      "enum": ["unclassified", "current_candidate"]
+                      "enum": [
+                        "unclassified",
+                        "current_candidate"
+                      ]
                     }
                   }
                 },
                 "then": {
                   "properties": {
-                    "establishes_current_state": {"type": "null"},
+                    "establishes_current_state": {
+                      "type": "null"
+                    },
                     "does_not_establish": {
                       "contains": {
                         "const": "current_state_without_fresh_verification"
@@ -499,13 +521,31 @@
                 },
                 "then": {
                   "properties": {
-                    "establishes_current_state": {"const": false},
+                    "establishes_current_state": {
+                      "const": false
+                    },
                     "does_not_establish": {
                       "allOf": [
-                        {"contains": {"const": "current_state"}},
-                        {"contains": {"const": "current_architecture"}},
-                        {"contains": {"const": "current_service_necessity"}},
-                        {"contains": {"const": "preferred_access_path"}}
+                        {
+                          "contains": {
+                            "const": "current_state"
+                          }
+                        },
+                        {
+                          "contains": {
+                            "const": "current_architecture"
+                          }
+                        },
+                        {
+                          "contains": {
+                            "const": "current_service_necessity"
+                          }
+                        },
+                        {
+                          "contains": {
+                            "const": "preferred_access_path"
+                          }
+                        }
                       ]
                     }
                   }
@@ -582,17 +622,61 @@
             ]
           },
           "allOf": [
-            {"contains": {"const": "actual_reading_proven"}},
-            {"contains": {"const": "answer_correct"}},
-            {"contains": {"const": "repo_understood"}},
-            {"contains": {"const": "all_relevant_context_used"}},
-            {"contains": {"const": "claims_true"}},
-            {"contains": {"const": "test_sufficiency"}},
-            {"contains": {"const": "regression_absence"}},
-            {"contains": {"const": "runtime_behavior"}},
-            {"contains": {"const": "forensic_ready"}},
-            {"contains": {"const": "merge_readiness"}},
-            {"contains": {"const": "security_correctness"}}
+            {
+              "contains": {
+                "const": "actual_reading_proven"
+              }
+            },
+            {
+              "contains": {
+                "const": "answer_correct"
+              }
+            },
+            {
+              "contains": {
+                "const": "repo_understood"
+              }
+            },
+            {
+              "contains": {
+                "const": "all_relevant_context_used"
+              }
+            },
+            {
+              "contains": {
+                "const": "claims_true"
+              }
+            },
+            {
+              "contains": {
+                "const": "test_sufficiency"
+              }
+            },
+            {
+              "contains": {
+                "const": "regression_absence"
+              }
+            },
+            {
+              "contains": {
+                "const": "runtime_behavior"
+              }
+            },
+            {
+              "contains": {
+                "const": "forensic_ready"
+              }
+            },
+            {
+              "contains": {
+                "const": "merge_readiness"
+              }
+            },
+            {
+              "contains": {
+                "const": "security_correctness"
+              }
+            }
           ],
           "description": "Non-claims downstream agents must keep visible."
         }
@@ -615,13 +699,41 @@
         ]
       },
       "allOf": [
-        {"contains": {"const": "implicit_refresh"}},
-        {"contains": {"const": "git_mutation"}},
-        {"contains": {"const": "snapshot_creation_on_read"}},
-        {"contains": {"const": "patch_application"}},
-        {"contains": {"const": "pull_request_mutation"}},
-        {"contains": {"const": "shell_execution"}},
-        {"contains": {"const": "merge_authorization"}}
+        {
+          "contains": {
+            "const": "implicit_refresh"
+          }
+        },
+        {
+          "contains": {
+            "const": "git_mutation"
+          }
+        },
+        {
+          "contains": {
+            "const": "snapshot_creation_on_read"
+          }
+        },
+        {
+          "contains": {
+            "const": "patch_application"
+          }
+        },
+        {
+          "contains": {
+            "const": "pull_request_mutation"
+          }
+        },
+        {
+          "contains": {
+            "const": "shell_execution"
+          }
+        },
+        {
+          "contains": {
+            "const": "merge_authorization"
+          }
+        }
       ],
       "description": "Operations forbidden while assembling this context pack."
     },
@@ -647,17 +759,61 @@
         ]
       },
       "allOf": [
-        {"contains": {"const": "actual_reading_proven"}},
-        {"contains": {"const": "answer_correct"}},
-        {"contains": {"const": "repo_understood"}},
-        {"contains": {"const": "all_relevant_context_used"}},
-        {"contains": {"const": "claims_true"}},
-        {"contains": {"const": "test_sufficiency"}},
-        {"contains": {"const": "regression_absence"}},
-        {"contains": {"const": "runtime_behavior"}},
-        {"contains": {"const": "forensic_ready"}},
-        {"contains": {"const": "merge_readiness"}},
-        {"contains": {"const": "security_correctness"}}
+        {
+          "contains": {
+            "const": "actual_reading_proven"
+          }
+        },
+        {
+          "contains": {
+            "const": "answer_correct"
+          }
+        },
+        {
+          "contains": {
+            "const": "repo_understood"
+          }
+        },
+        {
+          "contains": {
+            "const": "all_relevant_context_used"
+          }
+        },
+        {
+          "contains": {
+            "const": "claims_true"
+          }
+        },
+        {
+          "contains": {
+            "const": "test_sufficiency"
+          }
+        },
+        {
+          "contains": {
+            "const": "regression_absence"
+          }
+        },
+        {
+          "contains": {
+            "const": "runtime_behavior"
+          }
+        },
+        {
+          "contains": {
+            "const": "forensic_ready"
+          }
+        },
+        {
+          "contains": {
+            "const": "merge_readiness"
+          }
+        },
+        {
+          "contains": {
+            "const": "security_correctness"
+          }
+        }
       ],
       "description": "Boundaries this context pack does not establish."
     },
@@ -680,19 +836,57 @@
         "does_not_establish_quality"
       ],
       "properties": {
-        "max_context_tokens": {"type": "integer", "minimum": 1},
-        "max_answer_tokens": {"type": "integer", "minimum": 1},
-        "token_derived_byte_ceiling": {"type": "integer", "minimum": 1},
-        "max_context_bytes": {"type": "integer", "minimum": 1},
-        "context_bytes_used": {"type": "integer", "minimum": 0},
-        "context_unicode_characters_used": {"type": "integer", "minimum": 0},
-        "approx_context_chars_used": {"type": "integer", "minimum": 0},
-        "byte_budget_is_hard": {"type": "boolean", "const": true},
-        "unit": {"type": "string", "const": "utf8_bytes"},
-        "accounting": {"type": "string", "minLength": 1},
-        "omissions": {"type": "array", "items": {"type": "object"}},
-        "truncated": {"type": "boolean"},
-        "does_not_establish_quality": {"type": "boolean", "const": true}
+        "max_context_tokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_answer_tokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "token_derived_byte_ceiling": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_context_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "context_bytes_used": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "context_unicode_characters_used": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "approx_context_chars_used": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "byte_budget_is_hard": {
+          "type": "boolean",
+          "const": true
+        },
+        "unit": {
+          "type": "string",
+          "const": "utf8_bytes"
+        },
+        "accounting": {
+          "type": "string",
+          "minLength": 1
+        },
+        "omissions": {
+          "type": "array",
+          "items": {"type": "object"}
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "does_not_establish_quality": {
+          "type": "boolean",
+          "const": true
+        }
       },
       "description": "Token budget report. This is a constraint record, not a quality proof."
     },
