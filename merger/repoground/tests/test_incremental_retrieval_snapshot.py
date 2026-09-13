@@ -11,6 +11,7 @@ import threading
 
 import pytest
 
+from merger.repoground.retrieval import incremental_snapshot as incremental_snapshot_module
 from merger.repoground.retrieval.incremental_snapshot import (
     IncrementalRetrievalSnapshot,
     SnapshotConfig,
@@ -46,6 +47,38 @@ def test_source_and_storage_roots_must_not_overlap(tmp_path: Path) -> None:
     nested_source.mkdir()
     with pytest.raises(ValueError, match="must not overlap"):
         IncrementalRetrievalSnapshot(nested_source, storage)
+
+
+def test_snapshot_schema_upgrade_invalidates_legacy_generation(tmp_path: Path, monkeypatch) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "history.md").write_text(
+        "---\nstatus: deprecated\n---\n# Historical\n", encoding="utf-8"
+    )
+    snapshot = IncrementalRetrievalSnapshot(
+        source, tmp_path / "snapshots", SnapshotConfig(repo_id="test")
+    )
+
+    monkeypatch.setattr(
+        incremental_snapshot_module,
+        "SNAPSHOT_SCHEMA",
+        "repoground.incremental-retrieval-snapshot.v1",
+    )
+    legacy = snapshot.build()
+    assert legacy.published
+
+    monkeypatch.setattr(
+        incremental_snapshot_module,
+        "SNAPSHOT_SCHEMA",
+        "repoground.incremental-retrieval-snapshot.v2",
+    )
+    upgraded = snapshot.build()
+
+    assert upgraded.published
+    assert not upgraded.no_op
+    assert upgraded.generation_id != legacy.generation_id
+    assert upgraded.receipt["files"]["reused"] == []
+    assert _rows(snapshot)[0]["source_authority"]["classification"] == "historical_only"
 
 
 def test_parallel_build_waits_for_exclusive_writer_lock(tmp_path: Path) -> None:

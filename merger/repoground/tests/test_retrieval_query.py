@@ -1385,3 +1385,44 @@ def test_semantic_model_fail_policy_raises_generic_error(mini_index, monkeypatch
         "Semantic re-ranking failed to load model (fallback_behavior=fail)."
     )
     assert secret not in message
+
+def test_source_authority_schema_requires_classification_caveats():
+    import jsonschema
+    from pathlib import Path
+
+    schema_path = Path(__file__).parent.parent / "contracts" / "query-result.v1.schema.json"
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))["definitions"]["sourceAuthority"]
+    validator = jsonschema.Draft7Validator(schema)
+
+    assert not validator.is_valid({
+        "classification": "current_candidate",
+        "frontmatter_present": True,
+        "establishes_current_state": None,
+        "does_not_establish": [],
+    })
+    assert not validator.is_valid({
+        "classification": "historical_only",
+        "frontmatter_present": True,
+        "establishes_current_state": False,
+        "does_not_establish": ["current_state", "current_architecture"],
+    })
+    assert validator.is_valid({
+        "classification": "current_candidate",
+        "frontmatter_present": True,
+        "establishes_current_state": None,
+        "does_not_establish": [
+            "current_state_without_fresh_verification",
+            "deployment_state",
+        ],
+    })
+    assert validator.is_valid({
+        "classification": "historical_only",
+        "frontmatter_present": True,
+        "establishes_current_state": False,
+        "does_not_establish": [
+            "current_state",
+            "current_architecture",
+            "current_service_necessity",
+            "preferred_access_path",
+        ],
+    })

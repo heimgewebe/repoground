@@ -287,7 +287,76 @@
         "last_reviewed": {
           "type": "string"
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "classification": {
+                "enum": [
+                  "unclassified",
+                  "current_candidate"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "establishes_current_state": {
+                "type": "null"
+              },
+              "does_not_establish": {
+                "contains": {
+                  "const": "current_state_without_fresh_verification"
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "classification": {
+                "enum": [
+                  "historical_only",
+                  "point_in_time_observation"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "establishes_current_state": {
+                "const": false
+              },
+              "does_not_establish": {
+                "allOf": [
+                  {
+                    "contains": {
+                      "const": "current_state"
+                    }
+                  },
+                  {
+                    "contains": {
+                      "const": "current_architecture"
+                    }
+                  },
+                  {
+                    "contains": {
+                      "const": "current_service_necessity"
+                    }
+                  },
+                  {
+                    "contains": {
+                      "const": "preferred_access_path"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
     }
   }
 }

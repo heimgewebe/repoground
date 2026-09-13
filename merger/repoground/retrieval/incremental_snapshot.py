@@ -25,7 +25,7 @@ from ..core.chunker import Chunker
 from . import index_db, query_core
 
 
-SNAPSHOT_SCHEMA = "repoground.incremental-retrieval-snapshot.v1"
+SNAPSHOT_SCHEMA = "repoground.incremental-retrieval-snapshot.v2"
 _GENERATION_DIR = "generations"
 _STAGING_DIR = ".staging"
 _CURRENT = "current.json"
