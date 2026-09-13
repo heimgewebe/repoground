@@ -1,5 +1,5 @@
 import json
-from merger.repoground.core import bundle_access
+from merger.repoground.core import bundle_access, citation_projection
 from merger.repoground.tests.test_resolved_evidence_query import (
     _build_resolved_bundle,
     _sha256,
@@ -32,6 +32,268 @@ def test_query_existing_index_projects_source_citations(tmp_path):
     assert item["citation_id"] == bundle["citation_id"]
     assert item["source_range"]["file_path"] == bundle["canonical"].name
     assert item["citation_range"]["file_path"] == bundle["canonical"].name
+
+
+def test_query_existing_index_preserves_source_authority_through_resolution(tmp_path):
+    authority = {
+        "classification": "historical_only",
+        "frontmatter_present": True,
+        "establishes_current_state": False,
+        "does_not_establish": [
+            "current_state",
+            "current_architecture",
+            "current_service_necessity",
+            "preferred_access_path",
+        ],
+        "status": "deprecated",
+    }
+    bundle = _build_resolved_bundle(tmp_path, source_authority=authority)
+
+    result = bundle_access.query_existing_index(
+        bundle["manifest"], "hello", k=1, resolve_evidence=True, project_sources=True
+    )
+
+    assert result["query_result"]["results"][0]["source_authority"] == authority
+    assert result["resolved_evidence"]["hits"][0]["source_authority"] == authority
+    assert result["source_citation_projection"]["items"][0]["source_authority"] == authority
+
+
+def test_query_existing_index_fails_closed_on_invalid_stored_source_authority(tmp_path):
+    invalid_authority = {
+        "classification": "banana",
+        "frontmatter_present": True,
+        "establishes_current_state": True,
+        "does_not_establish": [],
+    }
+    bundle = _build_resolved_bundle(tmp_path, source_authority=invalid_authority)
+    expected = {
+        "classification": "unclassified",
+        "frontmatter_present": False,
+        "establishes_current_state": None,
+        "does_not_establish": ["current_state_without_fresh_verification"],
+    }
+
+    result = bundle_access.query_existing_index(
+        bundle["manifest"], "hello", k=1, resolve_evidence=True, project_sources=True
+    )
+
+    assert result["query_result"]["results"][0]["source_authority"] == expected
+    assert result["resolved_evidence"]["hits"][0]["source_authority"] == expected
+    assert result["source_citation_projection"]["items"][0]["source_authority"] == expected
+
+
+def test_source_authority_projection_rejects_contradictory_current_state():
+    expected = {
+        "classification": "unclassified",
+        "frontmatter_present": False,
+        "establishes_current_state": None,
+        "does_not_establish": ["current_state_without_fresh_verification"],
+    }
+    contradictory = (
+        ("historical_only", True),
+        ("historical_only", None),
+        ("point_in_time_observation", True),
+        ("point_in_time_observation", None),
+        ("current_candidate", True),
+        ("current_candidate", False),
+        ("unclassified", True),
+        ("unclassified", False),
+    )
+
+    for classification, establishes_current_state in contradictory:
+        authority = {
+            "classification": classification,
+            "frontmatter_present": True,
+            "establishes_current_state": establishes_current_state,
+            "does_not_establish": [],
+        }
+        assert citation_projection.source_authority_projection(authority) == expected
+
+
+def test_source_authority_projection_requires_classification_specific_caveats():
+    expected = {
+        "classification": "unclassified",
+        "frontmatter_present": False,
+        "establishes_current_state": None,
+        "does_not_establish": ["current_state_without_fresh_verification"],
+    }
+    cases = (
+        ("current_candidate", None, []),
+        ("unclassified", None, []),
+        (
+            "historical_only",
+            False,
+            ["current_state", "current_architecture", "current_service_necessity"],
+        ),
+        (
+            "point_in_time_observation",
+            False,
+            ["current_state", "current_architecture", "preferred_access_path"],
+        ),
+    )
+
+    for classification, establishes_current_state, caveats in cases:
+        authority = {
+            "classification": classification,
+            "frontmatter_present": True,
+            "establishes_current_state": establishes_current_state,
+            "does_not_establish": caveats,
+        }
+        assert citation_projection.source_authority_projection(authority) == expected
+
+
+def test_source_authority_projection_preserves_additional_conservative_caveats():
+    authority = {
+        "classification": "current_candidate",
+        "frontmatter_present": True,
+        "establishes_current_state": None,
+        "does_not_establish": [
+            "current_state_without_fresh_verification",
+            "deployment_state",
+        ],
+    }
+
+    assert citation_projection.source_authority_projection(authority) == authority
+
+
+def test_source_authority_projection_rejects_lifecycle_fields_that_contradict_classification():
+    expected = {
+        "classification": "unclassified",
+        "frontmatter_present": False,
+        "establishes_current_state": None,
+        "does_not_establish": ["current_state_without_fresh_verification"],
+    }
+    base = {
+        "classification": "current_candidate",
+        "frontmatter_present": True,
+        "establishes_current_state": None,
+        "does_not_establish": ["current_state_without_fresh_verification"],
+    }
+
+    for lifecycle in (
+        {"status": "deprecated"},
+        {"canonicality": "superseded"},
+        {"canonicality": "observation"},
+        {"temporal_scope": "point_in_time"},
+    ):
+        assert citation_projection.source_authority_projection(
+            {**base, **lifecycle}
+        ) == expected
+
+    assert citation_projection.source_authority_projection(
+        {**base, "frontmatter_present": False}
+    ) == expected
+
+
+def test_source_authority_projection_accepts_lifecycle_consistent_classifications():
+    historical = {
+        "classification": "historical_only",
+        "frontmatter_present": True,
+        "establishes_current_state": False,
+        "does_not_establish": [
+            "current_state",
+            "current_architecture",
+            "current_service_necessity",
+            "preferred_access_path",
+        ],
+        "status": "deprecated",
+    }
+    point_in_time = {
+        "classification": "point_in_time_observation",
+        "frontmatter_present": True,
+        "establishes_current_state": False,
+        "does_not_establish": [
+            "current_state",
+            "current_architecture",
+            "current_service_necessity",
+            "preferred_access_path",
+        ],
+        "canonicality": "observation",
+    }
+
+    assert citation_projection.source_authority_projection(historical) == historical
+    assert citation_projection.source_authority_projection(point_in_time) == point_in_time
+
+
+def test_source_authority_projection_fails_closed_on_unhashable_classification():
+    expected = {
+        "classification": "unclassified",
+        "frontmatter_present": False,
+        "establishes_current_state": None,
+        "does_not_establish": ["current_state_without_fresh_verification"],
+    }
+    malformed = ([], ["current_candidate"], {}, {"current_candidate": True})
+
+    for classification in malformed:
+        authority = {
+            "classification": classification,
+            "frontmatter_present": True,
+            "establishes_current_state": None,
+            "does_not_establish": [],
+        }
+        assert citation_projection.source_authority_projection(authority) == expected
+
+
+def test_source_authority_projection_fails_closed_on_lone_surrogate():
+    expected = {
+        "classification": "unclassified",
+        "frontmatter_present": False,
+        "establishes_current_state": None,
+        "does_not_establish": ["current_state_without_fresh_verification"],
+    }
+    surrogate = chr(0xD800)
+    for field, value in (("role", surrogate), ("does_not_establish", [surrogate])):
+        authority = {
+            "classification": "current_candidate",
+            "frontmatter_present": True,
+            "establishes_current_state": None,
+            "does_not_establish": [],
+        }
+        authority[field] = value
+        assert citation_projection.source_authority_projection(authority) == expected
+
+    assert citation_projection._source_authority_is_aggregate_bounded(
+        {"role": surrogate}
+    ) is False
+
+
+def test_source_authority_producer_fails_closed_on_yaml_lone_surrogate():
+    from merger.repoground.core.merge import _source_authority_metadata
+
+    yaml_text = '---\nstatus: active\nrole: "' + "\\uD800" + '"\n---\n# Current\n'
+    authority = _source_authority_metadata("docs/current.md", yaml_text)
+
+    assert authority == {
+        "classification": "unclassified",
+        "frontmatter_present": False,
+        "establishes_current_state": None,
+        "does_not_establish": ["current_state_without_fresh_verification"],
+    }
+
+
+def test_query_existing_index_fails_closed_on_oversized_stored_source_authority(tmp_path):
+    oversized_authority = {
+        "classification": "current_candidate",
+        "frontmatter_present": True,
+        "establishes_current_state": None,
+        "does_not_establish": ["current_state_without_fresh_verification"],
+        "role": "x" * 300,
+    }
+    bundle = _build_resolved_bundle(tmp_path, source_authority=oversized_authority)
+    expected = {
+        "classification": "unclassified",
+        "frontmatter_present": False,
+        "establishes_current_state": None,
+        "does_not_establish": ["current_state_without_fresh_verification"],
+    }
+
+    result = bundle_access.query_existing_index(
+        bundle["manifest"], "hello", k=1, resolve_evidence=True, project_sources=True
+    )
+
+    assert result["query_result"]["results"][0]["source_authority"] == expected
+    assert result["resolved_evidence"]["hits"][0]["source_authority"] == expected
+    assert result["source_citation_projection"]["items"][0]["source_authority"] == expected
 
 
 def test_query_existing_index_projection_is_read_only(tmp_path):
@@ -366,3 +628,66 @@ def test_query_projection_exposes_live_repo_address_and_preserves_canonical_auth
     assert item["live_repo_address_status"] == "available"
     assert item["canonical_authority"]["authority"] == "canonical_brief_source"
     assert item["citation_range"]["file_path"] == bundle["canonical"].name
+
+def test_source_citation_projection_preserves_valid_source_authority():
+    authority = {
+        "classification": "historical_only",
+        "frontmatter_present": True,
+        "establishes_current_state": False,
+        "does_not_establish": [
+            "current_state",
+            "current_architecture",
+            "current_service_necessity",
+            "preferred_access_path",
+        ],
+        "status": "deprecated",
+    }
+    projection = bundle_access._project_source_citations(
+        {
+            "hits": [
+                {
+                    "chunk_id": "c-authority",
+                    "path": "legacy.md",
+                    "source_authority": authority,
+                    "range_status": "unresolved",
+                    "range": {"text": "legacy"},
+                    "citation_status": "unavailable",
+                    "citation_id": None,
+                    "citation": None,
+                }
+            ]
+        }
+    )
+
+    assert projection["items"][0]["source_authority"] == authority
+
+
+def test_source_citation_projection_fails_closed_on_invalid_source_authority():
+    projection = bundle_access._project_source_citations(
+        {
+            "hits": [
+                {
+                    "chunk_id": "c-invalid-authority",
+                    "path": "legacy.md",
+                    "source_authority": {
+                        "classification": "historical_only",
+                        "frontmatter_present": "yes",
+                        "establishes_current_state": False,
+                        "does_not_establish": [],
+                    },
+                    "range_status": "unresolved",
+                    "range": {"text": "legacy"},
+                    "citation_status": "unavailable",
+                    "citation_id": None,
+                    "citation": None,
+                }
+            ]
+        }
+    )
+
+    assert projection["items"][0]["source_authority"] == {
+        "classification": "unclassified",
+        "frontmatter_present": False,
+        "establishes_current_state": None,
+        "does_not_establish": ["current_state_without_fresh_verification"],
+    }

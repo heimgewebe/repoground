@@ -221,7 +221,8 @@ def create_schema(conn: sqlite3.Connection) -> None:
             size_bytes INTEGER,
             language TEXT,
             content_range_ref TEXT,
-            source_file TEXT
+            source_file TEXT,
+            source_authority_json TEXT
         )
     """)
 
@@ -378,7 +379,13 @@ def build_index(dump_path: Path, chunk_path: Path, db_path: Path, config_payload
                     cid, repo, path, path_norm, layer, atype,
                     sb, eb, sl, el, sha, size, lang,
                     json.dumps(chunk.get("content_range_ref")) if chunk.get("content_range_ref") else None,
-                    chunk.get("source_file", path)
+                    chunk.get("source_file", path),
+                    json.dumps(
+                        chunk.get("source_authority") or {},
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
                 ))
 
                 batch_fts.append((
@@ -390,8 +397,8 @@ def build_index(dump_path: Path, chunk_path: Path, db_path: Path, config_payload
                 if len(batch_chunks) >= batch_size:
                     c.executemany("""
                         INSERT INTO chunks (chunk_id, repo_id, path, path_norm, layer, artifact_type,
-                                          start_byte, end_byte, start_line, end_line, content_sha256, size_bytes, language, content_range_ref, source_file)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                          start_byte, end_byte, start_line, end_line, content_sha256, size_bytes, language, content_range_ref, source_file, source_authority_json)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, batch_chunks)
 
                     c.executemany("""
@@ -406,8 +413,8 @@ def build_index(dump_path: Path, chunk_path: Path, db_path: Path, config_payload
         if batch_chunks:
             c.executemany("""
                 INSERT INTO chunks (chunk_id, repo_id, path, path_norm, layer, artifact_type,
-                                  start_byte, end_byte, start_line, end_line, content_sha256, size_bytes, language, content_range_ref, source_file)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  start_byte, end_byte, start_line, end_line, content_sha256, size_bytes, language, content_range_ref, source_file, source_authority_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, batch_chunks)
 
             c.executemany("""

@@ -11,6 +11,7 @@ import threading
 
 import pytest
 
+from merger.repoground.retrieval import incremental_snapshot as incremental_snapshot_module
 from merger.repoground.retrieval.incremental_snapshot import (
     IncrementalRetrievalSnapshot,
     SnapshotConfig,
@@ -46,6 +47,38 @@ def test_source_and_storage_roots_must_not_overlap(tmp_path: Path) -> None:
     nested_source.mkdir()
     with pytest.raises(ValueError, match="must not overlap"):
         IncrementalRetrievalSnapshot(nested_source, storage)
+
+
+def test_snapshot_schema_upgrade_invalidates_legacy_generation(tmp_path: Path, monkeypatch) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "history.md").write_text(
+        "---\nstatus: deprecated\n---\n# Historical\n", encoding="utf-8"
+    )
+    snapshot = IncrementalRetrievalSnapshot(
+        source, tmp_path / "snapshots", SnapshotConfig(repo_id="test")
+    )
+
+    monkeypatch.setattr(
+        incremental_snapshot_module,
+        "SNAPSHOT_SCHEMA",
+        "repoground.incremental-retrieval-snapshot.v1",
+    )
+    legacy = snapshot.build()
+    assert legacy.published
+
+    monkeypatch.setattr(
+        incremental_snapshot_module,
+        "SNAPSHOT_SCHEMA",
+        "repoground.incremental-retrieval-snapshot.v2",
+    )
+    upgraded = snapshot.build()
+
+    assert upgraded.published
+    assert not upgraded.no_op
+    assert upgraded.generation_id != legacy.generation_id
+    assert upgraded.receipt["files"]["reused"] == []
+    assert _rows(snapshot)[0]["source_authority"]["classification"] == "historical_only"
 
 
 def test_parallel_build_waits_for_exclusive_writer_lock(tmp_path: Path) -> None:
@@ -121,6 +154,90 @@ def test_change_reuses_unchunked_empty_files(tmp_path: Path) -> None:
     result = snapshot.build()
     assert "empty.py" in result.receipt["files"]["reused"]
     assert "empty.py" not in result.receipt["files"]["changed"]
+
+
+_UNCLASSIFIED_SOURCE_AUTHORITY = {
+    "classification": "unclassified",
+    "frontmatter_present": False,
+    "establishes_current_state": None,
+    "does_not_establish": ["current_state_without_fresh_verification"],
+}
+
+
+def _authority_by_path(snapshot: IncrementalRetrievalSnapshot) -> dict[str, dict]:
+    return {row["path"]: row["source_authority"] for row in _rows(snapshot)}
+
+
+def _documented_snapshot(tmp_path: Path) -> tuple[Path, IncrementalRetrievalSnapshot]:
+    source, snapshot = _snapshot(tmp_path)
+    (source / "old.md").write_text(
+        "---\nstatus: deprecated\ncanonicality: explanatory\n---\n"
+        "# Old\n\nThe retired needle architecture note.\n",
+        encoding="utf-8",
+    )
+    (source / "current.md").write_text(
+        "---\nstatus: active\ncanonicality: canonical\n---\n"
+        "# Current\n\nThe current needle architecture note.\n",
+        encoding="utf-8",
+    )
+    return source, snapshot
+
+
+def test_chunks_persist_bounded_source_authority(tmp_path: Path) -> None:
+    _, snapshot = _documented_snapshot(tmp_path)
+    snapshot.build()
+
+    authority = _authority_by_path(snapshot)
+    assert authority["old.md"] == {
+        "classification": "historical_only",
+        "frontmatter_present": True,
+        "establishes_current_state": False,
+        "does_not_establish": [
+            "current_state",
+            "current_architecture",
+            "current_service_necessity",
+            "preferred_access_path",
+        ],
+        "status": "deprecated",
+        "canonicality": "explanatory",
+    }
+    assert authority["current.md"]["classification"] == "current_candidate"
+    assert authority["current.md"]["establishes_current_state"] is None
+    assert authority["alpha.py"] == _UNCLASSIFIED_SOURCE_AUTHORITY
+
+    results = {hit["path"]: hit["source_authority"] for hit in snapshot.query("needle")["results"]}
+    assert results["old.md"]["classification"] == "historical_only"
+    assert results["current.md"]["classification"] == "current_candidate"
+
+
+def test_incremental_chunks_fail_closed_on_duplicate_lifecycle_frontmatter(
+    tmp_path: Path,
+) -> None:
+    source, snapshot = _snapshot(tmp_path)
+    (source / "ambiguous.md").write_text(
+        "---\nstatus: deprecated\nstatus: active\n---\n"
+        "# Ambiguous\n\nThe ambiguous needle architecture note.\n",
+        encoding="utf-8",
+    )
+
+    snapshot.build()
+
+    assert _authority_by_path(snapshot)["ambiguous.md"] == (
+        _UNCLASSIFIED_SOURCE_AUTHORITY
+    )
+
+
+def test_reused_file_chunks_keep_stored_source_authority(tmp_path: Path) -> None:
+    source, snapshot = _documented_snapshot(tmp_path)
+    snapshot.build()
+    original = [row for row in _rows(snapshot) if row["path"] == "old.md"]
+    (source / "alpha.py").write_text("def alpha():\n    return 'changed token'\n", encoding="utf-8")
+
+    result = snapshot.build()
+
+    assert "old.md" in result.receipt["files"]["reused"]
+    assert [row for row in _rows(snapshot) if row["path"] == "old.md"] == original
+    assert _authority_by_path(snapshot)["old.md"]["classification"] == "historical_only"
 
 
 def test_delete_and_rename_remove_old_paths(tmp_path: Path) -> None:

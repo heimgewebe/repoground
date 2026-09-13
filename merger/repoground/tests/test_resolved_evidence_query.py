@@ -20,7 +20,7 @@ def _sqlite_sidecars(index_path):
     }
 
 
-def _build_resolved_bundle(tmp_path, with_citation_map=True):
+def _build_resolved_bundle(tmp_path, with_citation_map=True, source_authority=None):
     from merger.repoground.retrieval import index_db
 
     canonical = tmp_path / "brief.md"
@@ -56,6 +56,8 @@ def _build_resolved_bundle(tmp_path, with_citation_map=True):
         "content_sha256": chunk_sha,
         "content_range_ref": range_ref,
     }
+    if source_authority is not None:
+        chunk["source_authority"] = source_authority
     chunk_path = tmp_path / "chunks.jsonl"
     chunk_path.write_text(json.dumps(chunk) + "\n", encoding="utf-8")
     dump_path = tmp_path / "dump.json"

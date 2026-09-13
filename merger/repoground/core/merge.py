@@ -34,6 +34,10 @@ from .constants import (
 )
 from . import clock
 from .chunker import Chunker
+from .citation_projection import (
+    source_authority_classification_from_lifecycle,
+    source_authority_projection,
+)
 from .redactor import Redactor
 from .range_resolver import build_explicit_range_ref
 from .yaml_compat import ensure_pyyaml_collections_abc_compat
@@ -5095,6 +5099,219 @@ def extract_retrieval_metadata(content: str, lang: str) -> Dict[str, Any]:
 # Concepts are heuristic keyword hints; may include false positives.
 MAX_CONCEPTS_PER_FILE = 6
 
+_SOURCE_AUTHORITY_CURRENT_STATE_GAPS = [
+    "current_state",
+    "current_architecture",
+    "current_service_necessity",
+    "preferred_access_path",
+]
+_SOURCE_AUTHORITY_UNCLASSIFIED_GAPS = ["current_state_without_fresh_verification"]
+_MAX_FRONTMATTER_BYTES = 64 * 1024
+# Bounds for the pre-construction YAML check, derived from the byte cap above.
+# Dense flow syntax emits about one token per input byte, so half the byte cap is
+# a deliberately conservative token ceiling: ordinary metadata headers stay
+# orders of magnitude below it, while token-dense payloads are refused.  Flow
+# indicators cost a single byte per nesting level, so the byte cap alone would
+# still admit pathological depth in what must be a shallow header.
+_MAX_FRONTMATTER_YAML_TOKENS = _MAX_FRONTMATTER_BYTES // 2
+_MAX_FRONTMATTER_YAML_DEPTH = 32
+_SOURCE_AUTHORITY_LIFECYCLE_FIELDS = (
+    "status",
+    "canonicality",
+    "role",
+    "temporal_scope",
+    "observed_at",
+    "last_reviewed",
+)
+_YAML_MERGE_KEY = "<<"
+if yaml is not None:
+    _YAML_COLLECTION_START_TOKENS = (
+        yaml.BlockMappingStartToken,
+        yaml.BlockSequenceStartToken,
+        yaml.FlowMappingStartToken,
+        yaml.FlowSequenceStartToken,
+    )
+    _YAML_COLLECTION_END_TOKENS = (
+        yaml.BlockEndToken,
+        yaml.FlowMappingEndToken,
+        yaml.FlowSequenceEndToken,
+    )
+else:  # pragma: no cover - PyYAML is optional
+    _YAML_COLLECTION_START_TOKENS = ()
+    _YAML_COLLECTION_END_TOKENS = ()
+
+
+def _is_frontmatter_delimiter(line: str) -> bool:
+    """Accept a column-zero YAML fence with only trailing horizontal whitespace."""
+    return line.rstrip("\r\n").rstrip(" \t") == "---"
+
+
+def _frontmatter_scalar(value: Any) -> Optional[str]:
+    """Normalize one frontmatter scalar without leaking arbitrary YAML structures."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        normalized = value.strip()
+        return normalized or None
+    if isinstance(value, (bool, int, float)):
+        return str(value)
+    isoformat = getattr(value, "isoformat", None)
+    if callable(isoformat):
+        try:
+            return str(isoformat())
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _frontmatter_lifecycle_key_scan_state(
+    token: Any,
+    *,
+    depth: int,
+    pending_top_level_key: bool,
+    seen_lifecycle_keys: set[str],
+) -> tuple[bool, bool]:
+    """Track top-level lifecycle keys without constructing YAML nodes."""
+    if isinstance(token, yaml.KeyToken):
+        return depth == 1, False
+    if not pending_top_level_key:
+        return False, False
+    if isinstance(token, yaml.ScalarToken):
+        key = token.value
+        if key not in _SOURCE_AUTHORITY_LIFECYCLE_FIELDS:
+            return False, False
+        duplicate = key in seen_lifecycle_keys
+        seen_lifecycle_keys.add(key)
+        return False, duplicate
+    if isinstance(token, (*_YAML_COLLECTION_START_TOKENS, yaml.ValueToken)):
+        return False, False
+    return True, False
+
+
+def _frontmatter_yaml_is_constructible(text: str) -> bool:
+    """Reject alias expansion and unbounded structure before any node is built.
+
+    ``yaml.scan`` is lexical only: it never resolves an alias, applies a merge key
+    or constructs a node, so this stays bounded by the frontmatter byte cap while
+    ``yaml.safe_load`` on the same text would not be.  Anchors are refused
+    together with aliases because frontmatter metadata has no use for either.
+    """
+    tokens = 0
+    depth = 0
+    seen_lifecycle_keys: set[str] = set()
+    pending_top_level_key = False
+    try:
+        for token in yaml.scan(text, Loader=yaml.SafeLoader):
+            tokens += 1
+            if tokens > _MAX_FRONTMATTER_YAML_TOKENS:
+                return False
+            if isinstance(token, (yaml.AliasToken, yaml.AnchorToken)):
+                return False
+            if isinstance(token, yaml.ScalarToken) and token.value == _YAML_MERGE_KEY:
+                return False
+            pending_top_level_key, duplicate_lifecycle_key = (
+                _frontmatter_lifecycle_key_scan_state(
+                    token,
+                    depth=depth,
+                    pending_top_level_key=pending_top_level_key,
+                    seen_lifecycle_keys=seen_lifecycle_keys,
+                )
+            )
+            if duplicate_lifecycle_key:
+                return False
+            if isinstance(token, _YAML_COLLECTION_START_TOKENS):
+                depth += 1
+                if depth > _MAX_FRONTMATTER_YAML_DEPTH:
+                    return False
+            elif isinstance(token, _YAML_COLLECTION_END_TOKENS):
+                depth -= 1
+    except Exception:
+        return False
+    return True
+
+
+def _parse_source_frontmatter(content: str) -> Optional[Dict[str, Any]]:
+    """Return bounded Markdown frontmatter, or None when it is unavailable/invalid."""
+    if yaml is None or not content.startswith("---"):
+        return None
+
+    lines = content.splitlines(keepends=True)
+    if not lines or not _is_frontmatter_delimiter(lines[0]):
+        return None
+
+    consumed_bytes = len(lines[0].encode("utf-8"))
+    for idx, line in enumerate(lines[1:], start=1):
+        consumed_bytes += len(line.encode("utf-8"))
+        if consumed_bytes > _MAX_FRONTMATTER_BYTES:
+            return None
+        if not _is_frontmatter_delimiter(line):
+            continue
+        body = "".join(lines[1:idx])
+        try:
+            ensure_pyyaml_collections_abc_compat()
+            if not _frontmatter_yaml_is_constructible(body):
+                return None
+            parsed = yaml.safe_load(body)
+        except Exception:
+            return None
+        return parsed if isinstance(parsed, dict) else None
+    return None
+
+
+def _source_authority_from_frontmatter(parsed: Dict[str, Any]) -> Dict[str, Any]:
+    """Translate frontmatter into an applicability boundary for retrieval."""
+    metadata: Dict[str, Any] = {
+        "classification": "current_candidate",
+        "frontmatter_present": True,
+        "establishes_current_state": None,
+        "does_not_establish": list(_SOURCE_AUTHORITY_UNCLASSIFIED_GAPS),
+    }
+    for key in _SOURCE_AUTHORITY_LIFECYCLE_FIELDS:
+        value = _frontmatter_scalar(parsed.get(key))
+        if value is not None:
+            metadata[key] = value
+
+    classification = source_authority_classification_from_lifecycle(metadata)
+    metadata["classification"] = classification
+    if classification == "current_candidate":
+        return metadata
+
+    metadata["establishes_current_state"] = False
+    metadata["does_not_establish"] = list(_SOURCE_AUTHORITY_CURRENT_STATE_GAPS)
+    return metadata
+
+
+def _source_authority_metadata(file_path: str, content: str) -> Dict[str, Any]:
+    """Classify source lifecycle without turning repository text into runtime truth."""
+    default = {
+        "classification": "unclassified",
+        "frontmatter_present": False,
+        "establishes_current_state": None,
+        "does_not_establish": list(_SOURCE_AUTHORITY_UNCLASSIFIED_GAPS),
+    }
+    if Path(file_path).suffix.lower() not in {".md", ".mdx", ".markdown"}:
+        return default
+    parsed = _parse_source_frontmatter(content)
+    if parsed is None:
+        return default
+    return source_authority_projection(_source_authority_from_frontmatter(parsed))
+
+
+def _redact_source_authority_metadata(
+    metadata: Dict[str, Any], redactor: Redactor
+) -> Dict[str, Any]:
+    """Redact copied frontmatter scalars without changing lifecycle classification."""
+    redacted = dict(metadata)
+    for key, value in metadata.items():
+        if isinstance(value, str):
+            redacted[key] = redactor.redact(value)[0]
+        elif isinstance(value, list):
+            redacted[key] = [
+                redactor.redact(item)[0] if isinstance(item, str) else item
+                for item in value
+            ]
+    return source_authority_projection(redacted)
+
 
 def get_semantic_metadata_path_only(file_path: str) -> Dict[str, Any]:
     """
@@ -5880,6 +6097,7 @@ def _chunk_record(
     truncated: bool,
     trunc_msg: Optional[str],
     sem_meta: Dict[str, Any],
+    source_authority: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Build the machine-readable chunk row, including legacy field aliases."""
     d = asdict(chunk)
@@ -5893,6 +6111,7 @@ def _chunk_record(
     d["layer"] = sem_meta["layer"]
     d["artifact_type"] = sem_meta["artifact_type"]
     d["concepts"] = sem_meta["concepts"]
+    d["source_authority"] = source_authority
 
     if trunc_msg:
         d["truncation_msg"] = trunc_msg
@@ -6029,11 +6248,13 @@ def _file_chunk_records(
     """Chunk one included text file into fully annotated chunk rows."""
     # Read content for chunking using the same limit as report to ensure coherence
     content, truncated, trunc_msg = read_smart_content(fi, config.max_file_bytes)
+    source_authority = _source_authority_metadata(fi.rel_path.as_posix(), content)
 
     was_redacted = False
     if redactor:
         content, _redacted_items = redactor.redact(content)
         was_redacted = bool(_redacted_items)
+        source_authority = _redact_source_authority_metadata(source_authority, redactor)
 
     content_bytes = content.encode("utf-8")
     source_git_blob_sha1 = (
@@ -6058,6 +6279,7 @@ def _file_chunk_records(
             truncated=truncated,
             trunc_msg=trunc_msg,
             sem_meta=sem_meta,
+            source_authority=source_authority,
         )
         offset = md_offsets.get(fid)
         if offset is not None and offset[0] == canonical_md_name:

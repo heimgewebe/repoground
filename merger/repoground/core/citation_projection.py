@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -13,6 +14,61 @@ RESOLVED_EVIDENCE_VERSION = "v1"
 SOURCE_CITATION_PROJECTION_KIND = "repobrief.source_citation_projection"
 SOURCE_CITATION_PROJECTION_VERSION = "v1"
 TEXT_EXCERPT_MAX_CHARS = 1200
+SOURCE_AUTHORITY_SCALAR_MAX_BYTES = 256
+SOURCE_AUTHORITY_MAX_BYTES = 1024
+SOURCE_AUTHORITY_MAX_GAPS = 16
+
+_SOURCE_AUTHORITY_CLASSIFICATIONS = frozenset(
+    {
+        "unclassified",
+        "current_candidate",
+        "historical_only",
+        "point_in_time_observation",
+    }
+)
+_SOURCE_AUTHORITY_OPTIONAL_STRING_FIELDS = (
+    "status",
+    "canonicality",
+    "role",
+    "temporal_scope",
+    "observed_at",
+    "last_reviewed",
+)
+_SOURCE_AUTHORITY_FIELDS = frozenset(
+    {
+        "classification",
+        "frontmatter_present",
+        "establishes_current_state",
+        "does_not_establish",
+        *_SOURCE_AUTHORITY_OPTIONAL_STRING_FIELDS,
+    }
+)
+_SOURCE_AUTHORITY_REQUIRED_GAPS = {
+    "unclassified": frozenset({"current_state_without_fresh_verification"}),
+    "current_candidate": frozenset({"current_state_without_fresh_verification"}),
+    "historical_only": frozenset(
+        {
+            "current_state",
+            "current_architecture",
+            "current_service_necessity",
+            "preferred_access_path",
+        }
+    ),
+    "point_in_time_observation": frozenset(
+        {
+            "current_state",
+            "current_architecture",
+            "current_service_necessity",
+            "preferred_access_path",
+        }
+    ),
+}
+_SOURCE_AUTHORITY_HISTORICAL_STATUSES = frozenset(
+    {"deprecated", "historical", "superseded", "retired", "archived"}
+)
+_SOURCE_AUTHORITY_HISTORICAL_CANONICALITY = frozenset(
+    {"deprecated", "historical", "superseded"}
+)
 
 _CITATION_ID_RE = re.compile(r"^cit_[a-f0-9]{16}$")
 _SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
@@ -29,6 +85,116 @@ def is_sha256(value: Any) -> bool:
 
 def is_int_not_bool(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _unclassified_source_authority() -> dict[str, Any]:
+    return {
+        "classification": "unclassified",
+        "frontmatter_present": False,
+        "establishes_current_state": None,
+        "does_not_establish": ["current_state_without_fresh_verification"],
+    }
+
+
+def _source_authority_string_is_bounded(value: Any) -> bool:
+    try:
+        return (
+            isinstance(value, str)
+            and len(value.encode("utf-8")) <= SOURCE_AUTHORITY_SCALAR_MAX_BYTES
+        )
+    except UnicodeEncodeError:
+        return False
+
+
+def source_authority_classification_from_lifecycle(value: dict[str, Any]) -> str:
+    """Derive the producer classification from already-normalized lifecycle fields."""
+    status = str(value.get("status", "")).strip().lower()
+    canonicality = str(value.get("canonicality", "")).strip().lower()
+    temporal_scope = str(value.get("temporal_scope", "")).strip().lower()
+    if (
+        status in _SOURCE_AUTHORITY_HISTORICAL_STATUSES
+        or canonicality in _SOURCE_AUTHORITY_HISTORICAL_CANONICALITY
+    ):
+        return "historical_only"
+    if canonicality == "observation" or temporal_scope == "point_in_time":
+        return "point_in_time_observation"
+    return "current_candidate"
+
+
+def _source_authority_lifecycle_is_consistent(value: dict[str, Any]) -> bool:
+    classification = value["classification"]
+    if value["frontmatter_present"] is False:
+        return classification == "unclassified" and not any(
+            field in value for field in _SOURCE_AUTHORITY_OPTIONAL_STRING_FIELDS
+        )
+    return classification == source_authority_classification_from_lifecycle(value)
+
+
+def _source_authority_is_aggregate_bounded(value: dict[str, Any]) -> bool:
+    try:
+        encoded = json.dumps(
+            value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return len(encoded) <= SOURCE_AUTHORITY_MAX_BYTES
+
+
+def source_authority_projection(value: Any) -> dict[str, Any]:
+    """Project only schema-valid, size-bounded metadata; otherwise fail closed."""
+    if not isinstance(value, dict) or set(value).difference(_SOURCE_AUTHORITY_FIELDS):
+        return _unclassified_source_authority()
+
+    classification = value.get("classification")
+    frontmatter_present = value.get("frontmatter_present")
+    establishes_current_state = value.get("establishes_current_state")
+    does_not_establish = value.get("does_not_establish")
+    # Membership alone would raise on unhashable stored values (list/dict).
+    if (
+        not isinstance(classification, str)
+        or classification not in _SOURCE_AUTHORITY_CLASSIFICATIONS
+    ):
+        return _unclassified_source_authority()
+    if not isinstance(frontmatter_present, bool):
+        return _unclassified_source_authority()
+    expected_current_state = (
+        False
+        if classification in {"historical_only", "point_in_time_observation"}
+        else None
+    )
+    if establishes_current_state is not expected_current_state:
+        return _unclassified_source_authority()
+    if (
+        not isinstance(does_not_establish, list)
+        or len(does_not_establish) > SOURCE_AUTHORITY_MAX_GAPS
+        or not all(
+            _source_authority_string_is_bounded(item) for item in does_not_establish
+        )
+        or not _SOURCE_AUTHORITY_REQUIRED_GAPS[classification].issubset(
+            does_not_establish
+        )
+    ):
+        return _unclassified_source_authority()
+
+    projected = {
+        "classification": classification,
+        "frontmatter_present": frontmatter_present,
+        "establishes_current_state": establishes_current_state,
+        "does_not_establish": list(does_not_establish),
+    }
+    for field in _SOURCE_AUTHORITY_OPTIONAL_STRING_FIELDS:
+        if field not in value:
+            continue
+        item = value[field]
+        if not _source_authority_string_is_bounded(item):
+            return _unclassified_source_authority()
+        projected[field] = item
+    if (
+        not _source_authority_lifecycle_is_consistent(projected)
+        or not _source_authority_is_aggregate_bounded(projected)
+    ):
+        return _unclassified_source_authority()
+    return projected
 
 
 def citation_range_key(value: Any) -> tuple[Any, ...] | None:
@@ -547,10 +713,12 @@ def _source_citation_item(ordinal: int, hit: dict[str, Any]) -> dict[str, Any]:
         and isinstance(citation_id, str)
         and _CITATION_ID_RE.fullmatch(citation_id) is not None
     )
+    source_authority = source_authority_projection(hit.get("source_authority"))
     return {
         "ordinal": ordinal,
         "chunk_id": hit.get("chunk_id"),
         "path": hit.get("path"),
+        "source_authority": source_authority,
         "range_status": range_status,
         "range_ref_source": hit.get("range_ref_source"),
         "source_range": source_range,

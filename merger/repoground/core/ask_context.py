@@ -13,6 +13,7 @@ from merger.repoground.core.bundle_access import (
     resolve_required_reading_for_bundle,
     snapshot_status,
 )
+from merger.repoground.core.citation_projection import source_authority_projection
 from merger.repoground.core.manifest_snapshot import (
     active_manifest_snapshot,
     resolve_manifest_path,
@@ -406,6 +407,14 @@ def _source_address_fields(hit: dict[str, Any]) -> dict[str, Any]:
     return fields
 
 
+def _source_projection_fields(hit: dict[str, Any]) -> dict[str, Any]:
+    fields = _source_address_fields(hit)
+    fields["source_authority"] = source_authority_projection(
+        hit.get("source_authority")
+    )
+    return fields
+
+
 def _resolved_ranges(
     query_result: dict[str, Any],
     max_context_tokens: int,
@@ -576,7 +585,7 @@ def _resolved_ranges_with_budget(
         content_sha = range_value.get("content_sha256") or range_value.get("sha256")
         if isinstance(content_sha, str) and len(content_sha) == 64:
             item["content_sha256"] = content_sha
-        item.update(_source_address_fields(hit))
+        item.update(_source_projection_fields(hit))
         result.append(item)
     return result, used_bytes, used_characters, truncated, omissions
 
@@ -629,6 +638,7 @@ def _language_range_projection(record: dict[str, Any]) -> dict[str, Any] | None:
         "range": {
             "artifact_role": "language_structure_json",
             "status": "resolved",
+            "source_authority": source_authority_projection(None),
             "range_ref": {
                 "ref": record_id,
                 "path": path,
@@ -1146,6 +1156,24 @@ def build_ask_context_pack(
     return result
 
 
+def _render_source_authority_text_scalar(value: str) -> str:
+    """Render one authority scalar without raw terminal/Unicode controls."""
+    rendered = json.dumps(value, ensure_ascii=False)
+    parts: list[str] = []
+    for character in rendered:
+        if unicodedata.category(character) in {"Cc", "Cf", "Zl", "Zp"}:
+            codepoint = ord(character)
+            escape = (
+                f"\\u{codepoint:04x}"
+                if codepoint <= 0xFFFF
+                else f"\\U{codepoint:08x}"
+            )
+            parts.append(escape)
+        else:
+            parts.append(character)
+    return "".join(parts)
+
+
 def render_ask_context_pack_text(pack: dict[str, Any]) -> str:
     lines = [
         "RepoGround Ask Context Pack",
@@ -1162,6 +1190,27 @@ def render_ask_context_pack_text(pack: dict[str, Any]) -> str:
         excerpt = item.get("text_excerpt")
         ref = item.get("range_ref")
         lines.append(f"- {item.get('artifact_role')} {item.get('status')} {ref}")
+        source_authority = item.get("source_authority")
+        if isinstance(source_authority, dict):
+            lines.append(
+                f"  source_authority: {source_authority.get('classification')}"
+            )
+            for field in (
+                "status",
+                "canonicality",
+                "role",
+                "temporal_scope",
+                "observed_at",
+                "last_reviewed",
+            ):
+                value = source_authority.get(field)
+                if isinstance(value, str) and value:
+                    rendered_value = _render_source_authority_text_scalar(value)
+                    lines.append(f"  source_authority.{field}: {rendered_value}")
+            for caveat in source_authority.get("does_not_establish", []):
+                if isinstance(caveat, str):
+                    rendered_caveat = _render_source_authority_text_scalar(caveat)
+                    lines.append(f"  does_not_establish: {rendered_caveat}")
         if excerpt:
             lines.append(f"  excerpt: {excerpt[:240].replace(chr(10), ' ')}")
     lines.append("")

@@ -28,7 +28,8 @@
           "score",
           "resolved_code_snippet",
           "provenance_type",
-          "bundle_source_references"
+          "bundle_source_references",
+          "source_authority"
         ],
         "properties": {
           "hit_identity": {
@@ -54,15 +55,24 @@
             "type": "string"
           },
           "surrounding_context": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "graph_context": {
-            "type": ["object", "null"],
+            "type": [
+              "object",
+              "null"
+            ],
             "additionalProperties": true
           },
           "provenance_type": {
             "type": "string",
-            "enum": ["explicit", "derived"]
+            "enum": [
+              "explicit",
+              "derived"
+            ]
           },
           "range_ref": {
             "type": "object",
@@ -119,9 +129,15 @@
                   "semantic_supported"
                 ],
                 "properties": {
-                  "explicit_provenance": { "type": "boolean" },
-                  "graph_used": { "type": "boolean" },
-                  "semantic_supported": { "type": "boolean" }
+                  "explicit_provenance": {
+                    "type": "boolean"
+                  },
+                  "graph_used": {
+                    "type": "boolean"
+                  },
+                  "semantic_supported": {
+                    "type": "boolean"
+                  }
                 }
               },
               "interpolation": {
@@ -132,11 +148,21 @@
                   "reason"
                 ],
                 "properties": {
-                  "used": { "type": "boolean" },
-                  "reason": { "type": ["string", "null"] }
+                  "used": {
+                    "type": "boolean"
+                  },
+                  "reason": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
                 }
               }
             }
+          },
+          "source_authority": {
+            "$ref": "#/definitions/sourceAuthority"
           }
         }
       }
@@ -169,20 +195,394 @@
           "type": "object",
           "description": "Surface-local resolve pointers restating the existing reading policy. Not a new authority model and not shared across contracts. The runtime surface resolves to query_trace when present.",
           "additionalProperties": false,
-          "required": ["content", "metadata", "schema", "runtime"],
+          "required": [
+            "content",
+            "metadata",
+            "schema",
+            "runtime"
+          ],
           "properties": {
-            "content": { "const": "canonical_md" },
-            "metadata": { "const": "bundle_manifest" },
-            "schema": { "const": "schema" },
-            "runtime": { "const": "query_trace" }
+            "content": {
+              "const": "canonical_md"
+            },
+            "metadata": {
+              "const": "bundle_manifest"
+            },
+            "schema": {
+              "const": "schema"
+            },
+            "runtime": {
+              "const": "query_trace"
+            }
           }
         },
         "does_not_prove": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "Surface-local statements this bundle does not prove. Owned by this contract; phrases may echo other surfaces but are not a shared vocabulary."
         }
       }
+    }
+  },
+  "definitions": {
+    "sourceAuthority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "classification",
+        "frontmatter_present",
+        "establishes_current_state",
+        "does_not_establish"
+      ],
+      "properties": {
+        "classification": {
+          "type": "string",
+          "enum": [
+            "unclassified",
+            "current_candidate",
+            "historical_only",
+            "point_in_time_observation"
+          ]
+        },
+        "frontmatter_present": {
+          "type": "boolean"
+        },
+        "establishes_current_state": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "does_not_establish": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "maxItems": 16
+        },
+        "status": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "canonicality": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "role": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "temporal_scope": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "observed_at": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "last_reviewed": {
+          "type": "string",
+          "maxLength": 256
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "classification": {
+                "enum": [
+                  "unclassified",
+                  "current_candidate"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "establishes_current_state": {
+                "type": "null"
+              },
+              "does_not_establish": {
+                "contains": {
+                  "const": "current_state_without_fresh_verification"
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "classification": {
+                "enum": [
+                  "historical_only",
+                  "point_in_time_observation"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "establishes_current_state": {
+                "const": false
+              },
+              "does_not_establish": {
+                "allOf": [
+                  {
+                    "contains": {
+                      "const": "current_state"
+                    }
+                  },
+                  {
+                    "contains": {
+                      "const": "current_architecture"
+                    }
+                  },
+                  {
+                    "contains": {
+                      "const": "current_service_necessity"
+                    }
+                  },
+                  {
+                    "contains": {
+                      "const": "preferred_access_path"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "description": "Lifecycle consistency: unclassified authority has no parsed frontmatter lifecycle fields.",
+          "if": {
+            "required": [
+              "classification"
+            ],
+            "properties": {
+              "classification": {
+                "const": "unclassified"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "frontmatter_present": {
+                "const": false
+              }
+            },
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "status"
+                  ]
+                },
+                {
+                  "required": [
+                    "canonicality"
+                  ]
+                },
+                {
+                  "required": [
+                    "role"
+                  ]
+                },
+                {
+                  "required": [
+                    "temporal_scope"
+                  ]
+                },
+                {
+                  "required": [
+                    "observed_at"
+                  ]
+                },
+                {
+                  "required": [
+                    "last_reviewed"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "description": "Lifecycle consistency: current candidates cannot carry lifecycle markers that derive a non-current classification.",
+          "if": {
+            "required": [
+              "classification"
+            ],
+            "properties": {
+              "classification": {
+                "const": "current_candidate"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "frontmatter_present": {
+                "const": true
+              }
+            },
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "status"
+                  ],
+                  "properties": {
+                    "status": {
+                      "pattern": "^\\s*([dD][eE][pP][rR][eE][cC][aA][tT][eE][dD]|[hH][iI][sS][tT][oO][rR][iI][cC][aA][lL]|[sS][uU][pP][eE][rR][sS][eE][dD][eE][dD]|[rR][eE][tT][iI][rR][eE][dD]|[aA][rR][cC][hH][iI][vV][eE][dD])\\s*$"
+                    }
+                  }
+                },
+                {
+                  "required": [
+                    "canonicality"
+                  ],
+                  "properties": {
+                    "canonicality": {
+                      "pattern": "^\\s*([dD][eE][pP][rR][eE][cC][aA][tT][eE][dD]|[hH][iI][sS][tT][oO][rR][iI][cC][aA][lL]|[sS][uU][pP][eE][rR][sS][eE][dD][eE][dD])\\s*$"
+                    }
+                  }
+                },
+                {
+                  "required": [
+                    "canonicality"
+                  ],
+                  "properties": {
+                    "canonicality": {
+                      "pattern": "^\\s*([oO][bB][sS][eE][rR][vV][aA][tT][iI][oO][nN])\\s*$"
+                    }
+                  }
+                },
+                {
+                  "required": [
+                    "temporal_scope"
+                  ],
+                  "properties": {
+                    "temporal_scope": {
+                      "pattern": "^\\s*([pP][oO][iI][nN][tT]_[iI][nN]_[tT][iI][mM][eE])\\s*$"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "description": "Lifecycle consistency: historical authority requires the same historical status/canonicality evidence used by the runtime classifier.",
+          "if": {
+            "required": [
+              "classification"
+            ],
+            "properties": {
+              "classification": {
+                "const": "historical_only"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "frontmatter_present": {
+                "const": true
+              }
+            },
+            "anyOf": [
+              {
+                "required": [
+                  "status"
+                ],
+                "properties": {
+                  "status": {
+                    "pattern": "^\\s*([dD][eE][pP][rR][eE][cC][aA][tT][eE][dD]|[hH][iI][sS][tT][oO][rR][iI][cC][aA][lL]|[sS][uU][pP][eE][rR][sS][eE][dD][eE][dD]|[rR][eE][tT][iI][rR][eE][dD]|[aA][rR][cC][hH][iI][vV][eE][dD])\\s*$"
+                  }
+                }
+              },
+              {
+                "required": [
+                  "canonicality"
+                ],
+                "properties": {
+                  "canonicality": {
+                    "pattern": "^\\s*([dD][eE][pP][rR][eE][cC][aA][tT][eE][dD]|[hH][iI][sS][tT][oO][rR][iI][cC][aA][lL]|[sS][uU][pP][eE][rR][sS][eE][dD][eE][dD])\\s*$"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "description": "Lifecycle consistency: point-in-time authority requires observation/point-in-time evidence and no higher-precedence historical marker.",
+          "if": {
+            "required": [
+              "classification"
+            ],
+            "properties": {
+              "classification": {
+                "const": "point_in_time_observation"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "frontmatter_present": {
+                "const": true
+              }
+            },
+            "anyOf": [
+              {
+                "required": [
+                  "canonicality"
+                ],
+                "properties": {
+                  "canonicality": {
+                    "pattern": "^\\s*([oO][bB][sS][eE][rR][vV][aA][tT][iI][oO][nN])\\s*$"
+                  }
+                }
+              },
+              {
+                "required": [
+                  "temporal_scope"
+                ],
+                "properties": {
+                  "temporal_scope": {
+                    "pattern": "^\\s*([pP][oO][iI][nN][tT]_[iI][nN]_[tT][iI][mM][eE])\\s*$"
+                  }
+                }
+              }
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "status"
+                  ],
+                  "properties": {
+                    "status": {
+                      "pattern": "^\\s*([dD][eE][pP][rR][eE][cC][aA][tT][eE][dD]|[hH][iI][sS][tT][oO][rR][iI][cC][aA][lL]|[sS][uU][pP][eE][rR][sS][eE][dD][eE][dD]|[rR][eE][tT][iI][rR][eE][dD]|[aA][rR][cC][hH][iI][vV][eE][dD])\\s*$"
+                    }
+                  }
+                },
+                {
+                  "required": [
+                    "canonicality"
+                  ],
+                  "properties": {
+                    "canonicality": {
+                      "pattern": "^\\s*([dD][eE][pP][rR][eE][cC][aA][tT][eE][dD]|[hH][iI][sS][tT][oO][rR][iI][cC][aA][lL]|[sS][uU][pP][eE][rR][sS][eE][dD][eE][dD])\\s*$"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
     }
   }
 }

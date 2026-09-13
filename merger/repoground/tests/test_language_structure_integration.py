@@ -407,6 +407,20 @@ def test_context_pack_composes_relevant_language_evidence_under_shared_budget(
         item["artifact_role"] == "language_structure_json"
         for item in pack["resolved_ranges"]
     )
+    language_ranges = [
+        item
+        for item in pack["resolved_ranges"]
+        if item["artifact_role"] == "language_structure_json"
+    ]
+    assert all(
+        item["source_authority"]["classification"] == "unclassified"
+        for item in language_ranges
+    )
+    assert all(
+        item["source_authority"]["does_not_establish"]
+        == ["current_state_without_fresh_verification"]
+        for item in language_ranges
+    )
     manifest_sha = _sha(manifest_path)
     for record in records:
         assert record["provenance"]["bundle_manifest_sha256"] == manifest_sha
@@ -476,6 +490,10 @@ def test_context_pack_reports_structure_only_after_fts_null(
     )
     assert all(
         item["artifact_role"] == "language_structure_json"
+        for item in pack["resolved_ranges"]
+    )
+    assert all(
+        item["source_authority"]["classification"] == "unclassified"
         for item in pack["resolved_ranges"]
     )
     assert not any(

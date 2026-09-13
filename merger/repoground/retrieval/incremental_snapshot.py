@@ -25,7 +25,7 @@ from ..core.chunker import Chunker
 from . import index_db, query_core
 
 
-SNAPSHOT_SCHEMA = "repoground.incremental-retrieval-snapshot.v1"
+SNAPSHOT_SCHEMA = "repoground.incremental-retrieval-snapshot.v2"
 _GENERATION_DIR = "generations"
 _STAGING_DIR = ".staging"
 _CURRENT = "current.json"
@@ -340,7 +340,14 @@ class IncrementalRetrievalSnapshot:
         return result
 
     def _chunk_file(self, relative_path: str, data: bytes, file_sha: str) -> list[dict[str, Any]]:
+        # Deferred import: the canonical source-lifecycle classification lives in
+        # the merge producer, which imports retrieval modules on demand.  Calling
+        # it here keeps this module's import path free of that stack instead of
+        # restating the classification.
+        from ..core.merge import _source_authority_metadata
+
         content = data.decode("utf-8")
+        source_authority = _source_authority_metadata(relative_path, content)
         chunks = Chunker(self.config.min_size, self.config.max_size, self.config.min_lines, self.config.max_lines).chunk_file(
             f"file:{file_sha}", content, file_path=relative_path
         )
@@ -353,6 +360,7 @@ class IncrementalRetrievalSnapshot:
                 "end_byte": chunk.end_byte, "start_line": chunk.start_line, "end_line": chunk.end_line,
                 "sha256": chunk.sha256, "size": chunk.size, "language": Path(relative_path).suffix.lstrip("."),
                 "source_file": relative_path, "content": excerpt,
+                "source_authority": source_authority,
             })
         return records
 

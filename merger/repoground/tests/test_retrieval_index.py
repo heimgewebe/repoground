@@ -892,3 +892,75 @@ def test_fts_content_hydration_empty_range_raises(tmp_path):
     with pytest.raises(RuntimeError, match="empty range"):
         index_db.build_index(dump_path, chunk_path, db_path)
     assert not db_path.exists()
+
+
+def test_index_preserves_bounded_non_ascii_source_authority(tmp_path):
+    from merger.repoground.core.citation_projection import (
+        SOURCE_AUTHORITY_MAX_BYTES,
+        source_authority_projection,
+    )
+
+    dump_path = tmp_path / "dump.json"
+    chunk_path = tmp_path / "chunks.jsonl"
+    db_path = tmp_path / "index.sqlite"
+    dump_path.write_text("{}", encoding="utf-8")
+
+    source_authority = {
+        "classification": "historical_only",
+        "frontmatter_present": True,
+        "establishes_current_state": False,
+        "does_not_establish": [
+            "current_state",
+            "current_architecture",
+            "current_service_necessity",
+            "preferred_access_path",
+        ],
+        "status": "deprecated",
+        "role": "é" * 120,
+        "observed_at": "é" * 120,
+    }
+    assert source_authority_projection(source_authority) == source_authority
+    assert len(
+        json.dumps(
+            source_authority,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ) <= SOURCE_AUTHORITY_MAX_BYTES
+    assert len(
+        json.dumps(
+            source_authority,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ) > SOURCE_AUTHORITY_MAX_BYTES
+
+    chunk_path.write_text(
+        json.dumps(
+            {
+                "chunk_id": "unicode-authority",
+                "repo_id": "r1",
+                "path": "docs/history.md",
+                "content": "history",
+                "start_line": 1,
+                "end_line": 1,
+                "layer": "docs",
+                "source_authority": source_authority,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    index_db.build_index(dump_path, chunk_path, db_path)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        stored = conn.execute(
+            "SELECT source_authority_json FROM chunks WHERE chunk_id = ?",
+            ("unicode-authority",),
+        ).fetchone()[0]
+
+    assert len(stored.encode("utf-8")) <= SOURCE_AUTHORITY_MAX_BYTES
+    assert "é" in stored
+    assert json.loads(stored) == source_authority

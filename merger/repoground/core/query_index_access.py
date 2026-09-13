@@ -26,6 +26,7 @@ from merger.repoground.core.citation_projection import (
     citation_row_is_valid as _citation_row_is_valid,
     enrich_resolved_hit_for_direct_use as _enrich_resolved_hit_for_direct_use,
     project_source_citations as _project_source_citations,
+    source_authority_projection as _source_authority_projection,
 )
 from merger.repoground.core import citation_projection as _citation_projection_module
 from merger.repoground.core.manifest_snapshot import resolve_manifest_path
@@ -188,6 +189,7 @@ def _resolve_hit_evidence(
     record: dict[str, Any] = {
         "chunk_id": hit.get("chunk_id"),
         "path": hit.get("path"),
+        "source_authority": _source_authority_projection(hit.get("source_authority")),
         "range_ref_source": range_ref_source,
         "range_ref": None,
         "range_status": "unresolved",

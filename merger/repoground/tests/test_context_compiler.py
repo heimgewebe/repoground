@@ -728,3 +728,42 @@ def test_context_plan_projection_is_compact_by_default_and_verbose_is_exact(tmp_
     assert compact["does_not_establish"]["items"] == plan["does_not_establish"]
     assert all("trust" not in item for item in compact["selected_context"])
     assert project_context_plan(plan, verbose=True) == plan
+
+
+def test_context_plan_projection_preserves_source_authority_for_selected_and_omitted():
+    authority = {
+        "classification": "historical_only",
+        "frontmatter_present": True,
+        "establishes_current_state": False,
+        "does_not_establish": [
+            "current_state",
+            "current_architecture",
+            "current_service_necessity",
+            "preferred_access_path",
+        ],
+        "status": "deprecated",
+    }
+    plan = {
+        "status": "available",
+        "selected_context": [
+            {
+                "id": "selected",
+                "source": "resolved_evidence",
+                "source_authority": authority,
+            }
+        ],
+        "omitted_context": [
+            {
+                "id": "omitted",
+                "source": "changed_path",
+                "source_authority": authority,
+                "omission_reason": "estimated_tokens_exceed_remaining_budget",
+            }
+        ],
+        "does_not_establish": [],
+    }
+
+    compact = project_context_plan(plan)
+
+    assert compact["selected_context"][0]["source_authority"] == authority
+    assert compact["omitted_context"][0]["source_authority"] == authority

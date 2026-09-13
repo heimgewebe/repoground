@@ -4,6 +4,14 @@ import pytest
 from merger.repoground.retrieval import query_core
 from merger.repoground.retrieval import index_db
 
+
+UNCLASSIFIED_SOURCE_AUTHORITY = {
+    "classification": "unclassified",
+    "frontmatter_present": False,
+    "establishes_current_state": None,
+    "does_not_establish": ["current_state_without_fresh_verification"],
+}
+
 def test_schema_validates_both_cases(tmp_path):
     db_path = tmp_path / "index.sqlite"
     dump_path = tmp_path / "dump.json"
@@ -97,6 +105,7 @@ def test_query_result_schema_accepts_canonical_v2_without_legacy_aliases(tmp_pat
                 "layer": "core",
                 "type": "code",
                 "sha256": "a" * 64,
+                "source_authority": dict(UNCLASSIFIED_SOURCE_AUTHORITY),
                 "why": {
                     "matched_terms": ["hello"],
                     "filter_pass": [],
@@ -146,6 +155,7 @@ def test_query_result_schema_rejects_invalid_v2_hash_pattern(tmp_path):
                 "layer": "core",
                 "type": "code",
                 "sha256": "a" * 64,
+                "source_authority": dict(UNCLASSIFIED_SOURCE_AUTHORITY),
                 "why": {
                     "matched_terms": ["hello"],
                     "filter_pass": [],
@@ -195,6 +205,7 @@ def test_query_result_schema_still_accepts_v1_range_ref(tmp_path):
                 "layer": "core",
                 "type": "code",
                 "sha256": "a" * 64,
+                "source_authority": dict(UNCLASSIFIED_SOURCE_AUTHORITY),
                 "why": {
                     "matched_terms": ["hello"],
                     "filter_pass": [],
@@ -239,6 +250,7 @@ def test_query_result_schema_rejects_invalid_v1_hash_pattern(tmp_path):
                 "layer": "core",
                 "type": "code",
                 "sha256": "a" * 64,
+                "source_authority": dict(UNCLASSIFIED_SOURCE_AUTHORITY),
                 "why": {
                     "matched_terms": ["hello"],
                     "filter_pass": [],
@@ -284,6 +296,7 @@ def test_query_result_schema_accepts_v2_chunk_id(tmp_path):
                 "layer": "core",
                 "type": "code",
                 "sha256": "a" * 64,
+                "source_authority": dict(UNCLASSIFIED_SOURCE_AUTHORITY),
                 "why": {
                     "matched_terms": ["hello"],
                     "filter_pass": [],
@@ -333,6 +346,7 @@ def test_query_result_schema_rejects_invalid_v2_artifact_role(tmp_path):
                 "layer": "core",
                 "type": "code",
                 "sha256": "a" * 64,
+                "source_authority": dict(UNCLASSIFIED_SOURCE_AUTHORITY),
                 "why": {
                     "matched_terms": ["hello"],
                     "filter_pass": [],

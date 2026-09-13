@@ -6,6 +6,10 @@ import time
 from typing import Dict, Any, Optional, List
 
 from .router import route_query
+from ..core.citation_projection import (
+    SOURCE_AUTHORITY_MAX_BYTES,
+    source_authority_projection,
+)
 from ..core.range_resolver import build_derived_range_ref
 from ..core.graph_degradation import graph_load_degradation
 from ..architecture.graph_index import load_graph_index
@@ -42,6 +46,22 @@ _SYSTEMKATALOG_REPOSITORY_IDENTITIES = frozenset({"heimgewebe/systemkatalog", "s
 _SYSTEMKATALOG_ARCHIVE_PREFIX = "docs/archive/cabinet-era/"
 
 logger = logging.getLogger(__name__)
+
+
+def _unclassified_source_authority() -> Dict[str, Any]:
+    return source_authority_projection(None)
+
+
+def _decode_source_authority(raw: Any) -> Dict[str, Any]:
+    if not isinstance(raw, str) or not raw.strip():
+        return _unclassified_source_authority()
+    try:
+        if len(raw.encode("utf-8")) > SOURCE_AUTHORITY_MAX_BYTES:
+            return _unclassified_source_authority()
+        decoded = json.loads(raw)
+    except (TypeError, ValueError, RecursionError, UnicodeEncodeError):
+        return _unclassified_source_authority()
+    return source_authority_projection(decoded)
 
 
 def normalize_excluded_paths(excluded_paths: Optional[List[str]]) -> List[str]:
@@ -674,32 +694,29 @@ def execute_query(
             # FTS Query: Escape double quotes
             cleaned_q = routed_query.replace('"', '""')
 
-            # Check if source_file exists in schema to support backwards compatibility
-            # If not, we don't query it.
+            # Optional columns preserve backwards compatibility with older indexes.
             cursor = conn.execute("PRAGMA table_info(chunks)")
             columns = [row["name"] for row in cursor.fetchall()]
             has_source_file = "source_file" in columns
+            has_source_authority = "source_authority_json" in columns
+            source_file_select = (
+                "c.source_file" if has_source_file else "NULL AS source_file"
+            )
+            source_authority_select = (
+                "c.source_authority_json"
+                if has_source_authority
+                else "NULL AS source_authority_json"
+            )
 
-            if has_source_file:
-                base_sql = """
-                    SELECT
-                        c.chunk_id, c.repo_id, c.path, c.start_line, c.end_line, c.start_byte, c.end_byte, c.content_sha256,
-                        c.layer, c.artifact_type, c.content_range_ref, c.source_file, chunks_fts.content,
-                        bm25(chunks_fts) as score
-                    FROM chunks_fts
-                    JOIN chunks c ON c.chunk_id = chunks_fts.chunk_id
-                    WHERE chunks_fts MATCH ?
-                """
-            else:
-                base_sql = """
-                    SELECT
-                        c.chunk_id, c.repo_id, c.path, c.start_line, c.end_line, c.start_byte, c.end_byte, c.content_sha256,
-                        c.layer, c.artifact_type, c.content_range_ref, chunks_fts.content,
-                        bm25(chunks_fts) as score
-                    FROM chunks_fts
-                    JOIN chunks c ON c.chunk_id = chunks_fts.chunk_id
-                    WHERE chunks_fts MATCH ?
-                """
+            base_sql = f"""
+                SELECT
+                    c.chunk_id, c.repo_id, c.path, c.start_line, c.end_line, c.start_byte, c.end_byte, c.content_sha256,
+                    c.layer, c.artifact_type, c.content_range_ref, {source_file_select}, {source_authority_select}, chunks_fts.content,
+                    bm25(chunks_fts) as score
+                FROM chunks_fts
+                JOIN chunks c ON c.chunk_id = chunks_fts.chunk_id
+                WHERE chunks_fts MATCH ?
+            """
 
             params.append(cleaned_q)
             fts_query_str = cleaned_q
@@ -709,23 +726,23 @@ def execute_query(
             cursor = conn.execute("PRAGMA table_info(chunks)")
             columns = [row["name"] for row in cursor.fetchall()]
             has_source_file = "source_file" in columns
+            has_source_authority = "source_authority_json" in columns
+            source_file_select = (
+                "c.source_file" if has_source_file else "NULL AS source_file"
+            )
+            source_authority_select = (
+                "c.source_authority_json"
+                if has_source_authority
+                else "NULL AS source_authority_json"
+            )
 
-            if has_source_file:
-                base_sql = """
-                    SELECT
-                        c.chunk_id, c.repo_id, c.path, c.start_line, c.end_line, c.start_byte, c.end_byte, c.content_sha256,
-                        c.layer, c.artifact_type, c.content_range_ref, c.source_file, '' as content,
-                        0 as score
-                    FROM chunks c
-                """
-            else:
-                base_sql = """
-                    SELECT
-                        c.chunk_id, c.repo_id, c.path, c.start_line, c.end_line, c.start_byte, c.end_byte, c.content_sha256,
-                        c.layer, c.artifact_type, c.content_range_ref, '' as content,
-                        0 as score
-                    FROM chunks c
-                """
+            base_sql = f"""
+                SELECT
+                    c.chunk_id, c.repo_id, c.path, c.start_line, c.end_line, c.start_byte, c.end_byte, c.content_sha256,
+                    c.layer, c.artifact_type, c.content_range_ref, {source_file_select}, {source_authority_select}, '' as content,
+                    0 as score
+                FROM chunks c
+            """
             where_clauses.append("1=1")
 
         # Add metadata filters
@@ -1030,6 +1047,7 @@ def execute_query(
                 source_path = r["source_file"] or r["path"]
             except IndexError:
                 source_path = r["path"]
+            source_authority = _decode_source_authority(r["source_authority_json"])
             hit = {
                 "chunk_id": r["chunk_id"],
                 "repo_id": r["repo_id"],
@@ -1054,6 +1072,7 @@ def execute_query(
                 "layer": r["layer"],
                 "type": r["artifact_type"],
                 "sha256": r["content_sha256"],
+                "source_authority": source_authority,
                 "why": {
                     "matched_terms": matched_terms,
                     "filter_pass": filter_pass,
@@ -1346,6 +1365,9 @@ def build_context_bundle(query_text: str, results: List[Dict[str, Any]], raw_con
             "graph_context": hit.get("why", {}).get("diagnostics", {}).get("graph"),
             "provenance_type": prov_type,
             "bundle_source_references": refs,
+            "source_authority": hit.get(
+                "source_authority", _unclassified_source_authority()
+            ),
             # Epistemic integrity rules:
             # - `provenance_type`: The origin class of the hit. `derived` means it lacks a bundle-backed explicit `range_ref`.
             # - `resolver_status`: The actual technical outcome of resolving this hit against the bundle or source workspace.

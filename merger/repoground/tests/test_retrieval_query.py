@@ -1385,3 +1385,110 @@ def test_semantic_model_fail_policy_raises_generic_error(mini_index, monkeypatch
         "Semantic re-ranking failed to load model (fallback_behavior=fail)."
     )
     assert secret not in message
+
+def test_source_authority_schema_requires_classification_caveats():
+    import jsonschema
+    from pathlib import Path
+
+    schema_path = Path(__file__).parent.parent / "contracts" / "query-result.v1.schema.json"
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))["definitions"]["sourceAuthority"]
+    validator = jsonschema.Draft7Validator(schema)
+
+    assert not validator.is_valid({
+        "classification": "current_candidate",
+        "frontmatter_present": True,
+        "establishes_current_state": None,
+        "does_not_establish": [],
+    })
+    assert not validator.is_valid({
+        "classification": "historical_only",
+        "frontmatter_present": True,
+        "establishes_current_state": False,
+        "does_not_establish": ["current_state", "current_architecture"],
+    })
+    assert validator.is_valid({
+        "classification": "current_candidate",
+        "frontmatter_present": True,
+        "establishes_current_state": None,
+        "does_not_establish": [
+            "current_state_without_fresh_verification",
+            "deployment_state",
+        ],
+    })
+    assert validator.is_valid({
+        "classification": "historical_only",
+        "frontmatter_present": True,
+        "establishes_current_state": False,
+        "does_not_establish": [
+            "current_state",
+            "current_architecture",
+            "current_service_necessity",
+            "preferred_access_path",
+        ],
+        "status": "deprecated",
+    })
+
+
+def test_source_authority_schema_rejects_lifecycle_classification_contradictions():
+    import jsonschema
+    from pathlib import Path
+
+    schema_path = Path(__file__).parent.parent / "contracts" / "query-result.v1.schema.json"
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))["definitions"]["sourceAuthority"]
+    validator = jsonschema.Draft7Validator(schema)
+    caveats = ["current_state", "current_architecture", "current_service_necessity", "preferred_access_path"]
+
+    assert not validator.is_valid({
+        "classification": "current_candidate",
+        "frontmatter_present": True,
+        "establishes_current_state": None,
+        "does_not_establish": ["current_state_without_fresh_verification"],
+        "status": "deprecated",
+    })
+    assert not validator.is_valid({
+        "classification": "historical_only",
+        "frontmatter_present": True,
+        "establishes_current_state": False,
+        "does_not_establish": caveats,
+        "status": "active",
+    })
+    assert not validator.is_valid({
+        "classification": "point_in_time_observation",
+        "frontmatter_present": True,
+        "establishes_current_state": False,
+        "does_not_establish": caveats,
+        "status": "retired",
+        "canonicality": "observation",
+    })
+    assert validator.is_valid({
+        "classification": "historical_only",
+        "frontmatter_present": True,
+        "establishes_current_state": False,
+        "does_not_establish": caveats,
+        "status": " Deprecated ",
+    })
+
+
+def test_decode_source_authority_rejects_oversized_raw_json_before_parsing(monkeypatch):
+    raw = '{"classification":' + ('9' * 5000) + '}'
+
+    def fail_if_called(_raw):
+        pytest.fail("oversized stored authority must be rejected before json.loads")
+
+    monkeypatch.setattr(query_core.json, "loads", fail_if_called)
+    decoded = query_core._decode_source_authority(raw)
+
+    assert decoded["classification"] == "unclassified"
+
+
+@pytest.mark.parametrize("decoder_error", [ValueError("integer limit"), RecursionError("depth")])
+def test_decode_source_authority_fails_closed_on_decoder_resource_errors(
+    monkeypatch, decoder_error
+):
+    def raise_decoder_error(_raw):
+        raise decoder_error
+
+    monkeypatch.setattr(query_core.json, "loads", raise_decoder_error)
+    decoded = query_core._decode_source_authority("{}")
+
+    assert decoded["classification"] == "unclassified"
