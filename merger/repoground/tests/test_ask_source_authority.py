@@ -81,15 +81,24 @@ def test_ask_resolved_range_preserves_source_authority_and_renders_caveats(autho
         assert f"does_not_establish: {caveat}" in rendered
 
 
-def test_ask_context_contract_enforces_historical_authority_caveats():
+def test_ask_context_contract_enforces_source_authority_invariants():
     schema = json.loads(CONTEXT_SCHEMA.read_text(encoding="utf-8"))
-    authority_schema = schema["properties"]["resolved_ranges"]["items"]["properties"][
-        "source_authority"
-    ]
+    authority_schema = schema["definitions"]["sourceAuthority"]
 
     jsonschema.validate(instance=HISTORICAL_AUTHORITY, schema=authority_schema)
+    jsonschema.validate(instance=POINT_IN_TIME_AUTHORITY, schema=authority_schema)
 
-    invalid = dict(HISTORICAL_AUTHORITY)
-    invalid["does_not_establish"] = ["current_state"]
+    missing_caveats = dict(HISTORICAL_AUTHORITY)
+    missing_caveats["does_not_establish"] = ["current_state"]
     with pytest.raises(jsonschema.ValidationError):
-        jsonschema.validate(instance=invalid, schema=authority_schema)
+        jsonschema.validate(instance=missing_caveats, schema=authority_schema)
+
+    contradictory = {
+        "classification": "current_candidate",
+        "frontmatter_present": True,
+        "establishes_current_state": None,
+        "does_not_establish": ["current_state_without_fresh_verification"],
+        "status": "deprecated",
+    }
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=contradictory, schema=authority_schema)
