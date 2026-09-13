@@ -1,5 +1,5 @@
 import json
-from merger.repoground.core import bundle_access
+from merger.repoground.core import bundle_access, citation_projection
 from merger.repoground.tests.test_resolved_evidence_query import (
     _build_resolved_bundle,
     _sha256,
@@ -75,6 +75,71 @@ def test_query_existing_index_fails_closed_on_invalid_stored_source_authority(tm
     assert result["query_result"]["results"][0]["source_authority"] == expected
     assert result["resolved_evidence"]["hits"][0]["source_authority"] == expected
     assert result["source_citation_projection"]["items"][0]["source_authority"] == expected
+
+
+def test_source_authority_projection_rejects_contradictory_current_state():
+    expected = {
+        "classification": "unclassified",
+        "frontmatter_present": False,
+        "establishes_current_state": None,
+        "does_not_establish": ["current_state_without_fresh_verification"],
+    }
+    contradictory = (
+        ("historical_only", True),
+        ("historical_only", None),
+        ("point_in_time_observation", True),
+        ("point_in_time_observation", None),
+        ("current_candidate", True),
+        ("current_candidate", False),
+        ("unclassified", True),
+        ("unclassified", False),
+    )
+
+    for classification, establishes_current_state in contradictory:
+        authority = {
+            "classification": classification,
+            "frontmatter_present": True,
+            "establishes_current_state": establishes_current_state,
+            "does_not_establish": [],
+        }
+        assert citation_projection.source_authority_projection(authority) == expected
+
+
+def test_source_authority_projection_fails_closed_on_lone_surrogate():
+    expected = {
+        "classification": "unclassified",
+        "frontmatter_present": False,
+        "establishes_current_state": None,
+        "does_not_establish": ["current_state_without_fresh_verification"],
+    }
+    surrogate = chr(0xD800)
+    for field, value in (("role", surrogate), ("does_not_establish", [surrogate])):
+        authority = {
+            "classification": "current_candidate",
+            "frontmatter_present": True,
+            "establishes_current_state": None,
+            "does_not_establish": [],
+        }
+        authority[field] = value
+        assert citation_projection.source_authority_projection(authority) == expected
+
+    assert citation_projection._source_authority_is_aggregate_bounded(
+        {"role": surrogate}
+    ) is False
+
+
+def test_source_authority_producer_fails_closed_on_yaml_lone_surrogate():
+    from merger.repoground.core.merge import _source_authority_metadata
+
+    yaml_text = '---\nstatus: active\nrole: "' + "\\uD800" + '"\n---\n# Current\n'
+    authority = _source_authority_metadata("docs/current.md", yaml_text)
+
+    assert authority == {
+        "classification": "unclassified",
+        "frontmatter_present": False,
+        "establishes_current_state": None,
+        "does_not_establish": ["current_state_without_fresh_verification"],
+    }
 
 
 def test_query_existing_index_fails_closed_on_oversized_stored_source_authority(tmp_path):

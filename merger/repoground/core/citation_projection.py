@@ -71,16 +71,22 @@ def _unclassified_source_authority() -> dict[str, Any]:
 
 
 def _source_authority_string_is_bounded(value: Any) -> bool:
-    return (
-        isinstance(value, str)
-        and len(value.encode("utf-8")) <= SOURCE_AUTHORITY_SCALAR_MAX_BYTES
-    )
+    try:
+        return (
+            isinstance(value, str)
+            and len(value.encode("utf-8")) <= SOURCE_AUTHORITY_SCALAR_MAX_BYTES
+        )
+    except UnicodeEncodeError:
+        return False
 
 
 def _source_authority_is_aggregate_bounded(value: dict[str, Any]) -> bool:
-    encoded = json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    ).encode("utf-8")
+    try:
+        encoded = json.dumps(
+            value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+    except UnicodeEncodeError:
+        return False
     return len(encoded) <= SOURCE_AUTHORITY_MAX_BYTES
 
 
@@ -97,9 +103,12 @@ def source_authority_projection(value: Any) -> dict[str, Any]:
         return _unclassified_source_authority()
     if not isinstance(frontmatter_present, bool):
         return _unclassified_source_authority()
-    if establishes_current_state is not None and not isinstance(
-        establishes_current_state, bool
-    ):
+    expected_current_state = (
+        False
+        if classification in {"historical_only", "point_in_time_observation"}
+        else None
+    )
+    if establishes_current_state is not expected_current_state:
         return _unclassified_source_authority()
     if (
         not isinstance(does_not_establish, list)
