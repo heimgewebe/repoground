@@ -28,7 +28,8 @@
           "score",
           "resolved_code_snippet",
           "provenance_type",
-          "bundle_source_references"
+          "bundle_source_references",
+          "source_authority"
         ],
         "properties": {
           "hit_identity": {

@@ -409,9 +409,9 @@ def _source_address_fields(hit: dict[str, Any]) -> dict[str, Any]:
 
 def _source_projection_fields(hit: dict[str, Any]) -> dict[str, Any]:
     fields = _source_address_fields(hit)
-    source_authority = hit.get("source_authority")
-    if source_authority is not None:
-        fields["source_authority"] = source_authority_projection(source_authority)
+    fields["source_authority"] = source_authority_projection(
+        hit.get("source_authority")
+    )
     return fields
 
 
@@ -1176,6 +1176,17 @@ def render_ask_context_pack_text(pack: dict[str, Any]) -> str:
             lines.append(
                 f"  source_authority: {source_authority.get('classification')}"
             )
+            for field in (
+                "status",
+                "canonicality",
+                "role",
+                "temporal_scope",
+                "observed_at",
+                "last_reviewed",
+            ):
+                value = source_authority.get(field)
+                if isinstance(value, str) and value:
+                    lines.append(f"  source_authority.{field}: {value}")
             for caveat in source_authority.get("does_not_establish", []):
                 lines.append(f"  does_not_establish: {caveat}")
         if excerpt:

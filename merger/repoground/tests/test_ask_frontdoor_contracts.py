@@ -89,7 +89,22 @@ def _context_pack():
             "detail": None,
         },
         "retrieval_hits": [{"artifact_role": "canonical_md", "ref": "hit-1", "score": 1.0, "citation_id": "cit_0000000000000001"}],
-        "resolved_ranges": [{"artifact_role": "canonical_md", "status": "resolved", "range_ref": {"file_path": "demo.md"}, "content_sha256": SHA}],
+        "resolved_ranges": [
+            {
+                "artifact_role": "canonical_md",
+                "status": "resolved",
+                "range_ref": {"file_path": "demo.md"},
+                "content_sha256": SHA,
+                "source_authority": {
+                    "classification": "unclassified",
+                    "frontmatter_present": False,
+                    "establishes_current_state": None,
+                    "does_not_establish": [
+                        "current_state_without_fresh_verification"
+                    ],
+                },
+            }
+        ],
         "answer_scaffold": {
             "citation_obligations": ["Cite every strong repository claim."],
             "caveats_to_surface": [caveat],

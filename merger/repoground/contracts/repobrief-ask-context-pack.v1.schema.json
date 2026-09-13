@@ -379,7 +379,8 @@
         "required": [
           "artifact_role",
           "status",
-          "range_ref"
+          "range_ref",
+          "source_authority"
         ],
         "properties": {
           "artifact_role": {
