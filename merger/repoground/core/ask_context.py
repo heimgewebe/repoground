@@ -1186,9 +1186,12 @@ def render_ask_context_pack_text(pack: dict[str, Any]) -> str:
             ):
                 value = source_authority.get(field)
                 if isinstance(value, str) and value:
-                    lines.append(f"  source_authority.{field}: {value}")
+                    rendered_value = json.dumps(value, ensure_ascii=False)
+                    lines.append(f"  source_authority.{field}: {rendered_value}")
             for caveat in source_authority.get("does_not_establish", []):
-                lines.append(f"  does_not_establish: {caveat}")
+                if isinstance(caveat, str):
+                    rendered_caveat = json.dumps(caveat, ensure_ascii=False)
+                    lines.append(f"  does_not_establish: {rendered_caveat}")
         if excerpt:
             lines.append(f"  excerpt: {excerpt[:240].replace(chr(10), ' ')}")
     lines.append("")
