@@ -140,10 +140,10 @@ def source_authority_projection(value: Any) -> dict[str, Any]:
         or not all(
             _source_authority_string_is_bounded(item) for item in does_not_establish
         )
+        or not _SOURCE_AUTHORITY_REQUIRED_GAPS[classification].issubset(
+            does_not_establish
+        )
     ):
-        return _unclassified_source_authority()
-    required_gaps = _SOURCE_AUTHORITY_REQUIRED_GAPS[classification]
-    if not required_gaps.issubset(does_not_establish):
         return _unclassified_source_authority()
 
     projected = {
