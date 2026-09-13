@@ -13,6 +13,7 @@ from merger.repoground.core.bundle_access import (
     resolve_required_reading_for_bundle,
     snapshot_status,
 )
+from merger.repoground.core.citation_projection import source_authority_projection
 from merger.repoground.core.manifest_snapshot import (
     active_manifest_snapshot,
     resolve_manifest_path,
@@ -576,6 +577,9 @@ def _resolved_ranges_with_budget(
         content_sha = range_value.get("content_sha256") or range_value.get("sha256")
         if isinstance(content_sha, str) and len(content_sha) == 64:
             item["content_sha256"] = content_sha
+        source_authority = hit.get("source_authority")
+        if source_authority is not None:
+            item["source_authority"] = source_authority_projection(source_authority)
         item.update(_source_address_fields(hit))
         result.append(item)
     return result, used_bytes, used_characters, truncated, omissions
@@ -1162,6 +1166,13 @@ def render_ask_context_pack_text(pack: dict[str, Any]) -> str:
         excerpt = item.get("text_excerpt")
         ref = item.get("range_ref")
         lines.append(f"- {item.get('artifact_role')} {item.get('status')} {ref}")
+        source_authority = item.get("source_authority")
+        if isinstance(source_authority, dict):
+            lines.append(
+                f"  source_authority: {source_authority.get('classification')}"
+            )
+            for caveat in source_authority.get("does_not_establish", []):
+                lines.append(f"  does_not_establish: {caveat}")
         if excerpt:
             lines.append(f"  excerpt: {excerpt[:240].replace(chr(10), ' ')}")
     lines.append("")
