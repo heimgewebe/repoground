@@ -43,6 +43,26 @@ _SOURCE_AUTHORITY_FIELDS = frozenset(
         *_SOURCE_AUTHORITY_OPTIONAL_STRING_FIELDS,
     }
 )
+_SOURCE_AUTHORITY_REQUIRED_GAPS = {
+    "unclassified": frozenset({"current_state_without_fresh_verification"}),
+    "current_candidate": frozenset({"current_state_without_fresh_verification"}),
+    "historical_only": frozenset(
+        {
+            "current_state",
+            "current_architecture",
+            "current_service_necessity",
+            "preferred_access_path",
+        }
+    ),
+    "point_in_time_observation": frozenset(
+        {
+            "current_state",
+            "current_architecture",
+            "current_service_necessity",
+            "preferred_access_path",
+        }
+    ),
+}
 
 _CITATION_ID_RE = re.compile(r"^cit_[a-f0-9]{16}$")
 _SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
@@ -121,6 +141,9 @@ def source_authority_projection(value: Any) -> dict[str, Any]:
             _source_authority_string_is_bounded(item) for item in does_not_establish
         )
     ):
+        return _unclassified_source_authority()
+    required_gaps = _SOURCE_AUTHORITY_REQUIRED_GAPS[classification]
+    if not required_gaps.issubset(does_not_establish):
         return _unclassified_source_authority()
 
     projected = {

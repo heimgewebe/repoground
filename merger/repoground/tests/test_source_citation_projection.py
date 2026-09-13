@@ -39,7 +39,12 @@ def test_query_existing_index_preserves_source_authority_through_resolution(tmp_
         "classification": "historical_only",
         "frontmatter_present": True,
         "establishes_current_state": False,
-        "does_not_establish": ["current_state", "current_architecture"],
+        "does_not_establish": [
+            "current_state",
+            "current_architecture",
+            "current_service_necessity",
+            "preferred_access_path",
+        ],
         "status": "deprecated",
     }
     bundle = _build_resolved_bundle(tmp_path, source_authority=authority)
@@ -103,6 +108,52 @@ def test_source_authority_projection_rejects_contradictory_current_state():
             "does_not_establish": [],
         }
         assert citation_projection.source_authority_projection(authority) == expected
+
+
+def test_source_authority_projection_requires_classification_specific_caveats():
+    expected = {
+        "classification": "unclassified",
+        "frontmatter_present": False,
+        "establishes_current_state": None,
+        "does_not_establish": ["current_state_without_fresh_verification"],
+    }
+    cases = (
+        ("current_candidate", None, []),
+        ("unclassified", None, []),
+        (
+            "historical_only",
+            False,
+            ["current_state", "current_architecture", "current_service_necessity"],
+        ),
+        (
+            "point_in_time_observation",
+            False,
+            ["current_state", "current_architecture", "preferred_access_path"],
+        ),
+    )
+
+    for classification, establishes_current_state, caveats in cases:
+        authority = {
+            "classification": classification,
+            "frontmatter_present": True,
+            "establishes_current_state": establishes_current_state,
+            "does_not_establish": caveats,
+        }
+        assert citation_projection.source_authority_projection(authority) == expected
+
+
+def test_source_authority_projection_preserves_additional_conservative_caveats():
+    authority = {
+        "classification": "current_candidate",
+        "frontmatter_present": True,
+        "establishes_current_state": None,
+        "does_not_establish": [
+            "current_state_without_fresh_verification",
+            "deployment_state",
+        ],
+    }
+
+    assert citation_projection.source_authority_projection(authority) == authority
 
 
 def test_source_authority_projection_fails_closed_on_unhashable_classification():
@@ -524,7 +575,12 @@ def test_source_citation_projection_preserves_valid_source_authority():
         "classification": "historical_only",
         "frontmatter_present": True,
         "establishes_current_state": False,
-        "does_not_establish": ["current_state_without_fresh_verification"],
+        "does_not_establish": [
+            "current_state",
+            "current_architecture",
+            "current_service_necessity",
+            "preferred_access_path",
+        ],
         "status": "deprecated",
     }
     projection = bundle_access._project_source_citations(
