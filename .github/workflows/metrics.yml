@@ -9,7 +9,6 @@ on:
 env:
   METRICS_SCHEMA_URL: https://raw.githubusercontent.com/heimgewebe/metarepo/cba66e2b08d908aeff201e4e43aa902b96762b47/contracts/metrics.snapshot.schema.json
   METRICS_SCHEMA_SHA256: 1b1de44ea326ce8de36da6fc6d8f2da0abe279df8c47ab10e58ddc2cf604b914
-  HAUSKI_POST_URL: ${{ secrets.HAUSKI_METRICS_URL }}
 
 jobs:
   snapshot:
@@ -36,16 +35,6 @@ jobs:
 
       - name: Validate metrics contract
         run: npx --yes ajv-cli@5.0.0 validate --spec=draft2020 -c ./scripts/ci/ajv_metrics_keywords.cjs -s .ci/metrics.schema.json -d metrics.json
-
-      - name: Optional POST to hausKI
-        if: ${{ env.HAUSKI_POST_URL && env.HAUSKI_POST_URL != '' }}
-        run: |
-          curl --fail --silent --show-error \
-            --connect-timeout 5 --max-time 30 --retry 3 --retry-delay 2 \
-            -H 'Content-Type: application/json' \
-            --data @metrics.json \
-            "$HAUSKI_POST_URL"
-        continue-on-error: true
 
       - name: Upload metrics.json artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
