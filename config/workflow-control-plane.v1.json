@@ -107,8 +107,8 @@
       "path": ".github/workflows/metrics.yml",
       "class": "diagnostic",
       "rationale": "Metrics snapshot/validation; scheduled/diagnostic posture.",
-      "sha256": "331c1e430de6d477c2c105c7afe319cfbe688cdf4b75cc6bfa6a7347924ed3c7",
-      "bytes": 2069
+      "sha256": "b26311da0a07b22952954bb79916150b76c58f20d1143d90cf3340009cc3126f",
+      "bytes": 1626
     },
     {
       "path": ".github/workflows/parity-gate.yml",

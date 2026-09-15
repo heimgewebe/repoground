@@ -54,15 +54,13 @@ def test_metrics_workflow_verifies_download_before_ajv_validation() -> None:
     assert workflow["jobs"]["snapshot"]["timeout-minutes"] == 10
 
 
-def test_optional_hauski_post_remains_non_blocking() -> None:
+def test_metrics_workflow_has_no_hauski_post_compatibility() -> None:
     workflow = _workflow()
-    steps = workflow["jobs"]["snapshot"]["steps"]
-    post = next(step for step in steps if step.get("name") == "Optional POST to hausKI")
+    raw_workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
 
-    assert post["continue-on-error"] is True
-    assert "HAUSKI_POST_URL" in str(post["if"])
-    assert "--connect-timeout 5" in post["run"]
-    assert "--max-time 30" in post["run"]
+    assert "HAUSKI_POST_URL" not in workflow["env"]
+    assert "HAUSKI_METRICS_URL" not in raw_workflow
+    assert "hauski" not in raw_workflow.lower()
 
 
 def test_metrics_ajv_extension_registers_only_declared_metadata_keywords() -> None:
