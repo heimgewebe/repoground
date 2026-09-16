@@ -29,6 +29,222 @@ def test_symbol_definition_intent_is_conservative_and_bilingual():
     )
 
 
+def test_call_navigation_intent_is_conservative_and_bilingual():
+    assert mcp_tools._call_navigation_intent(
+        "Which Python functions directly call _cursor_offset?"
+    ) == ("callers", "_cursor_offset")
+    assert mcp_tools._call_navigation_intent("What functions call _cursor_offset?") == (
+        "callers",
+        "_cursor_offset",
+    )
+    assert mcp_tools._call_navigation_intent(
+        "Welche Funktionen rufen `_cursor_offset` direkt auf?"
+    ) == ("callers", "_cursor_offset")
+    assert mcp_tools._call_navigation_intent(
+        "Which functions does build_current_work_projection directly call?"
+    ) == ("callees", "build_current_work_projection")
+    assert mcp_tools._call_navigation_intent(
+        "Welche Funktionen ruft `build_current_work_projection` direkt auf?"
+    ) == ("callees", "build_current_work_projection")
+    assert (
+        mcp_tools._call_navigation_intent(
+            "Welche Funktion ruft `_cursor_offset` direkt auf?"
+        )
+        is None
+    )
+    assert (
+        mcp_tools._call_navigation_intent(
+            "Which functions indirectly call _cursor_offset?"
+        )
+        is None
+    )
+    assert (
+        mcp_tools._call_navigation_intent("Where is `_cursor_offset` called?") is None
+    )
+    assert mcp_tools._call_navigation_intent("How does call routing work?") is None
+
+
+def _call_result(*, relation: str):
+    common = {
+        "status": "available",
+        "availability": {"status": "pass"},
+        "freshness": {"status": "not_comparable"},
+        "hit_count": 1,
+        "k": 5,
+        "truncated": False,
+        "total_call_site_count": 1,
+        "call_graph_coverage": {
+            "scope": "observed_call_edges",
+            "completeness": "partial",
+            "confidence_model": "observed_resolution_coverage_proxy",
+            "model_scope": "observed_static_python_call_edges",
+            "resolved_ratio": 0.5,
+            "resolved_call_edges": 1,
+            "total_call_edges": 2,
+            "skipped_files_count": 0,
+        },
+    }
+    if relation == "callers":
+        common.update(
+            {
+                "target_symbol": {"id": "target", "name": "_cursor_offset"},
+                "target_candidates": [],
+                "callers": [
+                    {
+                        "caller_symbol": {
+                            "id": "caller",
+                            "name": "build_current_work_projection",
+                            "path": "src/grabowski_current_work.py",
+                            "range_ref": "file:src/grabowski_current_work.py#L2088-L2427",
+                        },
+                        "call_site_count": 1,
+                        "call_sites": [
+                            {
+                                "range_ref": "file:src/grabowski_current_work.py#L2260-L2260"
+                            }
+                        ],
+                    }
+                ],
+                "total_caller_count": 1,
+                "unresolved_reference_count": 0,
+                "unresolved_references": [],
+            }
+        )
+    else:
+        common.update(
+            {
+                "caller_symbol": {
+                    "id": "caller",
+                    "name": "build_current_work_projection",
+                },
+                "caller_candidates": [],
+                "callees": [
+                    {
+                        "callee_symbol": {
+                            "id": "callee",
+                            "name": "_cursor_offset",
+                            "path": "src/grabowski_current_work.py",
+                            "range_ref": "file:src/grabowski_current_work.py#L900-L910",
+                        },
+                        "call_site_count": 1,
+                        "call_sites": [
+                            {
+                                "range_ref": "file:src/grabowski_current_work.py#L2260-L2260"
+                            }
+                        ],
+                        "relation_types": ["calls"],
+                    }
+                ],
+                "total_callee_count": 1,
+                "unresolved_call_site_count": 0,
+                "unresolved_call_sites": [],
+            }
+        )
+    return {"status": "available", "result": common}
+
+
+def test_query_routes_direct_caller_question_to_call_graph(monkeypatch):
+    monkeypatch.setattr(
+        mcp_tools, "get_callers", lambda **_arguments: _call_result(relation="callers")
+    )
+    monkeypatch.setattr(
+        ask_context,
+        "build_ask_context_pack",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("text fallback must not run for a direct caller intent")
+        ),
+    )
+    result = mcp_tools.query_existing_index(
+        bundle_manifest="demo.bundle.manifest.json",
+        query="Which Python functions directly call _cursor_offset?",
+        k=5,
+    )
+    assert result["route"] == "callers"
+    assert result["intent"] == {"kind": "callers", "symbol": "_cursor_offset"}
+    assert (
+        result["retrieval"]["strategy"] == "callers"
+        and result["retrieval"]["fts_query"] is None
+    )
+    assert result["budget"]["context_bytes_used"] == 0
+    assert result["navigation"]["total_caller_count"] == 1
+    assert result["navigation"]["call_graph_coverage"]["resolved_ratio"] == 0.5
+    assert (
+        result["navigation_hits"][0]["caller_symbol"]["name"]
+        == "build_current_work_projection"
+    )
+
+
+def test_query_routes_direct_callee_question_to_call_graph(monkeypatch):
+    monkeypatch.setattr(
+        mcp_tools, "get_callees", lambda **_arguments: _call_result(relation="callees")
+    )
+    monkeypatch.setattr(
+        ask_context,
+        "build_ask_context_pack",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("text fallback must not run for a direct callee intent")
+        ),
+    )
+    result = mcp_tools.query_existing_index(
+        bundle_manifest="demo.bundle.manifest.json",
+        query="Which functions does build_current_work_projection directly call?",
+        k=5,
+    )
+    assert result["route"] == "callees"
+    assert result["intent"] == {
+        "kind": "callees",
+        "symbol": "build_current_work_projection",
+    }
+    assert (
+        result["retrieval"]["strategy"] == "callees"
+        and result["retrieval"]["fts_query"] is None
+    )
+    assert result["budget"]["context_bytes_used"] == 0
+    assert result["navigation"]["total_callee_count"] == 1
+    assert result["navigation"]["call_graph_coverage"]["resolved_ratio"] == 0.5
+    assert result["navigation_hits"][0]["callee_symbol"]["name"] == "_cursor_offset"
+
+
+def test_call_graph_intent_falls_back_to_text_when_navigation_is_unavailable(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        mcp_tools,
+        "get_callers",
+        lambda **_arguments: {"status": "missing", "result": {"status": "missing"}},
+    )
+    monkeypatch.setattr(
+        ask_context,
+        "build_ask_context_pack",
+        lambda *_args, **_kwargs: {
+            "retrieval": {
+                "raw_query": "Which functions call missing_symbol?",
+                "fts_query": "missing_symbol",
+                "strategy": "exact_and",
+                "match_count": 0,
+            },
+            "retrieval_hits": [],
+            "resolved_ranges": [],
+            "retrieval_infrastructure": {
+                "status": "available",
+                "index_resolved": True,
+                "error_code": None,
+                "detail": None,
+            },
+            "budget": {"max_context_tokens": 1000},
+            "availability": {"status": "available", "caveats": []},
+            "freshness": {"status": "fresh", "caveats": []},
+            "answer_scaffold": {"caveats_to_surface": []},
+        },
+    )
+    result = mcp_tools.query_existing_index(
+        bundle_manifest="demo.bundle.manifest.json",
+        query="Which functions call missing_symbol?",
+        max_context_tokens=1000,
+    )
+    assert result["route"] == "text_retrieval"
+
+
 def test_query_routes_exact_definition_question_to_symbol_index(monkeypatch):
     monkeypatch.setattr(
         mcp_tools,
