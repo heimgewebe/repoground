@@ -569,7 +569,10 @@ def _call_navigation_match_is_complete(query: str, match: re.Match[str]) -> bool
     if opening_tick != closing_tick:
         return False
 
-    tail = query[match.end() :].lstrip()
+    tail_start = match.end()
+    if opening_tick and closing_tick and tail_start == end:
+        tail_start = end + 1
+    tail = query[tail_start:].lstrip()
     if not tail:
         return True
     if tail[0] in "?!":

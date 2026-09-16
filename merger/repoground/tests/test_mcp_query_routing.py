@@ -38,6 +38,9 @@ def test_call_navigation_intent_is_conservative_and_bilingual():
         "_cursor_offset",
     )
     assert mcp_tools._call_navigation_intent(
+        "Which functions call `_cursor_offset`?"
+    ) == ("callers", "_cursor_offset")
+    assert mcp_tools._call_navigation_intent(
         "Welche Funktionen rufen `_cursor_offset` direkt auf?"
     ) == ("callers", "_cursor_offset")
     assert mcp_tools._call_navigation_intent(
