@@ -575,11 +575,18 @@ def _call_navigation_match_is_complete(query: str, match: re.Match[str]) -> bool
     tail = query[tail_start:].lstrip()
     if not tail:
         return True
-    if tail[0] in "?!":
+    if tail[0] not in "?!.":
+        return False
+    if tail[0] == "." and len(tail) > 1 and not tail[1].isspace():
+        return False
+
+    remainder = tail[1:].lstrip()
+    if not remainder:
         return True
-    if tail[0] == ".":
-        return len(tail) == 1 or tail[1].isspace()
-    return False
+    for patterns in (_CALLER_INTENT_PATTERNS, _CALLEE_INTENT_PATTERNS):
+        if any(pattern.search(remainder) for pattern in patterns):
+            return False
+    return True
 
 
 def _call_navigation_intent(query: str) -> tuple[str, str] | None:
