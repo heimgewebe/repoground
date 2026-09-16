@@ -561,6 +561,24 @@ _CALL_NAVIGATION_NON_DIRECT_RE = re.compile(
 )
 
 
+def _call_navigation_match_is_complete(query: str, match: re.Match[str]) -> bool:
+    """Reject prefix/compound targets so structured routing stays fail-closed."""
+    start, end = match.span(1)
+    opening_tick = start > 0 and query[start - 1] == "`"
+    closing_tick = end < len(query) and query[end] == "`"
+    if opening_tick != closing_tick:
+        return False
+
+    tail = query[match.end() :].lstrip()
+    if not tail:
+        return True
+    if tail[0] in "?!":
+        return True
+    if tail[0] == ".":
+        return len(tail) == 1 or tail[1].isspace()
+    return False
+
+
 def _call_navigation_intent(query: str) -> tuple[str, str] | None:
     """Extract one conservative direct caller/callee intent for one identifier."""
     if not isinstance(query, str) or _CALL_NAVIGATION_NON_DIRECT_RE.search(query):
@@ -571,7 +589,11 @@ def _call_navigation_intent(query: str) -> tuple[str, str] | None:
     ):
         for pattern in patterns:
             match = pattern.search(query)
-            if match and _SYMBOL_NAME_RE.fullmatch(match.group(1)):
+            if (
+                match
+                and _SYMBOL_NAME_RE.fullmatch(match.group(1))
+                and _call_navigation_match_is_complete(query, match)
+            ):
                 return relation, match.group(1)
     return None
 

@@ -62,6 +62,20 @@ def test_call_navigation_intent_is_conservative_and_bilingual():
         mcp_tools._call_navigation_intent("Where is `_cursor_offset` called?") is None
     )
     assert mcp_tools._call_navigation_intent("How does call routing work?") is None
+    assert mcp_tools._call_navigation_intent("Which functions call Worker.run?") is None
+    assert (
+        mcp_tools._call_navigation_intent("Which functions call `Worker.run`?") is None
+    )
+    assert (
+        mcp_tools._call_navigation_intent("Which functions call foo and bar?") is None
+    )
+    assert (
+        mcp_tools._call_navigation_intent("Welche Funktionen rufen foo und bar auf?")
+        is None
+    )
+    assert mcp_tools._call_navigation_intent(
+        "Which functions call _cursor_offset? Return exact source ranges."
+    ) == ("callers", "_cursor_offset")
 
 
 def _call_result(*, relation: str):
