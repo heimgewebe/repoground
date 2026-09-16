@@ -530,6 +530,84 @@ _DEFINITION_INTENT_RE = re.compile(
 )
 
 
+_CALLER_INTENT_PATTERNS = (
+    re.compile(
+        r"\b(?:who|(?:which|what)\s+(?:python\s+)?functions?)\s+"
+        r"(?:directly\s+)?calls?\s+"
+        r"`?([A-Za-z_][A-Za-z0-9_]*)`?(?:\s+directly)?\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:wer\s+ruft|welche\s+(?:python[- ]?)?funktionen\s+rufen)\s+"
+        r"`?([A-Za-z_][A-Za-z0-9_]*)`?(?:\s+direkt)?(?:\s+auf)?\b",
+        re.IGNORECASE,
+    ),
+)
+_CALLEE_INTENT_PATTERNS = (
+    re.compile(
+        r"\b(?:(?:which|what)\s+(?:python\s+)?functions?\s+does|what\s+does)\s+"
+        r"`?([A-Za-z_][A-Za-z0-9_]*)`?\s+(?:directly\s+)?call\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:welche\s+(?:python[- ]?)?funktionen\s+ruft|was\s+ruft)\s+"
+        r"`?([A-Za-z_][A-Za-z0-9_]*)`?\s+(?:direkt\s+)?auf\b",
+        re.IGNORECASE,
+    ),
+)
+_CALL_NAVIGATION_NON_DIRECT_RE = re.compile(
+    r"\b(?:indirectly|transitively|indirekt|transitiv)\b",
+    re.IGNORECASE,
+)
+
+
+def _call_navigation_match_is_complete(query: str, match: re.Match[str]) -> bool:
+    """Reject prefix/compound targets so structured routing stays fail-closed."""
+    start, end = match.span(1)
+    opening_tick = start > 0 and query[start - 1] == "`"
+    closing_tick = end < len(query) and query[end] == "`"
+    if opening_tick != closing_tick:
+        return False
+
+    tail_start = match.end()
+    if opening_tick and closing_tick and tail_start == end:
+        tail_start = end + 1
+    tail = query[tail_start:].lstrip()
+    if not tail:
+        return True
+    if tail[0] not in "?!.":
+        return False
+    if tail[0] == "." and len(tail) > 1 and not tail[1].isspace():
+        return False
+
+    remainder = tail[1:].lstrip()
+    if not remainder:
+        return True
+    for patterns in (_CALLER_INTENT_PATTERNS, _CALLEE_INTENT_PATTERNS):
+        if any(pattern.search(remainder) for pattern in patterns):
+            return False
+    return True
+
+
+def _call_navigation_intent(query: str) -> tuple[str, str] | None:
+    """Extract one conservative direct caller/callee intent for one identifier."""
+    if not isinstance(query, str) or _CALL_NAVIGATION_NON_DIRECT_RE.search(query):
+        return None
+    for relation, patterns in (
+        ("callers", _CALLER_INTENT_PATTERNS),
+        ("callees", _CALLEE_INTENT_PATTERNS),
+    ):
+        for pattern in patterns:
+            match = pattern.search(query)
+            if (
+                match
+                and _SYMBOL_NAME_RE.fullmatch(match.group(1))
+                and _call_navigation_match_is_complete(query, match)
+            ):
+                return relation, match.group(1)
+    return None
+
+
 def _symbol_definition_intent(query: str) -> str | None:
     """Extract one conservative identifier from an explicit definition question."""
     if not isinstance(query, str) or not _DEFINITION_INTENT_RE.search(query):
@@ -745,6 +823,157 @@ def _symbol_query_result(
     return result
 
 
+def _compact_call_graph_coverage(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    compact = {
+        key: value[key]
+        for key in (
+            "scope",
+            "completeness",
+            "confidence_model",
+            "model_scope",
+            "resolved_call_edges",
+            "resolved_ratio",
+            "total_call_edges",
+            "skipped_files_count",
+            "reason",
+        )
+        if key in value
+    }
+    return compact or None
+
+
+def _call_navigation_query_result(
+    *,
+    bundle_manifest: str | Path,
+    query: str,
+    relation: str,
+    symbol_name: str,
+    max_context_tokens: int,
+    k: int,
+    verbose: bool,
+) -> dict[str, Any] | None:
+    navigation_tool = get_callers if relation == "callers" else get_callees
+    wrapped = navigation_tool(
+        bundle_manifest=bundle_manifest, name=symbol_name, k=k, verbose=verbose
+    )
+    inner = wrapped.get("result") if isinstance(wrapped, dict) else None
+    if (
+        not isinstance(inner, dict)
+        or wrapped.get("status") != "available"
+        or inner.get("status") != "available"
+    ):
+        return None
+
+    from merger.repoground.core.ask_context import (
+        _availability_block,
+        _context_budget,
+        _freshness_block,
+    )
+
+    availability = _availability_block(
+        {"availability_model": inner.get("availability")}
+    )
+    freshness = _freshness_block({"freshness": inner.get("freshness")})
+    token_derived_byte_ceiling, total_context_bytes = _context_budget(
+        max_context_tokens, None
+    )
+    if relation == "callers":
+        navigation_hits = (
+            inner.get("callers") if isinstance(inner.get("callers"), list) else []
+        )
+        unresolved_truncated = bool(inner.get("unresolved_references_truncated", False))
+        navigation = {
+            "target_symbol": inner.get("target_symbol"),
+            "target_candidates": inner.get("target_candidates", []),
+            "total_caller_count": inner.get("total_caller_count", len(navigation_hits)),
+            "total_call_site_count": inner.get("total_call_site_count", 0),
+            "unresolved_reference_count": inner.get("unresolved_reference_count", 0),
+            "unresolved_references": inner.get("unresolved_references", []),
+            "unresolved_references_truncated": unresolved_truncated,
+        }
+        symbol_key = "caller_symbol"
+    else:
+        navigation_hits = (
+            inner.get("callees") if isinstance(inner.get("callees"), list) else []
+        )
+        unresolved_truncated = bool(inner.get("unresolved_call_sites_truncated", False))
+        navigation = {
+            "caller_symbol": inner.get("caller_symbol"),
+            "caller_candidates": inner.get("caller_candidates", []),
+            "total_callee_count": inner.get("total_callee_count", len(navigation_hits)),
+            "total_call_site_count": inner.get("total_call_site_count", 0),
+            "unresolved_call_site_count": inner.get("unresolved_call_site_count", 0),
+            "unresolved_call_sites": inner.get("unresolved_call_sites", []),
+            "unresolved_call_sites_truncated": unresolved_truncated,
+        }
+        symbol_key = "callee_symbol"
+    coverage = _compact_call_graph_coverage(inner.get("call_graph_coverage"))
+    if coverage is not None:
+        navigation["call_graph_coverage"] = coverage
+    navigation_truncated = bool(inner.get("truncated", False)) or unresolved_truncated
+    navigation["truncated"] = navigation_truncated
+    retrieval_hits = []
+    for hit in navigation_hits:
+        if not isinstance(hit, dict):
+            continue
+        symbol = hit.get(symbol_key)
+        if not isinstance(symbol, dict):
+            continue
+        retrieval_hits.append(
+            {
+                "artifact_role": "python_call_graph_json",
+                "ref": str(symbol.get("id") or symbol.get("range_ref") or relation),
+                "score": 0.0,
+                "purpose": f"direct {relation} navigation candidate",
+            }
+        )
+    return {
+        "kind": READ_ONLY_KIND,
+        "version": READ_ONLY_VERSION,
+        "tool": "query_existing_index",
+        "status": "available",
+        "route": relation,
+        "intent": {"kind": relation, "symbol": symbol_name},
+        "retrieval": {
+            "raw_query": query,
+            "fts_query": None,
+            "strategy": relation,
+            "match_count": len(navigation_hits),
+        },
+        "retrieval_hits": retrieval_hits,
+        "navigation_hits": navigation_hits,
+        "navigation": navigation,
+        "resolved_ranges": [],
+        "budget": {
+            "max_context_tokens": max_context_tokens,
+            "token_derived_byte_ceiling": token_derived_byte_ceiling,
+            "max_context_bytes": total_context_bytes,
+            "context_bytes_used": 0,
+            "context_unicode_characters_used": 0,
+            "approx_context_chars_used": 0,
+            "byte_budget_is_hard": True,
+            "unit": "utf8_bytes",
+            "accounting": "call-graph navigation addresses and envelope metadata are outside the evidence payload budget",
+            "omissions": [],
+            "truncated": navigation_truncated,
+            "does_not_establish_quality": True,
+        },
+        "availability": availability,
+        "freshness": freshness,
+        "answer_caveats": [
+            {
+                "kind": "navigation_only",
+                "detail": "Call-graph hits establish observed static Python call relationships, not a complete runtime call graph; unresolved or dynamic calls may exist.",
+            }
+        ],
+        "result_semantics": "repobrief.query_existing_index.agent_frontdoor.v1",
+        "mutation_boundary": _read_only_boundary(verbose=verbose),
+        "does_not_establish": _read_only_does_not_establish(verbose=verbose),
+    }
+
+
 def query_existing_index(
     *,
     bundle_manifest: str | Path,
@@ -756,6 +985,21 @@ def query_existing_index(
 ) -> dict[str, Any]:
     """Query one existing index through the canonical ask retrieval strategy."""
     from merger.repoground.core.ask_context import build_ask_context_pack
+
+    call_intent = _call_navigation_intent(query)
+    if call_intent is not None:
+        relation, symbol_name = call_intent
+        routed = _call_navigation_query_result(
+            bundle_manifest=bundle_manifest,
+            query=query,
+            relation=relation,
+            symbol_name=symbol_name,
+            max_context_tokens=max_context_tokens,
+            k=k,
+            verbose=verbose,
+        )
+        if routed is not None:
+            return routed
 
     symbol_name = _symbol_definition_intent(query)
     if symbol_name is not None:
