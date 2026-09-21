@@ -44,7 +44,7 @@
       "path": ".github/workflows/contracts-validate.yml",
       "class": "required_protection",
       "rationale": "Contract/schema/fixture integrity.",
-      "sha256": "ce7a7e8d9db09a5f0158ca0972b83c8e7aef48554eb439a16732b0c5dbeecb30",
+      "sha256": "adcd2128477ed68098f7e262a1023afc0d5265d61c589d75c14994115e470801",
       "bytes": 10556
     },
     {
