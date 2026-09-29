@@ -1444,6 +1444,23 @@ def test_bounded_bundle_byte_count_includes_unmanifested_split_parts(tmp_path):
     )
 
 
+def test_bounded_bundle_byte_count_fails_closed_on_measurement_error(
+    tmp_path, monkeypatch
+):
+    manifest, canonical, _call_graph = _write_bounded_manifest(tmp_path)
+    original_is_file = Path.is_file
+
+    def failing_is_file(path):
+        if path == canonical:
+            raise OSError("measurement denied")
+        return original_is_file(path)
+
+    monkeypatch.setattr(Path, "is_file", failing_is_file)
+
+    with pytest.raises(ValueError, match="bounded bundle byte measurement failed"):
+        cmd_ground._bundle_file_bytes(manifest)
+
+
 def test_bounded_bundle_selection_digest_is_path_independent(tmp_path):
     first_dir = tmp_path / "first"
     second_dir = tmp_path / "second"

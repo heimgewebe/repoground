@@ -1757,8 +1757,10 @@ def _bundle_file_bytes(bundle_manifest: Path) -> int:
         try:
             if candidate.is_file() and not candidate.is_symlink():
                 total += candidate.stat().st_size
-        except OSError:
-            continue
+        except OSError as exc:
+            raise ValueError(
+                f"bounded bundle byte measurement failed for {candidate}"
+            ) from exc
     return total
 
 
