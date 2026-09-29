@@ -156,6 +156,113 @@ def test_wrong_sha256_raises_error(manifest_env):
         resolve_range_ref(manifest_env["manifest_path"], ref)
 
 
+def test_range_ref_fallback_without_jsonschema_accepts_v1_and_v2(
+    manifest_env, monkeypatch
+):
+    from merger.repoground.core import range_resolver
+
+    monkeypatch.setattr(range_resolver, "jsonschema", None)
+
+    v1_ref = {
+        "artifact_role": "canonical_md",
+        "repo_id": "test-repo",
+        "file_path": "code.md",
+        "start_byte": manifest_env["start_byte"],
+        "end_byte": manifest_env["end_byte"],
+        "start_line": 2,
+        "end_line": 2,
+        "content_sha256": manifest_env["expected_sha256"],
+    }
+    assert resolve_range_ref(manifest_env["manifest_path"], v1_ref)["text"] == "Line 2\n"
+
+    v2_ref = _build_v2_ref(manifest_env)
+    assert resolve_range_ref(manifest_env["manifest_path"], v2_ref)["text"] == "Line 2\n"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("artifact_role", "invalid_role"),
+        ("start_byte", True),
+        ("start_byte", -1),
+        ("start_line", 0),
+        ("content_sha256", "not-a-sha"),
+    ],
+)
+def test_range_ref_fallback_rejects_same_invalid_v1_shapes_as_jsonschema(
+    manifest_env, monkeypatch, field, value
+):
+    from merger.repoground.core import range_resolver
+
+    ref = {
+        "artifact_role": "canonical_md",
+        "repo_id": "test-repo",
+        "file_path": "code.md",
+        "start_byte": manifest_env["start_byte"],
+        "end_byte": manifest_env["end_byte"],
+        "start_line": 2,
+        "end_line": 2,
+        "content_sha256": manifest_env["expected_sha256"],
+    }
+    ref[field] = value
+    schema = range_resolver._load_schema(range_resolver._RANGE_REF_V1_SCHEMA_PATH)
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=ref, schema=schema)
+
+    monkeypatch.setattr(range_resolver, "jsonschema", None)
+    with pytest.raises(ValueError, match="range_ref failed schema"):
+        resolve_range_ref(manifest_env["manifest_path"], ref)
+
+
+def test_range_ref_fallback_rejects_missing_and_extra_fields(manifest_env, monkeypatch):
+    from merger.repoground.core import range_resolver
+
+    ref = {
+        "artifact_role": "canonical_md",
+        "repo_id": "test-repo",
+        "file_path": "code.md",
+        "start_byte": manifest_env["start_byte"],
+        "end_byte": manifest_env["end_byte"],
+        "start_line": 2,
+        "end_line": 2,
+        "content_sha256": manifest_env["expected_sha256"],
+    }
+    monkeypatch.setattr(range_resolver, "jsonschema", None)
+
+    missing = dict(ref)
+    del missing["repo_id"]
+    with pytest.raises(ValueError, match="missing required field"):
+        resolve_range_ref(manifest_env["manifest_path"], missing)
+
+    extra = dict(ref)
+    extra["unexpected"] = "value"
+    with pytest.raises(ValueError, match="additional properties are not allowed"):
+        resolve_range_ref(manifest_env["manifest_path"], extra)
+
+
+def test_range_ref_fallback_fails_closed_on_new_schema_keyword(manifest_env, monkeypatch):
+    from merger.repoground.core import range_resolver
+
+    ref = {
+        "artifact_role": "canonical_md",
+        "repo_id": "test-repo",
+        "file_path": "code.md",
+        "start_byte": manifest_env["start_byte"],
+        "end_byte": manifest_env["end_byte"],
+        "start_line": 2,
+        "end_line": 2,
+        "content_sha256": manifest_env["expected_sha256"],
+    }
+    schema = dict(range_resolver._load_schema(range_resolver._RANGE_REF_V1_SCHEMA_PATH))
+    schema["minProperties"] = 1
+    monkeypatch.setattr(range_resolver, "jsonschema", None)
+
+    with pytest.raises(RuntimeError, match="Unsupported range_ref schema keyword"):
+        range_resolver._validate_range_ref_schema(
+            ref, schema, range_resolver._RANGE_REF_V1_SCHEMA_PATH
+        )
+
+
 def test_range_ref_v1_backwards_compatible(manifest_env):
     ref = {
         "artifact_role": "canonical_md",

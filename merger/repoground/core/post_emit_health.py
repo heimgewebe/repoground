@@ -252,9 +252,10 @@ def _range_ref_status(
         return "no_range_ref", "no range reference found; range_ref check skipped", not_applicable
 
     try:
-        from .range_resolver import resolve_range_ref
+        from . import range_resolver
 
-        resolve_range_ref(manifest_path, sample_ref)
+        range_resolver._require_jsonschema()
+        range_resolver.resolve_range_ref(manifest_path, sample_ref)
         return (
             "ok",
             "range reference resolved against bundle manifest",

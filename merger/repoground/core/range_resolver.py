@@ -1,5 +1,6 @@
 import json
 import hashlib
+import re
 from copy import deepcopy
 from functools import lru_cache
 from pathlib import Path
@@ -19,11 +20,235 @@ _CONTRACTS_DIR = Path(__file__).parent.parent / "contracts"
 _RANGE_REF_V1_SCHEMA_PATH = _CONTRACTS_DIR / "range-ref.v1.schema.json"
 _RANGE_REF_V2_SCHEMA_PATH = _CONTRACTS_DIR / "range-ref.v2.schema.json"
 
+_FALLBACK_ROOT_KEYWORDS = frozenset(
+    {
+        "$schema",
+        "$id",
+        "title",
+        "description",
+        "type",
+        "additionalProperties",
+        "required",
+        "properties",
+    }
+)
+_FALLBACK_PROPERTY_KEYWORDS = frozenset(
+    {"type", "enum", "const", "minimum", "pattern", "description"}
+)
+_FALLBACK_PROPERTY_TYPES = frozenset({"string", "integer", "null"})
+_SHA256_PATTERN = "^[a-f0-9]{64}$"
+
+
+def _range_schema_error(schema_path: Path, message: str) -> ValueError:
+    return ValueError(f"range_ref failed schema: {schema_path.name}: {message}")
+
+
+def _fallback_type_matches(value: Any, expected: str) -> bool:
+    if expected == "string":
+        return isinstance(value, str)
+    if expected == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if expected == "null":
+        return value is None
+    return False
+
+
 def _require_jsonschema() -> None:
     if jsonschema is None:
         raise RuntimeError(
             "Schema validation requested but jsonschema is unavailable in this environment."
         )
+
+
+def _fallback_schema_fields(
+    schema: Mapping[str, Any],
+) -> tuple[list[str], Mapping[str, Any]]:
+    unsupported_root = sorted(set(schema) - _FALLBACK_ROOT_KEYWORDS)
+    if unsupported_root:
+        raise RuntimeError(
+            "Unsupported range_ref schema keyword(s) without jsonschema: "
+            + ", ".join(unsupported_root)
+        )
+    if schema.get("type") != "object":
+        raise RuntimeError("Fallback range_ref validation requires an object schema")
+    if schema.get("additionalProperties") is not False:
+        raise RuntimeError(
+            "Fallback range_ref validation requires additionalProperties=false"
+        )
+
+    required = schema.get("required")
+    properties = schema.get("properties")
+    if not isinstance(required, list) or not all(
+        isinstance(item, str) for item in required
+    ):
+        raise RuntimeError(
+            "Fallback range_ref validation requires string required fields"
+        )
+    if not isinstance(properties, Mapping):
+        raise RuntimeError("Fallback range_ref validation requires object properties")
+    return required, properties
+
+
+def _fallback_property_types(
+    field: str,
+    field_schema: Mapping[str, Any],
+) -> tuple[Any, list[str]]:
+    unsupported = sorted(set(field_schema) - _FALLBACK_PROPERTY_KEYWORDS)
+    if unsupported:
+        raise RuntimeError(
+            "Unsupported range_ref property schema keyword(s) without jsonschema "
+            f"for {field}: " + ", ".join(unsupported)
+        )
+
+    declared_type = field_schema.get("type")
+    if isinstance(declared_type, str):
+        expected_types = [declared_type]
+    elif isinstance(declared_type, list):
+        expected_types = declared_type
+    else:
+        expected_types = []
+
+    if not expected_types or not all(
+        isinstance(item, str) and item in _FALLBACK_PROPERTY_TYPES
+        for item in expected_types
+    ):
+        raise RuntimeError(
+            f"Unsupported range_ref property type without jsonschema for {field}"
+        )
+    return declared_type, expected_types
+
+
+def _validate_fallback_enum_const(
+    field: str,
+    value: Any,
+    field_schema: Mapping[str, Any],
+    schema_path: Path,
+) -> None:
+    enum = field_schema.get("enum")
+    if enum is not None:
+        if not isinstance(enum, list):
+            raise RuntimeError(
+                f"Fallback range_ref validation requires list enum for {field}"
+            )
+        if value not in enum:
+            raise _range_schema_error(
+                schema_path, f"{field} is not one of the allowed values"
+            )
+
+    if "const" in field_schema and value != field_schema["const"]:
+        raise _range_schema_error(
+            schema_path, f"{field} does not match the required constant"
+        )
+
+
+def _validate_fallback_minimum(
+    field: str,
+    value: Any,
+    field_schema: Mapping[str, Any],
+    expected_types: list[str],
+    schema_path: Path,
+) -> None:
+    minimum = field_schema.get("minimum")
+    if minimum is None:
+        return
+    if "integer" not in expected_types:
+        raise RuntimeError(
+            f"Unsupported range_ref minimum/type combination without jsonschema for {field}"
+        )
+    if not isinstance(minimum, (int, float)) or isinstance(minimum, bool):
+        raise RuntimeError(
+            f"Fallback range_ref validation requires numeric minimum for {field}"
+        )
+    if isinstance(value, int) and not isinstance(value, bool) and value < minimum:
+        raise _range_schema_error(
+            schema_path, f"{field} is below minimum {minimum}"
+        )
+
+
+def _validate_fallback_pattern(
+    field: str,
+    value: Any,
+    field_schema: Mapping[str, Any],
+    expected_types: list[str],
+    schema_path: Path,
+) -> None:
+    pattern = field_schema.get("pattern")
+    if pattern is None:
+        return
+    if "string" not in expected_types:
+        raise RuntimeError(
+            f"Unsupported range_ref pattern/type combination without jsonschema for {field}"
+        )
+    if pattern != _SHA256_PATTERN:
+        raise RuntimeError(
+            f"Unsupported range_ref pattern without jsonschema for {field}"
+        )
+    if not isinstance(value, str) or re.fullmatch(pattern, value) is None:
+        raise _range_schema_error(
+            schema_path, f"{field} does not match the required pattern"
+        )
+
+
+def _validate_range_ref_schema_fallback(
+    ref: Mapping[str, Any],
+    schema: Mapping[str, Any],
+    schema_path: Path,
+) -> None:
+    """Validate the deliberately small shipped range-ref schema subset.
+
+    This path exists for isolated RepoGround readers where optional site packages
+    are intentionally hidden, for example Python -I MCP runtimes. It is not a
+    general JSON Schema implementation. Any new validation keyword fails closed
+    until this bounded validator is explicitly extended and tested.
+    """
+    required, properties = _fallback_schema_fields(schema)
+
+    unsupported_fields = sorted(set(ref) - set(properties))
+    if unsupported_fields:
+        raise _range_schema_error(
+            schema_path,
+            "additional properties are not allowed: " + ", ".join(unsupported_fields),
+        )
+    missing = [field for field in required if field not in ref]
+    if missing:
+        raise _range_schema_error(
+            schema_path, "missing required field(s): " + ", ".join(missing)
+        )
+
+    for field, value in ref.items():
+        field_schema = properties.get(field)
+        if not isinstance(field_schema, Mapping):
+            raise RuntimeError(
+                f"Fallback range_ref validation has no schema object for {field}"
+            )
+        declared_type, expected_types = _fallback_property_types(field, field_schema)
+        if not any(
+            _fallback_type_matches(value, expected) for expected in expected_types
+        ):
+            raise _range_schema_error(
+                schema_path,
+                f"{field} has invalid type; expected {declared_type!r}",
+            )
+        _validate_fallback_enum_const(field, value, field_schema, schema_path)
+        _validate_fallback_minimum(
+            field, value, field_schema, expected_types, schema_path
+        )
+        _validate_fallback_pattern(
+            field, value, field_schema, expected_types, schema_path
+        )
+
+def _validate_range_ref_schema(
+    ref: Mapping[str, Any],
+    schema: Mapping[str, Any],
+    schema_path: Path,
+) -> None:
+    if jsonschema is None:
+        _validate_range_ref_schema_fallback(ref, schema, schema_path)
+        return
+    try:
+        jsonschema.validate(instance=ref, schema=schema)
+    except jsonschema.ValidationError as exc:
+        raise _range_schema_error(schema_path, exc.message) from exc
 
 
 @lru_cache(maxsize=8)
@@ -211,12 +436,7 @@ def resolve_range_ref(
     schema_path = _RANGE_REF_V2_SCHEMA_PATH if is_v2 else _RANGE_REF_V1_SCHEMA_PATH
     schema = _load_schema(schema_path)
 
-    _require_jsonschema()
-
-    try:
-        jsonschema.validate(instance=ref, schema=schema)
-    except jsonschema.ValidationError as e:
-        raise ValueError(f"range_ref failed schema: {schema_path.name}: {e.message}")
+    _validate_range_ref_schema(ref, schema, schema_path)
 
     role_str = ref.get("artifact_role")
 
