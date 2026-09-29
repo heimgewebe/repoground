@@ -546,13 +546,6 @@ def _project_compact_callees(compact: dict[str, Any], *, candidate_limit: int) -
     )
 
 
-def _group_call_sites_truncated(value: Any) -> bool:
-    return isinstance(value, list) and any(
-        isinstance(group, dict) and group.get("call_sites_truncated") is True
-        for group in value
-    )
-
-
 def compact_call_navigation(result: Any) -> dict[str, Any]:
     """Project callers/callees to decision evidence while leaving diagnostics verbose-only."""
     if not isinstance(result, dict) or result.get("kind") not in _CALL_NAVIGATION_KINDS:
@@ -581,12 +574,8 @@ def compact_call_navigation(result: Any) -> dict[str, Any]:
 
     if compact.get("kind") == "repobrief.call_callers":
         _project_compact_callers(compact, candidate_limit=candidate_limit)
-        groups = compact.get("callers")
     else:
         _project_compact_callees(compact, candidate_limit=candidate_limit)
-        groups = compact.get("callees")
-    if _group_call_sites_truncated(groups):
-        compact["truncated"] = True
     return compact
 
 def project_read_result(

@@ -240,6 +240,44 @@ def test_query_routes_direct_callee_question_to_call_graph(monkeypatch):
     assert result["navigation_hits"][0]["callee_symbol"]["name"] == "_cursor_offset"
 
 
+def test_query_marks_caller_group_site_truncation(monkeypatch):
+    wrapped = _call_result(relation="callers")
+    wrapped["result"]["callers"][0].update(
+        call_site_count=2,
+        call_sites_truncated=True,
+    )
+    monkeypatch.setattr(mcp_tools, "get_callers", lambda **_arguments: wrapped)
+
+    result = mcp_tools.query_existing_index(
+        bundle_manifest="demo.bundle.manifest.json",
+        query="Which Python functions directly call _cursor_offset?",
+        k=1,
+    )
+
+    assert result["navigation_hits"][0]["call_sites_truncated"] is True
+    assert result["navigation"]["truncated"] is True
+    assert result["budget"]["truncated"] is True
+
+
+def test_query_marks_callee_group_site_truncation(monkeypatch):
+    wrapped = _call_result(relation="callees")
+    wrapped["result"]["callees"][0].update(
+        call_site_count=2,
+        call_sites_truncated=True,
+    )
+    monkeypatch.setattr(mcp_tools, "get_callees", lambda **_arguments: wrapped)
+
+    result = mcp_tools.query_existing_index(
+        bundle_manifest="demo.bundle.manifest.json",
+        query="Which functions does build_current_work_projection directly call?",
+        k=1,
+    )
+
+    assert result["navigation_hits"][0]["call_sites_truncated"] is True
+    assert result["navigation"]["truncated"] is True
+    assert result["budget"]["truncated"] is True
+
+
 def test_call_graph_intent_falls_back_to_text_when_navigation_is_unavailable(
     monkeypatch,
 ):
