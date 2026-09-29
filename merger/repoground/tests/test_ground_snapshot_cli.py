@@ -1766,3 +1766,52 @@ def test_bounded_finalization_records_insufficient_late_pruning(
     assert str(call_graph) in plan["removed_paths"]
     manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
     assert manifest_data["capabilities"]["repobrief_output_plan"] == output_plan
+
+
+def test_bounded_finalization_last_pass_prune_fails_closed_instead_of_exhausting(
+    tmp_path, monkeypatch
+):
+    manifest, _canonical, call_graph = _write_bounded_manifest(
+        tmp_path, canonical_bytes=64, call_graph_bytes=50_000
+    )
+    initial_bytes = cmd_ground._bundle_file_bytes(manifest)
+    target = initial_bytes + 20_000
+    plan = cmd_ground.apply_bounded_bundle_budget(
+        manifest, "agent-portable", target
+    )
+    output_plan = {"bounded_bundle": plan}
+    cmd_ground.mark_bundle_manifest_profile(
+        manifest, "agent-portable", output_plan
+    )
+    snapshot_plan = cmd_ground.emit_snapshot_plan_report(
+        manifest, "agent-portable", output_plan
+    )
+    assert snapshot_plan is not None
+
+    control = tmp_path / "last-pass-control.bin"
+
+    def fake_finalize(_manifest, _profile):
+        control.write_bytes(b"x" * 30_000)
+        return {
+            "status": "pass",
+            "errors": [],
+            "profile_evaluation": {"status": "warn"},
+            "control_paths": [str(control)],
+            "refreshed_paths": [],
+        }
+
+    monkeypatch.setattr(cmd_ground, "finalize_snapshot_bundle", fake_finalize)
+
+    result = cmd_ground.finalize_snapshot_with_bounded_bundle(
+        manifest,
+        "agent-portable",
+        output_plan,
+        snapshot_plan,
+        max_passes=1,
+    )
+
+    assert result["status"] == "fail"
+    assert not call_graph.exists()
+    assert plan["status"] == "fail"
+    assert plan["reason"] == "final_bundle_measurement_did_not_stabilize"
+    assert "bounded_bundle_measurement_unstable" in result["errors"]

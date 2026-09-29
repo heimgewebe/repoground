@@ -2298,6 +2298,27 @@ def finalize_bounded_bundle_measurement(
     }
 
 
+def _bounded_measurement_unstable_result(
+    bundle_manifest: Path,
+    profile: str,
+    output_plan: dict[str, Any],
+    plan: dict[str, Any],
+    finalization: dict[str, Any],
+) -> dict[str, Any]:
+    plan["status"] = "fail"
+    plan["reason"] = "final_bundle_measurement_did_not_stabilize"
+    mark_bundle_manifest_profile(bundle_manifest, profile, output_plan)
+    emit_snapshot_plan_report(bundle_manifest, profile, output_plan)
+    return {
+        **finalization,
+        "status": "fail",
+        "errors": [
+            *finalization.get("errors", []),
+            "bounded_bundle_measurement_unstable",
+        ],
+    }
+
+
 def finalize_snapshot_with_bounded_bundle(
     bundle_manifest: Path | None,
     profile: str,
@@ -2341,6 +2362,14 @@ def finalize_snapshot_with_bounded_bundle(
             mark_bundle_manifest_profile(bundle_manifest, profile, output_plan)
             emit_snapshot_plan_report(bundle_manifest, profile, output_plan)
             if retry_plan["status"] == "pass":
+                if attempt + 1 == max_passes:
+                    return _bounded_measurement_unstable_result(
+                        bundle_manifest,
+                        profile,
+                        output_plan,
+                        plan,
+                        finalization,
+                    )
                 continue
             return finalization
 
@@ -2358,18 +2387,13 @@ def finalize_snapshot_with_bounded_bundle(
             return finalization
 
         if attempt + 1 == max_passes:
-            plan["status"] = "fail"
-            plan["reason"] = "final_bundle_measurement_did_not_stabilize"
-            mark_bundle_manifest_profile(bundle_manifest, profile, output_plan)
-            emit_snapshot_plan_report(bundle_manifest, profile, output_plan)
-            return {
-                **finalization,
-                "status": "fail",
-                "errors": [
-                    *finalization.get("errors", []),
-                    "bounded_bundle_measurement_unstable",
-                ],
-            }
+            return _bounded_measurement_unstable_result(
+                bundle_manifest,
+                profile,
+                output_plan,
+                plan,
+                finalization,
+            )
 
         mark_bundle_manifest_profile(bundle_manifest, profile, output_plan)
         emit_snapshot_plan_report(bundle_manifest, profile, output_plan)
