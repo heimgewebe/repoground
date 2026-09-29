@@ -1595,7 +1595,10 @@ def build_snapshot_create_result(args: argparse.Namespace) -> dict[str, Any]:
         bounded_bundle_max_bytes,
     )
     dropped_profile_paths.extend(
-        Path(path) for path in bounded_bundle_plan["removed_paths"]
+        _bounded_recorded_output_paths(
+            artifacts.bundle_manifest,
+            bounded_bundle_plan["removed_paths"],
+        )
     )
     output_plan["bounded_bundle"] = bounded_bundle_plan
     mark_bundle_manifest_profile(artifacts.bundle_manifest, profile, output_plan)
@@ -1610,7 +1613,10 @@ def build_snapshot_create_result(args: argparse.Namespace) -> dict[str, Any]:
     )
     _append_unique_paths(
         dropped_profile_paths,
-        bounded_bundle_plan["removed_paths"],
+        _bounded_recorded_output_paths(
+            artifacts.bundle_manifest,
+            bounded_bundle_plan["removed_paths"],
+        ),
     )
     profile_evaluation = finalization.get("profile_evaluation")
     artifact_paths = [
@@ -2045,6 +2051,36 @@ def _remove_recorded_bounded_paths(
             ) from exc
 
 
+def _bounded_recorded_output_paths(
+    bundle_manifest: Path | None,
+    raw_paths: Iterable[str | Path],
+) -> list[Path]:
+    if bundle_manifest is None:
+        return []
+    root = bundle_manifest.parent.resolve()
+    resolved_paths: list[Path] = []
+    for raw_path in raw_paths:
+        candidate_input = Path(raw_path)
+        candidate_path = (
+            candidate_input
+            if candidate_input.is_absolute()
+            else bundle_manifest.parent / candidate_input
+        )
+        try:
+            candidate = candidate_path.resolve()
+            candidate.relative_to(root)
+        except OSError as exc:
+            raise ValueError(
+                f"bounded bundle recorded path resolution failed for {candidate_path}"
+            ) from exc
+        except ValueError as exc:
+            raise ValueError(
+                f"bounded bundle recorded path escapes output directory: {candidate_path}"
+            ) from exc
+        resolved_paths.append(candidate)
+    return resolved_paths
+
+
 def _append_unique_paths_as_strings(
     paths: list[str],
     raw_paths: Iterable[str | Path],
@@ -2101,7 +2137,16 @@ def _prune_bounded_role(
         and not isinstance(item.get("bytes", 0), bool)
     )
     dropped = _drop_manifest_role(bundle_manifest, role)
-    _append_unique_paths_as_strings(removed_paths, dropped)
+    root = bundle_manifest.parent.resolve()
+    relative_dropped: list[str] = []
+    for path in dropped:
+        try:
+            relative_dropped.append(path.relative_to(root).as_posix())
+        except ValueError as exc:
+            raise ValueError(
+                f"bounded bundle dropped path escapes output directory: {path}"
+            ) from exc
+    _append_unique_paths_as_strings(removed_paths, relative_dropped)
 
     decision_roles = {
         item.get("role") for item in decisions if isinstance(item, dict)
@@ -2275,13 +2320,15 @@ def finalize_bounded_bundle_measurement(
     plan: dict[str, Any],
     finalization: dict[str, Any],
 ) -> dict[str, Any]:
-    if not plan["enabled"] or bundle_manifest is None:
+    if bundle_manifest is None:
         return finalization
     final_bundle_bytes = _bundle_file_bytes(
         bundle_manifest,
         extra_paths=_bounded_finalization_extra_paths(plan, finalization),
     )
     plan["final_bundle_bytes"] = final_bundle_bytes
+    if not plan.get("enabled"):
+        return finalization
     if final_bundle_bytes <= plan["target_max_bytes"]:
         plan["status"] = "pass"
         plan.pop("reason", None)
@@ -2298,6 +2345,40 @@ def finalize_bounded_bundle_measurement(
     }
 
 
+def _refresh_bounded_selection_plan(
+    bundle_manifest: Path,
+    profile: str,
+    plan: dict[str, Any],
+) -> None:
+    if not plan.get("enabled"):
+        return
+    target = plan.get("target_max_bytes")
+    if not isinstance(target, int) or isinstance(target, bool) or target <= 0:
+        raise ValueError("bounded bundle target is invalid during finalization")
+    decisions = [
+        dict(item)
+        for item in plan.get("role_decisions", [])
+        if isinstance(item, dict)
+    ]
+    selected_roles, selection_sha256 = _bounded_selection_identity(
+        bundle_manifest,
+        profile=profile,
+        target=target,
+        decisions=decisions,
+    )
+    plan["selected_roles"] = selected_roles
+    plan["selection_sha256"] = selection_sha256
+
+
+def _persist_bounded_output_plan(
+    bundle_manifest: Path,
+    profile: str,
+    output_plan: dict[str, Any],
+) -> None:
+    mark_bundle_manifest_profile(bundle_manifest, profile, output_plan)
+    emit_snapshot_plan_report(bundle_manifest, profile, output_plan)
+
+
 def _bounded_measurement_unstable_result(
     bundle_manifest: Path,
     profile: str,
@@ -2305,17 +2386,17 @@ def _bounded_measurement_unstable_result(
     plan: dict[str, Any],
     finalization: dict[str, Any],
 ) -> dict[str, Any]:
-    plan["status"] = "fail"
+    if plan.get("enabled"):
+        plan["status"] = "fail"
     plan["reason"] = "final_bundle_measurement_did_not_stabilize"
-    mark_bundle_manifest_profile(bundle_manifest, profile, output_plan)
-    emit_snapshot_plan_report(bundle_manifest, profile, output_plan)
+    _persist_bounded_output_plan(bundle_manifest, profile, output_plan)
+    errors = list(finalization.get("errors", []))
+    if "bounded_bundle_measurement_unstable" not in errors:
+        errors.append("bounded_bundle_measurement_unstable")
     return {
         **finalization,
         "status": "fail",
-        "errors": [
-            *finalization.get("errors", []),
-            "bounded_bundle_measurement_unstable",
-        ],
+        "errors": errors,
     }
 
 
@@ -2328,9 +2409,11 @@ def finalize_snapshot_with_bounded_bundle(
     max_passes: int = 4,
 ) -> dict[str, Any]:
     plan = output_plan.get("bounded_bundle")
-    if not isinstance(plan, dict) or not plan.get("enabled"):
+    if not isinstance(plan, dict):
         return finalize_snapshot_bundle(bundle_manifest, profile)
     if bundle_manifest is None or snapshot_plan_path is None:
+        if not plan.get("enabled"):
+            return finalize_snapshot_bundle(bundle_manifest, profile)
         return {
             "status": "fail",
             "errors": ["bounded_bundle_snapshot_plan_missing"],
@@ -2342,13 +2425,11 @@ def finalize_snapshot_with_bounded_bundle(
     for attempt in range(max_passes):
         persisted_final_bytes = plan.get("final_bundle_bytes")
         finalization = finalize_snapshot_bundle(bundle_manifest, profile)
-        if finalization.get("status") != "pass":
-            return finalization
-        finalization = finalize_bounded_bundle_measurement(
+        measured_finalization = finalize_bounded_bundle_measurement(
             bundle_manifest, plan, finalization
         )
 
-        if finalization.get("status") != "pass":
+        if plan.get("enabled") and plan.get("status") == "fail":
             retry_plan = apply_bounded_bundle_budget(
                 bundle_manifest,
                 profile,
@@ -2359,8 +2440,8 @@ def finalize_snapshot_with_bounded_bundle(
             )
             plan.clear()
             plan.update(retry_plan)
-            mark_bundle_manifest_profile(bundle_manifest, profile, output_plan)
-            emit_snapshot_plan_report(bundle_manifest, profile, output_plan)
+            _refresh_bounded_selection_plan(bundle_manifest, profile, plan)
+            _persist_bounded_output_plan(bundle_manifest, profile, output_plan)
             if retry_plan["status"] == "pass":
                 if attempt + 1 == max_passes:
                     return _bounded_measurement_unstable_result(
@@ -2368,11 +2449,12 @@ def finalize_snapshot_with_bounded_bundle(
                         profile,
                         output_plan,
                         plan,
-                        finalization,
+                        measured_finalization,
                     )
                 continue
-            return finalization
+            return measured_finalization
 
+        _refresh_bounded_selection_plan(bundle_manifest, profile, plan)
         manifest_data = json.loads(bundle_manifest.read_text(encoding="utf-8"))
         capabilities = manifest_data.get("capabilities", {})
         persisted_output_plan = (
@@ -2384,7 +2466,7 @@ def finalize_snapshot_with_bounded_bundle(
             plan.get("final_bundle_bytes") == persisted_final_bytes
             and persisted_output_plan == output_plan
         ):
-            return finalization
+            return measured_finalization
 
         if attempt + 1 == max_passes:
             return _bounded_measurement_unstable_result(
@@ -2392,14 +2474,12 @@ def finalize_snapshot_with_bounded_bundle(
                 profile,
                 output_plan,
                 plan,
-                finalization,
+                measured_finalization,
             )
 
-        mark_bundle_manifest_profile(bundle_manifest, profile, output_plan)
-        emit_snapshot_plan_report(bundle_manifest, profile, output_plan)
+        _persist_bounded_output_plan(bundle_manifest, profile, output_plan)
 
     raise AssertionError("bounded bundle finalization loop exhausted")
-
 
 def refresh_entry(bundle_manifest: Path | None) -> list[Path]:
     if bundle_manifest is None:
