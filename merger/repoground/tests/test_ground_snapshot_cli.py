@@ -1360,7 +1360,7 @@ def _write_bounded_manifest(tmp_path, *, canonical_bytes=32, call_graph_bytes=96
     call_graph = tmp_path / "call-graph.json"
     canonical.write_bytes(b"c" * canonical_bytes)
     call_graph.write_bytes(b"g" * call_graph_bytes)
-    manifest = tmp_path / "bundle.manifest.json"
+    manifest = tmp_path / "demo.bundle.manifest.json"
     manifest.write_text(
         json.dumps(
             {
@@ -1431,17 +1431,108 @@ def test_bounded_bundle_budget_rejects_target_above_hard_limit(tmp_path):
         )
 
 
-def test_bounded_bundle_byte_count_includes_unmanifested_split_parts(tmp_path):
+@pytest.mark.parametrize(
+    "requested",
+    ["0", "257MB", "infM", "1e309M"],
+)
+def test_snapshot_create_rejects_invalid_bundle_limit_before_output(
+    tmp_path, capsys, requested
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "README.md").write_text("# invalid bounded request\n", encoding="utf-8")
+    out = tmp_path / "briefs"
+
+    rc = main(
+        [
+            "ground",
+            "snapshot",
+            "create",
+            "--repo",
+            str(repo),
+            "--out",
+            str(out),
+            "--profile",
+            "agent-portable",
+            "--bundle-max-bytes",
+            requested,
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "--bundle-max-bytes" in captured.err
+    assert not out.exists()
+
+
+def test_bounded_bundle_byte_count_scopes_to_current_snapshot(tmp_path):
     manifest, canonical, call_graph = _write_bounded_manifest(tmp_path)
     split_part = tmp_path / "brief-part2.md"
     split_part.write_bytes(b"s" * 41)
+    index_sidecar = tmp_path / "index.json"
+    index_sidecar.write_text(
+        json.dumps(
+            {
+                "artifacts": {
+                    "md_parts_basenames": [canonical.name, split_part.name],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+    manifest_data["artifacts"].append(
+        {
+            "role": "index_sidecar_json",
+            "path": index_sidecar.name,
+            "bytes": index_sidecar.stat().st_size,
+        }
+    )
+    manifest.write_text(json.dumps(manifest_data), encoding="utf-8")
+    unrelated = tmp_path / "old-snapshot.bin"
+    unrelated.write_bytes(b"z" * 100_000)
 
     assert cmd_ground._bundle_file_bytes(manifest) == (
         manifest.stat().st_size
         + canonical.stat().st_size
         + call_graph.stat().st_size
+        + index_sidecar.stat().st_size
         + split_part.stat().st_size
     )
+
+
+def test_snapshot_create_reused_output_ignores_stale_snapshot_files(
+    tmp_path, capsys
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "README.md").write_text("# reused bounded output\n", encoding="utf-8")
+    out = tmp_path / "briefs"
+    out.mkdir()
+    stale = out / "old-snapshot.bin"
+    stale.write_bytes(b"z" * (2 * 1024 * 1024))
+
+    rc = main(
+        [
+            "ground",
+            "snapshot",
+            "create",
+            "--repo",
+            str(repo),
+            "--out",
+            str(out),
+            "--profile",
+            "agent-portable",
+            "--bundle-max-bytes",
+            "1MB",
+        ]
+    )
+
+    result = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert result["status"] == "ok"
+    assert result["bounded_bundle"]["final_bundle_bytes"] <= 1024 * 1024
+    assert stale.exists()
 
 
 def test_bounded_bundle_byte_count_fails_closed_on_measurement_error(
@@ -1518,7 +1609,160 @@ def test_snapshot_create_persists_final_bounded_bundle_measurement(tmp_path, cap
     assert bounded["status"] == "pass"
     assert bounded["final_bundle_bytes"] == actual_bytes
     assert result["bounded_bundle"]["final_bundle_bytes"] == actual_bytes
+    manifest_path = next(plan_path.parent.glob("*.bundle.manifest.json"))
+    manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert (
+        manifest_data["capabilities"]["repobrief_output_plan"]["bounded_bundle"]
+        == bounded
+    )
     assert (
         result["finalization"]["manifest_sha256_at_final_health"]
         == result["finalization"]["final_manifest_sha256"]
     )
+
+
+def test_bounded_bundle_retry_removes_recorded_file_without_manifest_role(tmp_path):
+    manifest, canonical, call_graph = _write_bounded_manifest(tmp_path)
+    target = manifest.stat().st_size + canonical.stat().st_size + 8
+    plan = cmd_ground.apply_bounded_bundle_budget(
+        manifest, "agent-portable", target
+    )
+    assert not call_graph.exists()
+    assert all(
+        artifact.get("role") != "python_call_graph_json"
+        for artifact in json.loads(manifest.read_text(encoding="utf-8"))["artifacts"]
+    )
+
+    call_graph.write_bytes(b"g" * 96)
+    retry = cmd_ground.apply_bounded_bundle_budget(
+        manifest,
+        "agent-portable",
+        target,
+        fail_if_unmet=False,
+        extra_paths=[call_graph],
+        prior_plan=plan,
+    )
+
+    assert retry["status"] == "pass"
+    assert not call_graph.exists()
+    assert retry["removed_paths"] == plan["removed_paths"]
+    assert retry["role_decisions"] == plan["role_decisions"]
+
+
+def test_bounded_finalization_retries_approved_pruning_after_controls(
+    tmp_path, monkeypatch
+):
+    manifest, _canonical, call_graph = _write_bounded_manifest(
+        tmp_path, canonical_bytes=64, call_graph_bytes=50_000
+    )
+    initial_bytes = cmd_ground._bundle_file_bytes(manifest)
+    target = initial_bytes + 20_000
+    plan = cmd_ground.apply_bounded_bundle_budget(
+        manifest, "agent-portable", target
+    )
+    assert plan["role_decisions"] == []
+    output_plan = {"bounded_bundle": plan}
+    cmd_ground.mark_bundle_manifest_profile(
+        manifest, "agent-portable", output_plan
+    )
+    snapshot_plan = cmd_ground.emit_snapshot_plan_report(
+        manifest, "agent-portable", output_plan
+    )
+    assert snapshot_plan is not None
+    assert cmd_ground._bundle_file_bytes(manifest) <= target
+
+    control = tmp_path / "late-control.bin"
+
+    def fake_finalize(_manifest, _profile):
+        control.write_bytes(b"x" * 30_000)
+        return {
+            "status": "pass",
+            "errors": [],
+            "profile_evaluation": {"status": "warn"},
+            "control_paths": [str(control)],
+            "refreshed_paths": [],
+        }
+
+    monkeypatch.setattr(cmd_ground, "finalize_snapshot_bundle", fake_finalize)
+
+    result = cmd_ground.finalize_snapshot_with_bounded_bundle(
+        manifest,
+        "agent-portable",
+        output_plan,
+        snapshot_plan,
+    )
+
+    assert result["status"] == "pass"
+    assert not call_graph.exists()
+    assert plan["role_decisions"] == [
+        {
+            "role": "python_call_graph_json",
+            "profile_requirement": "recommended",
+            "decision": "profile_excluded_for_budget",
+            "reason": "bounded_bundle_budget",
+            "declared_bytes": 50_000,
+        }
+    ]
+    assert plan["final_bundle_bytes"] <= target
+    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+    assert manifest_data["capabilities"]["repobrief_output_plan"] == output_plan
+
+
+def test_bounded_finalization_records_insufficient_late_pruning(
+    tmp_path, monkeypatch
+):
+    manifest, _canonical, call_graph = _write_bounded_manifest(
+        tmp_path, canonical_bytes=64, call_graph_bytes=50_000
+    )
+    initial_bytes = cmd_ground._bundle_file_bytes(manifest)
+    target = initial_bytes + 20_000
+    plan = cmd_ground.apply_bounded_bundle_budget(
+        manifest, "agent-portable", target
+    )
+    output_plan = {"bounded_bundle": plan}
+    cmd_ground.mark_bundle_manifest_profile(
+        manifest, "agent-portable", output_plan
+    )
+    snapshot_plan = cmd_ground.emit_snapshot_plan_report(
+        manifest, "agent-portable", output_plan
+    )
+    assert snapshot_plan is not None
+
+    control = tmp_path / "oversized-late-control.bin"
+
+    def fake_finalize(_manifest, _profile):
+        control.write_bytes(b"x" * 100_000)
+        return {
+            "status": "pass",
+            "errors": [],
+            "profile_evaluation": {"status": "warn"},
+            "control_paths": [str(control)],
+            "refreshed_paths": [],
+        }
+
+    monkeypatch.setattr(cmd_ground, "finalize_snapshot_bundle", fake_finalize)
+
+    result = cmd_ground.finalize_snapshot_with_bounded_bundle(
+        manifest,
+        "agent-portable",
+        output_plan,
+        snapshot_plan,
+    )
+
+    assert result["status"] == "fail"
+    assert not call_graph.exists()
+    assert plan["status"] == "fail"
+    assert plan["reason"] == "approved_droppable_roles_insufficient"
+    assert plan["final_bundle_bytes"] > target
+    assert plan["role_decisions"] == [
+        {
+            "role": "python_call_graph_json",
+            "profile_requirement": "recommended",
+            "decision": "profile_excluded_for_budget",
+            "reason": "bounded_bundle_budget",
+            "declared_bytes": 50_000,
+        }
+    ]
+    assert str(call_graph) in plan["removed_paths"]
+    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+    assert manifest_data["capabilities"]["repobrief_output_plan"] == output_plan
