@@ -366,3 +366,190 @@ def test_verbose_navigation_preserves_historical_full_result_shape(tmp_path: Pat
 
     assert wrapped_verbose["status"] == "invalid"
     assert wrapped_verbose["result"] == access_result
+
+
+def _compact_json_bytes(value: object) -> int:
+    return len(
+        json.dumps(value, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    )
+
+
+def test_compact_callers_preserve_navigation_evidence_and_bound_payload(tmp_path: Path):
+    manifest = _bundle(tmp_path)
+    compact = mcp_tools.get_callers(
+        bundle_manifest=manifest,
+        name="target",
+        path="pkg/target.py",
+        k=6,
+    )
+    verbose = mcp_tools.get_callers(
+        bundle_manifest=manifest,
+        name="target",
+        path="pkg/target.py",
+        k=6,
+        verbose=True,
+    )
+
+    result = compact["result"]
+    full = verbose["result"]
+    assert [caller["caller_qualified_name"] for caller in result["callers"]] == [
+        caller["caller_qualified_name"] for caller in full["callers"]
+    ]
+    assert [
+        caller["caller_symbol"]["range_ref"] for caller in result["callers"]
+    ] == [caller["caller_symbol"]["range_ref"] for caller in full["callers"]]
+    assert result["total_caller_count"] == full["total_caller_count"]
+    assert result["total_call_site_count"] == full["total_call_site_count"]
+    assert result["unresolved_reference_count"] == full["unresolved_reference_count"]
+    assert (
+        result["unresolved_references_truncated"]
+        == full["unresolved_references_truncated"]
+    )
+
+    call_site = result["callers"][0]["call_sites"][0]
+    assert call_site["evidence_level"] == "S1"
+    assert call_site["resolution_status"] == "resolved"
+    assert call_site["range_ref"].startswith("file:pkg/a.py#")
+    assert "source_range" not in call_site
+    assert "caller_start_line" not in call_site
+
+    unresolved = result["unresolved_references"][0]
+    assert unresolved["evidence_level"] == "S0"
+    assert unresolved["resolution_status"] != "resolved"
+    assert unresolved["caller_symbol_id"]
+    assert unresolved["caller_qualified_name"]
+    assert unresolved["range_ref"].startswith("file:")
+    assert unresolved["relation_to_selected_target"]
+
+    coverage = result["call_graph_coverage"]
+    full_coverage = full["call_graph_coverage"]
+    assert coverage["scope"] == full_coverage["scope"]
+    assert coverage["completeness"] == full_coverage["completeness"]
+    assert coverage["resolved_ratio"] == full_coverage["resolved_ratio"]
+    assert coverage["does_not_establish"] == full_coverage["does_not_establish"]
+    assert coverage["task_profile_confidence"]["basic_repo_question"]["status"] == (
+        full_coverage["task_profile_confidence"]["basic_repo_question"]["status"]
+    )
+    assert coverage["task_profile_confidence"]["basic_repo_question"][
+        "minimum_resolved_ratio"
+    ] == full_coverage["task_profile_confidence"]["basic_repo_question"][
+        "minimum_resolved_ratio"
+    ]
+    assert "unresolved_by_reason" not in coverage
+    assert "status_ratios" not in coverage
+
+    assert result["symbol_index"]["sha256"] == full["symbol_index"]["sha256"]
+    assert result["call_graph"]["sha256"] == full["call_graph"]["sha256"]
+    assert "absolute_path" not in result["symbol_index"]
+    assert "absolute_path" not in result["call_graph"]
+    assert result["call_graph_metadata"]["resolution_counts"] == full[
+        "call_graph_metadata"
+    ]["resolution_counts"]
+
+    compact_bytes = _compact_json_bytes(result)
+    verbose_bytes = _compact_json_bytes(full)
+    assert compact_bytes <= int(verbose_bytes * 0.75), (
+        compact_bytes,
+        verbose_bytes,
+    )
+
+
+def test_compact_callees_preserve_navigation_evidence_and_bound_payload(tmp_path: Path):
+    manifest = _bundle(tmp_path)
+    compact = mcp_tools.get_callees(
+        bundle_manifest=manifest,
+        name="caller_one",
+        path="pkg/a.py",
+        k=6,
+    )
+    verbose = mcp_tools.get_callees(
+        bundle_manifest=manifest,
+        name="caller_one",
+        path="pkg/a.py",
+        k=6,
+        verbose=True,
+    )
+
+    result = compact["result"]
+    full = verbose["result"]
+    assert result["caller_symbol"]["id"] == full["caller_symbol"]["id"]
+    assert result["caller_symbol"]["range_ref"] == full["caller_symbol"]["range_ref"]
+    assert [callee["callee_symbol"]["id"] for callee in result["callees"]] == [
+        callee["callee_symbol"]["id"] for callee in full["callees"]
+    ]
+    assert result["total_callee_count"] == full["total_callee_count"]
+    assert result["total_call_site_count"] == full["total_call_site_count"]
+    assert result["unresolved_call_site_count"] == full["unresolved_call_site_count"]
+    assert (
+        result["unresolved_call_sites_truncated"]
+        == full["unresolved_call_sites_truncated"]
+    )
+
+    for callee in result["callees"]:
+        assert callee["callee_symbol"]["range_ref"].startswith("file:")
+        for call_site in callee["call_sites"]:
+            assert call_site["evidence_level"] == "S1"
+            assert call_site["resolution_status"] == "resolved"
+            assert call_site["range_ref"].startswith("file:")
+            assert "source_range" not in call_site
+
+    unresolved = result["unresolved_call_sites"][0]
+    assert unresolved["evidence_level"] == "S0"
+    assert unresolved["resolution_status"] != "resolved"
+    assert unresolved["callee_expression"]
+    assert unresolved["range_ref"].startswith("file:")
+
+    coverage = result["call_graph_coverage"]
+    full_coverage = full["call_graph_coverage"]
+    assert coverage["resolved_ratio"] == full_coverage["resolved_ratio"]
+    assert coverage["completeness"] == full_coverage["completeness"]
+    assert coverage["task_profile_confidence"]["review"]["status"] == full_coverage[
+        "task_profile_confidence"
+    ]["review"]["status"]
+
+    compact_bytes = _compact_json_bytes(result)
+    verbose_bytes = _compact_json_bytes(full)
+    assert compact_bytes <= int(verbose_bytes * 0.75), (
+        compact_bytes,
+        verbose_bytes,
+    )
+
+
+def test_verbose_call_navigation_keeps_full_historical_result(tmp_path: Path):
+    manifest = _bundle(tmp_path)
+
+    direct_callers = bundle_access.get_callers(
+        manifest,
+        "target",
+        path="pkg/target.py",
+        k=6,
+        verbose=True,
+    )
+    wrapped_callers = mcp_tools.get_callers(
+        bundle_manifest=manifest,
+        name="target",
+        path="pkg/target.py",
+        k=6,
+        verbose=True,
+    )
+    assert wrapped_callers["result"] == direct_callers
+    assert "source_range" in direct_callers["callers"][0]["call_sites"][0]
+    assert "absolute_path" in direct_callers["symbol_index"]
+
+    direct_callees = bundle_access.get_callees(
+        manifest,
+        "caller_one",
+        path="pkg/a.py",
+        k=6,
+        verbose=True,
+    )
+    wrapped_callees = mcp_tools.get_callees(
+        bundle_manifest=manifest,
+        name="caller_one",
+        path="pkg/a.py",
+        k=6,
+        verbose=True,
+    )
+    assert wrapped_callees["result"] == direct_callees
+    assert "source_range" in direct_callees["callees"][0]["call_sites"][0]
+    assert "absolute_path" in direct_callees["call_graph"]
