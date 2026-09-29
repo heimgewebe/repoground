@@ -405,6 +405,52 @@ def _compact_callees(value: Any) -> list[dict[str, Any]]:
     return callees
 
 
+def _project_compact_callers(compact: dict[str, Any]) -> None:
+    if "target_symbol" in compact:
+        compact["target_symbol"] = _compact_symbol(compact.get("target_symbol"))
+    candidates = compact.get("target_candidates")
+    if isinstance(candidates, list):
+        compact["target_candidates"] = [
+            symbol
+            for candidate in candidates
+            if (symbol := _compact_symbol(candidate)) is not None
+        ]
+    compact["callers"] = _compact_callers(compact.get("callers"))
+    unresolved = compact.get("unresolved_references")
+    compact["unresolved_references"] = (
+        [
+            _compact_unresolved_call_site(site, keep_caller_identity=True)
+            for site in unresolved
+            if isinstance(site, dict)
+        ]
+        if isinstance(unresolved, list)
+        else []
+    )
+
+
+def _project_compact_callees(compact: dict[str, Any]) -> None:
+    if "caller_symbol" in compact:
+        compact["caller_symbol"] = _compact_symbol(compact.get("caller_symbol"))
+    candidates = compact.get("caller_candidates")
+    if isinstance(candidates, list):
+        compact["caller_candidates"] = [
+            symbol
+            for candidate in candidates
+            if (symbol := _compact_symbol(candidate)) is not None
+        ]
+    compact["callees"] = _compact_callees(compact.get("callees"))
+    unresolved = compact.get("unresolved_call_sites")
+    compact["unresolved_call_sites"] = (
+        [
+            _compact_unresolved_call_site(site, keep_caller_identity=False)
+            for site in unresolved
+            if isinstance(site, dict)
+        ]
+        if isinstance(unresolved, list)
+        else []
+    )
+
+
 def compact_call_navigation(result: Any) -> dict[str, Any]:
     """Project callers/callees to decision evidence while leaving diagnostics verbose-only."""
     if not isinstance(result, dict) or result.get("kind") not in _CALL_NAVIGATION_KINDS:
@@ -424,49 +470,10 @@ def compact_call_navigation(result: Any) -> dict[str, Any]:
         )
 
     if compact.get("kind") == "repobrief.call_callers":
-        if "target_symbol" in compact:
-            compact["target_symbol"] = _compact_symbol(compact.get("target_symbol"))
-        candidates = compact.get("target_candidates")
-        if isinstance(candidates, list):
-            compact["target_candidates"] = [
-                symbol
-                for candidate in candidates
-                if (symbol := _compact_symbol(candidate)) is not None
-            ]
-        compact["callers"] = _compact_callers(compact.get("callers"))
-        unresolved = compact.get("unresolved_references")
-        compact["unresolved_references"] = (
-            [
-                _compact_unresolved_call_site(site, keep_caller_identity=True)
-                for site in unresolved
-                if isinstance(site, dict)
-            ]
-            if isinstance(unresolved, list)
-            else []
-        )
+        _project_compact_callers(compact)
     else:
-        if "caller_symbol" in compact:
-            compact["caller_symbol"] = _compact_symbol(compact.get("caller_symbol"))
-        candidates = compact.get("caller_candidates")
-        if isinstance(candidates, list):
-            compact["caller_candidates"] = [
-                symbol
-                for candidate in candidates
-                if (symbol := _compact_symbol(candidate)) is not None
-            ]
-        compact["callees"] = _compact_callees(compact.get("callees"))
-        unresolved = compact.get("unresolved_call_sites")
-        compact["unresolved_call_sites"] = (
-            [
-                _compact_unresolved_call_site(site, keep_caller_identity=False)
-                for site in unresolved
-                if isinstance(site, dict)
-            ]
-            if isinstance(unresolved, list)
-            else []
-        )
+        _project_compact_callees(compact)
     return compact
-
 
 def project_read_result(
     result: dict[str, Any],

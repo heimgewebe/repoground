@@ -448,7 +448,7 @@ def test_compact_callers_preserve_navigation_evidence_and_bound_payload(tmp_path
 
     compact_bytes = _compact_json_bytes(result)
     verbose_bytes = _compact_json_bytes(full)
-    assert compact_bytes <= int(verbose_bytes * 0.75), (
+    assert compact_bytes <= verbose_bytes // 2, (
         compact_bytes,
         verbose_bytes,
     )
@@ -509,7 +509,7 @@ def test_compact_callees_preserve_navigation_evidence_and_bound_payload(tmp_path
 
     compact_bytes = _compact_json_bytes(result)
     verbose_bytes = _compact_json_bytes(full)
-    assert compact_bytes <= int(verbose_bytes * 0.75), (
+    assert compact_bytes <= verbose_bytes // 2, (
         compact_bytes,
         verbose_bytes,
     )
