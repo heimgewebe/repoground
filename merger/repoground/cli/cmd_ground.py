@@ -1503,6 +1503,19 @@ def run_preflight(args: argparse.Namespace) -> int:
     return 0 if result.get("status") in {"pass", "warn"} else 1
 
 
+def _append_unique_paths(
+    paths: list[Path],
+    raw_paths: Iterable[str | Path],
+) -> None:
+    known = set(paths)
+    for raw_path in raw_paths:
+        path = Path(raw_path)
+        if path in known:
+            continue
+        paths.append(path)
+        known.add(path)
+
+
 def build_snapshot_create_result(args: argparse.Namespace) -> dict[str, Any]:
     profile = args.profile
     repo = Path(args.repo).expanduser().resolve()
@@ -1595,10 +1608,10 @@ def build_snapshot_create_result(args: argparse.Namespace) -> dict[str, Any]:
         output_plan,
         snapshot_plan_path,
     )
-    for raw_path in bounded_bundle_plan["removed_paths"]:
-        path = Path(raw_path)
-        if path not in dropped_profile_paths:
-            dropped_profile_paths.append(path)
+    _append_unique_paths(
+        dropped_profile_paths,
+        bounded_bundle_plan["removed_paths"],
+    )
     profile_evaluation = finalization.get("profile_evaluation")
     artifact_paths = [
         path
@@ -1801,29 +1814,37 @@ def _bounded_bundle_member_path(
     return candidate
 
 
-def _bundle_snapshot_paths(
+def _required_bounded_member(
     bundle_manifest: Path,
+    raw_path: str | Path,
     *,
-    extra_paths: Iterable[str | Path] = (),
-) -> list[Path]:
-    manifest_path = _bounded_bundle_member_path(bundle_manifest, bundle_manifest)
-    if manifest_path is None:
-        raise AssertionError("bundle manifest unexpectedly missing")
+    missing_reason: str,
+) -> Path:
+    path = _bounded_bundle_member_path(bundle_manifest, raw_path)
+    if path is None:
+        raise AssertionError(missing_reason)
+    return path
 
+
+def _read_bounded_json_object(path: Path, *, label: str) -> dict[str, Any]:
     try:
-        data = json.loads(bundle_manifest.read_text(encoding="utf-8"))
-    except OSError as exc:
-        raise ValueError(
-            f"bounded bundle manifest could not be read: {bundle_manifest}"
-        ) from exc
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"bounded bundle {label} could not be read: {path}") from exc
     if not isinstance(data, dict):
-        raise ValueError("bounded bundle manifest must be a JSON object")
+        raise ValueError(f"bounded bundle {label} must be a JSON object")
+    return data
 
-    paths: set[Path] = {manifest_path}
-    artifacts = data.get("artifacts", [])
-    artifact_rows = artifacts if isinstance(artifacts, list) else []
+
+def _bounded_manifest_members(
+    bundle_manifest: Path,
+    data: dict[str, Any],
+) -> tuple[set[Path], list[Path], list[Path]]:
+    paths: set[Path] = set()
     index_sidecars: list[Path] = []
     dump_indices: list[Path] = []
+    artifacts = data.get("artifacts", [])
+    artifact_rows = artifacts if isinstance(artifacts, list) else []
 
     for artifact in artifact_rows:
         if not isinstance(artifact, dict):
@@ -1831,39 +1852,54 @@ def _bundle_snapshot_paths(
         raw_path = artifact.get("path")
         if not isinstance(raw_path, str) or not raw_path:
             continue
-        path = _bounded_bundle_member_path(bundle_manifest, raw_path)
-        if path is None:
-            raise AssertionError("required manifest artifact unexpectedly missing")
-        paths.add(path)
-        if artifact.get("role") == "index_sidecar_json":
-            index_sidecars.append(path)
-        elif artifact.get("role") == "dump_index_json":
-            dump_indices.append(path)
-
-    links = data.get("links", {})
-    if isinstance(links, dict):
-        for key, raw_path in links.items():
-            if not str(key).endswith("_path"):
-                continue
-            if not isinstance(raw_path, str) or not raw_path:
-                continue
-            path = _bounded_bundle_member_path(bundle_manifest, raw_path)
-            if path is None:
-                raise AssertionError("required linked bundle surface unexpectedly missing")
-            paths.add(path)
-
-    # The dump index is the current run's inventory for primary outputs that are
-    # not all repeated in the bundle manifest (notably architecture_summary).
-    for dump_index_path in dump_indices:
-        try:
-            dump_data = json.loads(dump_index_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise ValueError(
-                f"bounded bundle dump index could not be read: {dump_index_path}"
-            ) from exc
-        dump_artifacts = (
-            dump_data.get("artifacts") if isinstance(dump_data, dict) else None
+        path = _required_bounded_member(
+            bundle_manifest,
+            raw_path,
+            missing_reason="required manifest artifact unexpectedly missing",
         )
+        paths.add(path)
+        role = artifact.get("role")
+        if role == "index_sidecar_json":
+            index_sidecars.append(path)
+        elif role == "dump_index_json":
+            dump_indices.append(path)
+    return paths, index_sidecars, dump_indices
+
+
+def _bounded_link_members(
+    bundle_manifest: Path,
+    data: dict[str, Any],
+) -> set[Path]:
+    paths: set[Path] = set()
+    links = data.get("links", {})
+    if not isinstance(links, dict):
+        return paths
+
+    for key, raw_path in links.items():
+        if not str(key).endswith("_path"):
+            continue
+        if not isinstance(raw_path, str) or not raw_path:
+            continue
+        path = _required_bounded_member(
+            bundle_manifest,
+            raw_path,
+            missing_reason="required linked bundle surface unexpectedly missing",
+        )
+        paths.add(path)
+    return paths
+
+
+def _bounded_dump_index_members(
+    bundle_manifest: Path,
+    dump_indices: Iterable[Path],
+) -> set[Path]:
+    paths: set[Path] = set()
+    for dump_index_path in dump_indices:
+        dump_data = _read_bounded_json_object(
+            dump_index_path,
+            label="dump index",
+        )
+        dump_artifacts = dump_data.get("artifacts")
         if not isinstance(dump_artifacts, dict):
             continue
         for artifact in dump_artifacts.values():
@@ -1872,23 +1908,26 @@ def _bundle_snapshot_paths(
             raw_path = artifact.get("path")
             if not isinstance(raw_path, str) or not raw_path:
                 continue
-            path = _bounded_bundle_member_path(bundle_manifest, raw_path)
-            if path is None:
-                raise AssertionError("required dump-index artifact unexpectedly missing")
+            path = _required_bounded_member(
+                bundle_manifest,
+                raw_path,
+                missing_reason="required dump-index artifact unexpectedly missing",
+            )
             paths.add(path)
+    return paths
 
-    # Only the canonical Markdown part is represented as a manifest artifact.
-    # The index sidecar carries the complete current-run part list.
+
+def _bounded_split_members(
+    bundle_manifest: Path,
+    index_sidecars: Iterable[Path],
+) -> set[Path]:
+    paths: set[Path] = set()
     for index_path in index_sidecars:
-        try:
-            index_data = json.loads(index_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise ValueError(
-                f"bounded bundle index sidecar could not be read: {index_path}"
-            ) from exc
-        sidecar_artifacts = (
-            index_data.get("artifacts") if isinstance(index_data, dict) else None
+        index_data = _read_bounded_json_object(
+            index_path,
+            label="index sidecar",
         )
+        sidecar_artifacts = index_data.get("artifacts")
         if not isinstance(sidecar_artifacts, dict):
             continue
         raw_parts = sidecar_artifacts.get("md_parts_basenames")
@@ -1899,11 +1938,20 @@ def _bundle_snapshot_paths(
         for raw_path in raw_parts:
             if not isinstance(raw_path, str) or not raw_path:
                 continue
-            path = _bounded_bundle_member_path(bundle_manifest, raw_path)
-            if path is None:
-                raise AssertionError("required split bundle part unexpectedly missing")
+            path = _required_bounded_member(
+                bundle_manifest,
+                raw_path,
+                missing_reason="required split bundle part unexpectedly missing",
+            )
             paths.add(path)
+    return paths
 
+
+def _bounded_extra_members(
+    bundle_manifest: Path,
+    extra_paths: Iterable[str | Path],
+) -> set[Path]:
+    paths: set[Path] = set()
     for raw_path in extra_paths:
         path = _bounded_bundle_member_path(
             bundle_manifest,
@@ -1912,9 +1960,30 @@ def _bundle_snapshot_paths(
         )
         if path is not None:
             paths.add(path)
+    return paths
 
+
+def _bundle_snapshot_paths(
+    bundle_manifest: Path,
+    *,
+    extra_paths: Iterable[str | Path] = (),
+) -> list[Path]:
+    manifest_path = _required_bounded_member(
+        bundle_manifest,
+        bundle_manifest,
+        missing_reason="bundle manifest unexpectedly missing",
+    )
+    data = _read_bounded_json_object(bundle_manifest, label="manifest")
+    paths, index_sidecars, dump_indices = _bounded_manifest_members(
+        bundle_manifest,
+        data,
+    )
+    paths.add(manifest_path)
+    paths.update(_bounded_link_members(bundle_manifest, data))
+    paths.update(_bounded_dump_index_members(bundle_manifest, dump_indices))
+    paths.update(_bounded_split_members(bundle_manifest, index_sidecars))
+    paths.update(_bounded_extra_members(bundle_manifest, extra_paths))
     return sorted(paths, key=str)
-
 
 def _bundle_file_bytes(
     bundle_manifest: Path,
@@ -1976,6 +2045,122 @@ def _remove_recorded_bounded_paths(
             ) from exc
 
 
+def _append_unique_paths_as_strings(
+    paths: list[str],
+    raw_paths: Iterable[str | Path],
+) -> None:
+    known = set(paths)
+    for raw_path in raw_paths:
+        path = str(raw_path)
+        if path in known:
+            continue
+        paths.append(path)
+        known.add(path)
+
+
+def _bounded_prior_plan_state(
+    prior_plan: dict[str, Any] | None,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    if not isinstance(prior_plan, dict):
+        return [], []
+    prior_decisions = prior_plan.get("role_decisions", [])
+    decisions = [
+        dict(item) for item in prior_decisions if isinstance(item, dict)
+    ]
+    prior_removed = prior_plan.get("removed_paths", [])
+    removed_paths = [
+        str(path) for path in prior_removed if isinstance(path, (str, Path))
+    ]
+    return decisions, removed_paths
+
+
+def _prune_bounded_role(
+    bundle_manifest: Path,
+    *,
+    role: str,
+    rules: dict[str, Any],
+    artifact_rows: list[Any],
+    decisions: list[dict[str, Any]],
+    removed_paths: list[str],
+) -> bool:
+    role_rows = [
+        item
+        for item in artifact_rows
+        if isinstance(item, dict) and item.get("role") == role
+    ]
+    if not role_rows:
+        return False
+
+    requirement = rules.get(role)
+    if requirement == "required":
+        raise ValueError(f"bounded bundle may not remove required role: {role}")
+    role_bytes = sum(
+        int(item.get("bytes", 0))
+        for item in role_rows
+        if isinstance(item.get("bytes", 0), int)
+        and not isinstance(item.get("bytes", 0), bool)
+    )
+    dropped = _drop_manifest_role(bundle_manifest, role)
+    _append_unique_paths_as_strings(removed_paths, dropped)
+
+    decision_roles = {
+        item.get("role") for item in decisions if isinstance(item, dict)
+    }
+    if role not in decision_roles:
+        decisions.append(
+            {
+                "role": role,
+                "profile_requirement": requirement,
+                "decision": "profile_excluded_for_budget",
+                "reason": "bounded_bundle_budget",
+                "declared_bytes": role_bytes,
+            }
+        )
+    return True
+
+
+def _bounded_selection_identity(
+    bundle_manifest: Path,
+    *,
+    profile: str,
+    target: int,
+    decisions: list[dict[str, Any]],
+) -> tuple[list[str], str]:
+    final_data = _read_bounded_json_object(bundle_manifest, label="manifest")
+    selected_roles = sorted(
+        artifact.get("role")
+        for artifact in final_data.get("artifacts", [])
+        if isinstance(artifact, dict) and isinstance(artifact.get("role"), str)
+    )
+    provenance = final_data.get("snapshot_provenance", {})
+    repositories = (
+        provenance.get("repositories", []) if isinstance(provenance, dict) else []
+    )
+    source_commits = sorted(
+        {
+            str(repo.get("git_commit"))
+            for repo in repositories
+            if isinstance(repo, dict) and isinstance(repo.get("git_commit"), str)
+        }
+    )
+    selection_material = {
+        "kind": "repoground.bounded_bundle_selection",
+        "version": "v1",
+        "profile": profile,
+        "target_max_bytes": target,
+        "hard_limit_bytes": BOUNDED_BUNDLE_HARD_LIMIT_BYTES,
+        "source_commits": source_commits,
+        "selected_roles": selected_roles,
+        "role_decisions": decisions,
+    }
+    selection_sha256 = hashlib.sha256(
+        json.dumps(selection_material, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+    return selected_roles, selection_sha256
+
+
 def apply_bounded_bundle_budget(
     bundle_manifest: Path | None,
     profile: str,
@@ -2011,22 +2196,7 @@ def apply_bounded_bundle_budget(
             "removed_paths": [],
         }
 
-    prior_decisions = (
-        prior_plan.get("role_decisions", [])
-        if isinstance(prior_plan, dict)
-        else []
-    )
-    decisions = [
-        dict(item) for item in prior_decisions if isinstance(item, dict)
-    ]
-    prior_removed = (
-        prior_plan.get("removed_paths", [])
-        if isinstance(prior_plan, dict)
-        else []
-    )
-    removed_paths = [
-        str(path) for path in prior_removed if isinstance(path, (str, Path))
-    ]
+    decisions, removed_paths = _bounded_prior_plan_state(prior_plan)
     _remove_recorded_bounded_paths(bundle_manifest, removed_paths)
 
     current = _bundle_file_bytes(bundle_manifest, extra_paths=extra_paths)
@@ -2035,7 +2205,7 @@ def apply_bounded_bundle_budget(
         if isinstance(prior_plan, dict)
         else current
     )
-    data = json.loads(bundle_manifest.read_text(encoding="utf-8"))
+    data = _read_bounded_json_object(bundle_manifest, label="manifest")
     rules = profile_policy(profile)["artifact_rules"]
     artifacts = data.get("artifacts", [])
     artifact_rows = artifacts if isinstance(artifacts, list) else []
@@ -2043,38 +2213,18 @@ def apply_bounded_bundle_budget(
     for role in BOUNDED_BUNDLE_DROPPABLE_ROLES:
         if current <= target:
             break
-        role_rows = [
-            item
-            for item in artifact_rows
-            if isinstance(item, dict) and item.get("role") == role
-        ]
-        if not role_rows:
-            continue
-        requirement = rules.get(role)
-        if requirement == "required":
-            raise ValueError(f"bounded bundle may not remove required role: {role}")
-        role_bytes = sum(
-            int(item.get("bytes", 0))
-            for item in role_rows
-            if isinstance(item.get("bytes", 0), int)
-            and not isinstance(item.get("bytes", 0), bool)
-        )
-        dropped = _drop_manifest_role(bundle_manifest, role)
-        for path in dropped:
-            raw = str(path)
-            if raw not in removed_paths:
-                removed_paths.append(raw)
-        if not any(item.get("role") == role for item in decisions):
-            decisions.append(
-                {
-                    "role": role,
-                    "profile_requirement": requirement,
-                    "decision": "profile_excluded_for_budget",
-                    "reason": "bounded_bundle_budget",
-                    "declared_bytes": role_bytes,
-                }
+        if _prune_bounded_role(
+            bundle_manifest,
+            role=role,
+            rules=rules,
+            artifact_rows=artifact_rows,
+            decisions=decisions,
+            removed_paths=removed_paths,
+        ):
+            current = _bundle_file_bytes(
+                bundle_manifest,
+                extra_paths=extra_paths,
             )
-        current = _bundle_file_bytes(bundle_manifest, extra_paths=extra_paths)
 
     target_met = current <= target
     if not target_met and fail_if_unmet:
@@ -2083,38 +2233,12 @@ def apply_bounded_bundle_budget(
             f"the approved droppable set: final={current} target={target}"
         )
 
-    final_data = json.loads(bundle_manifest.read_text(encoding="utf-8"))
-    selected_roles = sorted(
-        artifact.get("role")
-        for artifact in final_data.get("artifacts", [])
-        if isinstance(artifact, dict) and isinstance(artifact.get("role"), str)
+    selected_roles, selection_sha256 = _bounded_selection_identity(
+        bundle_manifest,
+        profile=profile,
+        target=target,
+        decisions=decisions,
     )
-    provenance = final_data.get("snapshot_provenance", {})
-    repositories = (
-        provenance.get("repositories", []) if isinstance(provenance, dict) else []
-    )
-    source_commits = sorted(
-        {
-            str(repo.get("git_commit"))
-            for repo in repositories
-            if isinstance(repo, dict) and isinstance(repo.get("git_commit"), str)
-        }
-    )
-    selection_material = {
-        "kind": "repoground.bounded_bundle_selection",
-        "version": "v1",
-        "profile": profile,
-        "target_max_bytes": target,
-        "hard_limit_bytes": BOUNDED_BUNDLE_HARD_LIMIT_BYTES,
-        "source_commits": source_commits,
-        "selected_roles": selected_roles,
-        "role_decisions": decisions,
-    }
-    selection_sha256 = hashlib.sha256(
-        json.dumps(selection_material, sort_keys=True, separators=(",", ":")).encode(
-            "utf-8"
-        )
-    ).hexdigest()
     result = {
         "enabled": True,
         "status": "pass" if target_met else "fail",
