@@ -912,7 +912,17 @@ def _call_navigation_query_result(
     coverage = _compact_call_graph_coverage(inner.get("call_graph_coverage"))
     if coverage is not None:
         navigation["call_graph_coverage"] = coverage
-    navigation_truncated = bool(inner.get("truncated", False)) or unresolved_truncated
+    group_sites_truncated = any(
+        isinstance(hit, dict) and hit.get("call_sites_truncated") is True
+        for hit in navigation_hits
+    )
+    navigation_truncated = any(
+        (
+            bool(inner.get("truncated", False)),
+            unresolved_truncated,
+            group_sites_truncated,
+        )
+    )
     navigation["truncated"] = navigation_truncated
     retrieval_hits = []
     for hit in navigation_hits:
