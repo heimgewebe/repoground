@@ -1354,3 +1354,154 @@ def test_snapshot_finalization_rejects_unreadable_linked_surface(tmp_path):
     assert result["status"] == "fail"
     assert result["errors"] == ["bundle_surface_validation_unreadable"]
     assert result["control_paths"] == []
+
+def _write_bounded_manifest(tmp_path, *, canonical_bytes=32, call_graph_bytes=96):
+    canonical = tmp_path / "brief.md"
+    call_graph = tmp_path / "call-graph.json"
+    canonical.write_bytes(b"c" * canonical_bytes)
+    call_graph.write_bytes(b"g" * call_graph_bytes)
+    manifest = tmp_path / "bundle.manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "artifacts": [
+                    {
+                        "role": "canonical_md",
+                        "path": canonical.name,
+                        "bytes": canonical.stat().st_size,
+                    },
+                    {
+                        "role": "python_call_graph_json",
+                        "path": call_graph.name,
+                        "bytes": call_graph.stat().st_size,
+                    },
+                ],
+                "capabilities": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    return manifest, canonical, call_graph
+
+
+def test_bounded_bundle_budget_drops_only_approved_nonrequired_role(tmp_path):
+    manifest, canonical, call_graph = _write_bounded_manifest(tmp_path)
+    target = manifest.stat().st_size + canonical.stat().st_size + 8
+
+    plan = cmd_ground.apply_bounded_bundle_budget(manifest, "agent-portable", target)
+
+    assert plan["status"] == "pass"
+    assert plan["required_roles_never_removed"] is True
+    assert plan["target_max_bytes"] == target
+    assert plan["hard_limit_bytes"] == 256 * 1024 * 1024
+    assert plan["role_decisions"] == [
+        {
+            "role": "python_call_graph_json",
+            "profile_requirement": "recommended",
+            "decision": "profile_excluded_for_budget",
+            "reason": "bounded_bundle_budget",
+            "declared_bytes": 96,
+        }
+    ]
+    assert canonical.exists()
+    assert not call_graph.exists()
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    assert [item["role"] for item in data["artifacts"]] == ["canonical_md"]
+
+
+def test_bounded_bundle_budget_fails_closed_when_approved_drop_is_insufficient(
+    tmp_path,
+):
+    manifest, canonical, _call_graph = _write_bounded_manifest(
+        tmp_path, canonical_bytes=256, call_graph_bytes=16
+    )
+
+    with pytest.raises(ValueError, match="cannot be met"):
+        cmd_ground.apply_bounded_bundle_budget(manifest, "agent-portable", 1)
+
+    assert canonical.exists()
+
+
+def test_bounded_bundle_budget_rejects_target_above_hard_limit(tmp_path):
+    manifest, _canonical, _call_graph = _write_bounded_manifest(tmp_path)
+
+    with pytest.raises(ValueError, match="256 MiB hard ceiling"):
+        cmd_ground.apply_bounded_bundle_budget(
+            manifest, "agent-portable", 256 * 1024 * 1024 + 1
+        )
+
+
+def test_bounded_bundle_byte_count_includes_unmanifested_split_parts(tmp_path):
+    manifest, canonical, call_graph = _write_bounded_manifest(tmp_path)
+    split_part = tmp_path / "brief-part2.md"
+    split_part.write_bytes(b"s" * 41)
+
+    assert cmd_ground._bundle_file_bytes(manifest) == (
+        manifest.stat().st_size
+        + canonical.stat().st_size
+        + call_graph.stat().st_size
+        + split_part.stat().st_size
+    )
+
+
+def test_bounded_bundle_selection_digest_is_path_independent(tmp_path):
+    first_dir = tmp_path / "first"
+    second_dir = tmp_path / "second"
+    first_dir.mkdir()
+    second_dir.mkdir()
+    first, first_canonical, _ = _write_bounded_manifest(first_dir)
+    second, second_canonical, _ = _write_bounded_manifest(second_dir)
+    target = max(
+        first.stat().st_size + first_canonical.stat().st_size + 8,
+        second.stat().st_size + second_canonical.stat().st_size + 8,
+    )
+
+    first_plan = cmd_ground.apply_bounded_bundle_budget(first, "agent-portable", target)
+    second_plan = cmd_ground.apply_bounded_bundle_budget(
+        second, "agent-portable", target
+    )
+
+    assert first_plan["selected_roles"] == second_plan["selected_roles"]
+    assert first_plan["selection_sha256"] == second_plan["selection_sha256"]
+
+
+def test_snapshot_create_persists_final_bounded_bundle_measurement(tmp_path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "README.md").write_text("# bounded final measurement\n", encoding="utf-8")
+    out = tmp_path / "briefs"
+
+    rc = main(
+        [
+            "ground",
+            "snapshot",
+            "create",
+            "--repo",
+            str(repo),
+            "--out",
+            str(out),
+            "--profile",
+            "agent-portable",
+            "--bundle-max-bytes",
+            "16MB",
+        ]
+    )
+
+    result = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    plan_path = Path(result["snapshot_plan_report"])
+    persisted_plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    bounded = persisted_plan["output_plan"]["bounded_bundle"]
+    actual_bytes = sum(
+        path.stat().st_size
+        for path in plan_path.parent.iterdir()
+        if path.is_file() and not path.is_symlink()
+    )
+
+    assert bounded["status"] == "pass"
+    assert bounded["final_bundle_bytes"] == actual_bytes
+    assert result["bounded_bundle"]["final_bundle_bytes"] == actual_bytes
+    assert (
+        result["finalization"]["manifest_sha256_at_final_health"]
+        == result["finalization"]["final_manifest_sha256"]
+    )

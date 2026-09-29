@@ -34,6 +34,14 @@ DOES_NOT_ESTABLISH = [
 ]
 
 
+BOUNDED_BUNDLE_HARD_LIMIT_BYTES = 256 * 1024 * 1024
+BOUNDED_BUNDLE_DEFAULT_TARGET_BYTES = 192 * 1024 * 1024
+# Keep the bounded benchmark surface intentionally narrow. The call graph is
+# useful navigation evidence but is not required for core retrieval, range
+# resolution, freshness or export safety in the agent-portable profile.
+BOUNDED_BUNDLE_DROPPABLE_ROLES = ("python_call_graph_json",)
+
+
 def _json_write_atomic(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path: Optional[Path] = None
@@ -540,6 +548,15 @@ def register_ground_command_groups(ground_parser: argparse.ArgumentParser) -> No
         help="Existing renderer mode passed through to the deterministic generator",
     )
     create_parser.add_argument("--max-bytes", default="0")
+    create_parser.add_argument(
+        "--bundle-max-bytes",
+        default=None,
+        help=(
+            "Optional total emitted bundle budget in bytes or a human size. "
+            "The request may not exceed the fixed 256 MiB hard ceiling; "
+            "recommended benchmark target: 192 MiB."
+        ),
+    )
     create_parser.add_argument("--split-size", default="25MB")
     create_parser.add_argument("--path-filter")
     create_parser.add_argument("--ext", action="append")
@@ -1555,10 +1572,25 @@ def build_snapshot_create_result(args: argparse.Namespace) -> dict[str, Any]:
         publish_generation=False,
     )
     dropped_profile_paths = enforce_profile_exclusions(artifacts.bundle_manifest, profile)
+    bounded_bundle_plan = apply_bounded_bundle_budget(
+        artifacts.bundle_manifest,
+        profile,
+        getattr(args, "bundle_max_bytes", None),
+    )
+    dropped_profile_paths.extend(
+        Path(path) for path in bounded_bundle_plan["removed_paths"]
+    )
+    output_plan["bounded_bundle"] = bounded_bundle_plan
+    mark_bundle_manifest_profile(artifacts.bundle_manifest, profile, output_plan)
     snapshot_plan_path = emit_snapshot_plan_report(
         artifacts.bundle_manifest, profile, output_plan
     )
-    finalization = finalize_snapshot_bundle(artifacts.bundle_manifest, profile)
+    finalization = finalize_snapshot_with_bounded_bundle(
+        artifacts.bundle_manifest,
+        profile,
+        output_plan,
+        snapshot_plan_path,
+    )
     profile_evaluation = finalization.get("profile_evaluation")
     artifact_paths = [
         path
@@ -1608,6 +1640,7 @@ def build_snapshot_create_result(args: argparse.Namespace) -> dict[str, Any]:
         "profile": profile,
         "output_mode": output_mode,
         "output_plan": output_plan,
+        "bounded_bundle": bounded_bundle_plan,
         "redaction": {
             "enabled": redact_secrets,
             "required": redaction_required,
@@ -1713,6 +1746,214 @@ def enforce_profile_exclusions(bundle_manifest: Path | None, profile: str) -> li
     for role in profile_excluded_roles(profile):
         dropped.extend(_drop_manifest_role(bundle_manifest, role))
     return dropped
+
+
+def _bundle_file_bytes(bundle_manifest: Path) -> int:
+    # The runner ceiling applies to the emitted bundle, not only to files that
+    # happen to have one manifest role. Split canonical Markdown parts are a
+    # concrete example: every regular top-level bundle file must count.
+    total = 0
+    for candidate in bundle_manifest.parent.iterdir():
+        try:
+            if candidate.is_file() and not candidate.is_symlink():
+                total += candidate.stat().st_size
+        except OSError:
+            continue
+    return total
+
+
+def apply_bounded_bundle_budget(
+    bundle_manifest: Path | None,
+    profile: str,
+    requested_max_bytes: str | int | None,
+) -> dict[str, Any]:
+    if bundle_manifest is None:
+        return {
+            "enabled": requested_max_bytes is not None,
+            "status": "not_applicable",
+            "target_max_bytes": None,
+            "hard_limit_bytes": BOUNDED_BUNDLE_HARD_LIMIT_BYTES,
+            "initial_bundle_bytes": 0,
+            "final_bundle_bytes": 0,
+            "role_decisions": [],
+            "removed_paths": [],
+        }
+    if requested_max_bytes is None:
+        current = _bundle_file_bytes(bundle_manifest)
+        return {
+            "enabled": False,
+            "status": "not_requested",
+            "target_max_bytes": None,
+            "hard_limit_bytes": BOUNDED_BUNDLE_HARD_LIMIT_BYTES,
+            "initial_bundle_bytes": current,
+            "final_bundle_bytes": current,
+            "role_decisions": [],
+            "removed_paths": [],
+        }
+    target = parse_human_size(str(requested_max_bytes))
+    if target <= 0:
+        raise ValueError("--bundle-max-bytes must be greater than zero")
+    if target > BOUNDED_BUNDLE_HARD_LIMIT_BYTES:
+        raise ValueError("--bundle-max-bytes exceeds the fixed 256 MiB hard ceiling")
+
+    data = json.loads(bundle_manifest.read_text(encoding="utf-8"))
+    rules = profile_policy(profile)["artifact_rules"]
+    initial = _bundle_file_bytes(bundle_manifest)
+    current = initial
+    decisions: list[dict[str, Any]] = []
+    removed_paths: list[str] = []
+    artifacts = data.get("artifacts", [])
+    artifact_rows = artifacts if isinstance(artifacts, list) else []
+
+    for role in BOUNDED_BUNDLE_DROPPABLE_ROLES:
+        if current <= target:
+            break
+        requirement = rules.get(role)
+        if requirement == "required":
+            raise ValueError(f"bounded bundle may not remove required role: {role}")
+        role_bytes = sum(
+            int(item.get("bytes", 0))
+            for item in artifact_rows
+            if isinstance(item, dict)
+            and item.get("role") == role
+            and isinstance(item.get("bytes", 0), int)
+            and not isinstance(item.get("bytes", 0), bool)
+        )
+        dropped = _drop_manifest_role(bundle_manifest, role)
+        removed_paths.extend(str(path) for path in dropped)
+        decisions.append(
+            {
+                "role": role,
+                "profile_requirement": requirement,
+                "decision": "profile_excluded_for_budget",
+                "reason": "bounded_bundle_budget",
+                "declared_bytes": role_bytes,
+            }
+        )
+        current = _bundle_file_bytes(bundle_manifest)
+
+    if current > target:
+        raise ValueError(
+            "bounded bundle target cannot be met without removing roles outside "
+            f"the approved droppable set: final={current} target={target}"
+        )
+    final_data = json.loads(bundle_manifest.read_text(encoding="utf-8"))
+    selected_roles = sorted(
+        artifact.get("role")
+        for artifact in final_data.get("artifacts", [])
+        if isinstance(artifact, dict) and isinstance(artifact.get("role"), str)
+    )
+    provenance = final_data.get("snapshot_provenance", {})
+    repositories = (
+        provenance.get("repositories", []) if isinstance(provenance, dict) else []
+    )
+    source_commits = sorted(
+        {
+            str(repo.get("git_commit"))
+            for repo in repositories
+            if isinstance(repo, dict) and isinstance(repo.get("git_commit"), str)
+        }
+    )
+    selection_material = {
+        "kind": "repoground.bounded_bundle_selection",
+        "version": "v1",
+        "profile": profile,
+        "target_max_bytes": target,
+        "hard_limit_bytes": BOUNDED_BUNDLE_HARD_LIMIT_BYTES,
+        "source_commits": source_commits,
+        "selected_roles": selected_roles,
+        "role_decisions": decisions,
+    }
+    selection_sha256 = hashlib.sha256(
+        json.dumps(selection_material, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+    return {
+        "enabled": True,
+        "status": "pass",
+        "target_max_bytes": target,
+        "hard_limit_bytes": BOUNDED_BUNDLE_HARD_LIMIT_BYTES,
+        "recommended_target_bytes": BOUNDED_BUNDLE_DEFAULT_TARGET_BYTES,
+        "initial_bundle_bytes": initial,
+        "final_bundle_bytes": current,
+        "role_decisions": decisions,
+        "selected_roles": selected_roles,
+        "selection_sha256": selection_sha256,
+        "removed_paths": removed_paths,
+        "required_roles_never_removed": True,
+    }
+
+
+def finalize_bounded_bundle_measurement(
+    bundle_manifest: Path | None,
+    plan: dict[str, Any],
+    finalization: dict[str, Any],
+) -> dict[str, Any]:
+    if not plan["enabled"] or bundle_manifest is None:
+        return finalization
+    final_bundle_bytes = _bundle_file_bytes(bundle_manifest)
+    plan["final_bundle_bytes"] = final_bundle_bytes
+    if final_bundle_bytes <= plan["target_max_bytes"]:
+        plan["status"] = "pass"
+        plan.pop("reason", None)
+        return finalization
+    plan["status"] = "fail"
+    plan["reason"] = "final_bundle_exceeds_target_after_controls"
+    return {
+        **finalization,
+        "status": "fail",
+        "errors": [
+            *finalization.get("errors", []),
+            "bounded_bundle_target_exceeded",
+        ],
+    }
+
+
+def finalize_snapshot_with_bounded_bundle(
+    bundle_manifest: Path | None,
+    profile: str,
+    output_plan: dict[str, Any],
+    snapshot_plan_path: Path | None,
+    *,
+    max_passes: int = 4,
+) -> dict[str, Any]:
+    plan = output_plan.get("bounded_bundle")
+    if not isinstance(plan, dict) or not plan.get("enabled"):
+        return finalize_snapshot_bundle(bundle_manifest, profile)
+    if bundle_manifest is None or snapshot_plan_path is None:
+        return {
+            "status": "fail",
+            "errors": ["bounded_bundle_snapshot_plan_missing"],
+            "phases": 0,
+            "control_paths": [],
+            "refreshed_paths": [],
+        }
+
+    for attempt in range(max_passes):
+        persisted_final_bytes = plan.get("final_bundle_bytes")
+        finalization = finalize_snapshot_bundle(bundle_manifest, profile)
+        if finalization.get("status") != "pass":
+            return finalization
+        finalization = finalize_bounded_bundle_measurement(
+            bundle_manifest, plan, finalization
+        )
+        if plan.get("final_bundle_bytes") == persisted_final_bytes:
+            return finalization
+        if attempt + 1 == max_passes:
+            plan["status"] = "fail"
+            plan["reason"] = "final_bundle_measurement_did_not_stabilize"
+            return {
+                **finalization,
+                "status": "fail",
+                "errors": [
+                    *finalization.get("errors", []),
+                    "bounded_bundle_measurement_unstable",
+                ],
+            }
+        emit_snapshot_plan_report(bundle_manifest, profile, output_plan)
+
+    raise AssertionError("bounded bundle finalization loop exhausted")
 
 
 def refresh_entry(bundle_manifest: Path | None) -> list[Path]:
