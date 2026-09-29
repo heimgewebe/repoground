@@ -225,6 +225,359 @@ def compact_does_not_establish(items: Any) -> dict[str, Any]:
     return {"ref": DOES_NOT_ESTABLISH_REF, "items": values}
 
 
+_CALL_NAVIGATION_KINDS = {
+    "repobrief.call_callers",
+    "repobrief.call_callees",
+}
+
+
+def _copy_fields(value: Any, fields: tuple[str, ...]) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    return {field: value[field] for field in fields if field in value}
+
+
+def _copy_nonempty_fields(value: Any, fields: tuple[str, ...]) -> dict[str, Any]:
+    compact = _copy_fields(value, fields)
+    return {
+        field: item
+        for field, item in compact.items()
+        if item is not None and item != [] and item != {}
+    }
+
+
+def _compact_symbol(value: Any) -> dict[str, Any] | None:
+    """Keep stable symbol identity and its source address, not duplicate metadata."""
+    if not isinstance(value, dict):
+        return None
+    return _copy_fields(
+        value,
+        (
+            "id",
+            "name",
+            "qualified_name",
+            "kind",
+            "path",
+            "start_line",
+            "end_line",
+            "range_ref",
+        ),
+    )
+
+
+def _compact_artifact_descriptor(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    return _copy_fields(value, ("role", "contract", "sha256"))
+
+
+def _compact_call_graph_metadata(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    return _copy_fields(
+        value,
+        (
+            "call_count",
+            "evidence_counts",
+            "resolution_counts",
+            "skipped_files_count",
+        ),
+    )
+
+
+def _compact_call_graph_coverage(value: Any) -> dict[str, Any] | None:
+    """Preserve completeness/confidence boundaries without diagnostic histograms."""
+    if not isinstance(value, dict):
+        return None
+    compact = _copy_fields(
+        value,
+        (
+            "scope",
+            "completeness",
+            "reason",
+            "resolved_call_edges",
+            "total_call_edges",
+            "resolved_ratio",
+            "skipped_files_count",
+            "model_scope",
+            "confidence_model",
+            "does_not_establish",
+        ),
+    )
+    profiles = value.get("task_profile_confidence")
+    if isinstance(profiles, dict):
+        compact_profiles: dict[str, Any] = {}
+        for profile, confidence in profiles.items():
+            if not isinstance(profile, str) or not isinstance(confidence, dict):
+                continue
+            compact_profiles[profile] = _copy_fields(
+                confidence,
+                ("status", "minimum_resolved_ratio"),
+            )
+        compact["task_profile_confidence"] = compact_profiles
+    return compact
+
+
+def _compact_resolved_call_site(value: Any) -> dict[str, Any]:
+    """Keep the bounded S1 edge proof; the grouped symbol carries caller/callee identity."""
+    return _copy_nonempty_fields(
+        value,
+        (
+            "path",
+            "range_ref",
+            "callee_expression",
+            "evidence_level",
+            "resolution_status",
+            "resolution_reason",
+            "relation_type",
+            "resolved_target_ids",
+        ),
+    )
+
+
+def _bounded_list(
+    value: Any,
+    limit: int,
+    *,
+    prior_count: Any = None,
+    prior_truncated: Any = None,
+) -> tuple[list[Any], int, bool]:
+    items = list(value) if isinstance(value, list) else []
+    visible = items[:limit]
+    count = len(items)
+    if (
+        isinstance(prior_count, int)
+        and not isinstance(prior_count, bool)
+        and prior_count >= count
+    ):
+        count = prior_count
+    truncated = len(items) > len(visible) or count > len(visible)
+    if prior_truncated is True:
+        truncated = True
+    return visible, count, truncated
+
+
+def _project_bounded_symbol_candidates(
+    compact: dict[str, Any],
+    *,
+    field: str,
+    count_field: str,
+    truncated_field: str,
+    limit: int,
+) -> None:
+    candidates = compact.get(field)
+    if not isinstance(candidates, list):
+        return
+    visible, count, truncated = _bounded_list(
+        candidates,
+        limit,
+        prior_count=compact.get(count_field),
+        prior_truncated=compact.get(truncated_field),
+    )
+    compact[field] = [
+        symbol
+        for candidate in visible
+        if (symbol := _compact_symbol(candidate)) is not None
+    ]
+    if candidates or count:
+        compact[count_field] = count
+        compact[truncated_field] = truncated
+
+
+def _compact_unresolved_call_site(
+    value: Any,
+    *,
+    keep_caller_identity: bool,
+    candidate_limit: int,
+) -> dict[str, Any]:
+    """Keep bounded S0 location and why it was not promoted to a resolved graph edge."""
+    fields = [
+        "path",
+        "range_ref",
+        "callee_expression",
+        "evidence_level",
+        "resolution_status",
+        "resolution_reason",
+        "relation_type",
+        "relation_to_selected_target",
+    ]
+    if keep_caller_identity:
+        fields.extend(("caller_symbol_id", "caller_qualified_name"))
+    compact = _copy_nonempty_fields(value, tuple(fields))
+    candidate_ids = value.get("candidate_target_ids") if isinstance(value, dict) else None
+    if isinstance(candidate_ids, list) and (
+        candidate_ids
+        or value.get("candidate_target_id_count")
+        or value.get("candidate_target_ids_truncated") is True
+    ):
+        visible, count, truncated = _bounded_list(
+            candidate_ids,
+            candidate_limit,
+            prior_count=value.get("candidate_target_id_count"),
+            prior_truncated=value.get("candidate_target_ids_truncated"),
+        )
+        compact["candidate_target_ids"] = visible
+        compact["candidate_target_id_count"] = count
+        compact["candidate_target_ids_truncated"] = truncated
+    return compact
+
+
+def _compact_callers(value: Any, *, call_site_limit: int) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    callers: list[dict[str, Any]] = []
+    for caller in value:
+        if not isinstance(caller, dict):
+            continue
+        compact = _copy_fields(
+            caller,
+            (
+                "caller_symbol_id",
+                "caller_qualified_name",
+                "caller_kind",
+                "caller_scope",
+                "path",
+                "call_site_count",
+            ),
+        )
+        compact["caller_symbol"] = _compact_symbol(caller.get("caller_symbol"))
+        sites = caller.get("call_sites")
+        visible_sites, count, truncated = _bounded_list(
+            sites,
+            call_site_limit,
+            prior_count=caller.get("call_site_count"),
+            prior_truncated=caller.get("call_sites_truncated"),
+        )
+        compact["call_sites"] = [
+            _compact_resolved_call_site(site)
+            for site in visible_sites
+            if isinstance(site, dict)
+        ]
+        if isinstance(sites, list) and (sites or count):
+            compact["call_site_count"] = count
+            compact["call_sites_truncated"] = truncated
+        callers.append(compact)
+    return callers
+
+
+def _compact_callees(value: Any, *, call_site_limit: int) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    callees: list[dict[str, Any]] = []
+    for callee in value:
+        if not isinstance(callee, dict):
+            continue
+        compact = _copy_fields(callee, ("call_site_count", "relation_types"))
+        compact["callee_symbol"] = _compact_symbol(callee.get("callee_symbol"))
+        sites = callee.get("call_sites")
+        visible_sites, count, truncated = _bounded_list(
+            sites,
+            call_site_limit,
+            prior_count=callee.get("call_site_count"),
+            prior_truncated=callee.get("call_sites_truncated"),
+        )
+        compact["call_sites"] = [
+            _compact_resolved_call_site(site)
+            for site in visible_sites
+            if isinstance(site, dict)
+        ]
+        if isinstance(sites, list) and (sites or count):
+            compact["call_site_count"] = count
+            compact["call_sites_truncated"] = truncated
+        callees.append(compact)
+    return callees
+
+
+def _project_compact_callers(compact: dict[str, Any], *, candidate_limit: int) -> None:
+    if "target_symbol" in compact:
+        compact["target_symbol"] = _compact_symbol(compact.get("target_symbol"))
+    _project_bounded_symbol_candidates(
+        compact,
+        field="target_candidates",
+        count_field="target_candidate_count",
+        truncated_field="target_candidates_truncated",
+        limit=candidate_limit,
+    )
+    compact["callers"] = _compact_callers(
+        compact.get("callers"), call_site_limit=candidate_limit
+    )
+    unresolved = compact.get("unresolved_references")
+    compact["unresolved_references"] = (
+        [
+            _compact_unresolved_call_site(
+                site,
+                keep_caller_identity=True,
+                candidate_limit=candidate_limit,
+            )
+            for site in unresolved
+            if isinstance(site, dict)
+        ]
+        if isinstance(unresolved, list)
+        else []
+    )
+
+
+def _project_compact_callees(compact: dict[str, Any], *, candidate_limit: int) -> None:
+    if "caller_symbol" in compact:
+        compact["caller_symbol"] = _compact_symbol(compact.get("caller_symbol"))
+    _project_bounded_symbol_candidates(
+        compact,
+        field="caller_candidates",
+        count_field="caller_candidate_count",
+        truncated_field="caller_candidates_truncated",
+        limit=candidate_limit,
+    )
+    compact["callees"] = _compact_callees(
+        compact.get("callees"), call_site_limit=candidate_limit
+    )
+    unresolved = compact.get("unresolved_call_sites")
+    compact["unresolved_call_sites"] = (
+        [
+            _compact_unresolved_call_site(
+                site,
+                keep_caller_identity=False,
+                candidate_limit=candidate_limit,
+            )
+            for site in unresolved
+            if isinstance(site, dict)
+        ]
+        if isinstance(unresolved, list)
+        else []
+    )
+
+
+def compact_call_navigation(result: Any) -> dict[str, Any]:
+    """Project callers/callees to decision evidence while leaving diagnostics verbose-only."""
+    if not isinstance(result, dict) or result.get("kind") not in _CALL_NAVIGATION_KINDS:
+        return dict(result) if isinstance(result, dict) else {}
+
+    compact = dict(result)
+    for key in ("symbol_index", "call_graph"):
+        if key in compact:
+            compact[key] = _compact_artifact_descriptor(compact.get(key))
+    if "call_graph_metadata" in compact:
+        compact["call_graph_metadata"] = _compact_call_graph_metadata(
+            compact.get("call_graph_metadata")
+        )
+    if "call_graph_coverage" in compact:
+        compact["call_graph_coverage"] = _compact_call_graph_coverage(
+            compact.get("call_graph_coverage")
+        )
+
+    candidate_limit = compact.get("k")
+    if (
+        not isinstance(candidate_limit, int)
+        or isinstance(candidate_limit, bool)
+        or candidate_limit < 1
+    ):
+        candidate_limit = 0
+
+    if compact.get("kind") == "repobrief.call_callers":
+        _project_compact_callers(compact, candidate_limit=candidate_limit)
+    else:
+        _project_compact_callees(compact, candidate_limit=candidate_limit)
+    return compact
+
 def project_read_result(
     result: dict[str, Any],
     manifest_path: str | Path,
@@ -234,14 +587,17 @@ def project_read_result(
     """Project a read-only frontdoor result to its compact default shape.
 
     ``verbose=True`` returns ``result`` unchanged. ``verbose=False`` leaves
-    hits, status, error detail, truncation and explicit non-claim semantics
-    untouched while collapsing repeated availability and mutation inventories.
+    status, truncation, navigable symbol/range evidence and explicit non-claim
+    semantics visible while collapsing repeated inventories and call-graph
+    diagnostics that remain available through the verbose view.
     """
     if verbose or not isinstance(result, dict):
         return result
     path = _coerce_manifest_path(manifest_path)
     projected = dict(result)
     projected["projection"] = COMPACT_PROJECTION
+    if projected.get("kind") in _CALL_NAVIGATION_KINDS:
+        projected = compact_call_navigation(projected)
     if "availability" in projected:
         projected["availability"] = compact_availability(
             projected.get("availability"), path
