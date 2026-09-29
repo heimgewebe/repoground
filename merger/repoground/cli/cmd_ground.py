@@ -37,10 +37,6 @@ DOES_NOT_ESTABLISH = [
 
 BOUNDED_BUNDLE_HARD_LIMIT_BYTES = 256 * 1024 * 1024
 BOUNDED_BUNDLE_DEFAULT_TARGET_BYTES = 192 * 1024 * 1024
-# Keep the bounded benchmark surface intentionally narrow. The call graph is
-# useful navigation evidence but is not required for core retrieval, range
-# resolution, freshness or export safety in the agent-portable profile.
-BOUNDED_BUNDLE_DROPPABLE_ROLES = ("python_call_graph_json",)
 
 
 def _json_write_atomic(path: Path, data: dict[str, Any]) -> None:
@@ -2259,11 +2255,12 @@ def apply_bounded_bundle_budget(
         else current
     )
     data = _read_bounded_json_object(bundle_manifest, label="manifest")
-    rules = profile_policy(profile)["artifact_rules"]
+    policy = profile_policy(profile)
+    rules = policy["artifact_rules"]
     artifacts = data.get("artifacts", [])
     artifact_rows = artifacts if isinstance(artifacts, list) else []
 
-    for role in BOUNDED_BUNDLE_DROPPABLE_ROLES:
+    for role in policy["budget_droppable_roles"]:
         if current <= target:
             break
         if _prune_bounded_role(

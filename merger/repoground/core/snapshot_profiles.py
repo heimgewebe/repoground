@@ -218,6 +218,22 @@ PROFILE_ARTIFACT_RULES = {
 }
 
 
+# Budget removal is distinct from generation availability: recommended artifacts
+# can still back indispensable profile-specific consumer paths. Fleet navigation
+# requires its call graph, so an unattainable fleet budget must fail, not degrade.
+# Unknown/new profiles receive no removal permission by default.
+PROFILE_BUDGET_DROPPABLE_ROLES = {
+    "local-private": ("python_call_graph_json",),
+    "agent-portable": ("python_call_graph_json",),
+    "full-max": ("python_call_graph_json",),
+    "pr-review": ("python_call_graph_json",),
+    "security-export-review": ("python_call_graph_json",),
+    "public-share": (),
+    "ci-artifact": ("python_call_graph_json",),
+    "fleet-context": (),
+}
+
+
 @dataclass(frozen=True)
 class ProfileArtifactStatus:
     role: str
@@ -265,6 +281,7 @@ def profile_policy(profile: str) -> dict[str, Any]:
         "artifact_rules": {role: rules[role] for role in ARTIFACT_ORDER},
         "valid_requirements": list(VALID_REQUIREMENTS),
         "export_semantics": profile_export_semantics(profile),
+        "budget_droppable_roles": list(PROFILE_BUDGET_DROPPABLE_ROLES.get(profile, ())),
     }
 
 

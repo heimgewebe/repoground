@@ -1950,3 +1950,113 @@ def test_snapshot_create_refreshes_unbounded_final_bundle_measurement(
         manifest_data["capabilities"]["repobrief_output_plan"]["bounded_bundle"]
         == bounded
     )
+
+
+@pytest.mark.parametrize("fail_if_unmet", [True, False])
+def test_bounded_fleet_budget_preserves_call_graph(tmp_path, fail_if_unmet):
+    manifest, canonical, call_graph = _write_bounded_manifest(
+        tmp_path, call_graph_bytes=50_000
+    )
+    target = manifest.stat().st_size + canonical.stat().st_size + 20_000
+    before = manifest.read_bytes()
+    if fail_if_unmet:
+        with pytest.raises(ValueError, match="cannot be met"):
+            cmd_ground.apply_bounded_bundle_budget(manifest, "fleet-context", target)
+    else:
+        plan = cmd_ground.apply_bounded_bundle_budget(
+            manifest, "fleet-context", target, fail_if_unmet=False
+        )
+        assert plan["status"] == "fail"
+        assert plan["removed_paths"] == []
+        assert plan["role_decisions"] == []
+        assert "python_call_graph_json" in plan["selected_roles"]
+    assert call_graph.read_bytes() == b"g" * 50_000
+    assert manifest.read_bytes() == before
+
+
+def test_bounded_fleet_budget_preserves_call_graph_after_controls(tmp_path, monkeypatch):
+    manifest, _canonical, call_graph = _write_bounded_manifest(
+        tmp_path, call_graph_bytes=50_000
+    )
+    target = cmd_ground._bundle_file_bytes(manifest) + 20_000
+    plan = cmd_ground.apply_bounded_bundle_budget(manifest, "fleet-context", target)
+    output_plan = {"bounded_bundle": plan}
+    cmd_ground.mark_bundle_manifest_profile(manifest, "fleet-context", output_plan)
+    snapshot_plan = cmd_ground.emit_snapshot_plan_report(
+        manifest, "fleet-context", output_plan
+    )
+    assert cmd_ground._bundle_file_bytes(manifest) <= target
+    control = tmp_path / "late-control.bin"
+
+    def fake_finalize(_manifest, _profile):
+        control.write_bytes(b"x" * 30_000)
+        return {"status": "pass", "errors": [], "control_paths": [str(control)]}
+
+    monkeypatch.setattr(cmd_ground, "finalize_snapshot_bundle", fake_finalize)
+    result = cmd_ground.finalize_snapshot_with_bounded_bundle(
+        manifest, "fleet-context", output_plan, snapshot_plan
+    )
+    assert result["status"] == "fail"
+    assert plan["status"] == "fail"
+    assert call_graph.exists()
+    assert plan["removed_paths"] == []
+    assert plan["role_decisions"] == []
+    assert "python_call_graph_json" in plan["selected_roles"]
+    assert plan["final_bundle_bytes"] == cmd_ground._bundle_file_bytes(
+        manifest, extra_paths=[control, snapshot_plan]
+    )
+    persisted = json.loads(manifest.read_text())
+    assert persisted["capabilities"]["repobrief_output_plan"] == output_plan
+
+
+@pytest.mark.parametrize("budget, expected_rc", [("1", 2), ("2MB", 0)])
+def test_bounded_fleet_budget_keeps_real_call_navigation(tmp_path, capsys, budget, expected_rc):
+    from merger.repoground.core import mcp_tools
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "sample.py").write_text(
+        "def helper(value):\n    return value + 1\n\ndef target(value):\n    return helper(value)\n"
+    )
+    out = tmp_path / "bundle"
+    rc = main([
+        "ground", "snapshot", "create", "--repo", str(repo),
+        "--out", str(out), "--profile", "fleet-context", "--bundle-max-bytes", budget,
+    ])
+    captured = capsys.readouterr()
+    assert rc == expected_rc, captured.err
+    if expected_rc:
+        assert "cannot be met" in captured.err
+    else:
+        assert json.loads(captured.out)["bounded_bundle"]["status"] == "pass"
+    manifest = next(out.glob("*.bundle.manifest.json"))
+    for function, name, key in [
+        (mcp_tools.find_references, "helper", "hits"),
+        (mcp_tools.get_callers, "helper", "callers"),
+        (mcp_tools.get_callees, "target", "callees"),
+    ]:
+        response = function(bundle_manifest=manifest, name=name)
+        assert response["status"] == "available", response
+        assert response["result"]["status"] == "available", response
+        assert response["result"][key], response
+
+
+@pytest.mark.parametrize("block", ["permission", "required"])
+def test_bounded_budget_respects_central_profile_authority(tmp_path, monkeypatch, block):
+    from merger.repoground.core import snapshot_profiles
+
+    manifest, _canonical, call_graph = _write_bounded_manifest(tmp_path)
+    if block == "permission":
+        monkeypatch.setitem(
+            snapshot_profiles.PROFILE_BUDGET_DROPPABLE_ROLES, "agent-portable", ()
+        )
+    else:
+        monkeypatch.setitem(
+            snapshot_profiles.PROFILE_ARTIFACT_RULES["agent-portable"],
+            "python_call_graph_json", "required",
+        )
+    before = manifest.read_bytes()
+    with pytest.raises(ValueError):
+        cmd_ground.apply_bounded_bundle_budget(manifest, "agent-portable", 1)
+    assert call_graph.exists()
+    assert manifest.read_bytes() == before
