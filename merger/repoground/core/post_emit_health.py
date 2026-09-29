@@ -254,14 +254,7 @@ def _range_ref_status(
     try:
         from . import range_resolver
 
-        if range_resolver.jsonschema is None:
-            return (
-                "environment_error",
-                "range_ref validation skipped: jsonschema unavailable",
-                _validation(
-                    "skipped_unavailable", "range_resolver", "dependency_unavailable"
-                ),
-            )
+        range_resolver._require_jsonschema()
         range_resolver.resolve_range_ref(manifest_path, sample_ref)
         return (
             "ok",
