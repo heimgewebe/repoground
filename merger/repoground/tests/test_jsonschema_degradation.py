@@ -44,7 +44,7 @@ print("Success")
     assert "Success" in result.stdout
 
 
-def test_range_resolver_degradation(tmp_path):
+def test_range_resolver_fallback_without_jsonschema_rejects_invalid_ref(tmp_path):
     manifest_path = tmp_path / "bundle.manifest.json"
     manifest_path.write_text('{"kind": "repolens.bundle.manifest"}', encoding="utf-8")
 
@@ -57,15 +57,21 @@ from pathlib import Path
 try:
     rr.resolve_range_ref(Path("{manifest_path}"), {{}})
     sys.exit(1)
-except RuntimeError as e:
-    if "Schema validation requested but jsonschema is unavailable" in str(e):
+except ValueError as e:
+    if "range_ref failed schema" in str(e):
         print("Success")
     else:
         print(f"Wrong error: {{e}}")
         sys.exit(1)
 """
     repo_root = get_repo_root()
-    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=get_test_env(), cwd=repo_root)
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        env=get_test_env(),
+        cwd=repo_root,
+    )
     assert result.returncode == 0
     assert "Success" in result.stdout
 

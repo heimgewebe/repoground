@@ -252,9 +252,17 @@ def _range_ref_status(
         return "no_range_ref", "no range reference found; range_ref check skipped", not_applicable
 
     try:
-        from .range_resolver import resolve_range_ref
+        from . import range_resolver
 
-        resolve_range_ref(manifest_path, sample_ref)
+        if range_resolver.jsonschema is None:
+            return (
+                "environment_error",
+                "range_ref validation skipped: jsonschema unavailable",
+                _validation(
+                    "skipped_unavailable", "range_resolver", "dependency_unavailable"
+                ),
+            )
+        range_resolver.resolve_range_ref(manifest_path, sample_ref)
         return (
             "ok",
             "range reference resolved against bundle manifest",

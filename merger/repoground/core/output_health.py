@@ -279,8 +279,18 @@ def _range_ref_check(
         return None, ["no range reference found; range_ref check skipped"], "no_range_ref", not_applicable
 
     try:
-        from .range_resolver import resolve_range_ref
-        resolve_range_ref(dump_index_path, sample_ref)
+        from . import range_resolver
+
+        if range_resolver.jsonschema is None:
+            return (
+                None,
+                ["range_ref schema validation skipped: jsonschema unavailable"],
+                "environment_error",
+                _range_ref_validation(
+                    "skipped_unavailable", "dependency_unavailable"
+                ),
+            )
+        range_resolver.resolve_range_ref(dump_index_path, sample_ref)
         return True, [], "ok", _range_ref_validation("jsonschema", "available")
     except Exception as e:
         if _is_jsonschema_unavailable_error(e):
