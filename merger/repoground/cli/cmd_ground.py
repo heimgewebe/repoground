@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -2015,8 +2016,15 @@ def _parse_bounded_bundle_max_bytes(
 ) -> int | None:
     if requested_max_bytes is None:
         return None
+    raw_value = str(requested_max_bytes).upper().strip()
+    size_pattern = (
+        r"(?:\d+|[+-]?(?:\d+(?:\.\d*)?|\.\d+)"
+        r"(?:E[+-]?\d+)?(?:K|KB|M|MB|G|GB))"
+    )
+    if re.fullmatch(size_pattern, raw_value) is None:
+        raise ValueError("--bundle-max-bytes must be a finite positive size")
     try:
-        target = parse_human_size(str(requested_max_bytes))
+        target = parse_human_size(raw_value)
     except (OverflowError, ValueError) as exc:
         raise ValueError(
             "--bundle-max-bytes must be a finite positive size"
@@ -2379,6 +2387,25 @@ def _persist_bounded_output_plan(
     emit_snapshot_plan_report(bundle_manifest, profile, output_plan)
 
 
+def _bounded_output_plan_is_stable(
+    bundle_manifest: Path,
+    output_plan: dict[str, Any],
+    plan: dict[str, Any],
+    persisted_final_bytes: object,
+) -> bool:
+    manifest_data = json.loads(bundle_manifest.read_text(encoding="utf-8"))
+    capabilities = manifest_data.get("capabilities", {})
+    persisted_output_plan = (
+        capabilities.get("repobrief_output_plan")
+        if isinstance(capabilities, dict)
+        else None
+    )
+    return (
+        plan.get("final_bundle_bytes") == persisted_final_bytes
+        and persisted_output_plan == output_plan
+    )
+
+
 def _bounded_measurement_unstable_result(
     bundle_manifest: Path,
     profile: str,
@@ -2398,6 +2425,63 @@ def _bounded_measurement_unstable_result(
         "status": "fail",
         "errors": errors,
     }
+
+
+def _retry_failed_bounded_finalization(
+    bundle_manifest: Path,
+    profile: str,
+    output_plan: dict[str, Any],
+    plan: dict[str, Any],
+    finalization: dict[str, Any],
+    measured_finalization: dict[str, Any],
+    persisted_final_bytes: object,
+    *,
+    attempt: int,
+    max_passes: int,
+) -> tuple[bool, dict[str, Any] | None]:
+    retry_plan = apply_bounded_bundle_budget(
+        bundle_manifest,
+        profile,
+        plan["target_max_bytes"],
+        fail_if_unmet=False,
+        extra_paths=_bounded_finalization_extra_paths(plan, finalization),
+        prior_plan=plan,
+    )
+    plan.clear()
+    plan.update(retry_plan)
+    _refresh_bounded_selection_plan(bundle_manifest, profile, plan)
+
+    if retry_plan["status"] == "pass":
+        _persist_bounded_output_plan(bundle_manifest, profile, output_plan)
+        if attempt + 1 == max_passes:
+            return True, _bounded_measurement_unstable_result(
+                bundle_manifest,
+                profile,
+                output_plan,
+                plan,
+                measured_finalization,
+            )
+        return False, None
+
+    if _bounded_output_plan_is_stable(
+        bundle_manifest,
+        output_plan,
+        plan,
+        persisted_final_bytes,
+    ):
+        return True, measured_finalization
+
+    if attempt + 1 == max_passes:
+        return True, _bounded_measurement_unstable_result(
+            bundle_manifest,
+            profile,
+            output_plan,
+            plan,
+            measured_finalization,
+        )
+
+    _persist_bounded_output_plan(bundle_manifest, profile, output_plan)
+    return False, None
 
 
 def finalize_snapshot_with_bounded_bundle(
@@ -2430,41 +2514,29 @@ def finalize_snapshot_with_bounded_bundle(
         )
 
         if plan.get("enabled") and plan.get("status") == "fail":
-            retry_plan = apply_bounded_bundle_budget(
+            should_return, retry_result = _retry_failed_bounded_finalization(
                 bundle_manifest,
                 profile,
-                plan["target_max_bytes"],
-                fail_if_unmet=False,
-                extra_paths=_bounded_finalization_extra_paths(plan, finalization),
-                prior_plan=plan,
+                output_plan,
+                plan,
+                finalization,
+                measured_finalization,
+                persisted_final_bytes,
+                attempt=attempt,
+                max_passes=max_passes,
             )
-            plan.clear()
-            plan.update(retry_plan)
-            _refresh_bounded_selection_plan(bundle_manifest, profile, plan)
-            _persist_bounded_output_plan(bundle_manifest, profile, output_plan)
-            if retry_plan["status"] == "pass":
-                if attempt + 1 == max_passes:
-                    return _bounded_measurement_unstable_result(
-                        bundle_manifest,
-                        profile,
-                        output_plan,
-                        plan,
-                        measured_finalization,
-                    )
-                continue
-            return measured_finalization
+            if should_return:
+                if retry_result is None:
+                    raise AssertionError("bounded retry result unexpectedly missing")
+                return retry_result
+            continue
 
         _refresh_bounded_selection_plan(bundle_manifest, profile, plan)
-        manifest_data = json.loads(bundle_manifest.read_text(encoding="utf-8"))
-        capabilities = manifest_data.get("capabilities", {})
-        persisted_output_plan = (
-            capabilities.get("repobrief_output_plan")
-            if isinstance(capabilities, dict)
-            else None
-        )
-        if (
-            plan.get("final_bundle_bytes") == persisted_final_bytes
-            and persisted_output_plan == output_plan
+        if _bounded_output_plan_is_stable(
+            bundle_manifest,
+            output_plan,
+            plan,
+            persisted_final_bytes,
         ):
             return measured_finalization
 

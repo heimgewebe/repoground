@@ -1435,7 +1435,7 @@ def test_bounded_bundle_budget_rejects_target_above_hard_limit(tmp_path):
 
 @pytest.mark.parametrize(
     "requested",
-    ["0", "257MB", "infM", "1e309M"],
+    ["0", "257MB", "infM", "1e309M", "1MM", "1MBMB"],
 )
 def test_snapshot_create_rejects_invalid_bundle_limit_before_output(
     tmp_path, capsys, requested
@@ -1740,7 +1740,11 @@ def test_bounded_finalization_records_insufficient_late_pruning(
 
     control = tmp_path / "oversized-late-control.bin"
 
+    finalize_calls = 0
+
     def fake_finalize(_manifest, _profile):
+        nonlocal finalize_calls
+        finalize_calls += 1
         control.write_bytes(b"x" * 100_000)
         return {
             "status": "pass",
@@ -1748,6 +1752,9 @@ def test_bounded_finalization_records_insufficient_late_pruning(
             "profile_evaluation": {"status": "warn"},
             "control_paths": [str(control)],
             "refreshed_paths": [],
+            "evidence_manifest_sha256": hashlib.sha256(
+                manifest.read_bytes()
+            ).hexdigest(),
         }
 
     monkeypatch.setattr(cmd_ground, "finalize_snapshot_bundle", fake_finalize)
@@ -1764,6 +1771,14 @@ def test_bounded_finalization_records_insufficient_late_pruning(
     assert plan["status"] == "fail"
     assert plan["reason"] == "approved_droppable_roles_insufficient"
     assert plan["final_bundle_bytes"] > target
+    assert finalize_calls >= 2
+    assert result["evidence_manifest_sha256"] == hashlib.sha256(
+        manifest.read_bytes()
+    ).hexdigest()
+    assert plan["final_bundle_bytes"] == cmd_ground._bundle_file_bytes(
+        manifest,
+        extra_paths=[control, snapshot_plan],
+    )
     assert plan["role_decisions"] == [
         {
             "role": "python_call_graph_json",
