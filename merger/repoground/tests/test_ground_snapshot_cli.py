@@ -1824,6 +1824,9 @@ def test_bounded_finalization_last_pass_prune_fails_closed_instead_of_exhausting
             "profile_evaluation": {"status": "warn"},
             "control_paths": [str(control)],
             "refreshed_paths": [],
+            "final_manifest_sha256": hashlib.sha256(
+                manifest.read_bytes()
+            ).hexdigest(),
         }
 
     monkeypatch.setattr(cmd_ground, "finalize_snapshot_bundle", fake_finalize)
@@ -1841,6 +1844,15 @@ def test_bounded_finalization_last_pass_prune_fails_closed_instead_of_exhausting
     assert plan["status"] == "fail"
     assert plan["reason"] == "final_bundle_measurement_did_not_stabilize"
     assert "bounded_bundle_measurement_unstable" in result["errors"]
+    assert plan["final_bundle_bytes"] == cmd_ground._bundle_file_bytes(
+        manifest,
+        extra_paths=[control, snapshot_plan],
+    )
+    assert result["final_manifest_sha256"] == hashlib.sha256(
+        manifest.read_bytes()
+    ).hexdigest()
+    persisted = json.loads(manifest.read_text(encoding="utf-8"))
+    assert persisted["capabilities"]["repobrief_output_plan"] == output_plan
 
 def test_bounded_finalization_measures_and_prunes_before_returning_gate_failure(
     tmp_path, monkeypatch

@@ -2406,6 +2406,28 @@ def _bounded_output_plan_is_stable(
     )
 
 
+def _stabilize_bounded_failure_evidence(
+    bundle_manifest: Path,
+    profile: str,
+    output_plan: dict[str, Any],
+    plan: dict[str, Any],
+    finalization: dict[str, Any],
+    *,
+    max_passes: int = 8,
+) -> None:
+    extra_paths = _bounded_finalization_extra_paths(plan, finalization)
+    for _attempt in range(max_passes):
+        _persist_bounded_output_plan(bundle_manifest, profile, output_plan)
+        measured_bytes = _bundle_file_bytes(
+            bundle_manifest,
+            extra_paths=extra_paths,
+        )
+        if measured_bytes == plan.get("final_bundle_bytes"):
+            return
+        plan["final_bundle_bytes"] = measured_bytes
+    raise ValueError("bounded bundle terminal failure evidence did not stabilize")
+
+
 def _bounded_measurement_unstable_result(
     bundle_manifest: Path,
     profile: str,
@@ -2416,7 +2438,13 @@ def _bounded_measurement_unstable_result(
     if plan.get("enabled"):
         plan["status"] = "fail"
     plan["reason"] = "final_bundle_measurement_did_not_stabilize"
-    _persist_bounded_output_plan(bundle_manifest, profile, output_plan)
+    _stabilize_bounded_failure_evidence(
+        bundle_manifest,
+        profile,
+        output_plan,
+        plan,
+        finalization,
+    )
     errors = list(finalization.get("errors", []))
     if "bounded_bundle_measurement_unstable" not in errors:
         errors.append("bounded_bundle_measurement_unstable")
@@ -2424,6 +2452,10 @@ def _bounded_measurement_unstable_result(
         **finalization,
         "status": "fail",
         "errors": errors,
+        "final_manifest_sha256": hashlib.sha256(
+            bundle_manifest.read_bytes()
+        ).hexdigest(),
+        "manifest_artifact_count": _manifest_artifact_count(bundle_manifest),
     }
 
 
