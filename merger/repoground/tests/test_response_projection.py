@@ -665,3 +665,88 @@ def test_compact_callees_bound_ambiguous_candidates_and_candidate_target_ids(
     assert project_read_result(full, manifest, verbose=True) == full
     assert len(full["caller_candidates"]) == 6
     assert len(full["unresolved_call_sites"][0]["candidate_target_ids"]) == 6
+
+
+def _resolved_call_site(index: int) -> dict[str, object]:
+    return {
+        "path": "pkg/a.py",
+        "range_ref": f"file:pkg/a.py#L{index + 1}-L{index + 1}",
+        "start_line": index + 1,
+        "start_col": 0,
+        "end_line": index + 1,
+        "end_col": 8,
+        "callee_expression": "target",
+        "evidence_level": "S1",
+        "resolution_status": "resolved",
+        "resolution_reason": "symbol_id_match",
+        "relation_type": "call",
+        "resolved_target_ids": ["target-id"],
+    }
+
+
+def test_compact_callers_bound_call_sites_per_group(tmp_path: Path):
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text("{}", encoding="utf-8")
+    full = {
+        "kind": "repobrief.call_callers",
+        "status": "available",
+        "k": 2,
+        "target_symbol": _candidate_symbol(0),
+        "target_candidates": [],
+        "callers": [
+            {
+                "caller_symbol_id": "caller-id",
+                "caller_qualified_name": "pkg.a.caller",
+                "caller_kind": "function",
+                "caller_scope": "pkg.a",
+                "path": "pkg/a.py",
+                "call_site_count": 5,
+                "caller_symbol": _candidate_symbol(1),
+                "call_sites": [_resolved_call_site(index) for index in range(5)],
+            }
+        ],
+        "unresolved_references": [],
+    }
+
+    compact = project_read_result(full, manifest)
+    caller = compact["callers"][0]
+    assert len(caller["call_sites"]) == 2
+    assert caller["call_site_count"] == 5
+    assert caller["call_sites_truncated"] is True
+    assert project_read_result(compact, manifest) == compact
+
+    verbose = project_read_result(full, manifest, verbose=True)
+    assert verbose == full
+    assert len(verbose["callers"][0]["call_sites"]) == 5
+
+
+def test_compact_callees_bound_call_sites_per_group(tmp_path: Path):
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text("{}", encoding="utf-8")
+    full = {
+        "kind": "repobrief.call_callees",
+        "status": "available",
+        "k": 3,
+        "caller_symbol": _candidate_symbol(0),
+        "caller_candidates": [],
+        "callees": [
+            {
+                "call_site_count": 6,
+                "relation_types": ["call"],
+                "callee_symbol": _candidate_symbol(1),
+                "call_sites": [_resolved_call_site(index) for index in range(6)],
+            }
+        ],
+        "unresolved_call_sites": [],
+    }
+
+    compact = project_read_result(full, manifest)
+    callee = compact["callees"][0]
+    assert len(callee["call_sites"]) == 3
+    assert callee["call_site_count"] == 6
+    assert callee["call_sites_truncated"] is True
+    assert project_read_result(compact, manifest) == compact
+
+    verbose = project_read_result(full, manifest, verbose=True)
+    assert verbose == full
+    assert len(verbose["callees"][0]["call_sites"]) == 6

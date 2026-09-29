@@ -422,7 +422,7 @@ def _compact_unresolved_call_site(
     return compact
 
 
-def _compact_callers(value: Any) -> list[dict[str, Any]]:
+def _compact_callers(value: Any, *, call_site_limit: int) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
     callers: list[dict[str, Any]] = []
@@ -442,16 +442,25 @@ def _compact_callers(value: Any) -> list[dict[str, Any]]:
         )
         compact["caller_symbol"] = _compact_symbol(caller.get("caller_symbol"))
         sites = caller.get("call_sites")
-        compact["call_sites"] = (
-            [_compact_resolved_call_site(site) for site in sites if isinstance(site, dict)]
-            if isinstance(sites, list)
-            else []
+        visible_sites, count, truncated = _bounded_list(
+            sites,
+            call_site_limit,
+            prior_count=caller.get("call_site_count"),
+            prior_truncated=caller.get("call_sites_truncated"),
         )
+        compact["call_sites"] = [
+            _compact_resolved_call_site(site)
+            for site in visible_sites
+            if isinstance(site, dict)
+        ]
+        if isinstance(sites, list) and (sites or count):
+            compact["call_site_count"] = count
+            compact["call_sites_truncated"] = truncated
         callers.append(compact)
     return callers
 
 
-def _compact_callees(value: Any) -> list[dict[str, Any]]:
+def _compact_callees(value: Any, *, call_site_limit: int) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
     callees: list[dict[str, Any]] = []
@@ -461,11 +470,20 @@ def _compact_callees(value: Any) -> list[dict[str, Any]]:
         compact = _copy_fields(callee, ("call_site_count", "relation_types"))
         compact["callee_symbol"] = _compact_symbol(callee.get("callee_symbol"))
         sites = callee.get("call_sites")
-        compact["call_sites"] = (
-            [_compact_resolved_call_site(site) for site in sites if isinstance(site, dict)]
-            if isinstance(sites, list)
-            else []
+        visible_sites, count, truncated = _bounded_list(
+            sites,
+            call_site_limit,
+            prior_count=callee.get("call_site_count"),
+            prior_truncated=callee.get("call_sites_truncated"),
         )
+        compact["call_sites"] = [
+            _compact_resolved_call_site(site)
+            for site in visible_sites
+            if isinstance(site, dict)
+        ]
+        if isinstance(sites, list) and (sites or count):
+            compact["call_site_count"] = count
+            compact["call_sites_truncated"] = truncated
         callees.append(compact)
     return callees
 
@@ -480,7 +498,9 @@ def _project_compact_callers(compact: dict[str, Any], *, candidate_limit: int) -
         truncated_field="target_candidates_truncated",
         limit=candidate_limit,
     )
-    compact["callers"] = _compact_callers(compact.get("callers"))
+    compact["callers"] = _compact_callers(
+        compact.get("callers"), call_site_limit=candidate_limit
+    )
     unresolved = compact.get("unresolved_references")
     compact["unresolved_references"] = (
         [
@@ -507,7 +527,9 @@ def _project_compact_callees(compact: dict[str, Any], *, candidate_limit: int) -
         truncated_field="caller_candidates_truncated",
         limit=candidate_limit,
     )
-    compact["callees"] = _compact_callees(compact.get("callees"))
+    compact["callees"] = _compact_callees(
+        compact.get("callees"), call_site_limit=candidate_limit
+    )
     unresolved = compact.get("unresolved_call_sites")
     compact["unresolved_call_sites"] = (
         [
