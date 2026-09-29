@@ -553,3 +553,115 @@ def test_verbose_call_navigation_keeps_full_historical_result(tmp_path: Path):
     assert wrapped_callees["result"] == direct_callees
     assert "source_range" in direct_callees["callees"][0]["call_sites"][0]
     assert "absolute_path" in direct_callees["call_graph"]
+
+
+def _candidate_symbol(index: int) -> dict[str, object]:
+    return {
+        "id": f"candidate-{index}",
+        "name": "duplicate",
+        "qualified_name": f"scope_{index}.duplicate",
+        "kind": "function",
+        "path": f"pkg/candidate_{index}.py",
+        "start_line": index + 1,
+        "end_line": index + 2,
+        "range_ref": f"file:pkg/candidate_{index}.py#L{index + 1}-L{index + 2}",
+    }
+
+
+def test_compact_callers_bound_ambiguous_candidates_and_candidate_target_ids(
+    tmp_path: Path,
+):
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text("{}", encoding="utf-8")
+    full = {
+        "kind": "repobrief.call_callers",
+        "status": "invalid",
+        "error_code": "symbol_ambiguous",
+        "k": 2,
+        "target_symbol": None,
+        "target_candidates": [_candidate_symbol(index) for index in range(5)],
+        "callers": [],
+        "unresolved_references": [
+            {
+                "path": "pkg/a.py",
+                "range_ref": "file:pkg/a.py#L10-L10",
+                "callee_expression": "duplicate",
+                "evidence_level": "S0",
+                "resolution_status": "ambiguous",
+                "resolution_reason": "multiple_targets",
+                "relation_type": "call",
+                "relation_to_selected_target": "candidate",
+                "candidate_target_ids": [f"candidate-{index}" for index in range(5)],
+            }
+        ],
+    }
+
+    compact = project_read_result(full, manifest)
+    assert [item["id"] for item in compact["target_candidates"]] == [
+        "candidate-0",
+        "candidate-1",
+    ]
+    assert compact["target_candidate_count"] == 5
+    assert compact["target_candidates_truncated"] is True
+
+    unresolved = compact["unresolved_references"][0]
+    assert unresolved["candidate_target_ids"] == ["candidate-0", "candidate-1"]
+    assert unresolved["candidate_target_id_count"] == 5
+    assert unresolved["candidate_target_ids_truncated"] is True
+
+    assert project_read_result(compact, manifest) == compact
+    assert project_read_result(full, manifest, verbose=True) == full
+    assert len(full["target_candidates"]) == 5
+    assert len(full["unresolved_references"][0]["candidate_target_ids"]) == 5
+
+
+def test_compact_callees_bound_ambiguous_candidates_and_candidate_target_ids(
+    tmp_path: Path,
+):
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text("{}", encoding="utf-8")
+    full = {
+        "kind": "repobrief.call_callees",
+        "status": "invalid",
+        "error_code": "symbol_ambiguous",
+        "k": 3,
+        "caller_symbol": None,
+        "caller_candidates": [_candidate_symbol(index) for index in range(6)],
+        "callees": [],
+        "unresolved_call_sites": [
+            {
+                "path": "pkg/a.py",
+                "range_ref": "file:pkg/a.py#L20-L20",
+                "callee_expression": "duplicate",
+                "evidence_level": "S0",
+                "resolution_status": "ambiguous",
+                "resolution_reason": "multiple_targets",
+                "relation_type": "call",
+                "relation_to_selected_target": "candidate",
+                "candidate_target_ids": [f"candidate-{index}" for index in range(6)],
+            }
+        ],
+    }
+
+    compact = project_read_result(full, manifest)
+    assert [item["id"] for item in compact["caller_candidates"]] == [
+        "candidate-0",
+        "candidate-1",
+        "candidate-2",
+    ]
+    assert compact["caller_candidate_count"] == 6
+    assert compact["caller_candidates_truncated"] is True
+
+    unresolved = compact["unresolved_call_sites"][0]
+    assert unresolved["candidate_target_ids"] == [
+        "candidate-0",
+        "candidate-1",
+        "candidate-2",
+    ]
+    assert unresolved["candidate_target_id_count"] == 6
+    assert unresolved["candidate_target_ids_truncated"] is True
+
+    assert project_read_result(compact, manifest) == compact
+    assert project_read_result(full, manifest, verbose=True) == full
+    assert len(full["caller_candidates"]) == 6
+    assert len(full["unresolved_call_sites"][0]["candidate_target_ids"]) == 6

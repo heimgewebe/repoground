@@ -335,12 +335,62 @@ def _compact_resolved_call_site(value: Any) -> dict[str, Any]:
     )
 
 
+def _bounded_list(
+    value: Any,
+    limit: int,
+    *,
+    prior_count: Any = None,
+    prior_truncated: Any = None,
+) -> tuple[list[Any], int, bool]:
+    items = list(value) if isinstance(value, list) else []
+    visible = items[:limit]
+    count = len(items)
+    if (
+        isinstance(prior_count, int)
+        and not isinstance(prior_count, bool)
+        and prior_count >= count
+    ):
+        count = prior_count
+    truncated = len(items) > len(visible) or count > len(visible)
+    if prior_truncated is True:
+        truncated = True
+    return visible, count, truncated
+
+
+def _project_bounded_symbol_candidates(
+    compact: dict[str, Any],
+    *,
+    field: str,
+    count_field: str,
+    truncated_field: str,
+    limit: int,
+) -> None:
+    candidates = compact.get(field)
+    if not isinstance(candidates, list):
+        return
+    visible, count, truncated = _bounded_list(
+        candidates,
+        limit,
+        prior_count=compact.get(count_field),
+        prior_truncated=compact.get(truncated_field),
+    )
+    compact[field] = [
+        symbol
+        for candidate in visible
+        if (symbol := _compact_symbol(candidate)) is not None
+    ]
+    if candidates or count:
+        compact[count_field] = count
+        compact[truncated_field] = truncated
+
+
 def _compact_unresolved_call_site(
     value: Any,
     *,
     keep_caller_identity: bool,
+    candidate_limit: int,
 ) -> dict[str, Any]:
-    """Keep S0 location and why it was not promoted to a resolved graph edge."""
+    """Keep bounded S0 location and why it was not promoted to a resolved graph edge."""
     fields = [
         "path",
         "range_ref",
@@ -350,11 +400,26 @@ def _compact_unresolved_call_site(
         "resolution_reason",
         "relation_type",
         "relation_to_selected_target",
-        "candidate_target_ids",
     ]
     if keep_caller_identity:
         fields.extend(("caller_symbol_id", "caller_qualified_name"))
-    return _copy_nonempty_fields(value, tuple(fields))
+    compact = _copy_nonempty_fields(value, tuple(fields))
+    candidate_ids = value.get("candidate_target_ids") if isinstance(value, dict) else None
+    if isinstance(candidate_ids, list) and (
+        candidate_ids
+        or value.get("candidate_target_id_count")
+        or value.get("candidate_target_ids_truncated") is True
+    ):
+        visible, count, truncated = _bounded_list(
+            candidate_ids,
+            candidate_limit,
+            prior_count=value.get("candidate_target_id_count"),
+            prior_truncated=value.get("candidate_target_ids_truncated"),
+        )
+        compact["candidate_target_ids"] = visible
+        compact["candidate_target_id_count"] = count
+        compact["candidate_target_ids_truncated"] = truncated
+    return compact
 
 
 def _compact_callers(value: Any) -> list[dict[str, Any]]:
@@ -405,21 +470,25 @@ def _compact_callees(value: Any) -> list[dict[str, Any]]:
     return callees
 
 
-def _project_compact_callers(compact: dict[str, Any]) -> None:
+def _project_compact_callers(compact: dict[str, Any], *, candidate_limit: int) -> None:
     if "target_symbol" in compact:
         compact["target_symbol"] = _compact_symbol(compact.get("target_symbol"))
-    candidates = compact.get("target_candidates")
-    if isinstance(candidates, list):
-        compact["target_candidates"] = [
-            symbol
-            for candidate in candidates
-            if (symbol := _compact_symbol(candidate)) is not None
-        ]
+    _project_bounded_symbol_candidates(
+        compact,
+        field="target_candidates",
+        count_field="target_candidate_count",
+        truncated_field="target_candidates_truncated",
+        limit=candidate_limit,
+    )
     compact["callers"] = _compact_callers(compact.get("callers"))
     unresolved = compact.get("unresolved_references")
     compact["unresolved_references"] = (
         [
-            _compact_unresolved_call_site(site, keep_caller_identity=True)
+            _compact_unresolved_call_site(
+                site,
+                keep_caller_identity=True,
+                candidate_limit=candidate_limit,
+            )
             for site in unresolved
             if isinstance(site, dict)
         ]
@@ -428,21 +497,25 @@ def _project_compact_callers(compact: dict[str, Any]) -> None:
     )
 
 
-def _project_compact_callees(compact: dict[str, Any]) -> None:
+def _project_compact_callees(compact: dict[str, Any], *, candidate_limit: int) -> None:
     if "caller_symbol" in compact:
         compact["caller_symbol"] = _compact_symbol(compact.get("caller_symbol"))
-    candidates = compact.get("caller_candidates")
-    if isinstance(candidates, list):
-        compact["caller_candidates"] = [
-            symbol
-            for candidate in candidates
-            if (symbol := _compact_symbol(candidate)) is not None
-        ]
+    _project_bounded_symbol_candidates(
+        compact,
+        field="caller_candidates",
+        count_field="caller_candidate_count",
+        truncated_field="caller_candidates_truncated",
+        limit=candidate_limit,
+    )
     compact["callees"] = _compact_callees(compact.get("callees"))
     unresolved = compact.get("unresolved_call_sites")
     compact["unresolved_call_sites"] = (
         [
-            _compact_unresolved_call_site(site, keep_caller_identity=False)
+            _compact_unresolved_call_site(
+                site,
+                keep_caller_identity=False,
+                candidate_limit=candidate_limit,
+            )
             for site in unresolved
             if isinstance(site, dict)
         ]
@@ -469,10 +542,18 @@ def compact_call_navigation(result: Any) -> dict[str, Any]:
             compact.get("call_graph_coverage")
         )
 
+    candidate_limit = compact.get("k")
+    if (
+        not isinstance(candidate_limit, int)
+        or isinstance(candidate_limit, bool)
+        or candidate_limit < 1
+    ):
+        candidate_limit = 0
+
     if compact.get("kind") == "repobrief.call_callers":
-        _project_compact_callers(compact)
+        _project_compact_callers(compact, candidate_limit=candidate_limit)
     else:
-        _project_compact_callees(compact)
+        _project_compact_callees(compact, candidate_limit=candidate_limit)
     return compact
 
 def project_read_result(
