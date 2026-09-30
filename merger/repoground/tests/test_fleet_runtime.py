@@ -251,7 +251,7 @@ def test_remote_branch_head_ignores_non_ref_diagnostics_without_shared_ref_updat
 
     monkeypatch.setattr(module, "run", fake_run)
 
-    assert module.remote_branch_head(repo, "main") == ("origin/main", "main", sha)
+    assert module.remote_branch_head(repo, "main") == ("refs/heads/main", "main", sha)
     assert not any(
         "refs/remotes/origin/main" in argument
         for argv in calls
@@ -361,7 +361,7 @@ def test_remote_branch_head_fetch_does_not_update_origin_tracking_ref(
     git(remote, "update-ref", "refs/heads/main", second_sha)
 
     assert module.remote_branch_head(checkout, "main") == (
-        "origin/main",
+        "refs/heads/main",
         "main",
         second_sha,
     )
@@ -4027,6 +4027,40 @@ def test_runtime_installer_rejects_legacy_publication_marker_spoof(
     assert not systemctl_log.exists()
 
 
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "repos:\n  - name: repoground\nrepos:\n  - name: heim-pc\n",
+        (
+            "repos:\n"
+            "  - name: repoground\n"
+            "    owner: heimgewebe\n"
+            "    owner: attacker\n"
+        ),
+    ],
+)
+def test_fleet_membership_yaml_rejects_duplicate_mapping_keys(raw: str) -> None:
+    module = load_publisher()
+
+    with pytest.raises(RuntimeError, match="fleet membership YAML is invalid"):
+        module._load_fleet_membership_yaml(raw)
+
+
+def test_fleet_membership_yaml_preserves_merge_key_overrides() -> None:
+    module = load_publisher()
+    document = module._load_fleet_membership_yaml(
+        "defaults: &defaults\n"
+        "  owner: heimgewebe\n"
+        "repos:\n"
+        "  - <<: *defaults\n"
+        "    owner: other\n"
+        "    name: demo\n"
+    )
+
+    assert isinstance(document, dict)
+    assert document["repos"][0] == {"owner": "other", "name": "demo"}
+
+
 def test_fleet_membership_keys_follow_authoritative_semantics() -> None:
     module = load_publisher()
     document = {
@@ -4183,7 +4217,8 @@ def test_authoritative_fleet_membership_reads_remote_main_not_dirty_worktree(
         "heimgewebe/heim-pc",
     )
     assert membership.source_commit == remote_head
-    assert membership.source_ref == "origin/main"
+    assert membership.source_ref == "refs/heads/main"
+    assert membership.receipt()["source_ref"] == "refs/heads/main"
     assert membership.content_sha256 == hashlib.sha256(
         authoritative.encode("utf-8")
     ).hexdigest()
