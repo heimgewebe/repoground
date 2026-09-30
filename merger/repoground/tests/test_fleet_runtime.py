@@ -157,6 +157,47 @@ def test_remote_head_rejects_remote_head_that_moves_after_fetch(
         module.remote_head(repo)
 
 
+def test_remote_branch_head_ignores_non_ref_diagnostics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo = tmp_path / "metarepo"
+    sha = "a" * 40
+    fetched = False
+
+    def fake_run(
+        argv: list[str],
+        cwd: Path | None = None,
+        check: bool = True,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal fetched
+        if argv[-3:] == ["--", "origin", "refs/heads/main"]:
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout=(
+                    "Warning: Permanently added github.com to known hosts.\n"
+                    f"{sha}\trefs/heads/main\n"
+                ),
+            )
+        if _is_advertised_branch_fetch(argv, "main"):
+            fetched = True
+            return subprocess.CompletedProcess(argv, 0, stdout="")
+        if argv[-3:] == ["rev-parse", "--verify", "refs/remotes/origin/main"]:
+            return subprocess.CompletedProcess(
+                argv,
+                0 if fetched else 1,
+                stdout=f"{sha}\n" if fetched else "",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    monkeypatch.setattr(module, "run", fake_run)
+
+    assert module.remote_branch_head(repo, "main") == ("origin/main", "main", sha)
+
+
 def test_remote_head_falls_back_to_existing_local_origin_head(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -3713,6 +3754,7 @@ def test_runtime_installer_rejects_legacy_publication_marker_spoof(
     assert legacy.is_file()
     assert not systemctl_log.exists()
 
+
 def test_fleet_membership_keys_follow_authoritative_semantics() -> None:
     module = load_publisher()
     document = {
@@ -3795,6 +3837,23 @@ def test_authoritative_fleet_membership_reads_remote_main_not_dirty_worktree(
     assert git(checkout, "status", "--porcelain")
 
     monkeypatch.setattr(module, "METAREPO_REPO", checkout)
+    original_run = module.run
+
+    def run_with_authority_origin(
+        argv: list[str],
+        cwd: Path | None = None,
+        check: bool = True,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        if argv[-3:] == ["remote", "get-url", "origin"]:
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout="org-236528253@github.com:heimgewebe/metarepo.git\n",
+            )
+        return original_run(argv, cwd=cwd, check=check, env=env)
+
+    monkeypatch.setattr(module, "run", run_with_authority_origin)
     membership = module.load_authoritative_fleet_membership()
 
     assert membership.keys == (
@@ -3806,6 +3865,26 @@ def test_authoritative_fleet_membership_reads_remote_main_not_dirty_worktree(
     assert membership.content_sha256 == hashlib.sha256(
         authoritative.encode("utf-8")
     ).hexdigest()
+
+
+def test_authoritative_fleet_membership_rejects_wrong_origin(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    checkout, _ = initialize_repository(tmp_path, "metarepo")
+    git(
+        checkout,
+        "remote",
+        "add",
+        "origin",
+        "git@github.com:heimgewebe/not-metarepo.git",
+    )
+
+    monkeypatch.setattr(module, "METAREPO_REPO", checkout)
+
+    with pytest.raises(RuntimeError, match="origin mismatch"):
+        module.load_authoritative_fleet_membership()
 
 
 def test_select_authoritative_fleet_entries_reports_missing_and_excluded(
@@ -3911,3 +3990,30 @@ def test_fleet_inventory_marks_missing_authoritative_member_as_failure(
         "heimgewebe/heim-pc"
     ]
     assert payload["membership"]["excluded_local_nonmember_count"] == 0
+
+
+def test_fleet_membership_preflight_failure_persists_fleet_last(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = load_publisher()
+    log_root = tmp_path / "logs"
+    monkeypatch.setattr(module, "LOG_ROOT", log_root)
+    monkeypatch.setattr(module, "discover", lambda: [])
+
+    def unavailable_membership() -> module.FleetMembership:
+        raise RuntimeError("membership unavailable")
+
+    monkeypatch.setattr(
+        module,
+        "load_authoritative_fleet_membership",
+        unavailable_membership,
+    )
+
+    assert module.main([]) == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["phase"] == "fleet_membership"
+
+    persisted = json.loads((log_root / "fleet-last.json").read_text(encoding="utf-8"))
+    assert persisted == payload
