@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -32,6 +33,10 @@ DOES_NOT_ESTABLISH = [
     "claims_true",
     "forensic_ready",
 ]
+
+
+BOUNDED_BUNDLE_HARD_LIMIT_BYTES = 256 * 1024 * 1024
+BOUNDED_BUNDLE_DEFAULT_TARGET_BYTES = 192 * 1024 * 1024
 
 
 def _json_write_atomic(path: Path, data: dict[str, Any]) -> None:
@@ -540,6 +545,15 @@ def register_ground_command_groups(ground_parser: argparse.ArgumentParser) -> No
         help="Existing renderer mode passed through to the deterministic generator",
     )
     create_parser.add_argument("--max-bytes", default="0")
+    create_parser.add_argument(
+        "--bundle-max-bytes",
+        default=None,
+        help=(
+            "Optional total emitted bundle budget in bytes or a human size. "
+            "The request may not exceed the fixed 256 MiB hard ceiling; "
+            "recommended benchmark target: 192 MiB."
+        ),
+    )
     create_parser.add_argument("--split-size", default="25MB")
     create_parser.add_argument("--path-filter")
     create_parser.add_argument("--ext", action="append")
@@ -1486,6 +1500,19 @@ def run_preflight(args: argparse.Namespace) -> int:
     return 0 if result.get("status") in {"pass", "warn"} else 1
 
 
+def _append_unique_paths(
+    paths: list[Path],
+    raw_paths: Iterable[str | Path],
+) -> None:
+    known = set(paths)
+    for raw_path in raw_paths:
+        path = Path(raw_path)
+        if path in known:
+            continue
+        paths.append(path)
+        known.add(path)
+
+
 def build_snapshot_create_result(args: argparse.Namespace) -> dict[str, Any]:
     profile = args.profile
     repo = Path(args.repo).expanduser().resolve()
@@ -1507,6 +1534,10 @@ def build_snapshot_create_result(args: argparse.Namespace) -> dict[str, Any]:
             f"profile {profile} excludes artifacts produced by output mode {output_mode}: "
             + ", ".join(conflicts)
         )
+
+    bounded_bundle_max_bytes = _parse_bounded_bundle_max_bytes(
+        getattr(args, "bundle_max_bytes", None)
+    )
 
     out.mkdir(parents=True, exist_ok=True)
     max_bytes = parse_human_size(args.max_bytes)
@@ -1555,10 +1586,35 @@ def build_snapshot_create_result(args: argparse.Namespace) -> dict[str, Any]:
         publish_generation=False,
     )
     dropped_profile_paths = enforce_profile_exclusions(artifacts.bundle_manifest, profile)
+    bounded_bundle_plan = apply_bounded_bundle_budget(
+        artifacts.bundle_manifest,
+        profile,
+        bounded_bundle_max_bytes,
+    )
+    dropped_profile_paths.extend(
+        _bounded_recorded_output_paths(
+            artifacts.bundle_manifest,
+            bounded_bundle_plan["removed_paths"],
+        )
+    )
+    output_plan["bounded_bundle"] = bounded_bundle_plan
+    mark_bundle_manifest_profile(artifacts.bundle_manifest, profile, output_plan)
     snapshot_plan_path = emit_snapshot_plan_report(
         artifacts.bundle_manifest, profile, output_plan
     )
-    finalization = finalize_snapshot_bundle(artifacts.bundle_manifest, profile)
+    finalization = finalize_snapshot_with_bounded_bundle(
+        artifacts.bundle_manifest,
+        profile,
+        output_plan,
+        snapshot_plan_path,
+    )
+    _append_unique_paths(
+        dropped_profile_paths,
+        _bounded_recorded_output_paths(
+            artifacts.bundle_manifest,
+            bounded_bundle_plan["removed_paths"],
+        ),
+    )
     profile_evaluation = finalization.get("profile_evaluation")
     artifact_paths = [
         path
@@ -1608,6 +1664,7 @@ def build_snapshot_create_result(args: argparse.Namespace) -> dict[str, Any]:
         "profile": profile,
         "output_mode": output_mode,
         "output_plan": output_plan,
+        "bounded_bundle": bounded_bundle_plan,
         "redaction": {
             "enabled": redact_secrets,
             "required": redaction_required,
@@ -1714,6 +1771,816 @@ def enforce_profile_exclusions(bundle_manifest: Path | None, profile: str) -> li
         dropped.extend(_drop_manifest_role(bundle_manifest, role))
     return dropped
 
+
+def _bounded_bundle_member_path(
+    bundle_manifest: Path,
+    raw_path: str | Path,
+    *,
+    allow_missing: bool = False,
+) -> Path | None:
+    root = bundle_manifest.parent.resolve()
+    candidate_input = Path(raw_path)
+    candidate_path = (
+        candidate_input
+        if candidate_input.is_absolute()
+        else bundle_manifest.parent / candidate_input
+    )
+    try:
+        if candidate_path.is_symlink():
+            raise ValueError(
+                f"bounded bundle member may not be a symlink: {candidate_path}"
+            )
+        candidate = candidate_path.resolve()
+        candidate.relative_to(root)
+    except OSError as exc:
+        raise ValueError(
+            f"bounded bundle member resolution failed for {candidate_path}"
+        ) from exc
+    except ValueError as exc:
+        raise ValueError(
+            f"bounded bundle member escapes output directory: {candidate_path}"
+        ) from exc
+
+    try:
+        if not candidate.exists():
+            if allow_missing:
+                return None
+            raise ValueError(f"bounded bundle member is missing: {candidate}")
+        if not candidate.is_file() or candidate.is_symlink():
+            raise ValueError(
+                f"bounded bundle member is not a regular file: {candidate}"
+            )
+    except OSError as exc:
+        raise ValueError(
+            f"bounded bundle byte measurement failed for {candidate}"
+        ) from exc
+    return candidate
+
+
+def _required_bounded_member(
+    bundle_manifest: Path,
+    raw_path: str | Path,
+    *,
+    missing_reason: str,
+) -> Path:
+    path = _bounded_bundle_member_path(bundle_manifest, raw_path)
+    if path is None:
+        raise AssertionError(missing_reason)
+    return path
+
+
+def _read_bounded_json_object(path: Path, *, label: str) -> dict[str, Any]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"bounded bundle {label} could not be read: {path}") from exc
+    if not isinstance(data, dict):
+        raise ValueError(f"bounded bundle {label} must be a JSON object")
+    return data
+
+
+def _bounded_manifest_members(
+    bundle_manifest: Path,
+    data: dict[str, Any],
+) -> tuple[set[Path], list[Path], list[Path]]:
+    paths: set[Path] = set()
+    index_sidecars: list[Path] = []
+    dump_indices: list[Path] = []
+    artifacts = data.get("artifacts", [])
+    artifact_rows = artifacts if isinstance(artifacts, list) else []
+
+    for artifact in artifact_rows:
+        if not isinstance(artifact, dict):
+            continue
+        raw_path = artifact.get("path")
+        if not isinstance(raw_path, str) or not raw_path:
+            continue
+        path = _required_bounded_member(
+            bundle_manifest,
+            raw_path,
+            missing_reason="required manifest artifact unexpectedly missing",
+        )
+        paths.add(path)
+        role = artifact.get("role")
+        if role == "index_sidecar_json":
+            index_sidecars.append(path)
+        elif role == "dump_index_json":
+            dump_indices.append(path)
+    return paths, index_sidecars, dump_indices
+
+
+def _bounded_link_members(
+    bundle_manifest: Path,
+    data: dict[str, Any],
+) -> set[Path]:
+    paths: set[Path] = set()
+    links = data.get("links", {})
+    if not isinstance(links, dict):
+        return paths
+
+    for key, raw_path in links.items():
+        if not str(key).endswith("_path"):
+            continue
+        if not isinstance(raw_path, str) or not raw_path:
+            continue
+        path = _required_bounded_member(
+            bundle_manifest,
+            raw_path,
+            missing_reason="required linked bundle surface unexpectedly missing",
+        )
+        paths.add(path)
+    return paths
+
+
+def _bounded_dump_index_members(
+    bundle_manifest: Path,
+    dump_indices: Iterable[Path],
+) -> set[Path]:
+    paths: set[Path] = set()
+    for dump_index_path in dump_indices:
+        dump_data = _read_bounded_json_object(
+            dump_index_path,
+            label="dump index",
+        )
+        dump_artifacts = dump_data.get("artifacts")
+        if not isinstance(dump_artifacts, dict):
+            continue
+        for artifact in dump_artifacts.values():
+            if not isinstance(artifact, dict):
+                continue
+            raw_path = artifact.get("path")
+            if not isinstance(raw_path, str) or not raw_path:
+                continue
+            path = _required_bounded_member(
+                bundle_manifest,
+                raw_path,
+                missing_reason="required dump-index artifact unexpectedly missing",
+            )
+            paths.add(path)
+    return paths
+
+
+def _bounded_split_members(
+    bundle_manifest: Path,
+    index_sidecars: Iterable[Path],
+) -> set[Path]:
+    paths: set[Path] = set()
+    for index_path in index_sidecars:
+        index_data = _read_bounded_json_object(
+            index_path,
+            label="index sidecar",
+        )
+        sidecar_artifacts = index_data.get("artifacts")
+        if not isinstance(sidecar_artifacts, dict):
+            continue
+        raw_parts = sidecar_artifacts.get("md_parts_basenames")
+        if not isinstance(raw_parts, list):
+            raw_parts = sidecar_artifacts.get("md_parts")
+        if not isinstance(raw_parts, list):
+            continue
+        for raw_path in raw_parts:
+            if not isinstance(raw_path, str) or not raw_path:
+                continue
+            path = _required_bounded_member(
+                bundle_manifest,
+                raw_path,
+                missing_reason="required split bundle part unexpectedly missing",
+            )
+            paths.add(path)
+    return paths
+
+
+def _bounded_extra_members(
+    bundle_manifest: Path,
+    extra_paths: Iterable[str | Path],
+) -> set[Path]:
+    paths: set[Path] = set()
+    for raw_path in extra_paths:
+        path = _bounded_bundle_member_path(
+            bundle_manifest,
+            raw_path,
+            allow_missing=True,
+        )
+        if path is not None:
+            paths.add(path)
+    return paths
+
+
+def _bundle_snapshot_paths(
+    bundle_manifest: Path,
+    *,
+    extra_paths: Iterable[str | Path] = (),
+) -> list[Path]:
+    manifest_path = _required_bounded_member(
+        bundle_manifest,
+        bundle_manifest,
+        missing_reason="bundle manifest unexpectedly missing",
+    )
+    data = _read_bounded_json_object(bundle_manifest, label="manifest")
+    paths, index_sidecars, dump_indices = _bounded_manifest_members(
+        bundle_manifest,
+        data,
+    )
+    paths.add(manifest_path)
+    paths.update(_bounded_link_members(bundle_manifest, data))
+    paths.update(_bounded_dump_index_members(bundle_manifest, dump_indices))
+    paths.update(_bounded_split_members(bundle_manifest, index_sidecars))
+    paths.update(_bounded_extra_members(bundle_manifest, extra_paths))
+    return sorted(paths, key=str)
+
+def _bundle_file_bytes(
+    bundle_manifest: Path,
+    *,
+    extra_paths: Iterable[str | Path] = (),
+) -> int:
+    total = 0
+    for candidate in _bundle_snapshot_paths(
+        bundle_manifest,
+        extra_paths=extra_paths,
+    ):
+        try:
+            total += candidate.stat().st_size
+        except OSError as exc:
+            raise ValueError(
+                f"bounded bundle byte measurement failed for {candidate}"
+            ) from exc
+    return total
+
+
+def _parse_bounded_bundle_max_bytes(
+    requested_max_bytes: str | int | None,
+) -> int | None:
+    if requested_max_bytes is None:
+        return None
+    raw_value = str(requested_max_bytes).upper().strip()
+    size_pattern = (
+        r"(?:\d+|[+-]?(?:\d+(?:\.\d*)?|\.\d+)"
+        r"(?:E[+-]?\d+)?(?:K|KB|M|MB|G|GB))"
+    )
+    if re.fullmatch(size_pattern, raw_value) is None:
+        raise ValueError("--bundle-max-bytes must be a finite positive size")
+    try:
+        target = parse_human_size(raw_value)
+    except (OverflowError, ValueError) as exc:
+        raise ValueError(
+            "--bundle-max-bytes must be a finite positive size"
+        ) from exc
+    if target <= 0:
+        raise ValueError("--bundle-max-bytes must be greater than zero")
+    if target > BOUNDED_BUNDLE_HARD_LIMIT_BYTES:
+        raise ValueError("--bundle-max-bytes exceeds the fixed 256 MiB hard ceiling")
+    return target
+
+
+def _remove_recorded_bounded_paths(
+    bundle_manifest: Path,
+    raw_paths: Iterable[str],
+) -> None:
+    manifest_path = bundle_manifest.resolve()
+    for raw_path in raw_paths:
+        candidate = _bounded_bundle_member_path(
+            bundle_manifest,
+            raw_path,
+            allow_missing=True,
+        )
+        if candidate is None:
+            continue
+        if candidate == manifest_path:
+            raise ValueError("bounded bundle may not remove its manifest")
+        try:
+            candidate.unlink()
+        except OSError as exc:
+            raise ValueError(
+                f"bounded bundle could not remove approved artifact: {candidate}"
+            ) from exc
+
+
+def _bounded_recorded_output_paths(
+    bundle_manifest: Path | None,
+    raw_paths: Iterable[str | Path],
+) -> list[Path]:
+    if bundle_manifest is None:
+        return []
+    root = bundle_manifest.parent.resolve()
+    resolved_paths: list[Path] = []
+    for raw_path in raw_paths:
+        candidate_input = Path(raw_path)
+        candidate_path = (
+            candidate_input
+            if candidate_input.is_absolute()
+            else bundle_manifest.parent / candidate_input
+        )
+        try:
+            candidate = candidate_path.resolve()
+            candidate.relative_to(root)
+        except OSError as exc:
+            raise ValueError(
+                f"bounded bundle recorded path resolution failed for {candidate_path}"
+            ) from exc
+        except ValueError as exc:
+            raise ValueError(
+                f"bounded bundle recorded path escapes output directory: {candidate_path}"
+            ) from exc
+        resolved_paths.append(candidate)
+    return resolved_paths
+
+
+def _append_unique_paths_as_strings(
+    paths: list[str],
+    raw_paths: Iterable[str | Path],
+) -> None:
+    known = set(paths)
+    for raw_path in raw_paths:
+        path = str(raw_path)
+        if path in known:
+            continue
+        paths.append(path)
+        known.add(path)
+
+
+def _bounded_prior_plan_state(
+    prior_plan: dict[str, Any] | None,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    if not isinstance(prior_plan, dict):
+        return [], []
+    prior_decisions = prior_plan.get("role_decisions", [])
+    decisions = [
+        dict(item) for item in prior_decisions if isinstance(item, dict)
+    ]
+    prior_removed = prior_plan.get("removed_paths", [])
+    removed_paths = [
+        str(path) for path in prior_removed if isinstance(path, (str, Path))
+    ]
+    return decisions, removed_paths
+
+
+def _prune_bounded_role(
+    bundle_manifest: Path,
+    *,
+    role: str,
+    rules: dict[str, Any],
+    artifact_rows: list[Any],
+    decisions: list[dict[str, Any]],
+    removed_paths: list[str],
+) -> bool:
+    role_rows = [
+        item
+        for item in artifact_rows
+        if isinstance(item, dict) and item.get("role") == role
+    ]
+    if not role_rows:
+        return False
+
+    requirement = rules.get(role)
+    if requirement == "required":
+        raise ValueError(f"bounded bundle may not remove required role: {role}")
+    role_bytes = sum(
+        int(item.get("bytes", 0))
+        for item in role_rows
+        if isinstance(item.get("bytes", 0), int)
+        and not isinstance(item.get("bytes", 0), bool)
+    )
+    dropped = _drop_manifest_role(bundle_manifest, role)
+    root = bundle_manifest.parent.resolve()
+    relative_dropped: list[str] = []
+    for path in dropped:
+        try:
+            relative_dropped.append(path.relative_to(root).as_posix())
+        except ValueError as exc:
+            raise ValueError(
+                f"bounded bundle dropped path escapes output directory: {path}"
+            ) from exc
+    _append_unique_paths_as_strings(removed_paths, relative_dropped)
+
+    decision_roles = {
+        item.get("role") for item in decisions if isinstance(item, dict)
+    }
+    if role not in decision_roles:
+        decisions.append(
+            {
+                "role": role,
+                "profile_requirement": requirement,
+                "decision": "profile_excluded_for_budget",
+                "reason": "bounded_bundle_budget",
+                "declared_bytes": role_bytes,
+            }
+        )
+    return True
+
+
+def _bounded_selection_identity(
+    bundle_manifest: Path,
+    *,
+    profile: str,
+    target: int,
+    decisions: list[dict[str, Any]],
+) -> tuple[list[str], str]:
+    final_data = _read_bounded_json_object(bundle_manifest, label="manifest")
+    selected_roles = sorted(
+        artifact.get("role")
+        for artifact in final_data.get("artifacts", [])
+        if isinstance(artifact, dict) and isinstance(artifact.get("role"), str)
+    )
+    provenance = final_data.get("snapshot_provenance", {})
+    repositories = (
+        provenance.get("repositories", []) if isinstance(provenance, dict) else []
+    )
+    source_commits = sorted(
+        {
+            str(repo.get("git_commit"))
+            for repo in repositories
+            if isinstance(repo, dict) and isinstance(repo.get("git_commit"), str)
+        }
+    )
+    selection_material = {
+        "kind": "repoground.bounded_bundle_selection",
+        "version": "v1",
+        "profile": profile,
+        "target_max_bytes": target,
+        "hard_limit_bytes": BOUNDED_BUNDLE_HARD_LIMIT_BYTES,
+        "source_commits": source_commits,
+        "selected_roles": selected_roles,
+        "role_decisions": decisions,
+    }
+    selection_sha256 = hashlib.sha256(
+        json.dumps(selection_material, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+    return selected_roles, selection_sha256
+
+
+def apply_bounded_bundle_budget(
+    bundle_manifest: Path | None,
+    profile: str,
+    requested_max_bytes: str | int | None,
+    *,
+    fail_if_unmet: bool = True,
+    extra_paths: Iterable[str | Path] = (),
+    prior_plan: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if bundle_manifest is None:
+        return {
+            "enabled": requested_max_bytes is not None,
+            "status": "not_applicable",
+            "target_max_bytes": None,
+            "hard_limit_bytes": BOUNDED_BUNDLE_HARD_LIMIT_BYTES,
+            "initial_bundle_bytes": 0,
+            "final_bundle_bytes": 0,
+            "role_decisions": [],
+            "removed_paths": [],
+        }
+
+    target = _parse_bounded_bundle_max_bytes(requested_max_bytes)
+    if target is None:
+        current = _bundle_file_bytes(bundle_manifest, extra_paths=extra_paths)
+        return {
+            "enabled": False,
+            "status": "not_requested",
+            "target_max_bytes": None,
+            "hard_limit_bytes": BOUNDED_BUNDLE_HARD_LIMIT_BYTES,
+            "initial_bundle_bytes": current,
+            "final_bundle_bytes": current,
+            "role_decisions": [],
+            "removed_paths": [],
+        }
+
+    decisions, removed_paths = _bounded_prior_plan_state(prior_plan)
+    _remove_recorded_bounded_paths(bundle_manifest, removed_paths)
+
+    current = _bundle_file_bytes(bundle_manifest, extra_paths=extra_paths)
+    initial = (
+        prior_plan.get("initial_bundle_bytes", current)
+        if isinstance(prior_plan, dict)
+        else current
+    )
+    data = _read_bounded_json_object(bundle_manifest, label="manifest")
+    policy = profile_policy(profile)
+    rules = policy["artifact_rules"]
+    artifacts = data.get("artifacts", [])
+    artifact_rows = artifacts if isinstance(artifacts, list) else []
+
+    for role in policy["budget_droppable_roles"]:
+        if current <= target:
+            break
+        if _prune_bounded_role(
+            bundle_manifest,
+            role=role,
+            rules=rules,
+            artifact_rows=artifact_rows,
+            decisions=decisions,
+            removed_paths=removed_paths,
+        ):
+            current = _bundle_file_bytes(
+                bundle_manifest,
+                extra_paths=extra_paths,
+            )
+
+    target_met = current <= target
+    if not target_met and fail_if_unmet:
+        raise ValueError(
+            "bounded bundle target cannot be met without removing roles outside "
+            f"the approved droppable set: final={current} target={target}"
+        )
+
+    selected_roles, selection_sha256 = _bounded_selection_identity(
+        bundle_manifest,
+        profile=profile,
+        target=target,
+        decisions=decisions,
+    )
+    result = {
+        "enabled": True,
+        "status": "pass" if target_met else "fail",
+        "target_max_bytes": target,
+        "hard_limit_bytes": BOUNDED_BUNDLE_HARD_LIMIT_BYTES,
+        "recommended_target_bytes": BOUNDED_BUNDLE_DEFAULT_TARGET_BYTES,
+        "initial_bundle_bytes": initial,
+        "final_bundle_bytes": current,
+        "role_decisions": decisions,
+        "selected_roles": selected_roles,
+        "selection_sha256": selection_sha256,
+        "removed_paths": removed_paths,
+        "required_roles_never_removed": True,
+    }
+    if not target_met:
+        result["reason"] = "approved_droppable_roles_insufficient"
+    return result
+
+
+def _bounded_finalization_extra_paths(
+    plan: dict[str, Any],
+    finalization: dict[str, Any],
+) -> list[str]:
+    raw_paths = [
+        *finalization.get("control_paths", []),
+        *finalization.get("refreshed_paths", []),
+        *plan.get("removed_paths", []),
+    ]
+    return [str(path) for path in raw_paths if isinstance(path, (str, Path))]
+
+
+def finalize_bounded_bundle_measurement(
+    bundle_manifest: Path | None,
+    plan: dict[str, Any],
+    finalization: dict[str, Any],
+) -> dict[str, Any]:
+    if bundle_manifest is None:
+        return finalization
+    final_bundle_bytes = _bundle_file_bytes(
+        bundle_manifest,
+        extra_paths=_bounded_finalization_extra_paths(plan, finalization),
+    )
+    plan["final_bundle_bytes"] = final_bundle_bytes
+    if not plan.get("enabled"):
+        return finalization
+    if final_bundle_bytes <= plan["target_max_bytes"]:
+        plan["status"] = "pass"
+        plan.pop("reason", None)
+        return finalization
+    plan["status"] = "fail"
+    plan["reason"] = "final_bundle_exceeds_target_after_controls"
+    return {
+        **finalization,
+        "status": "fail",
+        "errors": [
+            *finalization.get("errors", []),
+            "bounded_bundle_target_exceeded",
+        ],
+    }
+
+
+def _refresh_bounded_selection_plan(
+    bundle_manifest: Path,
+    profile: str,
+    plan: dict[str, Any],
+) -> None:
+    if not plan.get("enabled"):
+        return
+    target = plan.get("target_max_bytes")
+    if not isinstance(target, int) or isinstance(target, bool) or target <= 0:
+        raise ValueError("bounded bundle target is invalid during finalization")
+    decisions = [
+        dict(item)
+        for item in plan.get("role_decisions", [])
+        if isinstance(item, dict)
+    ]
+    selected_roles, selection_sha256 = _bounded_selection_identity(
+        bundle_manifest,
+        profile=profile,
+        target=target,
+        decisions=decisions,
+    )
+    plan["selected_roles"] = selected_roles
+    plan["selection_sha256"] = selection_sha256
+
+
+def _persist_bounded_output_plan(
+    bundle_manifest: Path,
+    profile: str,
+    output_plan: dict[str, Any],
+) -> None:
+    mark_bundle_manifest_profile(bundle_manifest, profile, output_plan)
+    emit_snapshot_plan_report(bundle_manifest, profile, output_plan)
+
+
+def _bounded_output_plan_is_stable(
+    bundle_manifest: Path,
+    output_plan: dict[str, Any],
+    plan: dict[str, Any],
+    persisted_final_bytes: object,
+) -> bool:
+    manifest_data = json.loads(bundle_manifest.read_text(encoding="utf-8"))
+    capabilities = manifest_data.get("capabilities", {})
+    persisted_output_plan = (
+        capabilities.get("repobrief_output_plan")
+        if isinstance(capabilities, dict)
+        else None
+    )
+    return (
+        plan.get("final_bundle_bytes") == persisted_final_bytes
+        and persisted_output_plan == output_plan
+    )
+
+
+def _stabilize_bounded_failure_evidence(
+    bundle_manifest: Path,
+    profile: str,
+    output_plan: dict[str, Any],
+    plan: dict[str, Any],
+    finalization: dict[str, Any],
+    *,
+    max_passes: int = 8,
+) -> None:
+    extra_paths = _bounded_finalization_extra_paths(plan, finalization)
+    for _attempt in range(max_passes):
+        _persist_bounded_output_plan(bundle_manifest, profile, output_plan)
+        measured_bytes = _bundle_file_bytes(
+            bundle_manifest,
+            extra_paths=extra_paths,
+        )
+        if measured_bytes == plan.get("final_bundle_bytes"):
+            return
+        plan["final_bundle_bytes"] = measured_bytes
+    raise ValueError("bounded bundle terminal failure evidence did not stabilize")
+
+
+def _bounded_measurement_unstable_result(
+    bundle_manifest: Path,
+    profile: str,
+    output_plan: dict[str, Any],
+    plan: dict[str, Any],
+    finalization: dict[str, Any],
+) -> dict[str, Any]:
+    if plan.get("enabled"):
+        plan["status"] = "fail"
+    plan["reason"] = "final_bundle_measurement_did_not_stabilize"
+    _stabilize_bounded_failure_evidence(
+        bundle_manifest,
+        profile,
+        output_plan,
+        plan,
+        finalization,
+    )
+    errors = list(finalization.get("errors", []))
+    if "bounded_bundle_measurement_unstable" not in errors:
+        errors.append("bounded_bundle_measurement_unstable")
+    return {
+        **finalization,
+        "status": "fail",
+        "errors": errors,
+        "final_manifest_sha256": hashlib.sha256(
+            bundle_manifest.read_bytes()
+        ).hexdigest(),
+        "manifest_artifact_count": _manifest_artifact_count(bundle_manifest),
+    }
+
+
+def _retry_failed_bounded_finalization(
+    bundle_manifest: Path,
+    profile: str,
+    output_plan: dict[str, Any],
+    plan: dict[str, Any],
+    finalization: dict[str, Any],
+    measured_finalization: dict[str, Any],
+    persisted_final_bytes: object,
+    *,
+    attempt: int,
+    max_passes: int,
+) -> tuple[bool, dict[str, Any] | None]:
+    retry_plan = apply_bounded_bundle_budget(
+        bundle_manifest,
+        profile,
+        plan["target_max_bytes"],
+        fail_if_unmet=False,
+        extra_paths=_bounded_finalization_extra_paths(plan, finalization),
+        prior_plan=plan,
+    )
+    plan.clear()
+    plan.update(retry_plan)
+    _refresh_bounded_selection_plan(bundle_manifest, profile, plan)
+
+    if retry_plan["status"] == "pass":
+        _persist_bounded_output_plan(bundle_manifest, profile, output_plan)
+        if attempt + 1 == max_passes:
+            return True, _bounded_measurement_unstable_result(
+                bundle_manifest,
+                profile,
+                output_plan,
+                plan,
+                measured_finalization,
+            )
+        return False, None
+
+    if _bounded_output_plan_is_stable(
+        bundle_manifest,
+        output_plan,
+        plan,
+        persisted_final_bytes,
+    ):
+        return True, measured_finalization
+
+    if attempt + 1 == max_passes:
+        return True, _bounded_measurement_unstable_result(
+            bundle_manifest,
+            profile,
+            output_plan,
+            plan,
+            measured_finalization,
+        )
+
+    _persist_bounded_output_plan(bundle_manifest, profile, output_plan)
+    return False, None
+
+
+def finalize_snapshot_with_bounded_bundle(
+    bundle_manifest: Path | None,
+    profile: str,
+    output_plan: dict[str, Any],
+    snapshot_plan_path: Path | None,
+    *,
+    max_passes: int = 4,
+) -> dict[str, Any]:
+    plan = output_plan.get("bounded_bundle")
+    if not isinstance(plan, dict):
+        return finalize_snapshot_bundle(bundle_manifest, profile)
+    if bundle_manifest is None or snapshot_plan_path is None:
+        if not plan.get("enabled"):
+            return finalize_snapshot_bundle(bundle_manifest, profile)
+        return {
+            "status": "fail",
+            "errors": ["bounded_bundle_snapshot_plan_missing"],
+            "phases": 0,
+            "control_paths": [],
+            "refreshed_paths": [],
+        }
+
+    for attempt in range(max_passes):
+        persisted_final_bytes = plan.get("final_bundle_bytes")
+        finalization = finalize_snapshot_bundle(bundle_manifest, profile)
+        measured_finalization = finalize_bounded_bundle_measurement(
+            bundle_manifest, plan, finalization
+        )
+
+        if plan.get("enabled") and plan.get("status") == "fail":
+            should_return, retry_result = _retry_failed_bounded_finalization(
+                bundle_manifest,
+                profile,
+                output_plan,
+                plan,
+                finalization,
+                measured_finalization,
+                persisted_final_bytes,
+                attempt=attempt,
+                max_passes=max_passes,
+            )
+            if should_return:
+                if retry_result is None:
+                    raise AssertionError("bounded retry result unexpectedly missing")
+                return retry_result
+            continue
+
+        _refresh_bounded_selection_plan(bundle_manifest, profile, plan)
+        if _bounded_output_plan_is_stable(
+            bundle_manifest,
+            output_plan,
+            plan,
+            persisted_final_bytes,
+        ):
+            return measured_finalization
+
+        if attempt + 1 == max_passes:
+            return _bounded_measurement_unstable_result(
+                bundle_manifest,
+                profile,
+                output_plan,
+                plan,
+                measured_finalization,
+            )
+
+        _persist_bounded_output_plan(bundle_manifest, profile, output_plan)
+
+    raise AssertionError("bounded bundle finalization loop exhausted")
 
 def refresh_entry(bundle_manifest: Path | None) -> list[Path]:
     if bundle_manifest is None:
