@@ -14,12 +14,42 @@ LEGACY_POLICY_COMMAND=${BIN_DIR}/rb-publication-policy
 LEGACY_POLICY_MARKER='rb-publication-policy is deprecated; use repoground-publication-policy'
 LEGACY_POLICY_SHA256='64278d6fe48b95931f7c75386004694ef3cf9c02aa4bef7f5e18b035cf90f68c'
 LOG_ROOT=${HOME}/logs/repoground-publish
+REPOGROUND_MANAGED_BASE=${HOME}/.local/share/repoground-runtime
+REPOGROUND_MANAGED_POINTER=${REPOGROUND_MANAGED_BASE}/current
 
 if [[ ${1:-} == "--enable" ]]; then
   ENABLE=1
 elif [[ $# -gt 0 ]]; then
   echo "usage: $0 [--enable]" >&2
   exit 2
+fi
+
+if (( ENABLE )); then
+  if [[ ! -e $REPOGROUND_MANAGED_POINTER && ! -L $REPOGROUND_MANAGED_POINTER ]]; then
+    echo "managed runtime activation is unavailable: $REPOGROUND_MANAGED_POINTER" >&2
+    exit 1
+  fi
+  if ! REPOGROUND_MANAGED_BASE_RESOLVED=$(readlink -f -- "$REPOGROUND_MANAGED_BASE") ||
+    [[ -z $REPOGROUND_MANAGED_BASE_RESOLVED ]]; then
+    echo "managed runtime root cannot be resolved: $REPOGROUND_MANAGED_BASE" >&2
+    exit 1
+  fi
+  if ! REPOGROUND_MANAGED_ROOT=$(readlink -f -- "$REPOGROUND_MANAGED_POINTER") ||
+    [[ -z $REPOGROUND_MANAGED_ROOT ]]; then
+    echo "managed runtime activation cannot be resolved: $REPOGROUND_MANAGED_POINTER" >&2
+    exit 1
+  fi
+  REPOGROUND_MANAGED_PARENT=${REPOGROUND_MANAGED_ROOT%/*}
+  REPOGROUND_MANAGED_RELEASE=${REPOGROUND_MANAGED_ROOT##*/}
+  if [[ $REPOGROUND_MANAGED_PARENT != "$REPOGROUND_MANAGED_BASE_RESOLVED" ||
+    ! $REPOGROUND_MANAGED_RELEASE =~ ^[0-9a-f]{40}$ ]]; then
+    echo "managed runtime activation must resolve to an immutable commit directory: $REPOGROUND_MANAGED_ROOT" >&2
+    exit 1
+  fi
+  if [[ ! -x $REPOGROUND_MANAGED_ROOT/.venv/bin/python ]]; then
+    echo "managed runtime activation exists but Python is unavailable: $REPOGROUND_MANAGED_ROOT/.venv/bin/python" >&2
+    exit 1
+  fi
 fi
 
 OLD_TIMERS=(

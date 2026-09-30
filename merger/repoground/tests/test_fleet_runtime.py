@@ -259,6 +259,48 @@ def test_remote_branch_head_ignores_non_ref_diagnostics_without_shared_ref_updat
     )
 
 
+def test_remote_branch_head_rejects_branch_that_moves_during_isolated_fetch_when_old_tip_is_local(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo = tmp_path / "metarepo"
+    old_sha = "a" * 40
+    new_sha = "b" * 40
+    advertisements = iter((old_sha, new_sha))
+
+    def fake_run(
+        argv: list[str],
+        cwd: Path | None = None,
+        check: bool = True,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        if argv[-3:] == ["--", "origin", "refs/heads/main"]:
+            sha = next(advertisements)
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout=f"{sha}\trefs/heads/main\n",
+            )
+        if argv[-6:] == [
+            "fetch",
+            "--no-tags",
+            "--no-write-fetch-head",
+            "--refmap=",
+            "origin",
+            "refs/heads/main",
+        ]:
+            return subprocess.CompletedProcess(argv, 0, stdout="")
+        if argv[-3:] == ["rev-parse", "--verify", f"{old_sha}^{{commit}}"]:
+            return subprocess.CompletedProcess(argv, 0, stdout=f"{old_sha}\n")
+        raise AssertionError(f"unexpected command: {argv}")
+
+    monkeypatch.setattr(module, "run", fake_run)
+
+    with pytest.raises(RuntimeError, match="moved during resolution"):
+        module.remote_branch_head(repo, "main")
+
+
 def test_remote_branch_head_fetch_does_not_update_origin_tracking_ref(
     tmp_path: Path,
 ) -> None:
@@ -2269,7 +2311,10 @@ def test_runtime_has_one_hourly_changed_only_timer_and_no_force_fallback() -> No
     ]
 
 
-def _run_installer(tmp_path: Path) -> subprocess.CompletedProcess[str]:
+def _run_installer(
+    tmp_path: Path,
+    *arguments: str,
+) -> subprocess.CompletedProcess[str]:
     home = tmp_path / "home"
     fake_bin = tmp_path / "bin"
     home.mkdir(exist_ok=True)
@@ -2284,13 +2329,26 @@ def _run_installer(tmp_path: Path) -> subprocess.CompletedProcess[str]:
     env["HOME"] = str(home)
     env["PATH"] = str(fake_bin) + os.pathsep + env["PATH"]
     return subprocess.run(
-        [str(INSTALLER)],
+        [str(INSTALLER), *arguments],
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         env=env,
         check=False,
     )
+
+
+def _activate_managed_runtime(home: Path, commit: str = "a" * 40) -> Path:
+    managed_root = home / ".local/share/repoground-runtime" / commit
+    managed_python = managed_root / ".venv/bin/python"
+    managed_python.parent.mkdir(parents=True)
+    managed_python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    managed_python.chmod(0o755)
+    (managed_root.parent / "current").symlink_to(
+        managed_root,
+        target_is_directory=True,
+    )
+    return managed_root
 
 
 def test_fleet_wrapper_uses_managed_runtime_python(tmp_path: Path) -> None:
@@ -2333,6 +2391,33 @@ def test_fleet_wrapper_uses_managed_runtime_python(tmp_path: Path) -> None:
         str(implementation),
         "--inventory",
     ]
+
+
+def test_runtime_installer_enable_fails_before_mutation_without_managed_runtime(
+    tmp_path: Path,
+) -> None:
+    completed = _run_installer(tmp_path, "--enable")
+    home = tmp_path / "home"
+
+    assert completed.returncode == 1
+    assert "managed runtime activation is unavailable" in completed.stderr
+    assert not (home / "systemctl.log").exists()
+    assert not (home / ".local/bin/repoground-publish-fleet").exists()
+
+
+def test_runtime_installer_enable_accepts_valid_managed_runtime(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    _activate_managed_runtime(home)
+
+    completed = _run_installer(tmp_path, "--enable")
+
+    assert completed.returncode == 0, completed.stderr
+    assert "PASS enabled" in completed.stdout
+    assert "enable --now repoground-publish-fleet-watch.timer" in (
+        home / "systemctl.log"
+    ).read_text(encoding="utf-8")
 
 
 def test_installer_atomically_migrates_state_and_starts_canonical_logs(

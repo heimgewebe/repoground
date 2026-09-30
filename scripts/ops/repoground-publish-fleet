@@ -2130,29 +2130,36 @@ def remote_branch_head(repo_path: Path, branch: str) -> tuple[str, str, str]:
             f"unsafe authoritative fleet membership branch: {branch!r}"
         )
     full_ref = f"refs/heads/{branch}"
-    advertised = run(
-        [
-            "git",
-            "-C",
-            str(repo_path),
-            "ls-remote",
-            "--exit-code",
-            "--refs",
-            "--",
-            "origin",
-            full_ref,
-        ]
-    ).stdout.splitlines()
-    matching: list[str] = []
-    for line in advertised:
-        value, separator, advertised_ref = line.partition("\t")
-        if separator and advertised_ref == full_ref:
-            matching.append(value)
-    if len(matching) != 1 or SOURCE_REVISION_RE.fullmatch(matching[0]) is None:
-        raise RuntimeError(
-            f"authoritative remote branch unavailable for {repo_path}: {branch}"
-        )
-    advertised_sha = matching[0]
+
+    def advertised_sha() -> str:
+        advertised = run(
+            [
+                "git",
+                "-C",
+                str(repo_path),
+                "ls-remote",
+                "--exit-code",
+                "--refs",
+                "--",
+                "origin",
+                full_ref,
+            ]
+        ).stdout.splitlines()
+        matching: list[str] = []
+        for line in advertised:
+            value, separator, advertised_ref = line.partition("\t")
+            if separator and advertised_ref == full_ref:
+                matching.append(value)
+        if (
+            len(matching) != 1
+            or SOURCE_REVISION_RE.fullmatch(matching[0]) is None
+        ):
+            raise RuntimeError(
+                f"authoritative remote branch unavailable for {repo_path}: {branch}"
+            )
+        return matching[0]
+
+    expected_sha = advertised_sha()
     run(
         [
             "git",
@@ -2166,6 +2173,11 @@ def remote_branch_head(repo_path: Path, branch: str) -> tuple[str, str, str]:
             full_ref,
         ]
     )
+    if advertised_sha() != expected_sha:
+        raise RuntimeError(
+            f"authoritative remote branch moved during resolution for {repo_path}: "
+            f"{branch}"
+        )
     fetched = run(
         [
             "git",
@@ -2173,17 +2185,17 @@ def remote_branch_head(repo_path: Path, branch: str) -> tuple[str, str, str]:
             str(repo_path),
             "rev-parse",
             "--verify",
-            f"{advertised_sha}^{{commit}}",
+            f"{expected_sha}^{{commit}}",
         ],
         check=False,
     )
     fetched_sha = fetched.stdout.strip() if fetched.returncode == 0 else ""
-    if fetched_sha != advertised_sha:
+    if fetched_sha != expected_sha:
         raise RuntimeError(
-            f"authoritative remote branch moved during resolution for {repo_path}: "
+            f"authoritative remote branch unavailable after fetch for {repo_path}: "
             f"{branch}"
         )
-    return f"origin/{branch}", branch, advertised_sha
+    return f"origin/{branch}", branch, expected_sha
 
 
 def _fleet_membership_entry_key(
