@@ -386,8 +386,7 @@ def parse_github_remote(remote: str) -> tuple[str, str] | None:
         return None
     match = re.fullmatch(
         r"(?:(?:https?|ssh|git)://(?:[^/@]+@)?github\.com/"
-        r"|(?:[^@/:]+@)?github\.com:"
-        r"|github\.com/)"
+        r"|(?:[^@/:]+@)?github\.com:)"
         r"([^/]+)/([^/]+?)(?:\.git)?/?",
         value,
     )

@@ -138,6 +138,7 @@ def test_parse_github_remote_requires_exact_github_host() -> None:
         "git@notgithub.com:heimgewebe/metarepo.git",
         "https://notgithub.com/heimgewebe/metarepo",
         "ssh://git@github.com.evil.example/heimgewebe/metarepo.git",
+        "github.com/heimgewebe/metarepo",
     ):
         assert module.parse_github_remote(remote) is None
 
