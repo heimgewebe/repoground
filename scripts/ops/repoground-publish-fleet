@@ -2244,7 +2244,13 @@ def _fleet_membership_entry_key(
             return None
         if fleet_value is False:
             return None
-        name = raw.get("name") or raw.get("repo")
+        name_value = raw.get("name")
+        repo_value = raw.get("repo")
+        if "name" in raw and "repo" in raw and name_value != repo_value:
+            raise RuntimeError(
+                "fleet membership entry name/repo must match when both are present"
+            )
+        name = repo_value if "repo" in raw else name_value
         if "owner" in raw:
             owner = raw["owner"]
             if not isinstance(owner, str) or not owner.strip():

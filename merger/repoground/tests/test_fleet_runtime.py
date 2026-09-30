@@ -4124,6 +4124,37 @@ def test_fleet_membership_keys_reject_malformed_static_sections(
         )
 
 
+def test_fleet_membership_keys_reject_conflicting_name_repo_fields() -> None:
+    module = load_publisher()
+
+    with pytest.raises(RuntimeError, match="name/repo must match"):
+        module._fleet_membership_keys(
+            {
+                "repos": [
+                    {
+                        "name": "repoground",
+                        "repo": "wgx",
+                    }
+                ]
+            }
+        )
+
+
+def test_fleet_membership_keys_accept_matching_name_repo_fields() -> None:
+    module = load_publisher()
+
+    assert module._fleet_membership_keys(
+        {
+            "repos": [
+                {
+                    "name": "repoground",
+                    "repo": "repoground",
+                }
+            ]
+        }
+    ) == ("heimgewebe/repoground",)
+
+
 @pytest.mark.parametrize("owner_value", [False, 0, None, [], {}, "", "   "])
 def test_fleet_membership_keys_reject_malformed_owner_values(
     owner_value: object,
