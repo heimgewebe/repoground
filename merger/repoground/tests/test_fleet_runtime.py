@@ -5,6 +5,7 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import shlex
 import shutil
 import sqlite3
 import subprocess
@@ -18,6 +19,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
 PUBLISHER = ROOT / "scripts/ops/repoground-publish-fleet"
+CLI_WRAPPER = ROOT / "scripts/ops/repoground-cli-wrapper"
 LEGACY_PUBLISHER = ROOT / "scripts/ops/rb-publish-fleet"
 INSTALLER = ROOT / "scripts/ops/install_repoground_publish_fleet_runtime.sh"
 LEGACY_INSTALLER = ROOT / "scripts/ops/install_rb_publish_fleet_runtime.sh"
@@ -141,6 +143,25 @@ def test_parse_github_remote_requires_exact_github_host() -> None:
         "github.com/heimgewebe/metarepo",
     ):
         assert module.parse_github_remote(remote) is None
+
+
+def test_authenticated_membership_transport_rejects_http_and_git() -> None:
+    module = load_publisher()
+
+    for remote in (
+        "https://github.com/heimgewebe/metarepo.git",
+        "ssh://git@github.com/heimgewebe/metarepo.git",
+        "git@github.com:heimgewebe/metarepo.git",
+        "org-236528253@github.com:heimgewebe/metarepo.git",
+    ):
+        assert module.github_remote_uses_authenticated_transport(remote) is True
+
+    for remote in (
+        "http://github.com/heimgewebe/metarepo.git",
+        "git://github.com/heimgewebe/metarepo.git",
+    ):
+        assert module.parse_github_remote(remote) == ("heimgewebe", "metarepo")
+        assert module.github_remote_uses_authenticated_transport(remote) is False
 
 
 def test_remote_head_rejects_remote_head_that_moves_after_fetch(
@@ -2179,6 +2200,48 @@ def _run_installer(tmp_path: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
+def test_fleet_wrapper_uses_managed_runtime_python(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    managed_base = home / ".local/share/repoground-runtime"
+    managed_root = managed_base / ("a" * 40)
+    managed_python = managed_root / ".venv/bin/python"
+    managed_python.parent.mkdir(parents=True)
+    marker = tmp_path / "managed-python.args"
+    managed_python.write_text(
+        "#!/bin/sh\n"
+        f"printf '%s\\n' \"$@\" > {shlex.quote(str(marker))}\n",
+        encoding="utf-8",
+    )
+    managed_python.chmod(0o755)
+    managed_base.mkdir(parents=True, exist_ok=True)
+    (managed_base / "current").symlink_to(managed_root, target_is_directory=True)
+
+    implementation = home / ".local/libexec/repoground/repoground-publish-fleet.py"
+    implementation.parent.mkdir(parents=True)
+    implementation.write_text("# implementation marker\n", encoding="utf-8")
+
+    fleet_command = tmp_path / "repoground-publish-fleet"
+    shutil.copy2(CLI_WRAPPER, fleet_command)
+
+    env = os.environ.copy()
+    env["HOME"] = str(home)
+    completed = subprocess.run(
+        ["bash", str(fleet_command), "--inventory"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+        env=env,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert marker.read_text(encoding="utf-8").splitlines() == [
+        "-I",
+        str(implementation),
+        "--inventory",
+    ]
+
+
 def test_installer_atomically_migrates_state_and_starts_canonical_logs(
     tmp_path: Path,
 ) -> None:
@@ -2199,7 +2262,13 @@ def test_installer_atomically_migrates_state_and_starts_canonical_logs(
     assert (new_state / "marker.json").read_text(encoding="utf-8") == "{}\n"
     assert new_log.is_dir()
     assert (old_log / "historical.log").read_text(encoding="utf-8") == "old\n"
-    assert (home / ".local/bin/repoground-publish-fleet").is_file()
+    installed_wrapper = home / ".local/bin/repoground-publish-fleet"
+    installed_impl = (
+        home / ".local/libexec/repoground/repoground-publish-fleet.py"
+    )
+    assert installed_wrapper.read_bytes() == CLI_WRAPPER.read_bytes()
+    assert installed_wrapper.stat().st_mode & 0o111
+    assert installed_impl.read_bytes() == PUBLISHER.read_bytes()
     assert "PASS paused" in completed.stdout
 
 
@@ -3909,6 +3978,26 @@ def test_authoritative_fleet_membership_rejects_wrong_origin(
     monkeypatch.setattr(module, "METAREPO_REPO", checkout)
 
     with pytest.raises(RuntimeError, match="origin mismatch"):
+        module.load_authoritative_fleet_membership()
+
+
+def test_authoritative_fleet_membership_rejects_unauthenticated_transport(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    checkout, _ = initialize_repository(tmp_path, "metarepo")
+    git(
+        checkout,
+        "remote",
+        "add",
+        "origin",
+        "http://github.com/heimgewebe/metarepo.git",
+    )
+
+    monkeypatch.setattr(module, "METAREPO_REPO", checkout)
+
+    with pytest.raises(RuntimeError, match="must use HTTPS or SSH"):
         module.load_authoritative_fleet_membership()
 
 

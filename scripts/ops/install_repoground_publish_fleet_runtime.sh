@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 BIN_DIR=${HOME}/.local/bin
+LIBEXEC_DIR=${HOME}/.local/libexec/repoground
 UNIT_DIR=${HOME}/.config/systemd/user
 ENABLE=0
 OLD_STATE_ROOT=${HOME}/.local/state/repobrief-publish/fleet
@@ -88,7 +89,7 @@ if [[ -f $LEGACY_POLICY_COMMAND ]]; then
   fi
 fi
 
-install -d -m 0755 "$BIN_DIR" "$UNIT_DIR"
+install -d -m 0755 "$BIN_DIR" "$LIBEXEC_DIR" "$UNIT_DIR"
 systemctl --user disable --now repoground-publish-fleet-watch.timer 2>/dev/null || true
 systemctl --user stop repoground-publish-fleet-watch.service 2>/dev/null || true
 for unit in "${OLD_TIMERS[@]}"; do
@@ -106,7 +107,10 @@ fi
 install -d -m 0755 "$STATE_ROOT" "$LOG_ROOT"
 install -d -m 0700 "$POLICY_STATE_ROOT"
 
-install -m 0755 "$ROOT/scripts/ops/repoground-publish-fleet" "$BIN_DIR/repoground-publish-fleet"
+install -m 0644 "$ROOT/scripts/ops/repoground-publish-fleet" \
+  "$LIBEXEC_DIR/repoground-publish-fleet.py"
+install -m 0755 "$ROOT/scripts/ops/repoground-cli-wrapper" \
+  "$BIN_DIR/repoground-publish-fleet"
 install -m 0755 "$ROOT/scripts/ops/repoground-publication-policy" "$BIN_DIR/repoground-publication-policy"
 rm -f -- "$LEGACY_POLICY_COMMAND"
 install -m 0755 "$ROOT/scripts/ops/repoground-publish-systemkatalog-main" \

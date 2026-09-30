@@ -395,6 +395,18 @@ def parse_github_remote(remote: str) -> tuple[str, str] | None:
     return match.group(1), match.group(2)
 
 
+def github_remote_uses_authenticated_transport(remote: str) -> bool:
+    value = remote.strip()
+    if value.startswith("https://") or value.startswith("ssh://"):
+        return parse_github_remote(value) is not None
+    if re.fullmatch(
+        r"(?:[^@/:]+@)?github\.com:[^/]+/[^/]+(?:\.git)?/?",
+        value,
+    ):
+        return parse_github_remote(value) is not None
+    return False
+
+
 def canonical_repository_key(key: str) -> str:
     return RETIRED_REPOSITORY_ALIASES.get(key, key)
 
@@ -2256,6 +2268,11 @@ def load_authoritative_fleet_membership() -> FleetMembership:
         raise RuntimeError(
             "authoritative fleet membership repository origin mismatch: "
             "expected heimgewebe/metarepo"
+        )
+    if not github_remote_uses_authenticated_transport(origin_url):
+        raise RuntimeError(
+            "authoritative fleet membership repository origin transport "
+            "must use HTTPS or SSH"
         )
     remote_ref, _branch, source_sha = remote_branch_head(
         METAREPO_REPO,

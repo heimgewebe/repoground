@@ -3,10 +3,17 @@ set -euo pipefail
 
 REPOGROUND_MANAGED_BASE="$HOME/.local/share/repoground-runtime"
 REPOGROUND_MANAGED_POINTER="$REPOGROUND_MANAGED_BASE/current"
+REPOGROUND_ENTRYPOINT="${0##*/}"
+REPOGROUND_FLEET_ENTRYPOINT=0
+[[ "$REPOGROUND_ENTRYPOINT" == "repoground-publish-fleet" ]] && REPOGROUND_FLEET_ENTRYPOINT=1
 REPOGROUND_ROOT_EXPLICIT=0
 REPOGROUND_PYTHON_EXPLICIT=0
 [[ -n ${REPOGROUND_ROOT:-} ]] && REPOGROUND_ROOT_EXPLICIT=1
 [[ -n ${REPOGROUND_PYTHON:-} ]] && REPOGROUND_PYTHON_EXPLICIT=1
+if (( REPOGROUND_FLEET_ENTRYPOINT )); then
+  REPOGROUND_ROOT_EXPLICIT=0
+  REPOGROUND_PYTHON_EXPLICIT=0
+fi
 
 if [[ $REPOGROUND_ROOT_EXPLICIT -eq 0 && $REPOGROUND_PYTHON_EXPLICIT -eq 0 ]]; then
   if [[ -e "$REPOGROUND_MANAGED_POINTER" || -L "$REPOGROUND_MANAGED_POINTER" ]]; then
@@ -33,6 +40,10 @@ if [[ $REPOGROUND_ROOT_EXPLICIT -eq 0 && $REPOGROUND_PYTHON_EXPLICIT -eq 0 ]]; t
     REPOGROUND_PYTHON="$REPOGROUND_MANAGED_PYTHON"
     REPOGROUND_USE_USER_SITE=0
   else
+    if (( REPOGROUND_FLEET_ENTRYPOINT )); then
+      printf 'repoground-publish-fleet: managed runtime activation is unavailable: %s\n' "$REPOGROUND_MANAGED_POINTER" >&2
+      exit 1
+    fi
     REPOGROUND_ROOT="$HOME/repos/repoground"
     REPOGROUND_PYTHON=python3
     REPOGROUND_USE_USER_SITE=1
@@ -41,6 +52,15 @@ else
   REPOGROUND_ROOT="${REPOGROUND_ROOT:-$HOME/repos/repoground}"
   REPOGROUND_PYTHON="${REPOGROUND_PYTHON:-python3}"
   REPOGROUND_USE_USER_SITE=1
+fi
+
+if (( REPOGROUND_FLEET_ENTRYPOINT )); then
+  REPOGROUND_FLEET_IMPLEMENTATION="$HOME/.local/libexec/repoground/repoground-publish-fleet.py"
+  if [[ ! -f "$REPOGROUND_FLEET_IMPLEMENTATION" || -L "$REPOGROUND_FLEET_IMPLEMENTATION" ]]; then
+    printf 'repoground-publish-fleet: installed implementation is unavailable or unsafe: %s\n' "$REPOGROUND_FLEET_IMPLEMENTATION" >&2
+    exit 1
+  fi
+  exec "$REPOGROUND_PYTHON" -I "$REPOGROUND_FLEET_IMPLEMENTATION" "$@"
 fi
 
 if [[ ! -f "$REPOGROUND_ROOT/repoground/__main__.py" ]]; then
