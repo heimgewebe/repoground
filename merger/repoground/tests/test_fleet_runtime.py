@@ -4140,6 +4140,43 @@ def test_fleet_membership_keys_reject_conflicting_name_repo_fields() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("entry", "message"),
+    [
+        (
+            {"name": "repoground", "url": "https://github.com/heimgewebe/wgx"},
+            "URL conflicts with declared repository",
+        ),
+        (
+            {
+                "name": "repoground",
+                "owner": "other",
+                "url": "https://github.com/heimgewebe/repoground",
+            },
+            "URL conflicts with declared repository",
+        ),
+        (
+            {"name": "heimgewebe/repoground", "owner": "other"},
+            "owner conflicts with qualified repository",
+        ),
+    ],
+)
+def test_fleet_membership_keys_reject_conflicting_identity_fields(
+    entry: dict[str, object],
+    message: str,
+) -> None:
+    module = load_publisher()
+    with pytest.raises(RuntimeError, match=message):
+        module._fleet_membership_keys({"repos": [entry]})
+
+
+def test_fleet_membership_keys_accept_url_only_identity() -> None:
+    module = load_publisher()
+    assert module._fleet_membership_keys(
+        {"repos": [{"url": "https://github.com/other/demo"}]}
+    ) == ("other/demo",)
+
+
 def test_fleet_membership_keys_accept_matching_name_repo_fields() -> None:
     module = load_publisher()
 

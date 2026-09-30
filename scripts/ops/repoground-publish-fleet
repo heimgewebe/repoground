@@ -2229,6 +2229,7 @@ def _fleet_membership_entry_key(
     *,
     require_explicit_fleet: bool = False,
 ) -> str | None:
+    owner_explicit = False
     if isinstance(raw, str):
         if require_explicit_fleet:
             return None
@@ -2246,12 +2247,25 @@ def _fleet_membership_entry_key(
             return None
         name_value = raw.get("name")
         repo_value = raw.get("repo")
+        if "name" in raw and (
+            not isinstance(name_value, str) or not name_value.strip()
+        ):
+            raise RuntimeError(
+                "fleet membership entry name must be a non-empty string"
+            )
+        if "repo" in raw and (
+            not isinstance(repo_value, str) or not repo_value.strip()
+        ):
+            raise RuntimeError(
+                "fleet membership entry repo must be a non-empty string"
+            )
         if "name" in raw and "repo" in raw and name_value != repo_value:
             raise RuntimeError(
                 "fleet membership entry name/repo must match when both are present"
             )
         name = repo_value if "repo" in raw else name_value
-        if "owner" in raw:
+        owner_explicit = "owner" in raw
+        if owner_explicit:
             owner = raw["owner"]
             if not isinstance(owner, str) or not owner.strip():
                 raise RuntimeError(
@@ -2260,22 +2274,40 @@ def _fleet_membership_entry_key(
         else:
             owner = "heimgewebe"
         url = raw.get("url")
+        if "url" in raw and (not isinstance(url, str) or not url.strip()):
+            raise RuntimeError(
+                "fleet membership entry URL must be a non-empty string"
+            )
         fleet_enabled = True
     else:
         raise RuntimeError("fleet membership entries must be strings or objects")
 
     if not fleet_enabled:
         return None
+    if isinstance(name, str) and "/" in name:
+        parts = name.split("/")
+        if len(parts) != 2:
+            raise RuntimeError(f"invalid qualified fleet repository: {name!r}")
+        qualified_owner, qualified_name = parts
+        if owner_explicit and owner != qualified_owner:
+            raise RuntimeError(
+                "fleet membership entry owner conflicts with qualified repository"
+            )
+        owner, name = qualified_owner, qualified_name
+
     if isinstance(url, str) and url:
         parsed = parse_github_remote(url)
         if parsed is None:
             raise RuntimeError(f"invalid fleet membership GitHub URL: {url!r}")
+        if isinstance(name, str) and parsed != (owner, name):
+            raise RuntimeError(
+                "fleet membership entry URL conflicts with declared repository"
+            )
+        if name is None and owner_explicit and parsed[0] != owner:
+            raise RuntimeError(
+                "fleet membership entry URL conflicts with declared owner"
+            )
         owner, name = parsed
-    elif isinstance(name, str) and "/" in name:
-        parts = name.split("/")
-        if len(parts) != 2:
-            raise RuntimeError(f"invalid qualified fleet repository: {name!r}")
-        owner, name = parts
 
     if not isinstance(owner, str) or not isinstance(name, str):
         raise RuntimeError("fleet membership entry is missing owner/name")
