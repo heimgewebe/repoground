@@ -4034,39 +4034,25 @@ def main(argv: list[str]) -> int:
                 )
             )
             return 2
-    else:
-        try:
-            fleet_membership = load_authoritative_fleet_membership()
-            (
-                entries,
-                missing_fleet_members,
-                excluded_local_nonmember_count,
-            ) = select_authoritative_fleet_entries(entries, fleet_membership)
-        except Exception as exc:
-            summary = {
-                "status": "error",
-                "phase": "fleet_membership",
-                "error": str(exc)[:4000],
-                "details": [],
-            }
-            if not args.inventory:
-                atomic_write_json(LOG_ROOT / "fleet-last.json", summary)
-            print(json.dumps(summary, indent=2, sort_keys=True))
-            return 1
-    if args.record_managed_build_retain:
-        retain_lock = acquire_lock()
-        if retain_lock is None:
-            print(
-                json.dumps(
-                    {"status": "busy", "reason": "fleet publisher already running"}
-                )
-            )
-            return 0
-        try:
-            return managed_build_retain_mode(args, entries)
-        finally:
-            retain_lock.close()
+
     if args.inventory:
+        if not args.repo_keys:
+            try:
+                fleet_membership = load_authoritative_fleet_membership()
+                (
+                    entries,
+                    missing_fleet_members,
+                    excluded_local_nonmember_count,
+                ) = select_authoritative_fleet_entries(entries, fleet_membership)
+            except Exception as exc:
+                summary = {
+                    "status": "error",
+                    "phase": "fleet_membership",
+                    "error": str(exc)[:4000],
+                    "details": [],
+                }
+                print(json.dumps(summary, indent=2, sort_keys=True))
+                return 1
         membership_report = (
             fleet_membership.receipt()
             if fleet_membership is not None
@@ -4097,6 +4083,20 @@ def main(argv: list[str]) -> int:
         )
         return 1 if missing_fleet_members else 0
 
+    if args.record_managed_build_retain:
+        retain_lock = acquire_lock()
+        if retain_lock is None:
+            print(
+                json.dumps(
+                    {"status": "busy", "reason": "fleet publisher already running"}
+                )
+            )
+            return 0
+        try:
+            return managed_build_retain_mode(args, entries)
+        finally:
+            retain_lock.close()
+
     lock = acquire_lock()
     if lock is None:
         print(
@@ -4106,6 +4106,24 @@ def main(argv: list[str]) -> int:
     try:
         STATE_ROOT.mkdir(parents=True, exist_ok=True)
         LOG_ROOT.mkdir(parents=True, exist_ok=True)
+        if not args.repo_keys:
+            try:
+                fleet_membership = load_authoritative_fleet_membership()
+                (
+                    entries,
+                    missing_fleet_members,
+                    excluded_local_nonmember_count,
+                ) = select_authoritative_fleet_entries(entries, fleet_membership)
+            except Exception as exc:
+                summary = {
+                    "status": "error",
+                    "phase": "fleet_membership",
+                    "error": str(exc)[:4000],
+                    "details": [],
+                }
+                atomic_write_json(LOG_ROOT / "fleet-last.json", summary)
+                print(json.dumps(summary, indent=2, sort_keys=True))
+                return 1
         entries, scheduling = prioritize_fleet_publication(entries)
         mode = "targeted-force" if args.force_republish else "if-changed"
         total_count = len(entries) + len(missing_fleet_members)

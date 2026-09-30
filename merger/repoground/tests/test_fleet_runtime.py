@@ -1940,11 +1940,15 @@ def test_generator_repository_is_prioritized_without_reordering_other_entries(
 def test_generator_repository_priority_is_applied_before_publication_loop() -> None:
     source = PUBLISHER.read_text(encoding="utf-8")
     inventory_return = source.index("if args.inventory:")
-    lock = source.index("lock = acquire_lock()", inventory_return)
+    lock = source.index("\n    lock = acquire_lock()", inventory_return)
+    membership = source.index(
+        "fleet_membership = load_authoritative_fleet_membership()",
+        lock,
+    )
     priority = source.index("entries, scheduling = prioritize_fleet_publication(entries)")
     loop = source.index("for entry in entries:", priority)
 
-    assert inventory_return < lock < priority < loop
+    assert inventory_return < lock < membership < priority < loop
 
 
 def test_fleet_fairness_converges_42_repository_backlog_with_limit_8(
@@ -4012,6 +4016,43 @@ def test_fleet_inventory_marks_missing_authoritative_member_as_failure(
     assert payload["membership"]["excluded_local_nonmember_count"] == 0
 
 
+def test_busy_fleet_does_not_run_membership_preflight_or_replace_receipt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = load_publisher()
+    lock_path = tmp_path / "fleet.lock"
+    log_root = tmp_path / "logs"
+    monkeypatch.setattr(module, "LOCK_PATH", lock_path)
+    monkeypatch.setattr(module, "LOG_ROOT", log_root)
+    monkeypatch.setattr(module, "STATE_ROOT", tmp_path / "state")
+    monkeypatch.setattr(module, "discover", lambda: [])
+
+    def forbidden_membership() -> module.FleetMembership:
+        raise AssertionError("busy invocation must not run membership preflight")
+
+    monkeypatch.setattr(
+        module,
+        "load_authoritative_fleet_membership",
+        forbidden_membership,
+    )
+
+    held_lock = module.acquire_lock()
+    assert held_lock is not None
+    try:
+        assert module.main([]) == 0
+    finally:
+        held_lock.close()
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "status": "busy",
+        "reason": "fleet publisher already running",
+    }
+    assert not (log_root / "fleet-last.json").exists()
+
+
 def test_fleet_membership_preflight_failure_persists_fleet_last(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -4019,7 +4060,9 @@ def test_fleet_membership_preflight_failure_persists_fleet_last(
 ) -> None:
     module = load_publisher()
     log_root = tmp_path / "logs"
+    monkeypatch.setattr(module, "LOCK_PATH", tmp_path / "fleet.lock")
     monkeypatch.setattr(module, "LOG_ROOT", log_root)
+    monkeypatch.setattr(module, "STATE_ROOT", tmp_path / "state")
     monkeypatch.setattr(module, "discover", lambda: [])
 
     def unavailable_membership() -> module.FleetMembership:
