@@ -384,15 +384,24 @@ def parse_github_remote(remote: str) -> tuple[str, str] | None:
     value = remote.strip()
     if value.startswith("/") or value.startswith("file:"):
         return None
-    match = re.fullmatch(
-        r"(?:(?:https?|ssh|git)://(?:[^/@]+@)?github\.com/"
-        r"|(?:[^@/:]+@)?github\.com:)"
+    url_match = re.fullmatch(
+        r"(?:https?|ssh|git)://(?:[^/@:]+@)?github\.com"
+        r"(?::([0-9]+))?/([^/]+)/([^/]+?)(?:\.git)?/?",
+        value,
+    )
+    if url_match:
+        port = url_match.group(1)
+        if port is not None and not 1 <= int(port) <= 65535:
+            return None
+        return url_match.group(2), url_match.group(3)
+    scp_match = re.fullmatch(
+        r"(?:[^@/:]+@)?github\.com:"
         r"([^/]+)/([^/]+?)(?:\.git)?/?",
         value,
     )
-    if not match:
+    if not scp_match:
         return None
-    return match.group(1), match.group(2)
+    return scp_match.group(1), scp_match.group(2)
 
 
 def github_remote_uses_authenticated_transport(remote: str) -> bool:
@@ -2152,6 +2161,7 @@ def remote_branch_head(repo_path: Path, branch: str) -> tuple[str, str, str]:
             "fetch",
             "--no-tags",
             "--no-write-fetch-head",
+            "--refmap=",
             "origin",
             full_ref,
         ]
@@ -2197,7 +2207,14 @@ def _fleet_membership_entry_key(
         if fleet_value is False:
             return None
         name = raw.get("name") or raw.get("repo")
-        owner = raw.get("owner") or "heimgewebe"
+        if "owner" in raw:
+            owner = raw["owner"]
+            if not isinstance(owner, str) or not owner.strip():
+                raise RuntimeError(
+                    "fleet membership entry owner must be a non-empty string"
+                )
+        else:
+            owner = "heimgewebe"
         url = raw.get("url")
         fleet_enabled = True
     else:

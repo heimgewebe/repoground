@@ -133,6 +133,8 @@ def test_parse_github_remote_requires_exact_github_host() -> None:
         "org-236528253@github.com:heimgewebe/metarepo.git",
         "https://github.com/heimgewebe/metarepo",
         "ssh://git@github.com/heimgewebe/metarepo.git",
+        "ssh://git@github.com:22/heimgewebe/metarepo.git",
+        "https://github.com:443/heimgewebe/metarepo.git",
     ):
         assert module.parse_github_remote(remote) == expected
 
@@ -141,6 +143,8 @@ def test_parse_github_remote_requires_exact_github_host() -> None:
         "https://notgithub.com/heimgewebe/metarepo",
         "ssh://git@github.com.evil.example/heimgewebe/metarepo.git",
         "github.com/heimgewebe/metarepo",
+        "ssh://git@github.com:0/heimgewebe/metarepo.git",
+        "ssh://git@github.com:65536/heimgewebe/metarepo.git",
     ):
         assert module.parse_github_remote(remote) is None
 
@@ -151,6 +155,7 @@ def test_authenticated_membership_transport_rejects_http_and_git() -> None:
     for remote in (
         "https://github.com/heimgewebe/metarepo.git",
         "ssh://git@github.com/heimgewebe/metarepo.git",
+        "ssh://git@github.com:22/heimgewebe/metarepo.git",
         "git@github.com:heimgewebe/metarepo.git",
         "org-236528253@github.com:heimgewebe/metarepo.git",
     ):
@@ -226,10 +231,11 @@ def test_remote_branch_head_ignores_non_ref_diagnostics_without_shared_ref_updat
                     f"{sha}\trefs/heads/main\n"
                 ),
             )
-        if argv[-5:] == [
+        if argv[-6:] == [
             "fetch",
             "--no-tags",
             "--no-write-fetch-head",
+            "--refmap=",
             "origin",
             "refs/heads/main",
         ]:
@@ -250,6 +256,80 @@ def test_remote_branch_head_ignores_non_ref_diagnostics_without_shared_ref_updat
         "refs/remotes/origin/main" in argument
         for argv in calls
         for argument in argv
+    )
+
+
+def test_remote_branch_head_fetch_does_not_update_origin_tracking_ref(
+    tmp_path: Path,
+) -> None:
+    module = load_publisher()
+    source, first_sha = initialize_repository(tmp_path, "authority-source")
+    remote = tmp_path / "authority-remote.git"
+    completed = subprocess.run(
+        ["git", "clone", "--quiet", "--bare", str(source), str(remote)],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stdout
+
+    checkout = tmp_path / "authority-checkout"
+    completed = subprocess.run(
+        ["git", "clone", "--quiet", str(remote), str(checkout)],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stdout
+    assert git(checkout, "rev-parse", "refs/remotes/origin/main") == first_sha
+
+    tracked = source / "tracked.txt"
+    tracked.write_text("second\n", encoding="utf-8")
+    git(source, "add", "tracked.txt")
+    git(source, "commit", "-m", "second authority commit")
+    second_sha = git(source, "rev-parse", "HEAD")
+    assert second_sha != first_sha
+    assert (
+        subprocess.run(
+            ["git", "-C", str(checkout), "cat-file", "-e", f"{second_sha}^{{commit}}"],
+            check=False,
+        ).returncode
+        != 0
+    )
+
+    completed = subprocess.run(
+        [
+            "git",
+            "--git-dir",
+            str(remote),
+            "fetch",
+            "--quiet",
+            "--no-tags",
+            str(source),
+            second_sha,
+        ],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stdout
+    git(remote, "update-ref", "refs/heads/main", second_sha)
+
+    assert module.remote_branch_head(checkout, "main") == (
+        "origin/main",
+        "main",
+        second_sha,
+    )
+    assert git(checkout, "rev-parse", "refs/remotes/origin/main") == first_sha
+    assert (
+        subprocess.run(
+            ["git", "-C", str(checkout), "cat-file", "-e", f"{second_sha}^{{commit}}"],
+            check=False,
+        ).returncode
+        == 0
     )
 
 
@@ -3921,6 +4001,24 @@ def test_fleet_membership_keys_reject_malformed_static_sections(
             {
                 "repos": [{"name": "repoground"}],
                 "static": static_value,
+            }
+        )
+
+
+@pytest.mark.parametrize("owner_value", [False, 0, None, [], {}, "", "   "])
+def test_fleet_membership_keys_reject_malformed_owner_values(
+    owner_value: object,
+) -> None:
+    module = load_publisher()
+    with pytest.raises(RuntimeError, match="owner must be a non-empty string"):
+        module._fleet_membership_keys(
+            {
+                "repos": [
+                    {
+                        "name": "repoground",
+                        "owner": owner_value,
+                    }
+                ]
             }
         )
 
