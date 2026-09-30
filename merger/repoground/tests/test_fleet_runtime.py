@@ -3961,6 +3961,60 @@ def test_authoritative_fleet_membership_reads_remote_main_not_dirty_worktree(
     ).hexdigest()
 
 
+def test_authoritative_fleet_membership_preserves_crlf_blob_bytes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    remote, _ = initialize_repository(tmp_path, "metarepo-crlf")
+    (remote / "fleet").mkdir()
+    authoritative = (
+        b"---\r\n"
+        b"repos:\r\n"
+        b"  - name: repoground\r\n"
+        b"  - name: heim-pc\r\n"
+    )
+    (remote / "fleet" / "repos.yml").write_bytes(authoritative)
+    git(remote, "add", "fleet/repos.yml")
+    git(remote, "commit", "-m", "authoritative fleet crlf")
+
+    checkout = tmp_path / "metarepo-crlf-checkout"
+    completed = subprocess.run(
+        ["git", "clone", "--quiet", str(remote), str(checkout)],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stdout
+
+    monkeypatch.setattr(module, "METAREPO_REPO", checkout)
+    original_run = module.run
+
+    def run_with_authority_origin(
+        argv: list[str],
+        cwd: Path | None = None,
+        check: bool = True,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        if argv[-3:] == ["remote", "get-url", "origin"]:
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout="org-236528253@github.com:heimgewebe/metarepo.git\n",
+            )
+        return original_run(argv, cwd=cwd, check=check, env=env)
+
+    monkeypatch.setattr(module, "run", run_with_authority_origin)
+    membership = module.load_authoritative_fleet_membership()
+
+    assert membership.keys == (
+        "heimgewebe/repoground",
+        "heimgewebe/heim-pc",
+    )
+    assert membership.content_sha256 == hashlib.sha256(authoritative).hexdigest()
+
+
 def test_authoritative_fleet_membership_rejects_wrong_origin(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
