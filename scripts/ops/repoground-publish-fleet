@@ -381,9 +381,16 @@ def canonical_sha256(payload: dict[str, object]) -> str:
 
 
 def parse_github_remote(remote: str) -> tuple[str, str] | None:
-    if remote.startswith("/") or remote.startswith("file:"):
+    value = remote.strip()
+    if value.startswith("/") or value.startswith("file:"):
         return None
-    match = re.search(r"github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?$", remote)
+    match = re.fullmatch(
+        r"(?:(?:https?|ssh|git)://(?:[^/@]+@)?github\.com/"
+        r"|(?:[^@/:]+@)?github\.com:"
+        r"|github\.com/)"
+        r"([^/]+)/([^/]+?)(?:\.git)?/?",
+        value,
+    )
     if not match:
         return None
     return match.group(1), match.group(2)

@@ -122,6 +122,26 @@ def test_remote_head_explicitly_fetches_remote_advertised_nonstandard_default_br
     assert not any("set-head" in argv for argv in calls)
 
 
+def test_parse_github_remote_requires_exact_github_host() -> None:
+    module = load_publisher()
+    expected = ("heimgewebe", "metarepo")
+
+    for remote in (
+        "git@github.com:heimgewebe/metarepo.git",
+        "org-236528253@github.com:heimgewebe/metarepo.git",
+        "https://github.com/heimgewebe/metarepo",
+        "ssh://git@github.com/heimgewebe/metarepo.git",
+    ):
+        assert module.parse_github_remote(remote) == expected
+
+    for remote in (
+        "git@notgithub.com:heimgewebe/metarepo.git",
+        "https://notgithub.com/heimgewebe/metarepo",
+        "ssh://git@github.com.evil.example/heimgewebe/metarepo.git",
+    ):
+        assert module.parse_github_remote(remote) is None
+
+
 def test_remote_head_rejects_remote_head_that_moves_after_fetch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -3878,7 +3898,7 @@ def test_authoritative_fleet_membership_rejects_wrong_origin(
         "remote",
         "add",
         "origin",
-        "git@github.com:heimgewebe/not-metarepo.git",
+        "git@notgithub.com:heimgewebe/metarepo.git",
     )
 
     monkeypatch.setattr(module, "METAREPO_REPO", checkout)
