@@ -28,6 +28,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+import yaml
+
 
 REPOS_ROOT = Path(
     os.environ.get("REPOGROUND_REPOS_ROOT") or "/home/alex/repos"
@@ -35,6 +37,16 @@ REPOS_ROOT = Path(
 REPOGROUND_REPO = Path(
     os.environ.get("REPOGROUND_REPOSITORY_PATH") or (REPOS_ROOT / "repoground")
 )
+METAREPO_REPO = Path(
+    os.environ.get("REPOGROUND_FLEET_MEMBERSHIP_REPOSITORY")
+    or (REPOS_ROOT / "metarepo")
+).expanduser()
+FLEET_MEMBERSHIP_REF = (
+    os.environ.get("REPOGROUND_FLEET_MEMBERSHIP_REF") or "main"
+)
+FLEET_MEMBERSHIP_PATH = "fleet/repos.yml"
+FLEET_MEMBERSHIP_MAX_BYTES = 256 * 1024
+FLEET_MEMBERSHIP_SCHEMA = "repoground.fleet-membership-authority.v1"
 TOOL_WT = Path(
     os.environ.get("REPOGROUND_TOOL_WORKTREE")
     or (REPOS_ROOT / ".repoground-tools" / "repoground-main")
@@ -147,6 +159,27 @@ class RepoEntry:
     repo: str
     path: Path
     remote: str
+
+
+@dataclass(frozen=True)
+class FleetMembership:
+    keys: tuple[str, ...]
+    source_commit: str
+    source_ref: str
+    source_path: str
+    content_sha256: str
+
+    def receipt(self) -> dict[str, object]:
+        return {
+            "schema": FLEET_MEMBERSHIP_SCHEMA,
+            "authority_repository": "heimgewebe/metarepo",
+            "source_commit": self.source_commit,
+            "source_ref": self.source_ref,
+            "source_path": self.source_path,
+            "content_sha256": self.content_sha256,
+            "member_count": len(self.keys),
+            "members": list(self.keys),
+        }
 
 
 @dataclass(frozen=True)
@@ -2064,6 +2097,196 @@ def remote_head(repo_path: Path) -> tuple[str, str, str]:
     raise RuntimeError(f"no remote default branch for {repo_path}")
 
 
+def remote_branch_head(repo_path: Path, branch: str) -> tuple[str, str, str]:
+    if not is_safe_git_branch_name(branch):
+        raise RuntimeError(
+            f"unsafe authoritative fleet membership branch: {branch!r}"
+        )
+    full_ref = f"refs/heads/{branch}"
+    advertised = run(
+        [
+            "git",
+            "-C",
+            str(repo_path),
+            "ls-remote",
+            "--exit-code",
+            "--refs",
+            "--",
+            "origin",
+            full_ref,
+        ]
+    ).stdout.splitlines()
+    rows = [line.split("\t", 1) for line in advertised if line.strip()]
+    matching = [
+        value
+        for value, separator_and_ref in rows
+        if separator_and_ref == full_ref
+    ]
+    if len(matching) != 1 or SOURCE_REVISION_RE.fullmatch(matching[0]) is None:
+        raise RuntimeError(
+            f"authoritative remote branch unavailable for {repo_path}: {branch}"
+        )
+    advertised_sha = matching[0]
+    fetched_sha = fetch_remote_tracking_branch(repo_path, branch)
+    if fetched_sha != advertised_sha:
+        raise RuntimeError(
+            f"authoritative remote branch moved during resolution for {repo_path}: "
+            f"{branch}"
+        )
+    return f"origin/{branch}", branch, fetched_sha
+
+
+def _fleet_membership_entry_key(
+    raw: object,
+    *,
+    require_explicit_fleet: bool = False,
+) -> str | None:
+    if isinstance(raw, str):
+        if require_explicit_fleet:
+            return None
+        name = raw
+        owner = "heimgewebe"
+        url = None
+        fleet_enabled = True
+    elif isinstance(raw, dict):
+        fleet_value = raw.get("fleet")
+        if require_explicit_fleet and fleet_value is not True:
+            return None
+        if fleet_value is False:
+            return None
+        name = raw.get("name") or raw.get("repo")
+        owner = raw.get("owner") or "heimgewebe"
+        url = raw.get("url")
+        fleet_enabled = True
+    else:
+        raise RuntimeError("fleet membership entries must be strings or objects")
+
+    if not fleet_enabled:
+        return None
+    if isinstance(url, str) and url:
+        parsed = parse_github_remote(url)
+        if parsed is None:
+            raise RuntimeError(f"invalid fleet membership GitHub URL: {url!r}")
+        owner, name = parsed
+    elif isinstance(name, str) and "/" in name:
+        parts = name.split("/")
+        if len(parts) != 2:
+            raise RuntimeError(f"invalid qualified fleet repository: {name!r}")
+        owner, name = parts
+
+    if not isinstance(owner, str) or not isinstance(name, str):
+        raise RuntimeError("fleet membership entry is missing owner/name")
+    if (
+        re.fullmatch(r"[A-Za-z0-9_.-]{1,100}", owner) is None
+        or re.fullmatch(r"[A-Za-z0-9_.-]{1,160}", name) is None
+    ):
+        raise RuntimeError(f"invalid fleet membership repository: {owner}/{name}")
+    return canonical_repository_key(f"{owner}/{name}")
+
+
+def _fleet_membership_keys(document: object) -> tuple[str, ...]:
+    if not isinstance(document, dict):
+        raise RuntimeError("fleet membership root must be an object")
+    repositories = document.get("repos")
+    if not isinstance(repositories, list):
+        raise RuntimeError("fleet membership repos must be a list")
+
+    keys: list[str] = []
+    for raw in repositories:
+        key = _fleet_membership_entry_key(raw)
+        if key is not None:
+            keys.append(key)
+
+    static = document.get("static")
+    if isinstance(static, dict):
+        included = static.get("include")
+        if included is not None and not isinstance(included, list):
+            raise RuntimeError("fleet membership static.include must be a list")
+        for raw in included or []:
+            key = _fleet_membership_entry_key(
+                raw,
+                require_explicit_fleet=True,
+            )
+            if key is not None:
+                keys.append(key)
+
+    seen: set[str] = set()
+    duplicates: set[str] = set()
+    ordered: list[str] = []
+    for key in keys:
+        if key in seen:
+            duplicates.add(key)
+            continue
+        seen.add(key)
+        ordered.append(key)
+    if duplicates:
+        raise RuntimeError(
+            "duplicate fleet membership repositories: "
+            + ", ".join(sorted(duplicates))
+        )
+    if not ordered:
+        raise RuntimeError("authoritative fleet membership is empty")
+    return tuple(ordered)
+
+
+def load_authoritative_fleet_membership() -> FleetMembership:
+    if (
+        not METAREPO_REPO.is_dir()
+        or METAREPO_REPO.is_symlink()
+        or not is_top_level_git(METAREPO_REPO)
+    ):
+        raise RuntimeError(
+            f"authoritative fleet membership repository is unavailable: "
+            f"{METAREPO_REPO}"
+        )
+    remote_ref, _branch, source_sha = remote_branch_head(
+        METAREPO_REPO,
+        FLEET_MEMBERSHIP_REF,
+    )
+    object_spec = f"{source_sha}:{FLEET_MEMBERSHIP_PATH}"
+    raw_size = run(
+        ["git", "-C", str(METAREPO_REPO), "cat-file", "-s", object_spec]
+    ).stdout.strip()
+    try:
+        observed_size = int(raw_size)
+    except ValueError as exc:
+        raise RuntimeError("fleet membership blob size is invalid") from exc
+    if not 0 < observed_size <= FLEET_MEMBERSHIP_MAX_BYTES:
+        raise RuntimeError(
+            f"fleet membership blob exceeds bounded size: {observed_size}"
+        )
+    raw = run(
+        ["git", "-C", str(METAREPO_REPO), "show", object_spec]
+    ).stdout
+    encoded = raw.encode("utf-8")
+    if len(encoded) != observed_size:
+        raise RuntimeError("fleet membership blob size changed during read")
+    try:
+        document = yaml.safe_load(raw)
+    except yaml.YAMLError as exc:
+        raise RuntimeError("fleet membership YAML is invalid") from exc
+    keys = _fleet_membership_keys(document)
+    return FleetMembership(
+        keys=keys,
+        source_commit=source_sha,
+        source_ref=remote_ref,
+        source_path=FLEET_MEMBERSHIP_PATH,
+        content_sha256=hashlib.sha256(encoded).hexdigest(),
+    )
+
+
+def select_authoritative_fleet_entries(
+    entries: list[RepoEntry],
+    membership: FleetMembership,
+) -> tuple[list[RepoEntry], list[str], int]:
+    by_key = {entry.key: entry for entry in entries}
+    selected = [by_key[key] for key in membership.keys if key in by_key]
+    missing = [key for key in membership.keys if key not in by_key]
+    member_keys = set(membership.keys)
+    excluded_count = sum(1 for key in by_key if key not in member_keys)
+    return selected, missing, excluded_count
+
+
 def state_path(entry: RepoEntry, ref_segment: str) -> Path:
     stem = (
         safe_segment(entry.owner) + "__" + safe_segment(entry.repo) + "__" + ref_segment
@@ -3776,6 +3999,9 @@ def main(argv: list[str]) -> int:
             cleanup_lock.close()
 
     entries = discover()
+    fleet_membership: FleetMembership | None = None
+    missing_fleet_members: list[str] = []
+    excluded_local_nonmember_count = 0
     if args.repo_keys:
         wanted = set(args.repo_keys)
         entries = [entry for entry in entries if entry.key in wanted]
@@ -3789,6 +4015,23 @@ def main(argv: list[str]) -> int:
                 )
             )
             return 2
+    else:
+        try:
+            fleet_membership = load_authoritative_fleet_membership()
+            (
+                entries,
+                missing_fleet_members,
+                excluded_local_nonmember_count,
+            ) = select_authoritative_fleet_entries(entries, fleet_membership)
+        except Exception as exc:
+            summary = {
+                "status": "error",
+                "phase": "fleet_membership",
+                "error": str(exc)[:4000],
+                "details": [],
+            }
+            print(json.dumps(summary, indent=2, sort_keys=True))
+            return 1
     if args.record_managed_build_retain:
         retain_lock = acquire_lock()
         if retain_lock is None:
@@ -3803,10 +4046,25 @@ def main(argv: list[str]) -> int:
         finally:
             retain_lock.close()
     if args.inventory:
+        membership_report = (
+            fleet_membership.receipt()
+            if fleet_membership is not None
+            else {
+                "schema": FLEET_MEMBERSHIP_SCHEMA,
+                "scope": "targeted_repo_selection",
+                "authority_required": False,
+            }
+        )
+        membership_report["missing_local_members"] = missing_fleet_members
+        membership_report["excluded_local_nonmember_count"] = (
+            excluded_local_nonmember_count
+        )
         print(
             json.dumps(
                 {
-                    "count": len(entries),
+                    "status": "warn" if missing_fleet_members else "ok",
+                    "count": len(entries) + len(missing_fleet_members),
+                    "membership": membership_report,
                     "repos": [
                         {"key": row.key, "path": str(row.path), "remote": row.remote}
                         for row in entries
@@ -3816,7 +4074,7 @@ def main(argv: list[str]) -> int:
                 sort_keys=True,
             )
         )
-        return 0
+        return 1 if missing_fleet_members else 0
 
     lock = acquire_lock()
     if lock is None:
@@ -3829,9 +4087,23 @@ def main(argv: list[str]) -> int:
         LOG_ROOT.mkdir(parents=True, exist_ok=True)
         entries, scheduling = prioritize_fleet_publication(entries)
         mode = "targeted-force" if args.force_republish else "if-changed"
+        total_count = len(entries) + len(missing_fleet_members)
+        membership_report = (
+            fleet_membership.receipt()
+            if fleet_membership is not None
+            else {
+                "schema": FLEET_MEMBERSHIP_SCHEMA,
+                "scope": "targeted_repo_selection",
+                "authority_required": False,
+            }
+        )
+        membership_report["missing_local_members"] = missing_fleet_members
+        membership_report["excluded_local_nonmember_count"] = (
+            excluded_local_nonmember_count
+        )
         log(
             f"== fleet {mode} {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} "
-            f"entries={len(entries)} limit={args.limit} retention={args.retention} =="
+            f"entries={total_count} limit={args.limit} retention={args.retention} =="
         )
         try:
             tool_sha, generator_sha = ensure_tool_worktree()
@@ -3839,9 +4111,10 @@ def main(argv: list[str]) -> int:
             summary = {
                 "status": "error",
                 "phase": "generator_preflight",
-                "count": len(entries),
-                "failed": len(entries),
+                "count": total_count,
+                "failed": total_count,
                 "error": str(exc)[:4000],
+                "membership": membership_report,
                 "scheduling": scheduling,
                 "details": [],
             }
@@ -3849,9 +4122,18 @@ def main(argv: list[str]) -> int:
             log(f"GENERATOR-PREFLIGHT-FAILED: {exc}")
             print(json.dumps(summary, indent=2, sort_keys=True))
             return 1
-        changed = published = skipped = failed = queued = retained = deferred = 0
+        changed = published = skipped = queued = retained = deferred = 0
+        failed = len(missing_fleet_members)
         prune_failed = 0
-        details: list[dict[str, object]] = []
+        details: list[dict[str, object]] = [
+            {
+                "repo": key,
+                "status": "failed",
+                "error_code": "fleet_member_checkout_missing",
+                "authority": "heimgewebe/metarepo:fleet/repos.yml",
+            }
+            for key in missing_fleet_members
+        ]
         protected: set[Path] = set()
         reconciliation = reconcile_prune_transactions(protected=protected, apply=True)
         for entry in entries:
@@ -4035,7 +4317,7 @@ def main(argv: list[str]) -> int:
         summary: dict[str, object] = {
             "status": "warn" if failed or retained or deferred else "ok",
             "mode": mode,
-            "count": len(entries),
+            "count": total_count,
             "changed": changed,
             "published": published,
             "skipped": skipped,
@@ -4047,6 +4329,7 @@ def main(argv: list[str]) -> int:
             "retention": args.retention,
             "tool_sha": tool_sha,
             "generator_inputs_sha": generator_sha,
+            "membership": membership_report,
             "force_reason": args.reason if args.force_republish else None,
             "retention_reconciliation": reconciliation,
             "scheduling": scheduling,

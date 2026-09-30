@@ -3712,3 +3712,202 @@ def test_runtime_installer_rejects_legacy_publication_marker_spoof(
     assert "unknown file at legacy publication-policy command path" in completed.stderr
     assert legacy.is_file()
     assert not systemctl_log.exists()
+
+def test_fleet_membership_keys_follow_authoritative_semantics() -> None:
+    module = load_publisher()
+    document = {
+        "static": {
+            "include": [
+                {
+                    "name": "commonthing",
+                    "url": "https://github.com/heimgewebe/commonthing",
+                    "status": "related",
+                },
+                {
+                    "name": "explicit-warm",
+                    "url": "https://github.com/heimgewebe/explicit-warm",
+                    "fleet": True,
+                },
+            ]
+        },
+        "repos": [
+            {"name": "repoground"},
+            "heimgewebe/wgx",
+            {"name": "retired", "fleet": False},
+        ],
+    }
+
+    assert module._fleet_membership_keys(document) == (
+        "heimgewebe/repoground",
+        "heimgewebe/wgx",
+        "heimgewebe/explicit-warm",
+    )
+
+
+def test_fleet_membership_keys_reject_duplicates() -> None:
+    module = load_publisher()
+    with pytest.raises(RuntimeError, match="duplicate fleet membership"):
+        module._fleet_membership_keys(
+            {
+                "repos": [
+                    {"name": "repoground"},
+                    "heimgewebe/repoground",
+                ]
+            }
+        )
+
+
+def test_authoritative_fleet_membership_reads_remote_main_not_dirty_worktree(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    remote, _ = initialize_repository(tmp_path, "metarepo-remote")
+    (remote / "fleet").mkdir()
+    authoritative = (
+        "---\n"
+        "static:\n"
+        "  include:\n"
+        "    - name: commonthing\n"
+        "      status: related\n"
+        "repos:\n"
+        "  - name: repoground\n"
+        "  - name: heim-pc\n"
+    )
+    (remote / "fleet" / "repos.yml").write_text(authoritative, encoding="utf-8")
+    git(remote, "add", "fleet/repos.yml")
+    git(remote, "commit", "-m", "authoritative fleet")
+    remote_head = git(remote, "rev-parse", "HEAD")
+
+    checkout = tmp_path / "metarepo-checkout"
+    completed = subprocess.run(
+        ["git", "clone", "--quiet", str(remote), str(checkout)],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stdout
+    (checkout / "fleet" / "repos.yml").write_text(
+        "repos:\n  - name: wrong-local-value\n",
+        encoding="utf-8",
+    )
+    assert git(checkout, "status", "--porcelain")
+
+    monkeypatch.setattr(module, "METAREPO_REPO", checkout)
+    membership = module.load_authoritative_fleet_membership()
+
+    assert membership.keys == (
+        "heimgewebe/repoground",
+        "heimgewebe/heim-pc",
+    )
+    assert membership.source_commit == remote_head
+    assert membership.source_ref == "origin/main"
+    assert membership.content_sha256 == hashlib.sha256(
+        authoritative.encode("utf-8")
+    ).hexdigest()
+
+
+def test_select_authoritative_fleet_entries_reports_missing_and_excluded(
+    tmp_path: Path,
+) -> None:
+    module = load_publisher()
+    entries = [
+        module.RepoEntry(
+            key="heimgewebe/repoground",
+            owner="heimgewebe",
+            repo="repoground",
+            path=tmp_path / "repoground",
+            remote="git@github.com:heimgewebe/repoground.git",
+        ),
+        module.RepoEntry(
+            key="heimgewebe/old-local",
+            owner="heimgewebe",
+            repo="old-local",
+            path=tmp_path / "old-local",
+            remote="git@github.com:heimgewebe/old-local.git",
+        ),
+    ]
+    membership = module.FleetMembership(
+        keys=("heimgewebe/repoground", "heimgewebe/heim-pc"),
+        source_commit="a" * 40,
+        source_ref="origin/main",
+        source_path="fleet/repos.yml",
+        content_sha256="b" * 64,
+    )
+
+    selected, missing, excluded = module.select_authoritative_fleet_entries(
+        entries,
+        membership,
+    )
+
+    assert [entry.key for entry in selected] == ["heimgewebe/repoground"]
+    assert missing == ["heimgewebe/heim-pc"]
+    assert excluded == 1
+
+
+def test_targeted_inventory_bypasses_fleet_membership_authority(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = load_publisher()
+    entry = module.RepoEntry(
+        key="heimgewebe/nonfleet",
+        owner="heimgewebe",
+        repo="nonfleet",
+        path=tmp_path / "nonfleet",
+        remote="git@github.com:heimgewebe/nonfleet.git",
+    )
+    monkeypatch.setattr(module, "discover", lambda: [entry])
+
+    def forbidden_membership() -> module.FleetMembership:
+        raise AssertionError("targeted --repo must not require Fleet membership")
+
+    monkeypatch.setattr(
+        module,
+        "load_authoritative_fleet_membership",
+        forbidden_membership,
+    )
+
+    assert module.main(["--inventory", "--repo", "heimgewebe/nonfleet"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["repos"][0]["key"] == "heimgewebe/nonfleet"
+    assert payload["membership"]["authority_required"] is False
+
+
+def test_fleet_inventory_marks_missing_authoritative_member_as_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = load_publisher()
+    entry = module.RepoEntry(
+        key="heimgewebe/repoground",
+        owner="heimgewebe",
+        repo="repoground",
+        path=tmp_path / "repoground",
+        remote="git@github.com:heimgewebe/repoground.git",
+    )
+    membership = module.FleetMembership(
+        keys=("heimgewebe/repoground", "heimgewebe/heim-pc"),
+        source_commit="a" * 40,
+        source_ref="origin/main",
+        source_path="fleet/repos.yml",
+        content_sha256="b" * 64,
+    )
+    monkeypatch.setattr(module, "discover", lambda: [entry])
+    monkeypatch.setattr(
+        module,
+        "load_authoritative_fleet_membership",
+        lambda: membership,
+    )
+
+    assert module.main(["--inventory"]) == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "warn"
+    assert payload["count"] == 2
+    assert payload["membership"]["missing_local_members"] == [
+        "heimgewebe/heim-pc"
+    ]
+    assert payload["membership"]["excluded_local_nonmember_count"] == 0
