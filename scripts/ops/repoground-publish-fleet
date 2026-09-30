@@ -2407,7 +2407,7 @@ def load_authoritative_fleet_membership() -> FleetMembership:
     )
     object_spec = f"{source_sha}:{FLEET_MEMBERSHIP_PATH}"
     raw_size = run(
-        ["git", "-C", str(METAREPO_REPO), "cat-file", "-s", object_spec]
+        ["git", "--no-replace-objects", "-C", str(METAREPO_REPO), "cat-file", "-s", object_spec]
     ).stdout.strip()
     try:
         observed_size = int(raw_size)
@@ -2418,7 +2418,7 @@ def load_authoritative_fleet_membership() -> FleetMembership:
             f"fleet membership blob exceeds bounded size: {observed_size}"
         )
     blob = subprocess.run(
-        ["git", "-C", str(METAREPO_REPO), "show", object_spec],
+        ["git", "--no-replace-objects", "-C", str(METAREPO_REPO), "show", object_spec],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         check=False,
