@@ -2144,13 +2144,36 @@ def remote_branch_head(repo_path: Path, branch: str) -> tuple[str, str, str]:
             f"authoritative remote branch unavailable for {repo_path}: {branch}"
         )
     advertised_sha = matching[0]
-    fetched_sha = fetch_remote_tracking_branch(repo_path, branch)
+    run(
+        [
+            "git",
+            "-C",
+            str(repo_path),
+            "fetch",
+            "--no-tags",
+            "--no-write-fetch-head",
+            "origin",
+            full_ref,
+        ]
+    )
+    fetched = run(
+        [
+            "git",
+            "-C",
+            str(repo_path),
+            "rev-parse",
+            "--verify",
+            f"{advertised_sha}^{{commit}}",
+        ],
+        check=False,
+    )
+    fetched_sha = fetched.stdout.strip() if fetched.returncode == 0 else ""
     if fetched_sha != advertised_sha:
         raise RuntimeError(
             f"authoritative remote branch moved during resolution for {repo_path}: "
             f"{branch}"
         )
-    return f"origin/{branch}", branch, fetched_sha
+    return f"origin/{branch}", branch, advertised_sha
 
 
 def _fleet_membership_entry_key(
@@ -2167,6 +2190,8 @@ def _fleet_membership_entry_key(
         fleet_enabled = True
     elif isinstance(raw, dict):
         fleet_value = raw.get("fleet")
+        if "fleet" in raw and not isinstance(fleet_value, bool):
+            raise RuntimeError("fleet membership entry fleet must be a boolean")
         if require_explicit_fleet and fleet_value is not True:
             return None
         if fleet_value is False:
@@ -2215,6 +2240,8 @@ def _fleet_membership_keys(document: object) -> tuple[str, ...]:
             keys.append(key)
 
     static = document.get("static")
+    if static is not None and not isinstance(static, dict):
+        raise RuntimeError("fleet membership static must be an object")
     if isinstance(static, dict):
         included = static.get("include")
         if included is not None and not isinstance(included, list):

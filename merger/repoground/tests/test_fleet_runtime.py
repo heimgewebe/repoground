@@ -199,7 +199,7 @@ def test_remote_head_rejects_remote_head_that_moves_after_fetch(
         module.remote_head(repo)
 
 
-def test_remote_branch_head_ignores_non_ref_diagnostics(
+def test_remote_branch_head_ignores_non_ref_diagnostics_without_shared_ref_update(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -207,6 +207,7 @@ def test_remote_branch_head_ignores_non_ref_diagnostics(
     repo = tmp_path / "metarepo"
     sha = "a" * 40
     fetched = False
+    calls: list[list[str]] = []
 
     def fake_run(
         argv: list[str],
@@ -215,6 +216,7 @@ def test_remote_branch_head_ignores_non_ref_diagnostics(
         env: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         nonlocal fetched
+        calls.append(argv)
         if argv[-3:] == ["--", "origin", "refs/heads/main"]:
             return subprocess.CompletedProcess(
                 argv,
@@ -224,10 +226,16 @@ def test_remote_branch_head_ignores_non_ref_diagnostics(
                     f"{sha}\trefs/heads/main\n"
                 ),
             )
-        if _is_advertised_branch_fetch(argv, "main"):
+        if argv[-5:] == [
+            "fetch",
+            "--no-tags",
+            "--no-write-fetch-head",
+            "origin",
+            "refs/heads/main",
+        ]:
             fetched = True
             return subprocess.CompletedProcess(argv, 0, stdout="")
-        if argv[-3:] == ["rev-parse", "--verify", "refs/remotes/origin/main"]:
+        if argv[-3:] == ["rev-parse", "--verify", f"{sha}^{{commit}}"]:
             return subprocess.CompletedProcess(
                 argv,
                 0 if fetched else 1,
@@ -238,6 +246,11 @@ def test_remote_branch_head_ignores_non_ref_diagnostics(
     monkeypatch.setattr(module, "run", fake_run)
 
     assert module.remote_branch_head(repo, "main") == ("origin/main", "main", sha)
+    assert not any(
+        "refs/remotes/origin/main" in argument
+        for argv in calls
+        for argument in argv
+    )
 
 
 def test_remote_head_falls_back_to_existing_local_origin_head(
@@ -3878,6 +3891,38 @@ def test_fleet_membership_keys_follow_authoritative_semantics() -> None:
         "heimgewebe/wgx",
         "heimgewebe/explicit-warm",
     )
+
+
+@pytest.mark.parametrize("fleet_value", ["false", 0, 1, None, [], {}])
+def test_fleet_membership_keys_reject_non_boolean_fleet_flags(
+    fleet_value: object,
+) -> None:
+    module = load_publisher()
+    with pytest.raises(RuntimeError, match="fleet must be a boolean"):
+        module._fleet_membership_keys(
+            {
+                "repos": [
+                    {
+                        "name": "repoground",
+                        "fleet": fleet_value,
+                    }
+                ]
+            }
+        )
+
+
+@pytest.mark.parametrize("static_value", [[], "invalid", 1, True])
+def test_fleet_membership_keys_reject_malformed_static_sections(
+    static_value: object,
+) -> None:
+    module = load_publisher()
+    with pytest.raises(RuntimeError, match="static must be an object"):
+        module._fleet_membership_keys(
+            {
+                "repos": [{"name": "repoground"}],
+                "static": static_value,
+            }
+        )
 
 
 def test_fleet_membership_keys_reject_duplicates() -> None:
