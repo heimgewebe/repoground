@@ -2905,7 +2905,7 @@ def _fleet_membership_keys(document: object) -> tuple[str, ...]:
             keys.append(key)
 
     static = document.get("static")
-    if static is not None and not isinstance(static, dict):
+    if "static" in document and not isinstance(static, dict):
         raise RuntimeError("fleet membership static must be an object")
     if isinstance(static, dict):
         included = static.get("include")

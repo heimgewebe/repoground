@@ -4424,7 +4424,7 @@ def test_fleet_membership_keys_reject_non_boolean_fleet_flags(
         )
 
 
-@pytest.mark.parametrize("static_value", [[], "invalid", 1, True])
+@pytest.mark.parametrize("static_value", [None, [], "invalid", 1, True])
 def test_fleet_membership_keys_reject_malformed_static_sections(
     static_value: object,
 ) -> None:
