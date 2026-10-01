@@ -62,6 +62,7 @@ FLEET_MEMBERSHIP_ENTRY_KEYS = frozenset(
         "url",
     }
 )
+FLEET_MEMBERSHIP_STATIC_KEYS = frozenset({"include"})
 TOOL_WT = Path(
     os.environ.get("REPOGROUND_TOOL_WORKTREE")
     or (REPOS_ROOT / ".repoground-tools" / "repoground-main")
@@ -2908,6 +2909,16 @@ def _fleet_membership_keys(document: object) -> tuple[str, ...]:
     if "static" in document and not isinstance(static, dict):
         raise RuntimeError("fleet membership static must be an object")
     if isinstance(static, dict):
+        unknown_static_fields = [
+            key
+            for key in static
+            if not isinstance(key, str) or key not in FLEET_MEMBERSHIP_STATIC_KEYS
+        ]
+        if unknown_static_fields:
+            rendered = ", ".join(repr(key) for key in unknown_static_fields)
+            raise RuntimeError(
+                f"fleet membership static has unknown fields: {rendered}"
+            )
         included = static.get("include")
         if "include" in static and not isinstance(included, list):
             raise RuntimeError("fleet membership static.include must be a list")

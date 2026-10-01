@@ -4406,6 +4406,25 @@ def test_fleet_membership_keys_reject_unknown_entry_fields() -> None:
 
 
 
+def test_fleet_membership_keys_reject_unknown_static_fields() -> None:
+    module = load_publisher()
+
+    with pytest.raises(RuntimeError, match="static has unknown fields.*incldue"):
+        module._fleet_membership_keys(
+            {
+                "repos": [{"name": "repoground"}],
+                "static": {
+                    "incldue": [
+                        {
+                            "name": "wgx",
+                            "fleet": True,
+                        }
+                    ]
+                },
+            }
+        )
+
+
 @pytest.mark.parametrize("fleet_value", ["false", 0, 1, None, [], {}])
 def test_fleet_membership_keys_reject_non_boolean_fleet_flags(
     fleet_value: object,
