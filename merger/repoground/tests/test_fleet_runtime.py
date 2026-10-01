@@ -533,6 +533,44 @@ def test_fleet_repo_ssh_env_preserves_only_bounded_github_auth_config(
         assert forbidden not in command
 
 
+@pytest.mark.parametrize(
+    ("host_patterns", "expected_identity"),
+    [
+        ("GitHub.COM", True),
+        ("github.com !github.com", False),
+        ("*.github.com", False),
+        ("attacker-github.com", False),
+        ("github.com.evil.example", False),
+    ],
+)
+def test_fleet_member_ssh_host_patterns_require_exact_github_match(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    host_patterns: str,
+    expected_identity: bool,
+) -> None:
+    module = load_publisher()
+    home = tmp_path / "home"
+    ssh_dir = home / ".ssh"
+    ssh_dir.mkdir(parents=True)
+    config = ssh_dir / "config"
+    config.write_text(
+        f"Host {host_patterns}\n"
+        "    IdentityFile ~/.ssh/id_ed25519\n",
+        encoding="utf-8",
+    )
+    config.chmod(0o600)
+    monkeypatch.setenv("HOME", str(home))
+
+    options = module._fleet_member_ssh_auth_options()
+
+    identities = options.get("identity_files", ())
+    if expected_identity:
+        assert identities == (str(ssh_dir / "id_ed25519"),)
+    else:
+        assert identities == ()
+
+
 def test_fleet_member_ssh_config_rejects_symlink_and_insecure_permissions(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -2490,7 +2490,14 @@ def _fleet_member_ssh_auth_options() -> dict[str, object]:
             values = values[1:]
         key = first.strip().lower()
         if key == "host":
-            active = "github.com" in values and "!github.com" not in values
+            normalized_patterns = tuple(value.casefold() for value in values)
+            positive_exact = any(
+                pattern == "github.com" for pattern in normalized_patterns
+            )
+            negative_exact = any(
+                pattern == "!github.com" for pattern in normalized_patterns
+            )
+            active = positive_exact and not negative_exact
             continue
         if key == "match":
             active = False
