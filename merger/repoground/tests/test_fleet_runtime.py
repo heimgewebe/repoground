@@ -462,7 +462,9 @@ def test_remote_head_falls_back_to_existing_local_origin_head(
     module = load_publisher()
     repo = tmp_path / "demo"
     sha = "a" * 40
+    validated_url = "git@github.com:heimgewebe/demo.git"
     calls: list[list[str]] = []
+    fetched = False
 
     def fake_run(
         argv: list[str],
@@ -470,22 +472,46 @@ def test_remote_head_falls_back_to_existing_local_origin_head(
         check: bool = True,
         env: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
+        nonlocal fetched
         calls.append(argv)
-        if argv[-3:] == ["fetch", "origin", "--prune"]:
-            return subprocess.CompletedProcess(argv, 0, stdout="")
-        if argv[-4:] == ["ls-remote", "--symref", "origin", "HEAD"]:
+        if argv[-4:] == ["ls-remote", "--symref", validated_url, "HEAD"]:
             return subprocess.CompletedProcess(argv, 0, stdout=f"{sha}\tHEAD\n")
         if argv[-3:] == ["symbolic-ref", "refs/remotes/origin/HEAD", "--short"]:
             return subprocess.CompletedProcess(argv, 0, stdout="origin/release\n")
-        if argv[-2:] == ["rev-parse", "origin/release"]:
-            return subprocess.CompletedProcess(argv, 0, stdout=f"{sha}\n")
+        if argv[-3:] == ["--", validated_url, "refs/heads/release"]:
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout=f"{sha}\trefs/heads/release\n",
+            )
+        if argv[-4:] == [
+            "fetch",
+            "--no-tags",
+            validated_url,
+            "+refs/heads/release:refs/remotes/origin/release",
+        ]:
+            fetched = True
+            return subprocess.CompletedProcess(argv, 0, stdout="")
+        if argv[-3:] == ["rev-parse", "--verify", "refs/remotes/origin/release"]:
+            return subprocess.CompletedProcess(
+                argv,
+                0 if fetched else 1,
+                stdout=f"{sha}\n" if fetched else "",
+            )
         raise AssertionError(f"unexpected command: {argv}")
 
     monkeypatch.setattr(module, "run", fake_run)
 
-    assert module.remote_head(repo) == ("origin/release", "release", sha)
+    assert module.remote_head(repo, remote=validated_url) == (
+        "origin/release",
+        "release",
+        sha,
+    )
+    assert fetched is True
+    assert not any(
+        argv[-3:] == ["fetch", validated_url, "--prune"] for argv in calls
+    )
     assert not any("set-head" in argv for argv in calls)
-
 
 def test_remote_head_rejects_fallback_that_disagrees_with_remote_head_sha(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -493,7 +519,7 @@ def test_remote_head_rejects_fallback_that_disagrees_with_remote_head_sha(
     module = load_publisher()
     repo = tmp_path / "stale-local-head"
     advertised_sha = "a" * 40
-    local_sha = "b" * 40
+    fallback_sha = "b" * 40
 
     def fake_run(
         argv: list[str],
@@ -501,21 +527,27 @@ def test_remote_head_rejects_fallback_that_disagrees_with_remote_head_sha(
         check: bool = True,
         env: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
-        if argv[-3:] == ["fetch", "origin", "--prune"]:
-            return subprocess.CompletedProcess(argv, 0, stdout="")
         if argv[-4:] == ["ls-remote", "--symref", "origin", "HEAD"]:
             return subprocess.CompletedProcess(argv, 0, stdout=f"{advertised_sha}\tHEAD\n")
         if argv[-3:] == ["symbolic-ref", "refs/remotes/origin/HEAD", "--short"]:
             return subprocess.CompletedProcess(argv, 0, stdout="origin/release\n")
-        if argv[-2:] == ["rev-parse", "origin/release"]:
-            return subprocess.CompletedProcess(argv, 0, stdout=f"{local_sha}\n")
+        if argv[-3:] == ["--", "origin", "refs/heads/release"]:
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout=f"{fallback_sha}\trefs/heads/release\n",
+            )
+        if argv[-3:] in (
+            ["--", "origin", "refs/heads/main"],
+            ["--", "origin", "refs/heads/master"],
+        ):
+            return subprocess.CompletedProcess(argv, 2, stdout="")
         raise AssertionError(f"unexpected command: {argv}")
 
     monkeypatch.setattr(module, "run", fake_run)
 
     with pytest.raises(RuntimeError, match="remote HEAD disagrees"):
         module.remote_head(repo)
-
 
 def test_remote_head_remains_fail_closed_without_any_default_branch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -531,14 +563,15 @@ def test_remote_head_remains_fail_closed_without_any_default_branch(
         env: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         calls.append(argv)
-        if argv[-3:] == ["fetch", "origin", "--prune"]:
-            return subprocess.CompletedProcess(argv, 0, stdout="")
         if argv[-4:] == ["ls-remote", "--symref", "origin", "HEAD"]:
             return subprocess.CompletedProcess(argv, 0, stdout="")
         if argv[-3:] == ["symbolic-ref", "refs/remotes/origin/HEAD", "--short"]:
             return subprocess.CompletedProcess(argv, 1, stdout="")
-        if len(argv) >= 2 and argv[-2] == "rev-parse":
-            return subprocess.CompletedProcess(argv, 1, stdout="")
+        if argv[-3:] in (
+            ["--", "origin", "refs/heads/main"],
+            ["--", "origin", "refs/heads/master"],
+        ):
+            return subprocess.CompletedProcess(argv, 2, stdout="")
         raise AssertionError(f"unexpected command: {argv}")
 
     monkeypatch.setattr(module, "run", fake_run)
@@ -546,7 +579,6 @@ def test_remote_head_remains_fail_closed_without_any_default_branch(
     with pytest.raises(RuntimeError, match="no remote default branch"):
         module.remote_head(repo)
     assert not any("set-head" in argv for argv in calls)
-
 
 def test_remote_head_rejects_non_branch_remote_head_symref(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

@@ -2170,7 +2170,6 @@ def remote_head(
             )
         return f"origin/{advertised_branch}", advertised_branch, local_sha
 
-    run(["git", "-C", str(repo_path), "fetch", remote, "--prune"], env=env)
     head = run(
         [
             "git",
@@ -2183,26 +2182,68 @@ def remote_head(
         check=False,
         env=env,
     ).stdout.strip()
+    candidate_refs: list[str] = []
+    fallback_mismatches: list[str] = []
     for ref in [head, "origin/main", "origin/master"]:
-        if not ref:
+        if not ref or ref in candidate_refs or not ref.startswith("origin/"):
             continue
-        cp = run(
-            ["git", "-C", str(repo_path), "rev-parse", ref],
+        candidate_refs.append(ref)
+        branch = ref.split("/", 1)[1]
+        if not is_safe_git_branch_name(branch):
+            continue
+        full_ref = f"refs/heads/{branch}"
+        candidate = run(
+            [
+                "git",
+                "-C",
+                str(repo_path),
+                "ls-remote",
+                "--exit-code",
+                "--refs",
+                "--",
+                remote,
+                full_ref,
+            ],
             check=False,
             env=env,
         )
-        if cp.returncode == 0:
-            revision = cp.stdout.strip()
-            if SOURCE_REVISION_RE.fullmatch(revision) is None:
-                raise RuntimeError(
-                    f"invalid remote default branch revision for {repo_path}: {revision!r}"
-                )
-            if advertised_sha is not None and revision != advertised_sha:
-                raise RuntimeError(
-                    f"remote HEAD disagrees with local default branch for {repo_path}: {ref}"
-                )
-            branch = ref.split("/", 1)[1] if ref.startswith("origin/") else ref
-            return ref, branch, revision
+        matching: list[str] = []
+        for line in candidate.stdout.splitlines():
+            value, separator, candidate_ref = line.partition("\t")
+            if separator and candidate_ref == full_ref:
+                matching.append(value)
+        if (
+            candidate.returncode != 0
+            or len(matching) != 1
+            or SOURCE_REVISION_RE.fullmatch(matching[0]) is None
+        ):
+            continue
+        candidate_sha = matching[0]
+        if advertised_sha is not None and candidate_sha != advertised_sha:
+            fallback_mismatches.append(ref)
+            continue
+        revision = fetch_remote_tracking_branch(
+            repo_path,
+            branch,
+            remote=remote,
+            env=env,
+        )
+        if revision != candidate_sha:
+            raise RuntimeError(
+                f"remote default branch moved during fallback resolution for "
+                f"{repo_path}: {branch}"
+            )
+        if advertised_sha is not None and revision != advertised_sha:
+            raise RuntimeError(
+                f"remote HEAD moved during fallback resolution for {repo_path}: "
+                f"{branch}"
+            )
+        return ref, branch, revision
+    if advertised_sha is not None and fallback_mismatches:
+        raise RuntimeError(
+            f"remote HEAD disagrees with fallback branches for {repo_path}: "
+            + ", ".join(fallback_mismatches)
+        )
     raise RuntimeError(f"no remote default branch for {repo_path}")
 
 
