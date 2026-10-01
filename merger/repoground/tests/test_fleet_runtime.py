@@ -4278,6 +4278,33 @@ def test_authoritative_fleet_membership_reads_remote_main_not_dirty_worktree(
         return original_run(argv, cwd=cwd, check=check, env=env)
 
     monkeypatch.setattr(module, "run", run_with_authority_origin)
+    original_isolated = module.read_remote_branch_blob_isolated
+
+    def read_fixture_remote(
+        origin_url: str,
+        branch: str,
+        path: str,
+        *,
+        env: dict[str, str],
+        max_bytes: int,
+    ) -> tuple[str, str, bytes]:
+        assert module.parse_github_remote(origin_url) == (
+            "heimgewebe",
+            "metarepo",
+        )
+        return original_isolated(
+            str(remote),
+            branch,
+            path,
+            env=env,
+            max_bytes=max_bytes,
+        )
+
+    monkeypatch.setattr(
+        module,
+        "read_remote_branch_blob_isolated",
+        read_fixture_remote,
+    )
     membership = module.load_authoritative_fleet_membership()
 
     assert membership.keys == (
@@ -4337,6 +4364,33 @@ def test_authoritative_fleet_membership_preserves_crlf_blob_bytes(
         return original_run(argv, cwd=cwd, check=check, env=env)
 
     monkeypatch.setattr(module, "run", run_with_authority_origin)
+    original_isolated = module.read_remote_branch_blob_isolated
+
+    def read_fixture_remote(
+        origin_url: str,
+        branch: str,
+        path: str,
+        *,
+        env: dict[str, str],
+        max_bytes: int,
+    ) -> tuple[str, str, bytes]:
+        assert module.parse_github_remote(origin_url) == (
+            "heimgewebe",
+            "metarepo",
+        )
+        return original_isolated(
+            str(remote),
+            branch,
+            path,
+            env=env,
+            max_bytes=max_bytes,
+        )
+
+    monkeypatch.setattr(
+        module,
+        "read_remote_branch_blob_isolated",
+        read_fixture_remote,
+    )
     membership = module.load_authoritative_fleet_membership()
 
     assert membership.keys == (

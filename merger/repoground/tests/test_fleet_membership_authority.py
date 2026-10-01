@@ -62,6 +62,37 @@ def initialize_repository(tmp_path: Path, name: str) -> Path:
     return repo
 
 
+def bind_isolated_fetch_to_local_remote(
+    module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    remote: Path,
+) -> None:
+    original = module.read_remote_branch_blob_isolated
+
+    def read_fixture_remote(
+        origin_url: str,
+        branch: str,
+        path: str,
+        *,
+        env: dict[str, str],
+        max_bytes: int,
+    ) -> tuple[str, str, bytes]:
+        assert module.parse_github_remote(origin_url) == ("heimgewebe", "metarepo")
+        return original(
+            str(remote),
+            branch,
+            path,
+            env=env,
+            max_bytes=max_bytes,
+        )
+
+    monkeypatch.setattr(
+        module,
+        "read_remote_branch_blob_isolated",
+        read_fixture_remote,
+    )
+
+
 def test_authoritative_fleet_membership_ignores_local_replace_refs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -115,6 +146,96 @@ def test_authoritative_fleet_membership_ignores_local_replace_refs(
         return original_run(argv, cwd=cwd, check=check, env=env)
 
     monkeypatch.setattr(module, "run", run_with_authority_origin)
+    bind_isolated_fetch_to_local_remote(module, monkeypatch, remote)
+    membership = module.load_authoritative_fleet_membership()
+
+    assert membership.keys == ("heimgewebe/repoground",)
+    assert membership.source_commit == remote_head
+    assert membership.content_sha256 == hashlib.sha256(
+        authoritative.encode("utf-8")
+    ).hexdigest()
+
+
+def test_authoritative_fleet_membership_ignores_forged_local_object_for_remote_sha(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    remote = initialize_repository(tmp_path, "metarepo-forged-remote")
+    (remote / "fleet").mkdir()
+    authoritative = "repos:\n  - name: repoground\n"
+    (remote / "fleet" / "repos.yml").write_text(authoritative, encoding="utf-8")
+    git(remote, "add", "fleet/repos.yml")
+    git(remote, "commit", "-m", "authoritative fleet")
+    remote_head = git(remote, "rev-parse", "HEAD")
+
+    checkout = tmp_path / "metarepo-forged-checkout"
+    completed = subprocess.run(
+        [
+            "git",
+            "clone",
+            "--quiet",
+            "--no-hardlinks",
+            str(remote),
+            str(checkout),
+        ],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stdout
+
+    attacker = initialize_repository(tmp_path, "metarepo-forged-attacker")
+    (attacker / "fleet").mkdir()
+    (attacker / "fleet" / "repos.yml").write_text(
+        "repos:\n  - name: attacker-controlled\n",
+        encoding="utf-8",
+    )
+    git(attacker, "add", "fleet/repos.yml")
+    git(attacker, "commit", "-m", "attacker fleet")
+    attacker_head = git(attacker, "rev-parse", "HEAD")
+
+    attacker_objects = attacker / ".git" / "objects"
+    checkout_objects = checkout / ".git" / "objects"
+    for source in attacker_objects.glob("[0-9a-f][0-9a-f]/*"):
+        relative = source.relative_to(attacker_objects)
+        target = checkout_objects / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(source.read_bytes())
+
+    attacker_commit_object = (
+        attacker_objects / attacker_head[:2] / attacker_head[2:]
+    )
+    assert attacker_commit_object.is_file()
+    forged_commit_object = (
+        checkout_objects / remote_head[:2] / remote_head[2:]
+    )
+    forged_commit_object.parent.mkdir(parents=True, exist_ok=True)
+    forged_commit_object.write_bytes(attacker_commit_object.read_bytes())
+
+    compromised = git(checkout, "show", f"{remote_head}:fleet/repos.yml")
+    assert "attacker-controlled" in compromised
+
+    monkeypatch.setattr(module, "METAREPO_REPO", checkout)
+    original_run = module.run
+
+    def run_with_authority_origin(
+        argv: list[str],
+        cwd: Path | None = None,
+        check: bool = True,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        if argv[-3:] == ["remote", "get-url", "origin"]:
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout="org-236528253@github.com:heimgewebe/metarepo.git\n",
+            )
+        return original_run(argv, cwd=cwd, check=check, env=env)
+
+    monkeypatch.setattr(module, "run", run_with_authority_origin)
+    bind_isolated_fetch_to_local_remote(module, monkeypatch, remote)
     membership = module.load_authoritative_fleet_membership()
 
     assert membership.keys == ("heimgewebe/repoground",)
