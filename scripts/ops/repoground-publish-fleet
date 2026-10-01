@@ -16,6 +16,7 @@ import json
 import os
 import re
 import resource
+import shlex
 import shutil
 import sqlite3
 import stat
@@ -2403,6 +2404,169 @@ def _fleet_repo_git_env(repo_path: Path) -> dict[str, str]:
     return env
 
 
+_FLEET_MEMBER_SSH_CONFIG_MAX_BYTES = 256 * 1024
+_FLEET_MEMBER_SSH_MAX_AUTH_FILES = 8
+_FLEET_MEMBER_SSH_AUTH_KEYS = frozenset(
+    {"certificatefile", "identitiesonly", "identityagent", "identityfile"}
+)
+
+
+def _read_fleet_member_ssh_config(config: Path) -> str | None:
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    if not nofollow:
+        raise RuntimeError("fleet member SSH configuration requires O_NOFOLLOW support")
+    try:
+        descriptor = os.open(
+            config,
+            os.O_RDONLY | os.O_CLOEXEC | nofollow,
+        )
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise RuntimeError("fleet member SSH configuration is unavailable") from exc
+    try:
+        st = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(st.st_mode)
+            or st.st_nlink != 1
+            or st.st_uid != os.getuid()
+        ):
+            raise RuntimeError(
+                "fleet member SSH configuration must be one user-owned regular file"
+            )
+        if stat.S_IMODE(st.st_mode) & 0o022:
+            raise RuntimeError(
+                "fleet member SSH configuration must not be group/world writable"
+            )
+        if st.st_size > _FLEET_MEMBER_SSH_CONFIG_MAX_BYTES:
+            raise RuntimeError("fleet member SSH configuration exceeds bounded size")
+        chunks: list[bytes] = []
+        remaining = _FLEET_MEMBER_SSH_CONFIG_MAX_BYTES + 1
+        while remaining > 0:
+            chunk = os.read(descriptor, min(64 * 1024, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        payload = b"".join(chunks)
+        if len(payload) > _FLEET_MEMBER_SSH_CONFIG_MAX_BYTES:
+            raise RuntimeError("fleet member SSH configuration exceeds bounded size")
+        try:
+            return payload.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise RuntimeError("fleet member SSH configuration is unreadable") from exc
+    finally:
+        os.close(descriptor)
+
+
+def _fleet_member_ssh_auth_options() -> dict[str, object]:
+    home_raw = os.environ.get("HOME")
+    if not home_raw:
+        return {}
+    home = Path(home_raw)
+    if not home.is_absolute():
+        raise RuntimeError("fleet member SSH HOME must be absolute")
+    raw = _read_fleet_member_ssh_config(home / ".ssh" / "config")
+    if raw is None:
+        return {}
+
+    active = False
+    identity_files: list[str] = []
+    certificate_files: list[str] = []
+    scalar: dict[str, str] = {}
+    for raw_line in raw.splitlines():
+        try:
+            tokens = shlex.split(raw_line, comments=True, posix=True)
+        except ValueError as exc:
+            raise RuntimeError("fleet member SSH configuration is malformed") from exc
+        if not tokens:
+            continue
+        first = tokens[0]
+        values = tokens[1:]
+        if "=" in first:
+            first, first_value = first.split("=", 1)
+            values = ([first_value] if first_value else []) + values
+        elif values and values[0] == "=":
+            values = values[1:]
+        key = first.strip().lower()
+        if key == "host":
+            active = "github.com" in values and "!github.com" not in values
+            continue
+        if key == "match":
+            active = False
+            continue
+        if not active or key not in _FLEET_MEMBER_SSH_AUTH_KEYS:
+            continue
+        if len(values) != 1 or not values[0] or any(
+            char in values[0] for char in ("\x00", "\n", "\r")
+        ):
+            raise RuntimeError(
+                f"fleet member SSH authentication option {key} is invalid"
+            )
+        value = values[0]
+        if value.startswith("~/"):
+            value = str(home / value[2:])
+        if key == "identityfile":
+            if value.lower() == "none":
+                identity_files.clear()
+                continue
+            identity_files.append(value)
+            if len(identity_files) > _FLEET_MEMBER_SSH_MAX_AUTH_FILES:
+                raise RuntimeError("fleet member SSH identity file list is too large")
+        elif key == "certificatefile":
+            if value.lower() == "none":
+                certificate_files.clear()
+                continue
+            certificate_files.append(value)
+            if len(certificate_files) > _FLEET_MEMBER_SSH_MAX_AUTH_FILES:
+                raise RuntimeError("fleet member SSH certificate file list is too large")
+        elif key == "identitiesonly":
+            normalized = value.lower()
+            if normalized not in {"yes", "no"}:
+                raise RuntimeError("fleet member SSH IdentitiesOnly must be yes or no")
+            scalar.setdefault(key, normalized)
+        else:
+            scalar.setdefault(key, value)
+
+    return {
+        "identity_files": tuple(identity_files),
+        "certificate_files": tuple(certificate_files),
+        **scalar,
+    }
+
+
+def _fleet_member_ssh_command() -> str:
+    options = _fleet_member_ssh_auth_options()
+    argv = [
+        "/usr/bin/ssh",
+        "-F",
+        os.devnull,
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ClearAllForwardings=yes",
+        "-o",
+        "PermitLocalCommand=no",
+    ]
+    for identity in options.get("identity_files", ()):
+        argv.extend(["-i", str(identity)])
+    for certificate in options.get("certificate_files", ()):
+        argv.extend(["-o", f"CertificateFile={certificate}"])
+    identities_only = options.get("identitiesonly")
+    if isinstance(identities_only, str):
+        argv.extend(["-o", f"IdentitiesOnly={identities_only}"])
+    identity_agent = options.get("identityagent")
+    if isinstance(identity_agent, str):
+        argv.extend(["-o", f"IdentityAgent={identity_agent}"])
+    return shlex.join(argv)
+
+
+def _fleet_repo_ssh_env() -> dict[str, str]:
+    env = _authority_git_env()
+    env["GIT_SSH_COMMAND"] = _fleet_member_ssh_command()
+    return env
+
+
 def _authority_git_local_config_is_transport_override(key: str) -> bool:
     normalized = key.strip().lower()
     if normalized in {
@@ -2513,7 +2677,7 @@ def remote_head_for_entry(entry: RepoEntry) -> tuple[str, str, str]:
     network_env = (
         _fleet_repo_git_env(entry.path)
         if origin_url.strip().lower().startswith("https://")
-        else transport_env
+        else _fleet_repo_ssh_env()
     )
     resolved = remote_head(entry.path, remote=origin_url, env=network_env)
 

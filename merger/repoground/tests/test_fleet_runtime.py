@@ -485,6 +485,136 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
     assert ssh_override.returncode == 1
 
 
+def test_fleet_repo_ssh_env_preserves_only_bounded_github_auth_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    home = tmp_path / "home"
+    ssh_dir = home / ".ssh"
+    ssh_dir.mkdir(parents=True)
+    (ssh_dir / "config").write_text(
+        "Host github.com\n"
+        "    HostName attacker.invalid\n"
+        "    User attacker\n"
+        "    IdentityFile ~/.ssh/id_ed25519\n"
+        "    CertificateFile ~/.ssh/id_ed25519-cert.pub\n"
+        "    IdentitiesOnly yes\n"
+        "    IdentityAgent ~/.ssh/agent.sock\n"
+        "    ProxyCommand /bin/false\n"
+        "    StrictHostKeyChecking no\n"
+        "    UserKnownHostsFile /dev/null\n"
+        "    LocalCommand /bin/false\n"
+        "Host other.example\n"
+        "    IdentityFile ~/.ssh/other\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(home))
+
+    env = module._fleet_repo_ssh_env()
+    command = env["GIT_SSH_COMMAND"]
+    argv = __import__("shlex").split(command)
+
+    assert argv[:3] == ["/usr/bin/ssh", "-F", os.devnull]
+    assert str(ssh_dir / "id_ed25519") in argv
+    assert f"CertificateFile={ssh_dir / 'id_ed25519-cert.pub'}" in argv
+    assert "IdentitiesOnly=yes" in argv
+    assert f"IdentityAgent={ssh_dir / 'agent.sock'}" in argv
+    assert "ClearAllForwardings=yes" in argv
+    assert "PermitLocalCommand=no" in argv
+    for forbidden in (
+        "attacker.invalid",
+        "ProxyCommand",
+        "StrictHostKeyChecking=no",
+        "UserKnownHostsFile=/dev/null",
+        "/bin/false",
+        str(ssh_dir / "other"),
+    ):
+        assert forbidden not in command
+
+
+def test_fleet_member_ssh_config_rejects_symlink_and_insecure_permissions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    home = tmp_path / "home"
+    ssh_dir = home / ".ssh"
+    ssh_dir.mkdir(parents=True)
+    target = tmp_path / "shared-config"
+    target.write_text(
+        "Host github.com\n    IdentityFile ~/.ssh/id_ed25519\n",
+        encoding="utf-8",
+    )
+    config = ssh_dir / "config"
+    config.symlink_to(target)
+    monkeypatch.setenv("HOME", str(home))
+
+    with pytest.raises(RuntimeError, match="configuration is unavailable"):
+        module._fleet_member_ssh_auth_options()
+
+    config.unlink()
+    config.write_text(
+        "Host github.com\n    IdentityFile ~/.ssh/id_ed25519\n",
+        encoding="utf-8",
+    )
+    config.chmod(0o622)
+    with pytest.raises(RuntimeError, match="must not be group/world writable"):
+        module._fleet_member_ssh_auth_options()
+
+
+def test_fleet_member_ssh_config_enforces_actual_read_bound(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    home = tmp_path / "home"
+    ssh_dir = home / ".ssh"
+    ssh_dir.mkdir(parents=True)
+    config = ssh_dir / "config"
+    config.write_bytes(b"x" * (module._FLEET_MEMBER_SSH_CONFIG_MAX_BYTES + 1))
+    config.chmod(0o600)
+    monkeypatch.setenv("HOME", str(home))
+
+    with pytest.raises(RuntimeError, match="exceeds bounded size"):
+        module._fleet_member_ssh_auth_options()
+
+
+def test_remote_head_for_entry_uses_bounded_ssh_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path, "member-ssh-auth")
+    remote = "git@github.com:heimgewebe/member.git"
+    git(repo, "remote", "add", "origin", remote)
+    entry = module.RepoEntry(
+        key="heimgewebe/member", owner="heimgewebe", repo="member", path=repo, remote=remote
+    )
+    ssh_env = module._authority_git_env()
+    ssh_env["GIT_SSH_COMMAND"] = "/usr/bin/ssh -F /dev/null -i /tmp/member-key"
+    observed: dict[str, object] = {}
+
+    monkeypatch.setattr(module, "_fleet_repo_ssh_env", lambda: ssh_env)
+
+    def fake_remote_head(
+        repo_path: Path,
+        *,
+        remote: str = "origin",
+        env: dict[str, str] | None = None,
+    ) -> tuple[str, str, str]:
+        observed["repo_path"] = repo_path
+        observed["remote"] = remote
+        observed["env"] = env
+        return "origin/main", "main", sha
+
+    monkeypatch.setattr(module, "remote_head", fake_remote_head)
+
+    assert module.remote_head_for_entry(entry) == ("origin/main", "main", sha)
+    assert observed["remote"] == remote
+    assert observed["env"] is ssh_env
+
+
 def test_remote_head_for_entry_uses_credential_env_for_https(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
