@@ -2150,6 +2150,94 @@ def remote_head(repo_path: Path) -> tuple[str, str, str]:
     raise RuntimeError(f"no remote default branch for {repo_path}")
 
 
+_AUTHORITY_GIT_FORBIDDEN_ENV = frozenset(
+    {
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_COMMON_DIR",
+        "GIT_CONFIG_GLOBAL",
+        "GIT_CONFIG_NOSYSTEM",
+        "GIT_CONFIG_PARAMETERS",
+        "GIT_CONFIG_SYSTEM",
+        "GIT_DIR",
+        "GIT_EXEC_PATH",
+        "GIT_INDEX_FILE",
+        "GIT_NAMESPACE",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_PROXY_COMMAND",
+        "GIT_SSH",
+        "GIT_SSH_COMMAND",
+        "GIT_SSL_NO_VERIFY",
+        "GIT_WORK_TREE",
+    }
+)
+_AUTHORITY_GIT_ALLOWED_ORIGIN_CONFIG = frozenset(
+    {"remote.origin.fetch", "remote.origin.url"}
+)
+
+
+def _authority_git_local_config_is_transport_override(key: str) -> bool:
+    normalized = key.strip().lower()
+    if normalized in {
+        "core.gitproxy",
+        "core.sshcommand",
+        "extensions.worktreeconfig",
+    }:
+        return True
+    if normalized.startswith(("http.", "include.", "includeif.", "url.")):
+        return True
+    if normalized.startswith("remote.origin."):
+        return normalized not in _AUTHORITY_GIT_ALLOWED_ORIGIN_CONFIG
+    return False
+
+
+def assert_authority_git_transport_safe(repo_path: Path) -> None:
+    environment_overrides = sorted(
+        name
+        for name in _AUTHORITY_GIT_FORBIDDEN_ENV
+        if os.environ.get(name)
+    )
+    config_count = os.environ.get("GIT_CONFIG_COUNT")
+    if config_count not in (None, "", "0"):
+        environment_overrides.append("GIT_CONFIG_COUNT")
+    if environment_overrides:
+        raise RuntimeError(
+            "authoritative fleet membership Git environment contains "
+            "repository/transport overrides: "
+            + ", ".join(environment_overrides)
+        )
+
+    local_config = run(
+        [
+            "git",
+            "-C",
+            str(repo_path),
+            "config",
+            "--local",
+            "--name-only",
+            "--list",
+        ],
+        check=False,
+    )
+    if local_config.returncode != 0:
+        raise RuntimeError(
+            "authoritative fleet membership repository local Git "
+            "configuration is unavailable"
+        )
+    unsafe_keys = sorted(
+        {
+            key.strip().lower()
+            for key in local_config.stdout.splitlines()
+            if _authority_git_local_config_is_transport_override(key)
+        }
+    )
+    if unsafe_keys:
+        raise RuntimeError(
+            "authoritative fleet membership repository has unsafe local "
+            "Git transport configuration: "
+            + ", ".join(unsafe_keys)
+        )
+
+
 def remote_branch_head(repo_path: Path, branch: str) -> tuple[str, str, str]:
     if not is_safe_git_branch_name(branch):
         raise RuntimeError(
@@ -2383,6 +2471,7 @@ def load_authoritative_fleet_membership() -> FleetMembership:
             f"authoritative fleet membership repository is unavailable: "
             f"{METAREPO_REPO}"
         )
+    assert_authority_git_transport_safe(METAREPO_REPO)
     origin = run(
         ["git", "-C", str(METAREPO_REPO), "remote", "get-url", "origin"],
         check=False,
