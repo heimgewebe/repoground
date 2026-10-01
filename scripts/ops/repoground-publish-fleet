@@ -171,37 +171,105 @@ _UNSAFE_GIT_BRANCH_TOKENS = (" ", "\t", "\n", "..", "~", "^", ":", "?", "*", "["
 
 
 class StrictFleetMembershipLoader(yaml.SafeLoader):
-    def flatten_mapping(self, node: yaml.MappingNode) -> None:
-        seen: set[object] = set()
-        merge_seen = False
-        for key_node, _value_node in node.value:
-            if key_node.tag == "tag:yaml.org,2002:merge":
-                if merge_seen:
-                    raise yaml.constructor.ConstructorError(
-                        "while constructing a mapping",
-                        node.start_mark,
-                        "found duplicate mapping key '<<'",
-                        key_node.start_mark,
-                    )
-                merge_seen = True
-                continue
-            key = self.construct_object(key_node, deep=False)
-            try:
-                if key in seen:
+    def _mapping_key(self, node: yaml.MappingNode, key_node: yaml.Node) -> object:
+        key = self.construct_object(key_node, deep=False)
+        try:
+            hash(key)
+        except TypeError as exc:
+            raise yaml.constructor.ConstructorError(
+                "while constructing a mapping",
+                node.start_mark,
+                "found unhashable mapping key",
+                key_node.start_mark,
+            ) from exc
+        return key
+
+    def _effective_mapping_keys(
+        self,
+        node: yaml.MappingNode,
+        trail: set[int],
+    ) -> set[object]:
+        marker = id(node)
+        if marker in trail:
+            raise yaml.constructor.ConstructorError(
+                "while constructing a mapping",
+                node.start_mark,
+                "found recursive YAML merge mapping",
+                node.start_mark,
+            )
+        trail.add(marker)
+        try:
+            explicit_seen: set[object] = set()
+            merged_keys: set[object] = set()
+            merge_seen = False
+            for key_node, value_node in node.value:
+                if key_node.tag == "tag:yaml.org,2002:merge":
+                    if merge_seen:
+                        raise yaml.constructor.ConstructorError(
+                            "while constructing a mapping",
+                            node.start_mark,
+                            "found duplicate mapping key '<<'",
+                            key_node.start_mark,
+                        )
+                    merge_seen = True
+                    if isinstance(value_node, yaml.MappingNode):
+                        merged_keys.update(
+                            self._effective_mapping_keys(value_node, trail)
+                        )
+                    elif isinstance(value_node, yaml.SequenceNode):
+                        sequence_seen: set[object] = set()
+                        for child in value_node.value:
+                            if not isinstance(child, yaml.MappingNode):
+                                raise yaml.constructor.ConstructorError(
+                                    "while constructing a mapping",
+                                    node.start_mark,
+                                    "expected a mapping in YAML merge sequence",
+                                    child.start_mark,
+                                )
+                            child_keys = self._effective_mapping_keys(child, trail)
+                            collisions = sequence_seen.intersection(child_keys)
+                            if collisions:
+                                rendered = ", ".join(
+                                    repr(key)
+                                    for key in sorted(collisions, key=repr)
+                                )
+                                raise yaml.constructor.ConstructorError(
+                                    "while constructing a mapping",
+                                    node.start_mark,
+                                    "found duplicate key(s) in YAML merge sequence: "
+                                    + rendered,
+                                    child.start_mark,
+                                )
+                            sequence_seen.update(child_keys)
+                        merged_keys.update(sequence_seen)
+                    else:
+                        raise yaml.constructor.ConstructorError(
+                            "while constructing a mapping",
+                            node.start_mark,
+                            "expected a mapping or list of mappings for YAML merge",
+                            value_node.start_mark,
+                        )
+                    continue
+
+                key = self._mapping_key(node, key_node)
+                if key in explicit_seen:
                     raise yaml.constructor.ConstructorError(
                         "while constructing a mapping",
                         node.start_mark,
                         f"found duplicate mapping key {key!r}",
                         key_node.start_mark,
                     )
-                seen.add(key)
-            except TypeError as exc:
-                raise yaml.constructor.ConstructorError(
-                    "while constructing a mapping",
-                    node.start_mark,
-                    "found unhashable mapping key",
-                    key_node.start_mark,
-                ) from exc
+                explicit_seen.add(key)
+
+            # Explicit keys are allowed to override one merged value, matching
+            # standard YAML merge semantics. Only collisions *between* members
+            # of one merge sequence are ambiguous and rejected above.
+            return merged_keys.union(explicit_seen)
+        finally:
+            trail.remove(marker)
+
+    def flatten_mapping(self, node: yaml.MappingNode) -> None:
+        self._effective_mapping_keys(node, set())
         super().flatten_mapping(node)
 
 
@@ -2484,20 +2552,25 @@ def _fleet_member_ssh_host_patterns_match_github(values: list[str]) -> bool:
     if not values:
         raise RuntimeError("fleet member SSH Host requires at least one pattern")
     matched = False
-    for raw_pattern in values:
-        if not raw_pattern or any(char in raw_pattern for char in ("\x00", "\n", "\r")):
+    for raw_pattern_list in values:
+        if not raw_pattern_list or any(
+            char in raw_pattern_list for char in ("\x00", "\n", "\r")
+        ):
             raise RuntimeError("fleet member SSH Host pattern is invalid")
-        negated = raw_pattern.startswith("!")
-        pattern = raw_pattern[1:] if negated else raw_pattern
-        if not pattern:
-            raise RuntimeError("fleet member SSH Host pattern is invalid")
-        normalized = pattern.casefold()
-        if re.fullmatch(r"[a-z0-9.*?-]+", normalized) is None:
-            continue
-        if fnmatchcase("github.com", normalized):
-            if negated:
-                return False
-            matched = True
+        for raw_pattern in raw_pattern_list.split(","):
+            if not raw_pattern:
+                raise RuntimeError("fleet member SSH Host pattern is invalid")
+            negated = raw_pattern.startswith("!")
+            pattern = raw_pattern[1:] if negated else raw_pattern
+            if not pattern:
+                raise RuntimeError("fleet member SSH Host pattern is invalid")
+            normalized = pattern.casefold()
+            if re.fullmatch(r"[a-z0-9.*?-]+", normalized) is None:
+                continue
+            if fnmatchcase("github.com", normalized):
+                if negated:
+                    return False
+                matched = True
     return matched
 
 
@@ -2610,7 +2683,34 @@ def _fleet_member_ssh_auth_options() -> dict[str, object]:
                 active = _fleet_member_ssh_host_patterns_match_github(values)
                 continue
             if key == "match":
-                active = False
+                normalized_match = tuple(value.casefold() for value in values)
+                if normalized_match == ("all",):
+                    active = True
+                elif (
+                    len(values) >= 2
+                    and normalized_match[0] == "host"
+                    and not any(
+                        token in {
+                            "all",
+                            "canonical",
+                            "command",
+                            "exec",
+                            "final",
+                            "host",
+                            "localnetwork",
+                            "localuser",
+                            "originalhost",
+                            "tagged",
+                            "user",
+                        }
+                        for token in normalized_match[1:]
+                    )
+                ):
+                    active = _fleet_member_ssh_host_patterns_match_github(
+                        values[1:]
+                    )
+                else:
+                    active = False
                 continue
             if not active or key not in _FLEET_MEMBER_SSH_AUTH_KEYS:
                 continue
@@ -2709,6 +2809,14 @@ def _authority_git_local_config_is_transport_override(key: str) -> bool:
     return False
 
 
+
+def _fleet_member_local_config_is_transport_override(key: str) -> bool:
+    normalized = key.strip().lower()
+    if normalized.startswith("credential."):
+        return not _fleet_credential_config_key_allowed(normalized)
+    return _authority_git_local_config_is_transport_override(normalized)
+
+
 def assert_authority_git_transport_safe(
     repo_path: Path,
     *,
@@ -2762,9 +2870,60 @@ def assert_authority_git_transport_safe(
         )
 
 
+def assert_fleet_member_git_transport_safe(
+    repo_path: Path,
+    *,
+    env: dict[str, str] | None = None,
+) -> None:
+    environment_overrides = sorted(
+        name
+        for name in _AUTHORITY_GIT_FORBIDDEN_ENV
+        if os.environ.get(name)
+    )
+    config_count = os.environ.get("GIT_CONFIG_COUNT")
+    if config_count not in (None, "", "0"):
+        environment_overrides.append("GIT_CONFIG_COUNT")
+    if environment_overrides:
+        raise RuntimeError(
+            "fleet member Git environment contains repository/transport "
+            "overrides: " + ", ".join(environment_overrides)
+        )
+
+    local_config = run(
+        [
+            "git",
+            "-C",
+            str(repo_path),
+            "config",
+            "--local",
+            "--no-includes",
+            "--name-only",
+            "--list",
+        ],
+        check=False,
+        env=env,
+    )
+    if local_config.returncode != 0:
+        raise RuntimeError(
+            "fleet repository local Git configuration is unavailable"
+        )
+    unsafe_keys = sorted(
+        {
+            key.strip().lower()
+            for key in local_config.stdout.splitlines()
+            if _fleet_member_local_config_is_transport_override(key)
+        }
+    )
+    if unsafe_keys:
+        raise RuntimeError(
+            "fleet repository has unsafe local Git transport configuration: "
+            + ", ".join(unsafe_keys)
+        )
+
+
 def remote_head_for_entry(entry: RepoEntry) -> tuple[str, str, str]:
     transport_env = _authority_git_env()
-    assert_authority_git_transport_safe(entry.path, env=transport_env)
+    assert_fleet_member_git_transport_safe(entry.path, env=transport_env)
 
     configured = run(
         [
@@ -2804,7 +2963,7 @@ def remote_head_for_entry(entry: RepoEntry) -> tuple[str, str, str]:
     )
     resolved = remote_head(entry.path, remote=origin_url, env=network_env)
 
-    assert_authority_git_transport_safe(entry.path, env=transport_env)
+    assert_fleet_member_git_transport_safe(entry.path, env=transport_env)
     configured_after = run(
         [
             "git",

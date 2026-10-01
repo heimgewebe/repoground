@@ -353,7 +353,6 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
 ) -> None:
     module = load_publisher()
     repo, _sha = initialize_repository(tmp_path, "credential-member")
-    git(repo, "config", "credential.username", "local-user")
 
     home = tmp_path / "home"
     home.mkdir()
@@ -450,7 +449,6 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
         and value == "bot"
         for key, value in injected
     )
-    assert all(value != "local-user" for _key, value in injected)
 
     filled = subprocess.run(
         ["/usr/bin/git", "credential", "fill"],
@@ -483,6 +481,73 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
     )
     assert url_override.returncode == 1
     assert ssh_override.returncode == 1
+
+
+def test_remote_head_for_entry_preserves_checkout_local_https_credentials(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path, "member-local-credential")
+    remote = "https://github.com/heimgewebe/member.git"
+    git(repo, "remote", "add", "origin", remote)
+    helper = tmp_path / "local-helper"
+    helper.write_text(
+        "#!/bin/sh\n"
+        "cat >/dev/null\n"
+        "printf 'username=local-user\\npassword=local-pass\\n'\n",
+        encoding="utf-8",
+    )
+    helper.chmod(0o700)
+    git(repo, "config", "credential.https://github.com.helper", f"!{helper}")
+    monkeypatch.setattr(
+        module,
+        "_global_system_github_credential_config",
+        lambda _repo_path: [],
+    )
+    entry = module.RepoEntry(
+        key="heimgewebe/member",
+        owner="heimgewebe",
+        repo="member",
+        path=repo,
+        remote=remote,
+    )
+    observed: dict[str, object] = {}
+
+    def fake_remote_head(
+        repo_path: Path,
+        *,
+        remote: str = "origin",
+        env: dict[str, str] | None = None,
+    ) -> tuple[str, str, str]:
+        observed["env"] = env
+        return "origin/main", "main", sha
+
+    monkeypatch.setattr(module, "remote_head", fake_remote_head)
+
+    assert module.remote_head_for_entry(entry) == ("origin/main", "main", sha)
+    env = observed["env"]
+    assert isinstance(env, dict)
+    injected = [
+        (env[f"GIT_CONFIG_KEY_{i}"], env[f"GIT_CONFIG_VALUE_{i}"])
+        for i in range(int(env.get("GIT_CONFIG_COUNT", "0")))
+    ]
+    assert (
+        "credential.https://github.com.helper",
+        f"!{helper}",
+    ) not in injected
+    filled = subprocess.run(
+        ["/usr/bin/git", "-C", str(repo), "credential", "fill"],
+        input="protocol=https\nhost=github.com\n\n",
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    assert filled.returncode == 0, filled.stderr
+    assert "username=local-user" in filled.stdout
+    assert "password=local-pass" in filled.stdout
 
 
 def test_fleet_repo_git_env_preserves_bounded_credential_helper_lookup(
@@ -592,6 +657,48 @@ def test_fleet_repo_ssh_env_preserves_only_bounded_github_auth_config(
         str(ssh_dir / "other"),
     ):
         assert forbidden not in command
+
+
+@pytest.mark.parametrize(
+    ("config_body", "expected_names"),
+    [
+        (
+            "Match host github.com\n"
+            "    IdentityFile ~/.ssh/match-host\n",
+            ("match-host",),
+        ),
+        (
+            "Host other.example\n"
+            "    IdentityFile ~/.ssh/other\n"
+            "Match all\n"
+            "    IdentityFile ~/.ssh/match-all\n",
+            ("match-all",),
+        ),
+        (
+            "Match host !github.com,*\n"
+            "    IdentityFile ~/.ssh/blocked\n",
+            (),
+        ),
+    ],
+)
+def test_fleet_member_ssh_match_supports_bounded_host_and_all(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    config_body: str,
+    expected_names: tuple[str, ...],
+) -> None:
+    module = load_publisher()
+    home = tmp_path / "home"
+    ssh_dir = home / ".ssh"
+    ssh_dir.mkdir(parents=True)
+    config = ssh_dir / "config"
+    config.write_text(config_body, encoding="utf-8")
+    config.chmod(0o600)
+    monkeypatch.setenv("HOME", str(home))
+
+    identities = module._fleet_member_ssh_auth_options().get("identity_files", ())
+
+    assert tuple(Path(value).name for value in identities) == expected_names
 
 
 def test_fleet_member_ssh_include_expands_nested_auth_only(
@@ -4742,6 +4849,11 @@ def test_fleet_membership_authority_ref_is_not_environment_overridable(
             "repos:\n"
             "  - <<: &trusted {owner: heimgewebe}\n"
             "    <<: &attacker {owner: attacker}\n"
+            "    name: demo\n"
+        ),
+        (
+            "repos:\n"
+            "  - <<: [{owner: heimgewebe}, {owner: attacker}]\n"
             "    name: demo\n"
         ),
     ],
