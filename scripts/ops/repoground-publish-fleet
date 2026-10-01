@@ -2288,6 +2288,7 @@ def remote_branch_head(
     *,
     env: dict[str, str] | None = None,
     depth: int | None = None,
+    filter_spec: str | None = None,
 ) -> tuple[str, str, str]:
     if not is_safe_git_branch_name(branch):
         raise RuntimeError(
@@ -2338,6 +2339,10 @@ def remote_branch_head(
         if isinstance(depth, bool) or depth < 1:
             raise RuntimeError("invalid authoritative remote fetch depth")
         fetch_argv.append(f"--depth={depth}")
+    if filter_spec is not None:
+        if filter_spec != "blob:none":
+            raise RuntimeError("invalid authoritative remote fetch filter")
+        fetch_argv.append(f"--filter={filter_spec}")
     fetch_argv.extend(["origin", full_ref])
     run(fetch_argv, env=env)
     if advertised_sha() != expected_sha:
@@ -2394,11 +2399,34 @@ def read_remote_branch_blob_isolated(
             ],
             env=env,
         )
+        run(
+            [
+                "git",
+                "-C",
+                str(isolated_repo),
+                "config",
+                "remote.origin.promisor",
+                "true",
+            ],
+            env=env,
+        )
+        run(
+            [
+                "git",
+                "-C",
+                str(isolated_repo),
+                "config",
+                "remote.origin.partialclonefilter",
+                "blob:none",
+            ],
+            env=env,
+        )
         remote_ref, _resolved_branch, source_sha = remote_branch_head(
             isolated_repo,
             branch,
             env=env,
             depth=1,
+            filter_spec="blob:none",
         )
         object_spec = f"{source_sha}:{path}"
         raw_size = run(

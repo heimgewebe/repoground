@@ -4,6 +4,7 @@ import hashlib
 import importlib.machinery
 import importlib.util
 import os
+import random
 import shlex
 import subprocess
 import sys
@@ -68,6 +69,7 @@ def bind_isolated_fetch_to_local_remote(
     remote: Path,
 ) -> None:
     original = module.read_remote_branch_blob_isolated
+    git(remote, "config", "uploadpack.allowFilter", "true")
 
     def read_fixture_remote(
         origin_url: str,
@@ -79,7 +81,7 @@ def bind_isolated_fetch_to_local_remote(
     ) -> tuple[str, str, bytes]:
         assert module.parse_github_remote(origin_url) == ("heimgewebe", "metarepo")
         return original(
-            str(remote),
+            remote.as_uri(),
             branch,
             path,
             env=env,
@@ -243,6 +245,66 @@ def test_authoritative_fleet_membership_ignores_forged_local_object_for_remote_s
     assert membership.content_sha256 == hashlib.sha256(
         authoritative.encode("utf-8")
     ).hexdigest()
+
+
+def test_isolated_membership_fetch_skips_unrelated_large_blob(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    remote = initialize_repository(tmp_path, "metarepo-partial-fetch")
+    git(remote, "config", "uploadpack.allowFilter", "true")
+    (remote / "fleet").mkdir()
+    authoritative = "repos:\n  - name: repoground\n"
+    (remote / "fleet" / "repos.yml").write_text(authoritative, encoding="utf-8")
+    (remote / "unrelated.bin").write_bytes(
+        random.Random(1337).randbytes(8 * 1024 * 1024)
+    )
+    git(remote, "add", "fleet/repos.yml", "unrelated.bin")
+    git(remote, "commit", "-m", "authoritative fleet with unrelated blob")
+    remote_head = git(remote, "rev-parse", "HEAD")
+
+    isolated_root = tmp_path / "preserved-authority"
+
+    class PreservedTemporaryDirectory:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def __enter__(self) -> str:
+            isolated_root.mkdir()
+            return str(isolated_root)
+
+        def __exit__(
+            self,
+            exc_type: object,
+            exc: object,
+            traceback: object,
+        ) -> bool:
+            return False
+
+    monkeypatch.setattr(
+        module.tempfile,
+        "TemporaryDirectory",
+        PreservedTemporaryDirectory,
+    )
+
+    remote_ref, source_sha, encoded = module.read_remote_branch_blob_isolated(
+        remote.as_uri(),
+        "main",
+        "fleet/repos.yml",
+        env=module._authority_git_env(),
+        max_bytes=module.FLEET_MEMBERSHIP_MAX_BYTES,
+    )
+
+    assert remote_ref == "refs/heads/main"
+    assert source_sha == remote_head
+    assert encoded == authoritative.encode("utf-8")
+    object_bytes = sum(
+        path.stat().st_size
+        for path in (isolated_root / "authority.git" / "objects").rglob("*")
+        if path.is_file()
+    )
+    assert object_bytes < 1024 * 1024
 
 
 def test_authoritative_fleet_membership_rejects_checkout_local_ssh_override(
