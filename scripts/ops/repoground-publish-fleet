@@ -446,15 +446,22 @@ def canonical_repository_key(key: str) -> str:
     return RETIRED_REPOSITORY_ALIASES.get(key, key)
 
 
-def is_top_level_git(path: Path) -> bool:
+def is_top_level_git(
+    path: Path,
+    *,
+    env: dict[str, str] | None = None,
+) -> bool:
     cp = run(
         ["git", "-C", str(path), "rev-parse", "--is-inside-work-tree"],
         check=False,
+        env=env,
     )
     if cp.returncode != 0 or cp.stdout.strip() != "true":
         return False
     top = run(
-        ["git", "-C", str(path), "rev-parse", "--show-toplevel"], check=False
+        ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
+        check=False,
+        env=env,
     ).stdout.strip()
     return bool(top) and Path(top).resolve() == path.resolve()
 
@@ -2173,24 +2180,60 @@ _AUTHORITY_GIT_FORBIDDEN_ENV = frozenset(
 _AUTHORITY_GIT_ALLOWED_ORIGIN_CONFIG = frozenset(
     {"remote.origin.fetch", "remote.origin.url"}
 )
+_AUTHORITY_PROXY_ENV_NAMES = frozenset({"all_proxy", "http_proxy", "https_proxy"})
+_AUTHORITY_TLS_ENV_NAMES = frozenset(
+    {"curl_ca_bundle", "ssl_cert_dir", "ssl_cert_file"}
+)
+_AUTHORITY_LOADER_ENV_NAMES = frozenset({"ld_library_path", "ld_preload"})
+
+
+def _authority_git_env() -> dict[str, str]:
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("GIT_")
+        and key.lower() not in _AUTHORITY_PROXY_ENV_NAMES
+        and key.lower() not in _AUTHORITY_TLS_ENV_NAMES
+        and key.lower() not in _AUTHORITY_LOADER_ENV_NAMES
+    }
+    env.update(
+        {
+            "PATH": "/usr/bin:/bin",
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_CONFIG_SYSTEM": os.devnull,
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_TERMINAL_PROMPT": "0",
+            "GIT_SSH_COMMAND": "/usr/bin/ssh -F /dev/null -o BatchMode=yes",
+            "GIT_SSH_VARIANT": "ssh",
+        }
+    )
+    return env
 
 
 def _authority_git_local_config_is_transport_override(key: str) -> bool:
     normalized = key.strip().lower()
     if normalized in {
+        "core.askpass",
         "core.gitproxy",
         "core.sshcommand",
         "extensions.worktreeconfig",
+        "ssh.variant",
     }:
         return True
-    if normalized.startswith(("http.", "include.", "includeif.", "url.")):
+    if normalized.startswith(
+        ("credential.", "http.", "include.", "includeif.", "url.")
+    ):
         return True
     if normalized.startswith("remote.origin."):
         return normalized not in _AUTHORITY_GIT_ALLOWED_ORIGIN_CONFIG
     return False
 
 
-def assert_authority_git_transport_safe(repo_path: Path) -> None:
+def assert_authority_git_transport_safe(
+    repo_path: Path,
+    *,
+    env: dict[str, str] | None = None,
+) -> None:
     environment_overrides = sorted(
         name
         for name in _AUTHORITY_GIT_FORBIDDEN_ENV
@@ -2217,6 +2260,7 @@ def assert_authority_git_transport_safe(repo_path: Path) -> None:
             "--list",
         ],
         check=False,
+        env=env,
     )
     if local_config.returncode != 0:
         raise RuntimeError(
@@ -2238,7 +2282,12 @@ def assert_authority_git_transport_safe(repo_path: Path) -> None:
         )
 
 
-def remote_branch_head(repo_path: Path, branch: str) -> tuple[str, str, str]:
+def remote_branch_head(
+    repo_path: Path,
+    branch: str,
+    *,
+    env: dict[str, str] | None = None,
+) -> tuple[str, str, str]:
     if not is_safe_git_branch_name(branch):
         raise RuntimeError(
             f"unsafe authoritative fleet membership branch: {branch!r}"
@@ -2257,7 +2306,8 @@ def remote_branch_head(repo_path: Path, branch: str) -> tuple[str, str, str]:
                 "--",
                 "origin",
                 full_ref,
-            ]
+            ],
+            env=env,
         ).stdout.splitlines()
         matching: list[str] = []
         for line in advertised:
@@ -2285,7 +2335,8 @@ def remote_branch_head(repo_path: Path, branch: str) -> tuple[str, str, str]:
             "--refmap=",
             "origin",
             full_ref,
-        ]
+        ],
+        env=env,
     )
     if advertised_sha() != expected_sha:
         raise RuntimeError(
@@ -2302,6 +2353,7 @@ def remote_branch_head(repo_path: Path, branch: str) -> tuple[str, str, str]:
             f"{expected_sha}^{{commit}}",
         ],
         check=False,
+        env=env,
     )
     fetched_sha = fetched.stdout.strip() if fetched.returncode == 0 else ""
     if fetched_sha != expected_sha:
@@ -2462,19 +2514,21 @@ def _load_fleet_membership_yaml(raw: str) -> object:
 
 
 def load_authoritative_fleet_membership() -> FleetMembership:
+    git_env = _authority_git_env()
     if (
         not METAREPO_REPO.is_dir()
         or METAREPO_REPO.is_symlink()
-        or not is_top_level_git(METAREPO_REPO)
+        or not is_top_level_git(METAREPO_REPO, env=git_env)
     ):
         raise RuntimeError(
             f"authoritative fleet membership repository is unavailable: "
             f"{METAREPO_REPO}"
         )
-    assert_authority_git_transport_safe(METAREPO_REPO)
+    assert_authority_git_transport_safe(METAREPO_REPO, env=git_env)
     origin = run(
         ["git", "-C", str(METAREPO_REPO), "remote", "get-url", "origin"],
         check=False,
+        env=git_env,
     )
     origin_url = origin.stdout.strip() if origin.returncode == 0 else ""
     if (
@@ -2493,10 +2547,20 @@ def load_authoritative_fleet_membership() -> FleetMembership:
     remote_ref, _branch, source_sha = remote_branch_head(
         METAREPO_REPO,
         FLEET_MEMBERSHIP_REF,
+        env=git_env,
     )
     object_spec = f"{source_sha}:{FLEET_MEMBERSHIP_PATH}"
     raw_size = run(
-        ["git", "--no-replace-objects", "-C", str(METAREPO_REPO), "cat-file", "-s", object_spec]
+        [
+            "git",
+            "--no-replace-objects",
+            "-C",
+            str(METAREPO_REPO),
+            "cat-file",
+            "-s",
+            object_spec,
+        ],
+        env=git_env,
     ).stdout.strip()
     try:
         observed_size = int(raw_size)
@@ -2507,7 +2571,15 @@ def load_authoritative_fleet_membership() -> FleetMembership:
             f"fleet membership blob exceeds bounded size: {observed_size}"
         )
     blob = subprocess.run(
-        ["git", "--no-replace-objects", "-C", str(METAREPO_REPO), "show", object_spec],
+        [
+            "git",
+            "--no-replace-objects",
+            "-C",
+            str(METAREPO_REPO),
+            "show",
+            object_spec,
+        ],
+        env=git_env,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         check=False,

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import hashlib
-import shlex
 import importlib.machinery
 import importlib.util
+import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -212,16 +213,88 @@ def test_authority_git_transport_guard_rejects_environment_override(
         module.assert_authority_git_transport_safe(repo)
 
 
+def test_authority_git_env_neutralizes_nonlocal_transport_configuration(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".gitconfig").write_text(
+        "[core]\n"
+        "    sshCommand = /tmp/attacker-ssh\n"
+        "[url \"ssh://attacker.invalid/\"]\n"
+        "    insteadOf = git@github.com:\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("GIT_DIR", "/tmp/attacker-git-dir")
+    monkeypatch.setenv("GIT_SSH_COMMAND", "/tmp/attacker-ssh")
+    monkeypatch.setenv("HTTPS_PROXY", "http://attacker.invalid:8080")
+    monkeypatch.setenv("SSL_CERT_FILE", "/tmp/attacker-ca.pem")
+    monkeypatch.setenv("LD_PRELOAD", "/tmp/attacker.so")
+    monkeypatch.setenv("PATH", "/tmp/attacker-bin")
+    monkeypatch.setenv("SSH_AUTH_SOCK", "/tmp/test-agent.sock")
+
+    raw_env = os.environ.copy()
+    raw_env.pop("GIT_DIR", None)
+    raw_env.pop("GIT_SSH_COMMAND", None)
+    inherited_global = subprocess.run(
+        ["/usr/bin/git", "config", "--global", "--name-only", "--list"],
+        env=raw_env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    assert inherited_global.returncode == 0, inherited_global.stdout
+    assert "core.sshcommand" in inherited_global.stdout.lower()
+    assert "insteadof" in inherited_global.stdout.lower()
+
+    env = module._authority_git_env()
+
+    assert env["PATH"] == "/usr/bin:/bin"
+    assert env["GIT_CONFIG_GLOBAL"] == os.devnull
+    assert env["GIT_CONFIG_SYSTEM"] == os.devnull
+    assert env["GIT_CONFIG_NOSYSTEM"] == "1"
+    assert env["GIT_TERMINAL_PROMPT"] == "0"
+    assert (
+        env["GIT_SSH_COMMAND"]
+        == "/usr/bin/ssh -F /dev/null -o BatchMode=yes"
+    )
+    assert env["GIT_SSH_VARIANT"] == "ssh"
+    assert env["SSH_AUTH_SOCK"] == "/tmp/test-agent.sock"
+    assert "GIT_DIR" not in env
+    assert "HTTPS_PROXY" not in env
+    assert "SSL_CERT_FILE" not in env
+    assert "LD_PRELOAD" not in env
+
+    effective_global = subprocess.run(
+        ["/usr/bin/git", "config", "--global", "--name-only", "--list"],
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    assert effective_global.returncode == 0, effective_global.stdout
+    assert "core.sshcommand" not in effective_global.stdout.lower()
+    assert "insteadof" not in effective_global.stdout.lower()
+
+
 @pytest.mark.parametrize(
     "key",
     [
         "core.sshCommand",
+        "core.askPass",
+        "ssh.variant",
         "url.ssh://attacker.invalid/.insteadOf",
         "url.ssh://attacker.invalid/.pushInsteadOf",
         "remote.origin.uploadpack",
         "remote.origin.proxy",
         "http.proxy",
         "http.sslVerify",
+        "credential.helper",
         "include.path",
         "extensions.worktreeConfig",
     ],
