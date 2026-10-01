@@ -4389,6 +4389,25 @@ def test_fleet_membership_keys_follow_authoritative_semantics() -> None:
     )
 
 
+def test_fleet_membership_keys_reject_unknown_root_fields() -> None:
+    module = load_publisher()
+
+    with pytest.raises(RuntimeError, match="root has unknown fields.*statci"):
+        module._fleet_membership_keys(
+            {
+                "repos": [{"name": "repoground"}],
+                "statci": {
+                    "include": [
+                        {
+                            "name": "wgx",
+                            "fleet": True,
+                        }
+                    ]
+                },
+            }
+        )
+
+
 def test_fleet_membership_keys_reject_unknown_entry_fields() -> None:
     module = load_publisher()
 
