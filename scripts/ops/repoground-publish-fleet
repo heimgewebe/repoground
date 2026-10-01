@@ -2909,7 +2909,7 @@ def _fleet_membership_keys(document: object) -> tuple[str, ...]:
         raise RuntimeError("fleet membership static must be an object")
     if isinstance(static, dict):
         included = static.get("include")
-        if included is not None and not isinstance(included, list):
+        if "include" in static and not isinstance(included, list):
             raise RuntimeError("fleet membership static.include must be a list")
         for raw in included or []:
             key = _fleet_membership_entry_key(

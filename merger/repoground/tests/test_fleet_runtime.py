@@ -4438,6 +4438,17 @@ def test_fleet_membership_keys_reject_malformed_static_sections(
         )
 
 
+def test_fleet_membership_keys_reject_null_static_include() -> None:
+    module = load_publisher()
+    with pytest.raises(RuntimeError, match=r"static\.include must be a list"):
+        module._fleet_membership_keys(
+            {
+                "repos": [{"name": "repoground"}],
+                "static": {"include": None},
+            }
+        )
+
+
 def test_fleet_membership_keys_reject_conflicting_name_repo_fields() -> None:
     module = load_publisher()
 
