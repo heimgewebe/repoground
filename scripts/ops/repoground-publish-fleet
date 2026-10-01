@@ -170,8 +170,17 @@ _UNSAFE_GIT_BRANCH_TOKENS = (" ", "\t", "\n", "..", "~", "^", ":", "?", "*", "["
 class StrictFleetMembershipLoader(yaml.SafeLoader):
     def flatten_mapping(self, node: yaml.MappingNode) -> None:
         seen: set[object] = set()
+        merge_seen = False
         for key_node, _value_node in node.value:
             if key_node.tag == "tag:yaml.org,2002:merge":
+                if merge_seen:
+                    raise yaml.constructor.ConstructorError(
+                        "while constructing a mapping",
+                        node.start_mark,
+                        "found duplicate mapping key '<<'",
+                        key_node.start_mark,
+                    )
+                merge_seen = True
                 continue
             key = self.construct_object(key_node, deep=False)
             try:
@@ -2269,7 +2278,7 @@ _AUTHORITY_GIT_FORBIDDEN_ENV = frozenset(
     }
 )
 _AUTHORITY_GIT_ALLOWED_ORIGIN_CONFIG = frozenset(
-    {"remote.origin.fetch", "remote.origin.url"}
+    {"remote.origin.fetch", "remote.origin.pushurl", "remote.origin.url"}
 )
 _AUTHORITY_PROXY_ENV_NAMES = frozenset({"all_proxy", "http_proxy", "https_proxy"})
 _AUTHORITY_TLS_ENV_NAMES = frozenset(
@@ -2381,6 +2390,9 @@ def _global_system_github_credential_config(
 
 def _fleet_repo_git_env(repo_path: Path) -> dict[str, str]:
     env = _authority_git_env()
+    for name, value in os.environ.items():
+        if name.lower() in _AUTHORITY_PROXY_ENV_NAMES:
+            env[name] = value
     entries = _global_system_github_credential_config(repo_path)
     if not entries:
         return env

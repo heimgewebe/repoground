@@ -226,6 +226,47 @@ def test_remote_head_for_entry_rejects_checkout_local_transport_override(
         module.remote_head_for_entry(entry)
 
 
+def test_remote_head_for_entry_allows_separate_pushurl(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path, "member-pushurl")
+    remote = "git@github.com:heimgewebe/member.git"
+    git(repo, "remote", "add", "origin", remote)
+    git(
+        repo,
+        "remote",
+        "set-url",
+        "--add",
+        "--push",
+        "origin",
+        "git@github.com:heimgewebe/member-write.git",
+    )
+    entry = module.RepoEntry(
+        key="heimgewebe/member",
+        owner="heimgewebe",
+        repo="member",
+        path=repo,
+        remote=remote,
+    )
+
+    def fake_remote_head(
+        repo_path: Path,
+        *,
+        remote: str = "origin",
+        env: dict[str, str] | None = None,
+    ) -> tuple[str, str, str]:
+        assert repo_path == repo
+        assert remote == entry.remote
+        assert isinstance(env, dict)
+        return "origin/main", "main", sha
+
+    monkeypatch.setattr(module, "remote_head", fake_remote_head)
+
+    assert module.remote_head_for_entry(entry) == ("origin/main", "main", sha)
+
+
 def test_remote_head_for_entry_rejects_origin_change_since_discovery(
     tmp_path: Path,
 ) -> None:
@@ -351,6 +392,12 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
     for name in module._AUTHORITY_GIT_FORBIDDEN_ENV:
         monkeypatch.delenv(name, raising=False)
     monkeypatch.delenv("GIT_CONFIG_COUNT", raising=False)
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:18443")
+    monkeypatch.setenv("http_proxy", "http://127.0.0.1:18080")
+    monkeypatch.setenv("ALL_PROXY", "socks5h://127.0.0.1:11080")
+    monkeypatch.setenv("NO_PROXY", "localhost,github.example.invalid")
+    monkeypatch.setenv("SSL_CERT_FILE", "/tmp/attacker-ca.pem")
+    monkeypatch.setenv("GIT_SSL_NO_VERIFY", "1")
 
     authority_env = module._authority_git_env()
     authority_helper = subprocess.run(
@@ -362,8 +409,20 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
         check=False,
     )
     assert authority_helper.returncode == 1
+    assert "HTTPS_PROXY" not in authority_env
+    assert "http_proxy" not in authority_env
+    assert "ALL_PROXY" not in authority_env
+    assert authority_env["NO_PROXY"] == "localhost,github.example.invalid"
+    assert "SSL_CERT_FILE" not in authority_env
+    assert "GIT_SSL_NO_VERIFY" not in authority_env
 
     env = module._fleet_repo_git_env(repo)
+    assert env["HTTPS_PROXY"] == "http://127.0.0.1:18443"
+    assert env["http_proxy"] == "http://127.0.0.1:18080"
+    assert env["ALL_PROXY"] == "socks5h://127.0.0.1:11080"
+    assert env["NO_PROXY"] == "localhost,github.example.invalid"
+    assert "SSL_CERT_FILE" not in env
+    assert "GIT_SSL_NO_VERIFY" not in env
     injected = [
         (
             env[f"GIT_CONFIG_KEY_{index}"],
@@ -4384,6 +4443,12 @@ def test_fleet_membership_authority_ref_is_not_environment_overridable(
             "  - name: repoground\n"
             "    owner: heimgewebe\n"
             "    owner: attacker\n"
+        ),
+        (
+            "repos:\n"
+            "  - <<: &trusted {owner: heimgewebe}\n"
+            "    <<: &attacker {owner: attacker}\n"
+            "    name: demo\n"
         ),
     ],
 )
