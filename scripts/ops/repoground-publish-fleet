@@ -2395,6 +2395,10 @@ def _fleet_member_credential_helper_path() -> str:
     paths = ["/usr/bin", "/bin", "/usr/local/bin"]
     home_raw = os.environ.get("HOME")
     if home_raw:
+        if os.pathsep in home_raw or any(
+            char in home_raw for char in ("\x00", "\n", "\r")
+        ):
+            raise RuntimeError("fleet member credential HOME is unsafe for PATH")
         home = Path(home_raw)
         if not home.is_absolute():
             raise RuntimeError("fleet member credential HOME must be absolute")

@@ -536,6 +536,16 @@ def test_fleet_repo_git_env_preserves_bounded_credential_helper_lookup(
     assert "password=path-pass" in filled.stdout
 
 
+def test_fleet_member_credential_helper_path_rejects_path_injection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    monkeypatch.setenv("HOME", "/tmp/safe:/tmp/attacker")
+
+    with pytest.raises(RuntimeError, match="unsafe for PATH"):
+        module._fleet_member_credential_helper_path()
+
+
 def test_fleet_repo_ssh_env_preserves_only_bounded_github_auth_config(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
