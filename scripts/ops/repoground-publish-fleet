@@ -2330,47 +2330,57 @@ def _fleet_credential_config_key_allowed(key: str) -> bool:
     )
 
 
-def _global_system_github_credential_config() -> list[tuple[str, str]]:
+def _global_system_github_credential_config(
+    repo_path: Path,
+) -> list[tuple[str, str]]:
     env = _credential_config_discovery_env()
-    entries: list[tuple[str, str]] = []
-    for scope in ("--system", "--global"):
-        cp = subprocess.run(
-            [
-                "/usr/bin/git",
-                "config",
-                scope,
-                "--includes",
-                "--null",
-                "--get-regexp",
-                r"^credential\.",
-            ],
-            env=env,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
+    cp = subprocess.run(
+        [
+            "/usr/bin/git",
+            "-C",
+            str(repo_path),
+            "config",
+            "--includes",
+            "--show-scope",
+            "--null",
+            "--get-regexp",
+            r"^credential\.",
+        ],
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if cp.returncode == 1:
+        return []
+    if cp.returncode != 0:
+        raise RuntimeError(
+            "Git credential configuration is unavailable for "
+            f"{repo_path}: {cp.stderr.strip()}"
         )
-        if cp.returncode == 1:
+
+    fields = cp.stdout.split("\0")
+    if fields and fields[-1] == "":
+        fields.pop()
+    if len(fields) % 2:
+        raise RuntimeError("Git scoped credential configuration is malformed")
+
+    entries: list[tuple[str, str]] = []
+    for scope, record in zip(fields[0::2], fields[1::2]):
+        if scope not in {"system", "global"}:
             continue
-        if cp.returncode != 0:
-            raise RuntimeError(
-                f"Git credential configuration is unavailable for {scope}: "
-                f"{cp.stderr.strip()}"
-            )
-        for record in cp.stdout.split("\0"):
-            if not record:
-                continue
-            key, separator, value = record.partition("\n")
-            if not separator:
-                raise RuntimeError("Git credential configuration record is malformed")
-            if _fleet_credential_config_key_allowed(key):
-                entries.append((key, value))
+        key, separator, value = record.partition("\n")
+        if not separator:
+            raise RuntimeError("Git credential configuration record is malformed")
+        if _fleet_credential_config_key_allowed(key):
+            entries.append((key, value))
     return entries
 
 
-def _fleet_repo_git_env() -> dict[str, str]:
+def _fleet_repo_git_env(repo_path: Path) -> dict[str, str]:
     env = _authority_git_env()
-    entries = _global_system_github_credential_config()
+    entries = _global_system_github_credential_config(repo_path)
     if not entries:
         return env
     env["GIT_CONFIG_COUNT"] = str(len(entries))
@@ -2488,7 +2498,7 @@ def remote_head_for_entry(entry: RepoEntry) -> tuple[str, str, str]:
         )
 
     network_env = (
-        _fleet_repo_git_env()
+        _fleet_repo_git_env(entry.path)
         if origin_url.strip().lower().startswith("https://")
         else transport_env
     )

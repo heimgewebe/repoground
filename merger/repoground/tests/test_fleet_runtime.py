@@ -290,6 +290,9 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     module = load_publisher()
+    repo, _sha = initialize_repository(tmp_path, "credential-member")
+    git(repo, "config", "credential.username", "local-user")
+
     home = tmp_path / "home"
     home.mkdir()
     helper = tmp_path / "credential-helper"
@@ -300,10 +303,17 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
         encoding="utf-8",
     )
     helper.chmod(0o700)
-    (home / ".gitconfig").write_text(
+    included = tmp_path / "member-credentials.inc"
+    included.write_text(
         "[credential \"https://github.com\"]\n"
         "    helper =\n"
-        f"    helper = !{helper}\n"
+        f"    helper = !{helper}\n",
+        encoding="utf-8",
+    )
+    git_dir = (repo / ".git").resolve()
+    (home / ".gitconfig").write_text(
+        f"[includeIf \"gitdir:{git_dir}\"]\n"
+        f"    path = {included}\n"
         "[url \"ssh://attacker.invalid/\"]\n"
         "    insteadOf = https://github.com/\n"
         "[core]\n"
@@ -326,7 +336,21 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
     )
     assert authority_helper.returncode == 1
 
-    env = module._fleet_repo_git_env()
+    env = module._fleet_repo_git_env(repo)
+    injected = [
+        (
+            env[f"GIT_CONFIG_KEY_{index}"],
+            env[f"GIT_CONFIG_VALUE_{index}"],
+        )
+        for index in range(int(env.get("GIT_CONFIG_COUNT", "0")))
+    ]
+    assert any(
+        key == "credential.https://github.com.helper"
+        and value == f"!{helper}"
+        for key, value in injected
+    )
+    assert all(value != "local-user" for _key, value in injected)
+
     filled = subprocess.run(
         ["/usr/bin/git", "credential", "fill"],
         input="protocol=https\nhost=github.com\n\n",
@@ -381,7 +405,11 @@ def test_remote_head_for_entry_uses_credential_env_for_https(
     credential_env["GIT_CONFIG_VALUE_0"] = "!/bin/true"
     observed: dict[str, object] = {}
 
-    monkeypatch.setattr(module, "_fleet_repo_git_env", lambda: credential_env)
+    def fake_fleet_repo_git_env(repo_path: Path) -> dict[str, str]:
+        assert repo_path == repo
+        return credential_env
+
+    monkeypatch.setattr(module, "_fleet_repo_git_env", fake_fleet_repo_git_env)
 
     def fake_remote_head(
         repo_path: Path,
