@@ -15,6 +15,7 @@ import hashlib
 import json
 import os
 import re
+import resource
 import shutil
 import sqlite3
 import stat
@@ -46,7 +47,20 @@ FLEET_MEMBERSHIP_REF = (
 )
 FLEET_MEMBERSHIP_PATH = "fleet/repos.yml"
 FLEET_MEMBERSHIP_MAX_BYTES = 256 * 1024
+FLEET_AUTHORITY_FETCH_MAX_BYTES = 4 * 1024 * 1024
 FLEET_MEMBERSHIP_SCHEMA = "repoground.fleet-membership-authority.v1"
+FLEET_MEMBERSHIP_ENTRY_KEYS = frozenset(
+    {
+        "default_branch",
+        "depends_on",
+        "fleet",
+        "name",
+        "owner",
+        "repo",
+        "status",
+        "url",
+    }
+)
 TOOL_WT = Path(
     os.environ.get("REPOGROUND_TOOL_WORKTREE")
     or (REPOS_ROOT / ".repoground-tools" / "repoground-main")
@@ -301,6 +315,17 @@ def atomic_write_json(path: Path, payload: dict[str, object]) -> None:
             fh.flush()
             os.fsync(fh.fileno())
         os.replace(tmp, path)
+        directory_flag = getattr(os, "O_DIRECTORY", 0)
+        if not directory_flag:
+            raise RuntimeError("atomic JSON replacement requires directory fsync support")
+        directory_fd = os.open(
+            path.parent,
+            os.O_RDONLY | os.O_CLOEXEC | directory_flag,
+        )
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
     finally:
         if tmp.exists():
             tmp.unlink()
@@ -2080,7 +2105,13 @@ def parse_advertised_remote_head(
     return advertised_branch, advertised_sha
 
 
-def fetch_remote_tracking_branch(repo_path: Path, branch: str) -> str:
+def fetch_remote_tracking_branch(
+    repo_path: Path,
+    branch: str,
+    *,
+    remote: str = "origin",
+    env: dict[str, str] | None = None,
+) -> str:
     tracking_ref = f"refs/remotes/origin/{branch}"
     run(
         [
@@ -2089,13 +2120,15 @@ def fetch_remote_tracking_branch(repo_path: Path, branch: str) -> str:
             str(repo_path),
             "fetch",
             "--no-tags",
-            "origin",
+            remote,
             f"+refs/heads/{branch}:{tracking_ref}",
-        ]
+        ],
+        env=env,
     )
     parsed = run(
         ["git", "-C", str(repo_path), "rev-parse", "--verify", tracking_ref],
         check=False,
+        env=env,
     )
     revision = parsed.stdout.strip() if parsed.returncode == 0 else ""
     if SOURCE_REVISION_RE.fullmatch(revision) is None:
@@ -2105,9 +2138,15 @@ def fetch_remote_tracking_branch(repo_path: Path, branch: str) -> str:
     return revision
 
 
-def remote_head(repo_path: Path) -> tuple[str, str, str]:
+def remote_head(
+    repo_path: Path,
+    *,
+    remote: str = "origin",
+    env: dict[str, str] | None = None,
+) -> tuple[str, str, str]:
     advertised = run(
-        ["git", "-C", str(repo_path), "ls-remote", "--symref", "origin", "HEAD"]
+        ["git", "-C", str(repo_path), "ls-remote", "--symref", remote, "HEAD"],
+        env=env,
     ).stdout.splitlines()
     advertised_branch, advertised_sha = parse_advertised_remote_head(
         advertised, repo_path
@@ -2118,7 +2157,12 @@ def remote_head(repo_path: Path) -> tuple[str, str, str]:
                 f"remote default branch revision unavailable for {repo_path}: "
                 f"{advertised_branch}"
             )
-        local_sha = fetch_remote_tracking_branch(repo_path, advertised_branch)
+        local_sha = fetch_remote_tracking_branch(
+            repo_path,
+            advertised_branch,
+            remote=remote,
+            env=env,
+        )
         if local_sha != advertised_sha:
             raise RuntimeError(
                 f"remote default branch moved during resolution for {repo_path}: "
@@ -2126,7 +2170,7 @@ def remote_head(repo_path: Path) -> tuple[str, str, str]:
             )
         return f"origin/{advertised_branch}", advertised_branch, local_sha
 
-    run(["git", "-C", str(repo_path), "fetch", "origin", "--prune"])
+    run(["git", "-C", str(repo_path), "fetch", remote, "--prune"], env=env)
     head = run(
         [
             "git",
@@ -2137,11 +2181,16 @@ def remote_head(repo_path: Path) -> tuple[str, str, str]:
             "--short",
         ],
         check=False,
+        env=env,
     ).stdout.strip()
     for ref in [head, "origin/main", "origin/master"]:
         if not ref:
             continue
-        cp = run(["git", "-C", str(repo_path), "rev-parse", ref], check=False)
+        cp = run(
+            ["git", "-C", str(repo_path), "rev-parse", ref],
+            check=False,
+            env=env,
+        )
         if cp.returncode == 0:
             revision = cp.stdout.strip()
             if SOURCE_REVISION_RE.fullmatch(revision) is None:
@@ -2282,6 +2331,104 @@ def assert_authority_git_transport_safe(
         )
 
 
+def remote_head_for_entry(entry: RepoEntry) -> tuple[str, str, str]:
+    git_env = _authority_git_env()
+    assert_authority_git_transport_safe(entry.path, env=git_env)
+
+    configured = run(
+        [
+            "git",
+            "-C",
+            str(entry.path),
+            "config",
+            "--local",
+            "--no-includes",
+            "--get-all",
+            "remote.origin.url",
+        ],
+        check=False,
+        env=git_env,
+    )
+    configured_urls = [
+        line.strip() for line in configured.stdout.splitlines() if line.strip()
+    ]
+    if configured.returncode != 0 or configured_urls != [entry.remote]:
+        raise RuntimeError(
+            f"fleet repository origin changed since discovery: {entry.key}"
+        )
+    origin_url = configured_urls[0]
+    if parse_github_remote(origin_url) != (entry.owner, entry.repo):
+        raise RuntimeError(
+            f"fleet repository origin identity mismatch: expected {entry.key}"
+        )
+    if not github_remote_uses_authenticated_transport(origin_url):
+        raise RuntimeError(
+            f"fleet repository origin transport must use HTTPS or SSH: {entry.key}"
+        )
+
+    resolved = remote_head(entry.path, remote=origin_url, env=git_env)
+
+    assert_authority_git_transport_safe(entry.path, env=git_env)
+    configured_after = run(
+        [
+            "git",
+            "-C",
+            str(entry.path),
+            "config",
+            "--local",
+            "--no-includes",
+            "--get-all",
+            "remote.origin.url",
+        ],
+        check=False,
+        env=git_env,
+    )
+    configured_after_urls = [
+        line.strip()
+        for line in configured_after.stdout.splitlines()
+        if line.strip()
+    ]
+    if configured_after.returncode != 0 or configured_after_urls != [origin_url]:
+        raise RuntimeError(
+            f"fleet repository origin changed during resolution: {entry.key}"
+        )
+    return resolved
+
+
+def _run_with_file_size_limit(
+    argv: list[str],
+    *,
+    env: dict[str, str],
+    max_file_bytes: int,
+) -> subprocess.CompletedProcess[str]:
+    if (
+        isinstance(max_file_bytes, bool)
+        or not isinstance(max_file_bytes, int)
+        or max_file_bytes < 1
+    ):
+        raise RuntimeError("invalid bounded Git fetch file-size limit")
+
+    def set_file_size_limit() -> None:
+        resource.setrlimit(
+            resource.RLIMIT_FSIZE,
+            (max_file_bytes, max_file_bytes),
+        )
+
+    cp = subprocess.run(
+        argv,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        preexec_fn=set_file_size_limit,
+    )
+    if cp.returncode != 0:
+        raise RuntimeError(
+            f"bounded Git fetch failed rc={cp.returncode}: {' '.join(argv)}\n{cp.stdout}"
+        )
+    return cp
+
+
 def remote_branch_head(
     repo_path: Path,
     branch: str,
@@ -2289,6 +2436,7 @@ def remote_branch_head(
     env: dict[str, str] | None = None,
     depth: int | None = None,
     filter_spec: str | None = None,
+    fetch_file_size_limit: int | None = None,
 ) -> tuple[str, str, str]:
     if not is_safe_git_branch_name(branch):
         raise RuntimeError(
@@ -2340,11 +2488,25 @@ def remote_branch_head(
             raise RuntimeError("invalid authoritative remote fetch depth")
         fetch_argv.append(f"--depth={depth}")
     if filter_spec is not None:
-        if filter_spec != "blob:none":
+        if filter_spec != "blob:none" and re.fullmatch(
+            r"blob:limit=[1-9][0-9]*",
+            filter_spec,
+        ) is None:
             raise RuntimeError("invalid authoritative remote fetch filter")
         fetch_argv.append(f"--filter={filter_spec}")
     fetch_argv.extend(["origin", full_ref])
-    run(fetch_argv, env=env)
+    if fetch_file_size_limit is None:
+        run(fetch_argv, env=env)
+    else:
+        if env is None:
+            raise RuntimeError(
+                "bounded authoritative fetch requires an explicit environment"
+            )
+        _run_with_file_size_limit(
+            fetch_argv,
+            env=env,
+            max_file_bytes=fetch_file_size_limit,
+        )
     if advertised_sha() != expected_sha:
         raise RuntimeError(
             f"authoritative remote branch moved during resolution for {repo_path}: "
@@ -2410,6 +2572,7 @@ def read_remote_branch_blob_isolated(
             ],
             env=env,
         )
+        filter_spec = f"blob:limit={max_bytes + 1}"
         run(
             [
                 "git",
@@ -2417,7 +2580,7 @@ def read_remote_branch_blob_isolated(
                 str(isolated_repo),
                 "config",
                 "remote.origin.partialclonefilter",
-                "blob:none",
+                filter_spec,
             ],
             env=env,
         )
@@ -2426,10 +2589,13 @@ def read_remote_branch_blob_isolated(
             branch,
             env=env,
             depth=1,
-            filter_spec="blob:none",
+            filter_spec=filter_spec,
+            fetch_file_size_limit=FLEET_AUTHORITY_FETCH_MAX_BYTES,
         )
         object_spec = f"{source_sha}:{path}"
-        raw_size = run(
+        no_lazy_env = dict(env)
+        no_lazy_env["GIT_NO_LAZY_FETCH"] = "1"
+        raw_size_result = run(
             [
                 "git",
                 "--no-replace-objects",
@@ -2439,8 +2605,15 @@ def read_remote_branch_blob_isolated(
                 "-s",
                 object_spec,
             ],
-            env=env,
-        ).stdout.strip()
+            check=False,
+            env=no_lazy_env,
+        )
+        if raw_size_result.returncode != 0:
+            raise RuntimeError(
+                "fleet membership blob exceeds bounded size or is unavailable "
+                "without lazy fetch"
+            )
+        raw_size = raw_size_result.stdout.strip()
         try:
             observed_size = int(raw_size)
         except ValueError as exc:
@@ -2459,7 +2632,7 @@ def read_remote_branch_blob_isolated(
                 "show",
                 object_spec,
             ],
-            env=env,
+            env=no_lazy_env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             check=False,
@@ -2489,6 +2662,16 @@ def _fleet_membership_entry_key(
         url = None
         fleet_enabled = True
     elif isinstance(raw, dict):
+        unknown_fields = [
+            key
+            for key in raw
+            if not isinstance(key, str) or key not in FLEET_MEMBERSHIP_ENTRY_KEYS
+        ]
+        if unknown_fields:
+            rendered = ", ".join(repr(key) for key in unknown_fields)
+            raise RuntimeError(
+                f"fleet membership entry has unknown fields: {rendered}"
+            )
         fleet_value = raw.get("fleet")
         if "fleet" in raw and not isinstance(fleet_value, bool):
             raise RuntimeError("fleet membership entry fleet must be a boolean")
@@ -4560,7 +4743,7 @@ def main(argv: list[str]) -> int:
         reconciliation = reconcile_prune_transactions(protected=protected, apply=True)
         for entry in entries:
             try:
-                remote_ref, branch, source_sha = remote_head(entry.path)
+                remote_ref, branch, source_sha = remote_head_for_entry(entry)
                 ref_segment = safe_segment(branch)
                 config = publication_config(entry)
                 registry_repository = publication_repository(entry)

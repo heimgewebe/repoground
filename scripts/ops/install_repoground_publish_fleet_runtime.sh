@@ -50,6 +50,12 @@ if (( ENABLE )); then
     echo "managed runtime activation exists but Python is unavailable: $REPOGROUND_MANAGED_ROOT/.venv/bin/python" >&2
     exit 1
   fi
+  if ! REPOGROUND_REPOSITORY_PATH="$ROOT" \
+    "$REPOGROUND_MANAGED_ROOT/.venv/bin/python" -I \
+    "$ROOT/scripts/ops/repoground-publish-fleet" --inventory >/dev/null; then
+    echo "authoritative fleet inventory preflight failed; refusing enable" >&2
+    exit 1
+  fi
 fi
 
 OLD_TIMERS=(

@@ -307,6 +307,63 @@ def test_isolated_membership_fetch_skips_unrelated_large_blob(
     assert object_bytes < 1024 * 1024
 
 
+def test_isolated_membership_fetch_rejects_oversized_membership_without_lazy_fetch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    remote = initialize_repository(tmp_path, "metarepo-oversized-membership")
+    git(remote, "config", "uploadpack.allowFilter", "true")
+    (remote / "fleet").mkdir()
+    oversized = random.Random(4242).randbytes(2 * 1024 * 1024)
+    (remote / "fleet" / "repos.yml").write_bytes(oversized)
+    git(remote, "add", "fleet/repos.yml")
+    git(remote, "commit", "-m", "oversized membership")
+
+    isolated_root = tmp_path / "preserved-oversized-authority"
+
+    class PreservedTemporaryDirectory:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def __enter__(self) -> str:
+            isolated_root.mkdir()
+            return str(isolated_root)
+
+        def __exit__(
+            self,
+            exc_type: object,
+            exc: object,
+            traceback: object,
+        ) -> bool:
+            return False
+
+    monkeypatch.setattr(
+        module.tempfile,
+        "TemporaryDirectory",
+        PreservedTemporaryDirectory,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="exceeds bounded size or is unavailable without lazy fetch",
+    ):
+        module.read_remote_branch_blob_isolated(
+            remote.as_uri(),
+            "main",
+            "fleet/repos.yml",
+            env=module._authority_git_env(),
+            max_bytes=1024,
+        )
+
+    object_bytes = sum(
+        path.stat().st_size
+        for path in (isolated_root / "authority.git" / "objects").rglob("*")
+        if path.is_file()
+    )
+    assert object_bytes < 1024 * 1024
+
+
 def test_authoritative_fleet_membership_rejects_checkout_local_ssh_override(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

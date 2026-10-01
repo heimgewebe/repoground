@@ -8,6 +8,7 @@ import os
 import shlex
 import shutil
 import sqlite3
+import stat
 import subprocess
 import sys
 import time
@@ -202,6 +203,86 @@ def test_remote_head_rejects_remote_head_that_moves_after_fetch(
 
     with pytest.raises(RuntimeError, match="moved during resolution"):
         module.remote_head(repo)
+
+
+
+def test_remote_head_for_entry_rejects_checkout_local_transport_override(
+    tmp_path: Path,
+) -> None:
+    module = load_publisher()
+    repo, _ = initialize_repository(tmp_path, "member-unsafe-transport")
+    remote = "git@github.com:heimgewebe/member.git"
+    git(repo, "remote", "add", "origin", remote)
+    git(repo, "config", "core.sshCommand", "/bin/false")
+    entry = module.RepoEntry(
+        key="heimgewebe/member",
+        owner="heimgewebe",
+        repo="member",
+        path=repo,
+        remote=remote,
+    )
+
+    with pytest.raises(RuntimeError, match="unsafe local Git transport configuration"):
+        module.remote_head_for_entry(entry)
+
+
+def test_remote_head_for_entry_rejects_origin_change_since_discovery(
+    tmp_path: Path,
+) -> None:
+    module = load_publisher()
+    repo, _ = initialize_repository(tmp_path, "member-origin-change")
+    discovered = "git@github.com:heimgewebe/member.git"
+    git(repo, "remote", "add", "origin", discovered)
+    entry = module.RepoEntry(
+        key="heimgewebe/member",
+        owner="heimgewebe",
+        repo="member",
+        path=repo,
+        remote=discovered,
+    )
+    git(repo, "remote", "set-url", "origin", "https://github.com/heimgewebe/member.git")
+
+    with pytest.raises(RuntimeError, match="origin changed since discovery"):
+        module.remote_head_for_entry(entry)
+
+
+def test_remote_head_for_entry_uses_exact_validated_origin_url(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path, "member-bound-origin")
+    remote = "git@github.com:heimgewebe/member.git"
+    git(repo, "remote", "add", "origin", remote)
+    entry = module.RepoEntry(
+        key="heimgewebe/member",
+        owner="heimgewebe",
+        repo="member",
+        path=repo,
+        remote=remote,
+    )
+    observed: dict[str, object] = {}
+
+    def fake_remote_head(
+        repo_path: Path,
+        *,
+        remote: str = "origin",
+        env: dict[str, str] | None = None,
+    ) -> tuple[str, str, str]:
+        observed["repo_path"] = repo_path
+        observed["remote"] = remote
+        observed["env"] = env
+        return "origin/main", "main", sha
+
+    monkeypatch.setattr(module, "remote_head", fake_remote_head)
+
+    assert module.remote_head_for_entry(entry) == ("origin/main", "main", sha)
+    assert observed["repo_path"] == repo
+    assert observed["remote"] == remote
+    env = observed["env"]
+    assert isinstance(env, dict)
+    assert env["GIT_CONFIG_GLOBAL"] == os.devnull
+    assert env["GIT_CONFIG_SYSTEM"] == os.devnull
 
 
 def test_remote_branch_head_ignores_non_ref_diagnostics_without_shared_ref_update(
@@ -1260,6 +1341,28 @@ def test_managed_worktree_cleanup_rejects_unrelated_and_nonempty_build(
     assert blocker["automatic_mutation_authorized"] is False
     assert payload.read_bytes() == b"preserve"
     assert (ruff_cache / "CACHEDIR.TAG").read_text(encoding="utf-8") == "preserve"
+
+
+
+def test_atomic_write_json_fsyncs_parent_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    path = tmp_path / "receipts" / "fleet-last.json"
+    observed_modes: list[int] = []
+    real_fsync = module.os.fsync
+
+    def tracking_fsync(descriptor: int) -> None:
+        observed_modes.append(module.os.fstat(descriptor).st_mode)
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(module.os, "fsync", tracking_fsync)
+
+    module.atomic_write_json(path, {"status": "ok"})
+
+    assert path.is_file()
+    assert any(stat.S_ISDIR(mode) for mode in observed_modes)
 
 
 def test_atomic_create_json_preserves_concurrent_replacement(
@@ -2418,6 +2521,24 @@ def test_runtime_installer_enable_accepts_valid_managed_runtime(
     assert "enable --now repoground-publish-fleet-watch.timer" in (
         home / "systemctl.log"
     ).read_text(encoding="utf-8")
+
+
+
+def test_runtime_installer_enable_fails_before_mutation_when_inventory_preflight_fails(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    managed_root = _activate_managed_runtime(home)
+    managed_python = managed_root / ".venv/bin/python"
+    managed_python.write_text("#!/bin/sh\nexit 7\n", encoding="utf-8")
+    managed_python.chmod(0o755)
+
+    completed = _run_installer(tmp_path, "--enable")
+
+    assert completed.returncode == 1
+    assert "authoritative fleet inventory preflight failed" in completed.stderr
+    assert not (home / "systemctl.log").exists()
+    assert not (home / ".local/bin/repoground-publish-fleet").exists()
 
 
 def test_installer_atomically_migrates_state_and_starts_canonical_logs(
@@ -3674,7 +3795,7 @@ def test_managed_build_blocker_is_structured_in_fleet_receipt(
     )
     monkeypatch.setattr(module, "ensure_tool_worktree", lambda: ("b" * 40, "c" * 64))
     monkeypatch.setattr(
-        module, "remote_head", lambda path: ("origin/main", "main", "a" * 40)
+        module, "remote_head_for_entry", lambda entry: ("origin/main", "main", "a" * 40)
     )
     monkeypatch.setattr(
         module,
@@ -3731,7 +3852,7 @@ def test_durable_retain_blocker_is_nonfatal_but_visible_in_fleet_receipt(
     )
     monkeypatch.setattr(module, "ensure_tool_worktree", lambda: ("b" * 40, "c" * 64))
     monkeypatch.setattr(
-        module, "remote_head", lambda path: ("origin/main", "main", "a" * 40)
+        module, "remote_head_for_entry", lambda entry: ("origin/main", "main", "a" * 40)
     )
     monkeypatch.setattr(
         module,
@@ -3861,8 +3982,8 @@ def test_idempotent_second_run_does_not_publish_or_create_bundle(
     )
     monkeypatch.setattr(
         module,
-        "remote_head",
-        lambda path: ("origin/main", "main", source_sha),
+        "remote_head_for_entry",
+        lambda entry: ("origin/main", "main", source_sha),
     )
     monkeypatch.setattr(module, "clear_active_publication_lease", lambda path: None)
     monkeypatch.setattr(
@@ -4090,6 +4211,23 @@ def test_fleet_membership_keys_follow_authoritative_semantics() -> None:
         "heimgewebe/wgx",
         "heimgewebe/explicit-warm",
     )
+
+
+def test_fleet_membership_keys_reject_unknown_entry_fields() -> None:
+    module = load_publisher()
+
+    with pytest.raises(RuntimeError, match="unknown fields.*fleat"):
+        module._fleet_membership_keys(
+            {
+                "repos": [
+                    {
+                        "name": "repoground",
+                        "fleat": False,
+                    }
+                ]
+            }
+        )
+
 
 
 @pytest.mark.parametrize("fleet_value", ["false", 0, 1, None, [], {}])
