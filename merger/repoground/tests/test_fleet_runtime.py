@@ -4324,6 +4324,15 @@ def test_runtime_installer_rejects_legacy_publication_marker_spoof(
     assert not systemctl_log.exists()
 
 
+def test_fleet_membership_authority_ref_is_not_environment_overridable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("REPOGROUND_FLEET_MEMBERSHIP_REF", "attacker-branch")
+    module = load_publisher()
+
+    assert module.FLEET_MEMBERSHIP_REF == "main"
+
+
 @pytest.mark.parametrize(
     "raw",
     [
