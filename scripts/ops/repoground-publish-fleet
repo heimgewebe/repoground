@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import glob
 import hashlib
 import json
 import os
@@ -27,6 +28,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -2389,8 +2391,20 @@ def _global_system_github_credential_config(
     return entries
 
 
+def _fleet_member_credential_helper_path() -> str:
+    paths = ["/usr/bin", "/bin", "/usr/local/bin"]
+    home_raw = os.environ.get("HOME")
+    if home_raw:
+        home = Path(home_raw)
+        if not home.is_absolute():
+            raise RuntimeError("fleet member credential HOME must be absolute")
+        paths.append(str(home / ".local" / "bin"))
+    return os.pathsep.join(paths)
+
+
 def _fleet_repo_git_env(repo_path: Path) -> dict[str, str]:
     env = _authority_git_env()
+    env["PATH"] = _fleet_member_credential_helper_path()
     for name, value in os.environ.items():
         if name.lower() in _AUTHORITY_PROXY_ENV_NAMES:
             env[name] = value
@@ -2405,6 +2419,9 @@ def _fleet_repo_git_env(repo_path: Path) -> dict[str, str]:
 
 
 _FLEET_MEMBER_SSH_CONFIG_MAX_BYTES = 256 * 1024
+_FLEET_MEMBER_SSH_CONFIG_TOTAL_MAX_BYTES = 512 * 1024
+_FLEET_MEMBER_SSH_MAX_CONFIG_FILES = 32
+_FLEET_MEMBER_SSH_MAX_INCLUDE_DEPTH = 8
 _FLEET_MEMBER_SSH_MAX_AUTH_FILES = 8
 _FLEET_MEMBER_SSH_AUTH_KEYS = frozenset(
     {"certificatefile", "identitiesonly", "identityagent", "identityfile"}
@@ -2459,6 +2476,68 @@ def _read_fleet_member_ssh_config(config: Path) -> str | None:
         os.close(descriptor)
 
 
+def _fleet_member_ssh_host_patterns_match_github(values: list[str]) -> bool:
+    if not values:
+        raise RuntimeError("fleet member SSH Host requires at least one pattern")
+    matched = False
+    for raw_pattern in values:
+        if not raw_pattern or any(char in raw_pattern for char in ("\x00", "\n", "\r")):
+            raise RuntimeError("fleet member SSH Host pattern is invalid")
+        negated = raw_pattern.startswith("!")
+        pattern = raw_pattern[1:] if negated else raw_pattern
+        if not pattern:
+            raise RuntimeError("fleet member SSH Host pattern is invalid")
+        normalized = pattern.casefold()
+        if re.fullmatch(r"[a-z0-9.*?-]+", normalized) is None:
+            continue
+        if fnmatchcase("github.com", normalized):
+            if negated:
+                return False
+            matched = True
+    return matched
+
+
+def _fleet_member_ssh_include_paths(home: Path, values: list[str]) -> list[Path]:
+    if not values:
+        raise RuntimeError("fleet member SSH Include requires at least one path")
+    ssh_root = home / ".ssh"
+    try:
+        root_resolved = ssh_root.resolve(strict=True)
+    except OSError as exc:
+        raise RuntimeError("fleet member SSH root is unavailable") from exc
+
+    matches: list[Path] = []
+    for raw_pattern in values:
+        if (
+            not raw_pattern
+            or any(char in raw_pattern for char in ("\x00", "\n", "\r"))
+            or "%" in raw_pattern
+        ):
+            raise RuntimeError("fleet member SSH Include path is invalid")
+        if raw_pattern.startswith("~/"):
+            candidate = home / raw_pattern[2:]
+        elif raw_pattern.startswith("~"):
+            raise RuntimeError("fleet member SSH Include user expansion is unsupported")
+        else:
+            raw_path = Path(raw_pattern)
+            candidate = raw_path if raw_path.is_absolute() else ssh_root / raw_path
+
+        for matched in sorted(glob.glob(str(candidate), recursive=False)):
+            path = Path(matched)
+            try:
+                resolved = path.resolve(strict=True)
+            except OSError as exc:
+                raise RuntimeError("fleet member SSH Include target is unavailable") from exc
+            try:
+                resolved.relative_to(root_resolved)
+            except ValueError as exc:
+                raise RuntimeError(
+                    "fleet member SSH Include target must remain under ~/.ssh"
+                ) from exc
+            matches.append(path)
+    return matches
+
+
 def _fleet_member_ssh_auth_options() -> dict[str, object]:
     home_raw = os.environ.get("HOME")
     if not home_raw:
@@ -2466,75 +2545,108 @@ def _fleet_member_ssh_auth_options() -> dict[str, object]:
     home = Path(home_raw)
     if not home.is_absolute():
         raise RuntimeError("fleet member SSH HOME must be absolute")
-    raw = _read_fleet_member_ssh_config(home / ".ssh" / "config")
-    if raw is None:
-        return {}
+    config = home / ".ssh" / "config"
 
-    active = False
     identity_files: list[str] = []
     certificate_files: list[str] = []
     scalar: dict[str, str] = {}
-    for raw_line in raw.splitlines():
-        try:
-            tokens = shlex.split(raw_line, comments=True, posix=True)
-        except ValueError as exc:
-            raise RuntimeError("fleet member SSH configuration is malformed") from exc
-        if not tokens:
-            continue
-        first = tokens[0]
-        values = tokens[1:]
-        if "=" in first:
-            first, first_value = first.split("=", 1)
-            values = ([first_value] if first_value else []) + values
-        elif values and values[0] == "=":
-            values = values[1:]
-        key = first.strip().lower()
-        if key == "host":
-            normalized_patterns = tuple(value.casefold() for value in values)
-            positive_exact = any(
-                pattern == "github.com" for pattern in normalized_patterns
-            )
-            negative_exact = any(
-                pattern == "!github.com" for pattern in normalized_patterns
-            )
-            active = positive_exact and not negative_exact
-            continue
-        if key == "match":
-            active = False
-            continue
-        if not active or key not in _FLEET_MEMBER_SSH_AUTH_KEYS:
-            continue
-        if len(values) != 1 or not values[0] or any(
-            char in values[0] for char in ("\x00", "\n", "\r")
-        ):
-            raise RuntimeError(
-                f"fleet member SSH authentication option {key} is invalid"
-            )
-        value = values[0]
-        if value.startswith("~/"):
-            value = str(home / value[2:])
-        if key == "identityfile":
-            if value.lower() == "none":
-                identity_files.clear()
-                continue
-            identity_files.append(value)
-            if len(identity_files) > _FLEET_MEMBER_SSH_MAX_AUTH_FILES:
-                raise RuntimeError("fleet member SSH identity file list is too large")
-        elif key == "certificatefile":
-            if value.lower() == "none":
-                certificate_files.clear()
-                continue
-            certificate_files.append(value)
-            if len(certificate_files) > _FLEET_MEMBER_SSH_MAX_AUTH_FILES:
-                raise RuntimeError("fleet member SSH certificate file list is too large")
-        elif key == "identitiesonly":
-            normalized = value.lower()
-            if normalized not in {"yes", "no"}:
-                raise RuntimeError("fleet member SSH IdentitiesOnly must be yes or no")
-            scalar.setdefault(key, normalized)
-        else:
-            scalar.setdefault(key, value)
+    config_files = 0
+    total_bytes = 0
 
+    def process_config(
+        path: Path,
+        *,
+        active: bool,
+        depth: int,
+        required: bool,
+    ) -> bool:
+        nonlocal config_files, total_bytes
+        if depth > _FLEET_MEMBER_SSH_MAX_INCLUDE_DEPTH:
+            raise RuntimeError("fleet member SSH Include nesting is too deep")
+        raw = _read_fleet_member_ssh_config(path)
+        if raw is None:
+            if required:
+                raise RuntimeError("fleet member SSH Include target disappeared")
+            return active
+
+        config_files += 1
+        if config_files > _FLEET_MEMBER_SSH_MAX_CONFIG_FILES:
+            raise RuntimeError("fleet member SSH configuration file count is too large")
+        total_bytes += len(raw.encode("utf-8"))
+        if total_bytes > _FLEET_MEMBER_SSH_CONFIG_TOTAL_MAX_BYTES:
+            raise RuntimeError("fleet member SSH configuration aggregate size is too large")
+
+        for raw_line in raw.splitlines():
+            try:
+                tokens = shlex.split(raw_line, comments=True, posix=True)
+            except ValueError as exc:
+                raise RuntimeError("fleet member SSH configuration is malformed") from exc
+            if not tokens:
+                continue
+            first = tokens[0]
+            values = tokens[1:]
+            if "=" in first:
+                first, first_value = first.split("=", 1)
+                values = ([first_value] if first_value else []) + values
+            elif values and values[0] == "=":
+                values = values[1:]
+            key = first.strip().lower()
+
+            if key == "include":
+                if active:
+                    for included in _fleet_member_ssh_include_paths(home, values):
+                        active = process_config(
+                            included,
+                            active=active,
+                            depth=depth + 1,
+                            required=True,
+                        )
+                continue
+            if key == "host":
+                active = _fleet_member_ssh_host_patterns_match_github(values)
+                continue
+            if key == "match":
+                active = False
+                continue
+            if not active or key not in _FLEET_MEMBER_SSH_AUTH_KEYS:
+                continue
+            if len(values) != 1 or not values[0] or any(
+                char in values[0] for char in ("\x00", "\n", "\r")
+            ):
+                raise RuntimeError(
+                    f"fleet member SSH authentication option {key} is invalid"
+                )
+            value = values[0]
+            if value.startswith("~/"):
+                value = str(home / value[2:])
+            if key == "identityfile":
+                if value.lower() == "none":
+                    identity_files.clear()
+                    continue
+                identity_files.append(value)
+                if len(identity_files) > _FLEET_MEMBER_SSH_MAX_AUTH_FILES:
+                    raise RuntimeError("fleet member SSH identity file list is too large")
+            elif key == "certificatefile":
+                if value.lower() == "none":
+                    certificate_files.clear()
+                    continue
+                certificate_files.append(value)
+                if len(certificate_files) > _FLEET_MEMBER_SSH_MAX_AUTH_FILES:
+                    raise RuntimeError(
+                        "fleet member SSH certificate file list is too large"
+                    )
+            elif key == "identitiesonly":
+                normalized = value.lower()
+                if normalized not in {"yes", "no"}:
+                    raise RuntimeError(
+                        "fleet member SSH IdentitiesOnly must be yes or no"
+                    )
+                scalar.setdefault(key, normalized)
+            else:
+                scalar.setdefault(key, value)
+        return active
+
+    process_config(config, active=True, depth=0, required=False)
     return {
         "identity_files": tuple(identity_files),
         "certificate_files": tuple(certificate_files),

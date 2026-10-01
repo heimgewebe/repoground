@@ -485,6 +485,57 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
     assert ssh_override.returncode == 1
 
 
+def test_fleet_repo_git_env_preserves_bounded_credential_helper_lookup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, _sha = initialize_repository(tmp_path, "credential-helper-path")
+    home = tmp_path / "home"
+    helper_dir = home / ".local" / "bin"
+    helper_dir.mkdir(parents=True)
+    helper = helper_dir / "git-credential-demo"
+    helper.write_text(
+        "#!/bin/sh\n"
+        "cat >/dev/null\n"
+        "printf 'username=path-user\\npassword=path-pass\\n'\n",
+        encoding="utf-8",
+    )
+    helper.chmod(0o700)
+    home.mkdir(exist_ok=True)
+    (home / ".gitconfig").write_text(
+        "[credential \"https://github.com\"]\n"
+        "    helper = demo\n",
+        encoding="utf-8",
+    )
+    attacker_bin = tmp_path / "attacker-bin"
+    attacker_bin.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("PATH", str(attacker_bin))
+    for name in module._AUTHORITY_GIT_FORBIDDEN_ENV:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.delenv("GIT_CONFIG_COUNT", raising=False)
+
+    env = module._fleet_repo_git_env(repo)
+
+    assert env["PATH"] == os.pathsep.join(
+        ["/usr/bin", "/bin", "/usr/local/bin", str(helper_dir)]
+    )
+    assert str(attacker_bin) not in env["PATH"].split(os.pathsep)
+    filled = subprocess.run(
+        ["/usr/bin/git", "credential", "fill"],
+        input="protocol=https\nhost=github.com\n\n",
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    assert filled.returncode == 0, filled.stderr
+    assert "username=path-user" in filled.stdout
+    assert "password=path-pass" in filled.stdout
+
+
 def test_fleet_repo_ssh_env_preserves_only_bounded_github_auth_config(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -533,10 +584,75 @@ def test_fleet_repo_ssh_env_preserves_only_bounded_github_auth_config(
         assert forbidden not in command
 
 
+def test_fleet_member_ssh_include_expands_nested_auth_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    home = tmp_path / "home"
+    ssh_dir = home / ".ssh"
+    conf_dir = ssh_dir / "conf.d"
+    conf_dir.mkdir(parents=True)
+    (ssh_dir / "config").write_text(
+        "Include ~/.ssh/conf.d/first\n"
+        "Host github.com\n"
+        "    IdentitiesOnly yes\n",
+        encoding="utf-8",
+    )
+    (conf_dir / "first").write_text(
+        "Include ~/.ssh/conf.d/second\n",
+        encoding="utf-8",
+    )
+    (conf_dir / "second").write_text(
+        "Host *\n"
+        "    IdentityFile ~/.ssh/include-key\n"
+        "    CertificateFile ~/.ssh/include-cert.pub\n"
+        "    HostName attacker.invalid\n"
+        "    ProxyCommand /bin/false\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(home))
+
+    command = module._fleet_member_ssh_command()
+
+    assert str(ssh_dir / "include-key") in command
+    assert f"CertificateFile={ssh_dir / 'include-cert.pub'}" in command
+    assert "IdentitiesOnly=yes" in command
+    assert "attacker.invalid" not in command
+    assert "ProxyCommand" not in command
+    assert "/bin/false" not in command
+
+
+def test_fleet_member_ssh_include_rejects_targets_outside_ssh_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    home = tmp_path / "home"
+    ssh_dir = home / ".ssh"
+    ssh_dir.mkdir(parents=True)
+    outside = tmp_path / "outside.conf"
+    outside.write_text(
+        "Host github.com\n    IdentityFile ~/.ssh/outside-key\n",
+        encoding="utf-8",
+    )
+    (ssh_dir / "config").write_text(
+        f"Include {outside}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(home))
+
+    with pytest.raises(RuntimeError, match="must remain under ~/.ssh"):
+        module._fleet_member_ssh_auth_options()
+
+
 @pytest.mark.parametrize(
     ("host_patterns", "expected_identity"),
     [
         ("GitHub.COM", True),
+        ("*", True),
+        ("github.*", True),
+        ("!github.com *", False),
         ("github.com !github.com", False),
         ("*.github.com", False),
         ("attacker-github.com", False),
