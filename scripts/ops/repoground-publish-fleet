@@ -48,6 +48,7 @@ FLEET_MEMBERSHIP_REF = (
 FLEET_MEMBERSHIP_PATH = "fleet/repos.yml"
 FLEET_MEMBERSHIP_MAX_BYTES = 256 * 1024
 FLEET_AUTHORITY_FETCH_MAX_BYTES = 4 * 1024 * 1024
+FLEET_MEMBERSHIP_FETCH_OVERHEAD_BYTES = 256 * 1024
 FLEET_MEMBERSHIP_SCHEMA = "repoground.fleet-membership-authority.v1"
 FLEET_MEMBERSHIP_ENTRY_KEYS = frozenset(
     {
@@ -2300,6 +2301,85 @@ def _authority_git_env() -> dict[str, str]:
     return env
 
 
+def _credential_config_discovery_env() -> dict[str, str]:
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("GIT_")
+        and key.lower() not in _AUTHORITY_LOADER_ENV_NAMES
+    }
+    env["PATH"] = "/usr/bin:/bin"
+    return env
+
+
+def _fleet_credential_config_key_allowed(key: str) -> bool:
+    normalized = key.strip().lower()
+    if normalized in {
+        "credential.helper",
+        "credential.username",
+        "credential.usehttppath",
+    }:
+        return True
+    return (
+        re.fullmatch(
+            r"credential\.https://github\.com(?:/[^ \t\r\n]*)?"
+            r"\.(?:helper|username|usehttppath)",
+            normalized,
+        )
+        is not None
+    )
+
+
+def _global_system_github_credential_config() -> list[tuple[str, str]]:
+    env = _credential_config_discovery_env()
+    entries: list[tuple[str, str]] = []
+    for scope in ("--system", "--global"):
+        cp = subprocess.run(
+            [
+                "/usr/bin/git",
+                "config",
+                scope,
+                "--includes",
+                "--null",
+                "--get-regexp",
+                r"^credential\.",
+            ],
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if cp.returncode == 1:
+            continue
+        if cp.returncode != 0:
+            raise RuntimeError(
+                f"Git credential configuration is unavailable for {scope}: "
+                f"{cp.stderr.strip()}"
+            )
+        for record in cp.stdout.split("\0"):
+            if not record:
+                continue
+            key, separator, value = record.partition("\n")
+            if not separator:
+                raise RuntimeError("Git credential configuration record is malformed")
+            if _fleet_credential_config_key_allowed(key):
+                entries.append((key, value))
+    return entries
+
+
+def _fleet_repo_git_env() -> dict[str, str]:
+    env = _authority_git_env()
+    entries = _global_system_github_credential_config()
+    if not entries:
+        return env
+    env["GIT_CONFIG_COUNT"] = str(len(entries))
+    for index, (key, value) in enumerate(entries):
+        env[f"GIT_CONFIG_KEY_{index}"] = key
+        env[f"GIT_CONFIG_VALUE_{index}"] = value
+    return env
+
+
 def _authority_git_local_config_is_transport_override(key: str) -> bool:
     normalized = key.strip().lower()
     if normalized in {
@@ -2373,8 +2453,8 @@ def assert_authority_git_transport_safe(
 
 
 def remote_head_for_entry(entry: RepoEntry) -> tuple[str, str, str]:
-    git_env = _authority_git_env()
-    assert_authority_git_transport_safe(entry.path, env=git_env)
+    transport_env = _authority_git_env()
+    assert_authority_git_transport_safe(entry.path, env=transport_env)
 
     configured = run(
         [
@@ -2388,7 +2468,7 @@ def remote_head_for_entry(entry: RepoEntry) -> tuple[str, str, str]:
             "remote.origin.url",
         ],
         check=False,
-        env=git_env,
+        env=transport_env,
     )
     configured_urls = [
         line.strip() for line in configured.stdout.splitlines() if line.strip()
@@ -2407,9 +2487,14 @@ def remote_head_for_entry(entry: RepoEntry) -> tuple[str, str, str]:
             f"fleet repository origin transport must use HTTPS or SSH: {entry.key}"
         )
 
-    resolved = remote_head(entry.path, remote=origin_url, env=git_env)
+    network_env = (
+        _fleet_repo_git_env()
+        if origin_url.strip().lower().startswith("https://")
+        else transport_env
+    )
+    resolved = remote_head(entry.path, remote=origin_url, env=network_env)
 
-    assert_authority_git_transport_safe(entry.path, env=git_env)
+    assert_authority_git_transport_safe(entry.path, env=transport_env)
     configured_after = run(
         [
             "git",
@@ -2422,7 +2507,7 @@ def remote_head_for_entry(entry: RepoEntry) -> tuple[str, str, str]:
             "remote.origin.url",
         ],
         check=False,
-        env=git_env,
+        env=transport_env,
     )
     configured_after_urls = [
         line.strip()
@@ -2434,7 +2519,6 @@ def remote_head_for_entry(entry: RepoEntry) -> tuple[str, str, str]:
             f"fleet repository origin changed during resolution: {entry.key}"
         )
     return resolved
-
 
 def _run_with_file_size_limit(
     argv: list[str],
@@ -2460,12 +2544,15 @@ def _run_with_file_size_limit(
         env=env,
         text=True,
         stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
+        stderr=subprocess.PIPE,
         preexec_fn=set_file_size_limit,
     )
     if cp.returncode != 0:
+        detail = "\n".join(
+            part.strip() for part in (cp.stdout, cp.stderr) if part.strip()
+        )
         raise RuntimeError(
-            f"bounded Git fetch failed rc={cp.returncode}: {' '.join(argv)}\n{cp.stdout}"
+            f"bounded Git fetch failed rc={cp.returncode}: {' '.join(argv)}\n{detail}"
         )
     return cp
 
@@ -2613,7 +2700,7 @@ def read_remote_branch_blob_isolated(
             ],
             env=env,
         )
-        filter_spec = f"blob:limit={max_bytes + 1}"
+        filter_spec = "blob:none"
         run(
             [
                 "git",
@@ -2634,26 +2721,24 @@ def read_remote_branch_blob_isolated(
             fetch_file_size_limit=FLEET_AUTHORITY_FETCH_MAX_BYTES,
         )
         object_spec = f"{source_sha}:{path}"
-        no_lazy_env = dict(env)
-        no_lazy_env["GIT_NO_LAZY_FETCH"] = "1"
-        raw_size_result = run(
-            [
-                "git",
-                "--no-replace-objects",
-                "-C",
-                str(isolated_repo),
-                "cat-file",
-                "-s",
-                object_spec,
-            ],
-            check=False,
-            env=no_lazy_env,
-        )
-        if raw_size_result.returncode != 0:
-            raise RuntimeError(
-                "fleet membership blob exceeds bounded size or is unavailable "
-                "without lazy fetch"
+        try:
+            raw_size_result = _run_with_file_size_limit(
+                [
+                    "git",
+                    "--no-replace-objects",
+                    "-C",
+                    str(isolated_repo),
+                    "cat-file",
+                    "-s",
+                    object_spec,
+                ],
+                env=env,
+                max_file_bytes=max_bytes + FLEET_MEMBERSHIP_FETCH_OVERHEAD_BYTES,
             )
+        except RuntimeError as exc:
+            raise RuntimeError(
+                "fleet membership blob exceeds bounded transfer or is unavailable"
+            ) from exc
         raw_size = raw_size_result.stdout.strip()
         try:
             observed_size = int(raw_size)
@@ -2664,6 +2749,8 @@ def read_remote_branch_blob_isolated(
                 f"fleet membership blob exceeds bounded size: {observed_size}"
             )
 
+        no_lazy_env = dict(env)
+        no_lazy_env["GIT_NO_LAZY_FETCH"] = "1"
         blob = subprocess.run(
             [
                 "git",

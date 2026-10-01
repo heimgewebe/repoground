@@ -307,6 +307,68 @@ def test_isolated_membership_fetch_skips_unrelated_large_blob(
     assert object_bytes < 1024 * 1024
 
 
+def test_isolated_membership_fetch_skips_many_unrelated_small_blobs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    remote = initialize_repository(tmp_path, "metarepo-many-small-blobs")
+    git(remote, "config", "uploadpack.allowFilter", "true")
+    (remote / "fleet").mkdir()
+    authoritative = "repos:\n  - name: repoground\n"
+    (remote / "fleet" / "repos.yml").write_text(authoritative, encoding="utf-8")
+    rng = random.Random(7331)
+    for index in range(30):
+        (remote / f"noise-{index:02d}.bin").write_bytes(
+            rng.randbytes(200 * 1024)
+        )
+    git(remote, "add", ".")
+    git(remote, "commit", "-m", "membership with many unrelated blobs")
+    remote_head = git(remote, "rev-parse", "HEAD")
+
+    isolated_root = tmp_path / "preserved-many-small-authority"
+
+    class PreservedTemporaryDirectory:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def __enter__(self) -> str:
+            isolated_root.mkdir()
+            return str(isolated_root)
+
+        def __exit__(
+            self,
+            exc_type: object,
+            exc: object,
+            traceback: object,
+        ) -> bool:
+            return False
+
+    monkeypatch.setattr(
+        module.tempfile,
+        "TemporaryDirectory",
+        PreservedTemporaryDirectory,
+    )
+
+    remote_ref, source_sha, encoded = module.read_remote_branch_blob_isolated(
+        remote.as_uri(),
+        "main",
+        "fleet/repos.yml",
+        env=module._authority_git_env(),
+        max_bytes=module.FLEET_MEMBERSHIP_MAX_BYTES,
+    )
+
+    assert remote_ref == "refs/heads/main"
+    assert source_sha == remote_head
+    assert encoded == authoritative.encode("utf-8")
+    object_bytes = sum(
+        path.stat().st_size
+        for path in (isolated_root / "authority.git" / "objects").rglob("*")
+        if path.is_file()
+    )
+    assert object_bytes < 1024 * 1024
+
+
 def test_isolated_membership_fetch_rejects_oversized_membership_without_lazy_fetch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -346,7 +408,7 @@ def test_isolated_membership_fetch_rejects_oversized_membership_without_lazy_fet
 
     with pytest.raises(
         RuntimeError,
-        match="exceeds bounded size or is unavailable without lazy fetch",
+        match="exceeds bounded transfer or is unavailable",
     ):
         module.read_remote_branch_blob_isolated(
             remote.as_uri(),

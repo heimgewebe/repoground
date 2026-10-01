@@ -285,6 +285,122 @@ def test_remote_head_for_entry_uses_exact_validated_origin_url(
     assert env["GIT_CONFIG_SYSTEM"] == os.devnull
 
 
+def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overrides(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    home = tmp_path / "home"
+    home.mkdir()
+    helper = tmp_path / "credential-helper"
+    helper.write_text(
+        "#!/bin/sh\n"
+        "cat >/dev/null\n"
+        "printf 'username=probe-user\\npassword=probe-pass\\n'\n",
+        encoding="utf-8",
+    )
+    helper.chmod(0o700)
+    (home / ".gitconfig").write_text(
+        "[credential \"https://github.com\"]\n"
+        "    helper =\n"
+        f"    helper = !{helper}\n"
+        "[url \"ssh://attacker.invalid/\"]\n"
+        "    insteadOf = https://github.com/\n"
+        "[core]\n"
+        "    sshCommand = /bin/false\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(home))
+    for name in module._AUTHORITY_GIT_FORBIDDEN_ENV:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.delenv("GIT_CONFIG_COUNT", raising=False)
+
+    authority_env = module._authority_git_env()
+    authority_helper = subprocess.run(
+        ["/usr/bin/git", "config", "--get-all", "credential.https://github.com.helper"],
+        env=authority_env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    assert authority_helper.returncode == 1
+
+    env = module._fleet_repo_git_env()
+    filled = subprocess.run(
+        ["/usr/bin/git", "credential", "fill"],
+        input="protocol=https\nhost=github.com\n\n",
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    assert filled.returncode == 0, filled.stderr
+    assert "username=probe-user" in filled.stdout
+    assert "password=probe-pass" in filled.stdout
+
+    url_override = subprocess.run(
+        ["/usr/bin/git", "config", "--get-regexp", r"^url\."],
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    ssh_override = subprocess.run(
+        ["/usr/bin/git", "config", "--get", "core.sshCommand"],
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    assert url_override.returncode == 1
+    assert ssh_override.returncode == 1
+
+
+def test_remote_head_for_entry_uses_credential_env_for_https(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path, "member-https-credentials")
+    remote = "https://github.com/heimgewebe/member.git"
+    git(repo, "remote", "add", "origin", remote)
+    entry = module.RepoEntry(
+        key="heimgewebe/member",
+        owner="heimgewebe",
+        repo="member",
+        path=repo,
+        remote=remote,
+    )
+    credential_env = module._authority_git_env()
+    credential_env["GIT_CONFIG_COUNT"] = "1"
+    credential_env["GIT_CONFIG_KEY_0"] = "credential.helper"
+    credential_env["GIT_CONFIG_VALUE_0"] = "!/bin/true"
+    observed: dict[str, object] = {}
+
+    monkeypatch.setattr(module, "_fleet_repo_git_env", lambda: credential_env)
+
+    def fake_remote_head(
+        repo_path: Path,
+        *,
+        remote: str = "origin",
+        env: dict[str, str] | None = None,
+    ) -> tuple[str, str, str]:
+        observed["repo_path"] = repo_path
+        observed["remote"] = remote
+        observed["env"] = env
+        return "origin/main", "main", sha
+
+    monkeypatch.setattr(module, "remote_head", fake_remote_head)
+
+    assert module.remote_head_for_entry(entry) == ("origin/main", "main", sha)
+    assert observed["remote"] == remote
+    assert observed["env"] is credential_env
+
+
 def test_remote_branch_head_ignores_non_ref_diagnostics_without_shared_ref_update(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
