@@ -2320,14 +2320,15 @@ def _fleet_credential_config_key_allowed(key: str) -> bool:
         "credential.usehttppath",
     }:
         return True
-    return (
-        re.fullmatch(
-            r"credential\.https://github\.com(?:/[^ \t\r\n]*)?"
-            r"\.(?:helper|username|usehttppath)",
-            normalized,
-        )
-        is not None
+    scoped = re.fullmatch(
+        r"credential\.https://(?:[^/@:]+@)?github\.com(?::([0-9]+))?"
+        r"(?:/[^ \t\r\n]*)?\.(?:helper|username|usehttppath)",
+        normalized,
     )
+    if scoped is None:
+        return False
+    port = scoped.group(1)
+    return port is None or 1 <= int(port) <= 65535
 
 
 def _global_system_github_credential_config(

@@ -285,6 +285,27 @@ def test_remote_head_for_entry_uses_exact_validated_origin_url(
     assert env["GIT_CONFIG_SYSTEM"] == os.devnull
 
 
+def test_fleet_credential_config_key_allowed_matches_valid_https_github_scopes() -> None:
+    module = load_publisher()
+
+    for key in (
+        "credential.https://github.com:443.helper",
+        "credential.https://bot@github.com.helper",
+        "credential.https://bot@github.com:443.username",
+        "credential.https://bot@github.com:443/owner/repo.usehttppath",
+    ):
+        assert module._fleet_credential_config_key_allowed(key) is True
+
+    for key in (
+        "credential.https://github.com:0.helper",
+        "credential.https://github.com:65536.helper",
+        "credential.https://bot:secret@github.com.helper",
+        "credential.http://github.com:443.helper",
+        "credential.https://github.com.evil.example:443.helper",
+    ):
+        assert module._fleet_credential_config_key_allowed(key) is False
+
+
 def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overrides(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -307,7 +328,13 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
     included.write_text(
         "[credential \"https://github.com\"]\n"
         "    helper =\n"
-        f"    helper = !{helper}\n",
+        f"    helper = !{helper}\n"
+        "[credential \"https://github.com:443\"]\n"
+        f"    helper = !{helper}\n"
+        "[credential \"https://bot@github.com\"]\n"
+        f"    helper = !{helper}\n"
+        "[credential \"https://bot@github.com:443\"]\n"
+        "    username = bot\n",
         encoding="utf-8",
     )
     git_dir = (repo / ".git").resolve()
@@ -347,6 +374,21 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
     assert any(
         key == "credential.https://github.com.helper"
         and value == f"!{helper}"
+        for key, value in injected
+    )
+    assert any(
+        key == "credential.https://github.com:443.helper"
+        and value == f"!{helper}"
+        for key, value in injected
+    )
+    assert any(
+        key == "credential.https://bot@github.com.helper"
+        and value == f"!{helper}"
+        for key, value in injected
+    )
+    assert any(
+        key == "credential.https://bot@github.com:443.username"
+        and value == "bot"
         for key, value in injected
     )
     assert all(value != "local-user" for _key, value in injected)
