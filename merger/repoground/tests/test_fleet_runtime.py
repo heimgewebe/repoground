@@ -399,8 +399,10 @@ def test_fleet_proxy_config_key_allowed_preserves_only_bounded_github_proxies() 
     for key in (
         "http.proxy",
         "http.proxyAuthMethod",
+        "http.proxySSLCAInfo",
         "http.https://github.com.proxy",
         "http.https://github.com.proxyAuthMethod",
+        "http.https://github.com.proxySSLCAInfo",
         "http.https://github.com:443.proxy",
         "http.https://github.com:443.proxyAuthMethod",
         "http.https://bot@github.com/owner/repo.proxy",
@@ -411,10 +413,14 @@ def test_fleet_proxy_config_key_allowed_preserves_only_bounded_github_proxies() 
     for key in (
         "http.https://github.com.evil.example.proxy",
         "http.https://github.com.evil.example.proxyAuthMethod",
+        "http.https://github.com.evil.example.proxySSLCAInfo",
         "http.https://github.com:0.proxy",
         "http.https://github.com:65536.proxyAuthMethod",
         "http.http://github.com.proxy",
         "http.proxyAuthMethodExtra",
+        "http.proxySSLCert",
+        "http.proxySSLCertPasswordProtected",
+        "http.proxySSLKey",
         "http.sslVerify",
     ):
         assert module._fleet_proxy_config_key_allowed(key) is False
@@ -459,9 +465,11 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
         "    sslCAPath = /tmp/global-ca-dir\n"
         "    proxy = http://127.0.0.1:18081\n"
         "    proxyAuthMethod = basic\n"
+        "    proxySSLCAInfo = /tmp/global-proxy-ca.pem\n"
         "[http \"https://github.com\"]\n"
         "    proxy = http://127.0.0.1:18082\n"
         "    proxyAuthMethod = ntlm\n"
+        "    proxySSLCAInfo = /tmp/github-proxy-ca.pem\n"
         "[url \"ssh://attacker.invalid/\"]\n"
         "    insteadOf = https://github.com/\n"
         "[core]\n"
@@ -585,6 +593,13 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
     assert ("http.https://github.com.proxyauthmethod", "ntlm") in [
         (key.lower(), value) for key, value in injected
     ]
+    assert ("http.proxysslcainfo", "/tmp/global-proxy-ca.pem") in [
+        (key.lower(), value) for key, value in injected
+    ]
+    assert (
+        "http.https://github.com.proxysslcainfo",
+        "/tmp/github-proxy-ca.pem",
+    ) in [(key.lower(), value) for key, value in injected]
 
     filled = subprocess.run(
         ["/usr/bin/git", "credential", "fill"],
@@ -633,6 +648,7 @@ def test_fleet_repo_git_env_preserves_local_https_precedence(
         "[http]\n"
         "    proxy = http://127.0.0.1:18081\n"
         "    proxyAuthMethod = basic\n"
+        "    proxySSLCAInfo = /tmp/global-proxy-ca.pem\n"
         "    sslCAInfo = /tmp/global-ca.pem\n",
         encoding="utf-8",
     )
@@ -643,6 +659,7 @@ def test_fleet_repo_git_env_preserves_local_https_precedence(
 
     git(repo, "config", "http.proxy", "http://127.0.0.1:18084")
     git(repo, "config", "http.proxyAuthMethod", "digest")
+    git(repo, "config", "http.proxySSLCAInfo", "/tmp/local-proxy-ca.pem")
     git(repo, "config", "http.sslCAInfo", "/tmp/local-ca.pem")
     git(repo, "config", "credential.https://github.com.helper", "")
     git(repo, "config", "--add", "credential.https://github.com.helper", "local-helper")
@@ -685,6 +702,14 @@ def test_fleet_repo_git_env_preserves_local_https_precedence(
         stderr=subprocess.PIPE,
         check=False,
     )
+    proxy_ca_info = subprocess.run(
+        ["/usr/bin/git", "-C", str(repo), "config", "--get", "http.proxySSLCAInfo"],
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
     ca_info = subprocess.run(
         ["/usr/bin/git", "-C", str(repo), "config", "--get", "http.sslCAInfo"],
         env=env,
@@ -713,6 +738,8 @@ def test_fleet_repo_git_env_preserves_local_https_precedence(
     assert proxy.stdout.strip() == "http://127.0.0.1:18084"
     assert proxy_auth_method.returncode == 0, proxy_auth_method.stderr
     assert proxy_auth_method.stdout.strip() == "digest"
+    assert proxy_ca_info.returncode == 0, proxy_ca_info.stderr
+    assert proxy_ca_info.stdout.strip() == "/tmp/local-proxy-ca.pem"
     assert ca_info.returncode == 0, ca_info.stderr
     assert ca_info.stdout.strip() == "/tmp/local-ca.pem"
     assert helpers.returncode == 0, helpers.stderr
@@ -728,8 +755,10 @@ def test_fleet_member_local_config_allows_only_bounded_https_transport() -> None
         "http.sslCAPath",
         "http.proxy",
         "http.proxyAuthMethod",
+        "http.proxySSLCAInfo",
         "http.https://github.com.proxy",
         "http.https://github.com.proxyAuthMethod",
+        "http.https://github.com.proxySSLCAInfo",
         "http.https://github.com.sslCAInfo",
         "http.https://github.com:443.sslCAPath",
     ):
@@ -755,6 +784,7 @@ def test_fleet_member_transport_safety_validates_worktree_scope(
     git(repo, "config", "--worktree", "http.sslCAPath", "/tmp/worktree-ca-dir")
     git(repo, "config", "--worktree", "http.proxy", "http://127.0.0.1:18083")
     git(repo, "config", "--worktree", "http.proxyAuthMethod", "negotiate")
+    git(repo, "config", "--worktree", "http.proxySSLCAInfo", "/tmp/worktree-proxy-ca.pem")
 
     module.assert_fleet_member_git_transport_safe(
         repo,

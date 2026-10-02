@@ -2455,11 +2455,15 @@ def _fleet_tls_config_key_allowed(key: str) -> bool:
 
 def _fleet_proxy_config_key_allowed(key: str) -> bool:
     normalized = key.strip().lower()
-    if normalized in {"http.proxy", "http.proxyauthmethod"}:
+    if normalized in {
+        "http.proxy",
+        "http.proxyauthmethod",
+        "http.proxysslcainfo",
+    }:
         return True
     scoped = re.fullmatch(
         r"http\.https://(?:[^/@:]+@)?github\.com(?::([0-9]+))?"
-        r"(?:/[^ \t\r\n]*)?\.(?:proxy|proxyauthmethod)",
+        r"(?:/[^ \t\r\n]*)?\.(?:proxy|proxyauthmethod|proxysslcainfo)",
         normalized,
     )
     if scoped is None:
