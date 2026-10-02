@@ -2453,8 +2453,27 @@ def _fleet_tls_config_key_allowed(key: str) -> bool:
     return port is None or 1 <= int(port) <= 65535
 
 
+def _fleet_proxy_config_key_allowed(key: str) -> bool:
+    normalized = key.strip().lower()
+    if normalized == "http.proxy":
+        return True
+    scoped = re.fullmatch(
+        r"http\.https://(?:[^/@:]+@)?github\.com(?::([0-9]+))?"
+        r"(?:/[^ \t\r\n]*)?\.proxy",
+        normalized,
+    )
+    if scoped is None:
+        return False
+    port = scoped.group(1)
+    return port is None or 1 <= int(port) <= 65535
+
+
 def _fleet_https_config_key_allowed(key: str) -> bool:
-    return _fleet_credential_config_key_allowed(key) or _fleet_tls_config_key_allowed(key)
+    return (
+        _fleet_credential_config_key_allowed(key)
+        or _fleet_tls_config_key_allowed(key)
+        or _fleet_proxy_config_key_allowed(key)
+    )
 
 
 def _global_system_github_https_config(

@@ -393,6 +393,27 @@ def test_fleet_credential_config_key_allowed_matches_valid_https_github_scopes()
         assert module._fleet_credential_config_key_allowed(key) is False
 
 
+def test_fleet_proxy_config_key_allowed_preserves_only_bounded_github_proxies() -> None:
+    module = load_publisher()
+
+    for key in (
+        "http.proxy",
+        "http.https://github.com.proxy",
+        "http.https://github.com:443.proxy",
+        "http.https://bot@github.com/owner/repo.proxy",
+    ):
+        assert module._fleet_proxy_config_key_allowed(key) is True
+
+    for key in (
+        "http.https://github.com.evil.example.proxy",
+        "http.https://github.com:0.proxy",
+        "http.https://github.com:65536.proxy",
+        "http.http://github.com.proxy",
+        "http.sslVerify",
+    ):
+        assert module._fleet_proxy_config_key_allowed(key) is False
+
+
 def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overrides(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -430,7 +451,9 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
         "[http]\n"
         "    sslCAInfo = /tmp/global-ca.pem\n"
         "    sslCAPath = /tmp/global-ca-dir\n"
-        "    proxy = http://attacker.invalid:8080\n"
+        "    proxy = http://127.0.0.1:18081\n"
+        "[http \"https://github.com\"]\n"
+        "    proxy = http://127.0.0.1:18082\n"
         "[url \"ssh://attacker.invalid/\"]\n"
         "    insteadOf = https://github.com/\n"
         "[core]\n"
@@ -521,7 +544,12 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
         and value == "/tmp/global-ca-dir"
         for key, value in injected
     )
-    assert not any(key.lower().endswith(".proxy") for key, _value in injected)
+    assert ("http.proxy", "http://127.0.0.1:18081") in [
+        (key.lower(), value) for key, value in injected
+    ]
+    assert ("http.https://github.com.proxy", "http://127.0.0.1:18082") in [
+        (key.lower(), value) for key, value in injected
+    ]
 
     filled = subprocess.run(
         ["/usr/bin/git", "credential", "fill"],
