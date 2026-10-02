@@ -2864,6 +2864,8 @@ def _fleet_member_local_config_is_transport_override(key: str) -> bool:
     normalized = key.strip().lower()
     if normalized.startswith("credential."):
         return not _fleet_credential_config_key_allowed(normalized)
+    if normalized.startswith("http."):
+        return not _fleet_tls_config_key_allowed(normalized)
     return _authority_git_local_config_is_transport_override(normalized)
 
 

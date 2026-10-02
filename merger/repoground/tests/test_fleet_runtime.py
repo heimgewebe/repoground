@@ -556,6 +556,91 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
     assert ssh_override.returncode == 1
 
 
+def test_fleet_member_local_config_allows_only_bounded_tls_trust() -> None:
+    module = load_publisher()
+
+    for key in (
+        "http.sslCAInfo",
+        "http.sslCAPath",
+        "http.https://github.com.sslCAInfo",
+        "http.https://github.com:443.sslCAPath",
+    ):
+        assert module._fleet_member_local_config_is_transport_override(key) is False
+
+    for key in (
+        "http.proxy",
+        "http.sslVerify",
+        "http.https://github.com.evil.example.sslCAInfo",
+        "http.https://github.com:0.sslCAPath",
+    ):
+        assert module._fleet_member_local_config_is_transport_override(key) is True
+
+
+def test_remote_head_for_entry_preserves_checkout_local_https_tls_trust(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path, "member-local-tls")
+    remote = "https://github.com/heimgewebe/member.git"
+    git(repo, "remote", "add", "origin", remote)
+    git(repo, "config", "http.sslCAInfo", "/tmp/local-ca.pem")
+    git(repo, "config", "http.sslCAPath", "/tmp/local-ca-dir")
+    monkeypatch.setattr(
+        module,
+        "_global_system_github_https_config",
+        lambda _repo_path: [],
+    )
+    entry = module.RepoEntry(
+        key="heimgewebe/member",
+        owner="heimgewebe",
+        repo="member",
+        path=repo,
+        remote=remote,
+    )
+    observed: dict[str, object] = {}
+
+    def fake_remote_head(
+        repo_path: Path,
+        *,
+        remote: str = "origin",
+        env: dict[str, str] | None = None,
+    ) -> tuple[str, str, str]:
+        observed["repo_path"] = repo_path
+        observed["remote"] = remote
+        observed["env"] = env
+        return "origin/main", "main", sha
+
+    monkeypatch.setattr(module, "remote_head", fake_remote_head)
+
+    assert module.remote_head_for_entry(entry) == ("origin/main", "main", sha)
+    assert observed["repo_path"] == repo
+    assert observed["remote"] == remote
+    env = observed["env"]
+    assert isinstance(env, dict)
+
+    local_ca_info = subprocess.run(
+        ["/usr/bin/git", "-C", str(repo), "config", "--get", "http.sslCAInfo"],
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    local_ca_path = subprocess.run(
+        ["/usr/bin/git", "-C", str(repo), "config", "--get", "http.sslCAPath"],
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    assert local_ca_info.returncode == 0
+    assert local_ca_info.stdout.strip() == "/tmp/local-ca.pem"
+    assert local_ca_path.returncode == 0
+    assert local_ca_path.stdout.strip() == "/tmp/local-ca-dir"
+
+
 def test_remote_head_for_entry_preserves_checkout_local_https_credentials(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
