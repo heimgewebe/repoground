@@ -2881,10 +2881,12 @@ def _authority_git_local_config_is_transport_override(key: str) -> bool:
 
 def _fleet_member_local_config_is_transport_override(key: str) -> bool:
     normalized = key.strip().lower()
+    if normalized == "extensions.worktreeconfig":
+        return False
     if normalized.startswith("credential."):
         return not _fleet_credential_config_key_allowed(normalized)
     if normalized.startswith("http."):
-        return not _fleet_tls_config_key_allowed(normalized)
+        return not _fleet_https_config_key_allowed(normalized)
     return _authority_git_local_config_is_transport_override(normalized)
 
 
@@ -2978,18 +2980,73 @@ def assert_fleet_member_git_transport_safe(
         raise RuntimeError(
             "fleet repository local Git configuration is unavailable"
         )
+    local_keys = {
+        key.strip().lower()
+        for key in local_config.stdout.splitlines()
+        if key.strip()
+    }
     unsafe_keys = sorted(
-        {
-            key.strip().lower()
-            for key in local_config.stdout.splitlines()
-            if _fleet_member_local_config_is_transport_override(key)
-        }
+        key
+        for key in local_keys
+        if _fleet_member_local_config_is_transport_override(key)
     )
     if unsafe_keys:
         raise RuntimeError(
             "fleet repository has unsafe local Git transport configuration: "
             + ", ".join(unsafe_keys)
         )
+
+    if "extensions.worktreeconfig" in local_keys:
+        worktree_flag = run(
+            [
+                "git",
+                "-C",
+                str(repo_path),
+                "config",
+                "--local",
+                "--no-includes",
+                "--bool",
+                "--get",
+                "extensions.worktreeConfig",
+            ],
+            check=False,
+            env=env,
+        )
+        if worktree_flag.returncode != 0:
+            raise RuntimeError(
+                "fleet repository worktree Git configuration flag is unavailable"
+            )
+        if worktree_flag.stdout.strip().lower() == "true":
+            worktree_config = run(
+                [
+                    "git",
+                    "-C",
+                    str(repo_path),
+                    "config",
+                    "--worktree",
+                    "--no-includes",
+                    "--name-only",
+                    "--list",
+                ],
+                check=False,
+                env=env,
+            )
+            if worktree_config.returncode != 0:
+                raise RuntimeError(
+                    "fleet repository worktree Git configuration is unavailable"
+                )
+            unsafe_worktree_keys = sorted(
+                {
+                    key.strip().lower()
+                    for key in worktree_config.stdout.splitlines()
+                    if _fleet_member_local_config_is_transport_override(key)
+                }
+            )
+            if unsafe_worktree_keys:
+                raise RuntimeError(
+                    "fleet repository has unsafe worktree Git transport configuration: "
+                    + ", ".join(unsafe_worktree_keys)
+                )
 
 
 def remote_head_for_entry(entry: RepoEntry) -> tuple[str, str, str]:

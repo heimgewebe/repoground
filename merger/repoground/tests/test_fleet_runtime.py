@@ -584,24 +584,53 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
     assert ssh_override.returncode == 1
 
 
-def test_fleet_member_local_config_allows_only_bounded_tls_trust() -> None:
+def test_fleet_member_local_config_allows_only_bounded_https_transport() -> None:
     module = load_publisher()
 
     for key in (
         "http.sslCAInfo",
         "http.sslCAPath",
+        "http.proxy",
+        "http.https://github.com.proxy",
         "http.https://github.com.sslCAInfo",
         "http.https://github.com:443.sslCAPath",
     ):
         assert module._fleet_member_local_config_is_transport_override(key) is False
 
     for key in (
-        "http.proxy",
         "http.sslVerify",
+        "http.https://github.com.evil.example.proxy",
         "http.https://github.com.evil.example.sslCAInfo",
         "http.https://github.com:0.sslCAPath",
     ):
         assert module._fleet_member_local_config_is_transport_override(key) is True
+
+
+def test_fleet_member_transport_safety_validates_worktree_scope(
+    tmp_path: Path,
+) -> None:
+    module = load_publisher()
+    repo, _sha = initialize_repository(tmp_path, "member-worktree-config")
+    git(repo, "remote", "add", "origin", "https://github.com/heimgewebe/member.git")
+    git(repo, "config", "extensions.worktreeConfig", "true")
+    git(repo, "config", "--worktree", "core.sparseCheckout", "true")
+    git(repo, "config", "--worktree", "http.sslCAPath", "/tmp/worktree-ca-dir")
+    git(repo, "config", "--worktree", "http.proxy", "http://127.0.0.1:18083")
+
+    module.assert_fleet_member_git_transport_safe(
+        repo,
+        env=module._authority_git_env(),
+    )
+
+    git(repo, "config", "--worktree", "core.sshCommand", "/bin/false")
+    with pytest.raises(
+        RuntimeError,
+        match="unsafe worktree Git transport configuration: core.sshcommand",
+    ):
+        module.assert_fleet_member_git_transport_safe(
+            repo,
+            env=module._authority_git_env(),
+        )
 
 
 def test_remote_head_for_entry_preserves_checkout_local_https_tls_trust(
