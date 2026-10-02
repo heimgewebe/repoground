@@ -2360,6 +2360,9 @@ _AUTHORITY_PROXY_ENV_NAMES = frozenset({"all_proxy", "http_proxy", "https_proxy"
 _AUTHORITY_TLS_ENV_NAMES = frozenset(
     {"curl_ca_bundle", "ssl_cert_dir", "ssl_cert_file"}
 )
+_FLEET_MEMBER_TLS_ENV_NAMES = _AUTHORITY_TLS_ENV_NAMES | frozenset(
+    {"git_ssl_cainfo"}
+)
 _AUTHORITY_LOADER_ENV_NAMES = frozenset({"ld_library_path", "ld_preload"})
 
 
@@ -2416,7 +2419,26 @@ def _fleet_credential_config_key_allowed(key: str) -> bool:
     return port is None or 1 <= int(port) <= 65535
 
 
-def _global_system_github_credential_config(
+def _fleet_tls_config_key_allowed(key: str) -> bool:
+    normalized = key.strip().lower()
+    if normalized == "http.sslcainfo":
+        return True
+    scoped = re.fullmatch(
+        r"http\.https://(?:[^/@:]+@)?github\.com(?::([0-9]+))?"
+        r"(?:/[^ \t\r\n]*)?\.sslcainfo",
+        normalized,
+    )
+    if scoped is None:
+        return False
+    port = scoped.group(1)
+    return port is None or 1 <= int(port) <= 65535
+
+
+def _fleet_https_config_key_allowed(key: str) -> bool:
+    return _fleet_credential_config_key_allowed(key) or _fleet_tls_config_key_allowed(key)
+
+
+def _global_system_github_https_config(
     repo_path: Path,
 ) -> list[tuple[str, str]]:
     env = _credential_config_discovery_env()
@@ -2430,7 +2452,7 @@ def _global_system_github_credential_config(
             "--show-scope",
             "--null",
             "--get-regexp",
-            r"^credential\.",
+            r"^(credential|http)\.",
         ],
         env=env,
         text=True,
@@ -2459,7 +2481,7 @@ def _global_system_github_credential_config(
         key, separator, value = record.partition("\n")
         if not separator:
             raise RuntimeError("Git credential configuration record is malformed")
-        if _fleet_credential_config_key_allowed(key):
+        if _fleet_https_config_key_allowed(key):
             entries.append((key, value))
     return entries
 
@@ -2483,9 +2505,13 @@ def _fleet_repo_git_env(repo_path: Path) -> dict[str, str]:
     env = _authority_git_env()
     env["PATH"] = _fleet_member_credential_helper_path()
     for name, value in os.environ.items():
-        if name.lower() in _AUTHORITY_PROXY_ENV_NAMES:
+        normalized = name.lower()
+        if (
+            normalized in _AUTHORITY_PROXY_ENV_NAMES
+            or normalized in _FLEET_MEMBER_TLS_ENV_NAMES
+        ):
             env[name] = value
-    entries = _global_system_github_credential_config(repo_path)
+    entries = _global_system_github_https_config(repo_path)
     if not entries:
         return env
     env["GIT_CONFIG_COUNT"] = str(len(entries))
@@ -2947,7 +2973,11 @@ def remote_head_for_entry(entry: RepoEntry) -> tuple[str, str, str]:
     configured_urls = [
         line.strip() for line in configured.stdout.splitlines() if line.strip()
     ]
-    if configured.returncode != 0 or configured_urls != [entry.remote]:
+    if (
+        configured.returncode != 0
+        or not configured_urls
+        or configured_urls[0] != entry.remote
+    ):
         raise RuntimeError(
             f"fleet repository origin changed since discovery: {entry.key}"
         )
@@ -2988,7 +3018,11 @@ def remote_head_for_entry(entry: RepoEntry) -> tuple[str, str, str]:
         for line in configured_after.stdout.splitlines()
         if line.strip()
     ]
-    if configured_after.returncode != 0 or configured_after_urls != [origin_url]:
+    if (
+        configured_after.returncode != 0
+        or not configured_after_urls
+        or configured_after_urls[0] != origin_url
+    ):
         raise RuntimeError(
             f"fleet repository origin changed during resolution: {entry.key}"
         )

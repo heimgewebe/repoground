@@ -269,6 +269,50 @@ def test_remote_head_for_entry_allows_separate_pushurl(
     assert module.remote_head_for_entry(entry) == ("origin/main", "main", sha)
 
 
+def test_remote_head_for_entry_allows_secondary_fetch_urls(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path, "member-secondary-fetch")
+    remote = "https://github.com/heimgewebe/member.git"
+    git(repo, "remote", "add", "origin", remote)
+    git(
+        repo,
+        "remote",
+        "set-url",
+        "--add",
+        "origin",
+        "https://github.com/heimgewebe/member-mirror.git",
+    )
+    entry = module.RepoEntry(
+        key="heimgewebe/member",
+        owner="heimgewebe",
+        repo="member",
+        path=repo,
+        remote=remote,
+    )
+    observed: dict[str, object] = {}
+
+    def fake_remote_head(
+        repo_path: Path,
+        *,
+        remote: str = "origin",
+        env: dict[str, str] | None = None,
+    ) -> tuple[str, str, str]:
+        observed["repo_path"] = repo_path
+        observed["remote"] = remote
+        observed["env"] = env
+        return "origin/main", "main", sha
+
+    monkeypatch.setattr(module, "remote_head", fake_remote_head)
+
+    assert module.remote_head_for_entry(entry) == ("origin/main", "main", sha)
+    assert observed["repo_path"] == repo
+    assert observed["remote"] == remote
+    assert isinstance(observed["env"], dict)
+
+
 def test_remote_head_for_entry_rejects_origin_change_since_discovery(
     tmp_path: Path,
 ) -> None:
@@ -383,6 +427,9 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
     (home / ".gitconfig").write_text(
         f"[includeIf \"gitdir:{git_dir}\"]\n"
         f"    path = {included}\n"
+        "[http]\n"
+        "    sslCAInfo = /tmp/global-ca.pem\n"
+        "    proxy = http://attacker.invalid:8080\n"
         "[url \"ssh://attacker.invalid/\"]\n"
         "    insteadOf = https://github.com/\n"
         "[core]\n"
@@ -397,7 +444,10 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
     monkeypatch.setenv("http_proxy", "http://127.0.0.1:18080")
     monkeypatch.setenv("ALL_PROXY", "socks5h://127.0.0.1:11080")
     monkeypatch.setenv("NO_PROXY", "localhost,github.example.invalid")
-    monkeypatch.setenv("SSL_CERT_FILE", "/tmp/attacker-ca.pem")
+    monkeypatch.setenv("CURL_CA_BUNDLE", "/tmp/curl-ca.pem")
+    monkeypatch.setenv("SSL_CERT_DIR", "/tmp/custom-ca-dir")
+    monkeypatch.setenv("SSL_CERT_FILE", "/tmp/custom-ca.pem")
+    monkeypatch.setenv("GIT_SSL_CAINFO", "/tmp/git-ca.pem")
     monkeypatch.setenv("GIT_SSL_NO_VERIFY", "1")
 
     authority_env = module._authority_git_env()
@@ -414,7 +464,10 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
     assert "http_proxy" not in authority_env
     assert "ALL_PROXY" not in authority_env
     assert authority_env["NO_PROXY"] == "localhost,github.example.invalid"
+    assert "CURL_CA_BUNDLE" not in authority_env
+    assert "SSL_CERT_DIR" not in authority_env
     assert "SSL_CERT_FILE" not in authority_env
+    assert "GIT_SSL_CAINFO" not in authority_env
     assert "GIT_SSL_NO_VERIFY" not in authority_env
 
     env = module._fleet_repo_git_env(repo)
@@ -422,7 +475,10 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
     assert env["http_proxy"] == "http://127.0.0.1:18080"
     assert env["ALL_PROXY"] == "socks5h://127.0.0.1:11080"
     assert env["NO_PROXY"] == "localhost,github.example.invalid"
-    assert "SSL_CERT_FILE" not in env
+    assert env["CURL_CA_BUNDLE"] == "/tmp/curl-ca.pem"
+    assert env["SSL_CERT_DIR"] == "/tmp/custom-ca-dir"
+    assert env["SSL_CERT_FILE"] == "/tmp/custom-ca.pem"
+    assert env["GIT_SSL_CAINFO"] == "/tmp/git-ca.pem"
     assert "GIT_SSL_NO_VERIFY" not in env
     injected = [
         (
@@ -451,6 +507,12 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
         and value == "bot"
         for key, value in injected
     )
+    assert any(
+        key.lower() == "http.sslcainfo"
+        and value == "/tmp/global-ca.pem"
+        for key, value in injected
+    )
+    assert not any(key.lower().endswith(".proxy") for key, _value in injected)
 
     filled = subprocess.run(
         ["/usr/bin/git", "credential", "fill"],
@@ -504,7 +566,7 @@ def test_remote_head_for_entry_preserves_checkout_local_https_credentials(
     git(repo, "config", "credential.https://github.com.helper", f"!{helper}")
     monkeypatch.setattr(
         module,
-        "_global_system_github_credential_config",
+        "_global_system_github_https_config",
         lambda _repo_path: [],
     )
     entry = module.RepoEntry(
