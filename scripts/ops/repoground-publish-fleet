@@ -2459,11 +2459,16 @@ def _fleet_proxy_config_key_allowed(key: str) -> bool:
         "http.proxy",
         "http.proxyauthmethod",
         "http.proxysslcainfo",
+        "http.proxysslcert",
+        "http.proxysslcertpasswordprotected",
+        "http.proxysslkey",
     }:
         return True
     scoped = re.fullmatch(
         r"http\.https://(?:[^/@:]+@)?github\.com(?::([0-9]+))?"
-        r"(?:/[^ \t\r\n]*)?\.(?:proxy|proxyauthmethod|proxysslcainfo)",
+        r"(?:/[^ \t\r\n]*)?\."
+        r"(?:proxy|proxyauthmethod|proxysslcainfo|proxysslcert|"
+        r"proxysslcertpasswordprotected|proxysslkey)",
         normalized,
     )
     if scoped is None:

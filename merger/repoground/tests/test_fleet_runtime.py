@@ -400,13 +400,20 @@ def test_fleet_proxy_config_key_allowed_preserves_only_bounded_github_proxies() 
         "http.proxy",
         "http.proxyAuthMethod",
         "http.proxySSLCAInfo",
+        "http.proxySSLCert",
+        "http.proxySSLCertPasswordProtected",
+        "http.proxySSLKey",
         "http.https://github.com.proxy",
         "http.https://github.com.proxyAuthMethod",
         "http.https://github.com.proxySSLCAInfo",
+        "http.https://github.com.proxySSLCert",
+        "http.https://github.com.proxySSLCertPasswordProtected",
+        "http.https://github.com.proxySSLKey",
         "http.https://github.com:443.proxy",
         "http.https://github.com:443.proxyAuthMethod",
         "http.https://bot@github.com/owner/repo.proxy",
         "http.https://bot@github.com/owner/repo.proxyAuthMethod",
+        "http.https://bot@github.com/owner/repo.proxySSLKey",
     ):
         assert module._fleet_proxy_config_key_allowed(key) is True
 
@@ -414,13 +421,14 @@ def test_fleet_proxy_config_key_allowed_preserves_only_bounded_github_proxies() 
         "http.https://github.com.evil.example.proxy",
         "http.https://github.com.evil.example.proxyAuthMethod",
         "http.https://github.com.evil.example.proxySSLCAInfo",
+        "http.https://github.com.evil.example.proxySSLKey",
         "http.https://github.com:0.proxy",
         "http.https://github.com:65536.proxyAuthMethod",
         "http.http://github.com.proxy",
         "http.proxyAuthMethodExtra",
-        "http.proxySSLCert",
-        "http.proxySSLCertPasswordProtected",
-        "http.proxySSLKey",
+        "http.proxySSLCAPath",
+        "http.proxySSLVerify",
+        "http.proxySSLCertExtra",
         "http.sslVerify",
     ):
         assert module._fleet_proxy_config_key_allowed(key) is False
@@ -466,6 +474,9 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
         "    proxy = http://127.0.0.1:18081\n"
         "    proxyAuthMethod = basic\n"
         "    proxySSLCAInfo = /tmp/global-proxy-ca.pem\n"
+        "    proxySSLCert = /tmp/global-proxy-client.pem\n"
+        "    proxySSLCertPasswordProtected = true\n"
+        "    proxySSLKey = /tmp/global-proxy-client.key\n"
         "[http \"https://github.com\"]\n"
         "    proxy = http://127.0.0.1:18082\n"
         "    proxyAuthMethod = ntlm\n"
@@ -600,6 +611,15 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
         "http.https://github.com.proxysslcainfo",
         "/tmp/github-proxy-ca.pem",
     ) in [(key.lower(), value) for key, value in injected]
+    assert ("http.proxysslcert", "/tmp/global-proxy-client.pem") in [
+        (key.lower(), value) for key, value in injected
+    ]
+    assert ("http.proxysslcertpasswordprotected", "true") in [
+        (key.lower(), value) for key, value in injected
+    ]
+    assert ("http.proxysslkey", "/tmp/global-proxy-client.key") in [
+        (key.lower(), value) for key, value in injected
+    ]
 
     filled = subprocess.run(
         ["/usr/bin/git", "credential", "fill"],
@@ -756,9 +776,13 @@ def test_fleet_member_local_config_allows_only_bounded_https_transport() -> None
         "http.proxy",
         "http.proxyAuthMethod",
         "http.proxySSLCAInfo",
+        "http.proxySSLCert",
+        "http.proxySSLCertPasswordProtected",
+        "http.proxySSLKey",
         "http.https://github.com.proxy",
         "http.https://github.com.proxyAuthMethod",
         "http.https://github.com.proxySSLCAInfo",
+        "http.https://github.com.proxySSLKey",
         "http.https://github.com.sslCAInfo",
         "http.https://github.com:443.sslCAPath",
     ):
@@ -766,6 +790,8 @@ def test_fleet_member_local_config_allows_only_bounded_https_transport() -> None
 
     for key in (
         "http.sslVerify",
+        "http.proxySSLVerify",
+        "http.proxySSLCAPath",
         "http.https://github.com.evil.example.proxy",
         "http.https://github.com.evil.example.sslCAInfo",
         "http.https://github.com:0.sslCAPath",
@@ -785,6 +811,9 @@ def test_fleet_member_transport_safety_validates_worktree_scope(
     git(repo, "config", "--worktree", "http.proxy", "http://127.0.0.1:18083")
     git(repo, "config", "--worktree", "http.proxyAuthMethod", "negotiate")
     git(repo, "config", "--worktree", "http.proxySSLCAInfo", "/tmp/worktree-proxy-ca.pem")
+    git(repo, "config", "--worktree", "http.proxySSLCert", "/tmp/worktree-proxy-client.pem")
+    git(repo, "config", "--worktree", "http.proxySSLCertPasswordProtected", "true")
+    git(repo, "config", "--worktree", "http.proxySSLKey", "/tmp/worktree-proxy-client.key")
 
     module.assert_fleet_member_git_transport_safe(
         repo,
