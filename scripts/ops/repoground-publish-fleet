@@ -538,10 +538,15 @@ def parse_github_remote(remote: str) -> tuple[str, str] | None:
 
 def github_remote_uses_authenticated_transport(remote: str) -> bool:
     value = remote.strip()
-    if value.startswith("https://") or value.startswith("ssh://"):
+    if value.startswith("https://"):
         return parse_github_remote(value) is not None
     if re.fullmatch(
-        r"(?:[^@/:]+@)?github\.com:[^/]+/[^/]+(?:\.git)?/?",
+        r"ssh://[^/@:]+@github\.com(?::[0-9]+)?/[^/]+/[^/]+(?:\.git)?/?",
+        value,
+    ):
+        return parse_github_remote(value) is not None
+    if re.fullmatch(
+        r"[^@/:]+@github\.com:[^/]+/[^/]+(?:\.git)?/?",
         value,
     ):
         return parse_github_remote(value) is not None

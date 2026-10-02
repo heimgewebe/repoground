@@ -150,7 +150,7 @@ def test_parse_github_remote_requires_exact_github_host() -> None:
         assert module.parse_github_remote(remote) is None
 
 
-def test_authenticated_membership_transport_rejects_http_and_git() -> None:
+def test_authenticated_membership_transport_requires_https_or_explicit_ssh_user() -> None:
     module = load_publisher()
 
     for remote in (
@@ -165,6 +165,8 @@ def test_authenticated_membership_transport_rejects_http_and_git() -> None:
     for remote in (
         "http://github.com/heimgewebe/metarepo.git",
         "git://github.com/heimgewebe/metarepo.git",
+        "ssh://github.com/heimgewebe/metarepo.git",
+        "github.com:heimgewebe/metarepo.git",
     ):
         assert module.parse_github_remote(remote) == ("heimgewebe", "metarepo")
         assert module.github_remote_uses_authenticated_transport(remote) is False
