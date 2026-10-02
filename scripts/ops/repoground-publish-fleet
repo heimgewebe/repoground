@@ -2539,7 +2539,11 @@ def _fleet_member_credential_helper_path() -> str:
     return os.pathsep.join(paths)
 
 
-def _fleet_repo_git_env(repo_path: Path) -> dict[str, str]:
+def _fleet_repo_git_env(
+    repo_path: Path,
+    *,
+    safe_global_config: Path | None = None,
+) -> dict[str, str]:
     env = _authority_git_env()
     env["PATH"] = _fleet_member_credential_helper_path()
     for name, value in os.environ.items():
@@ -2552,10 +2556,49 @@ def _fleet_repo_git_env(repo_path: Path) -> dict[str, str]:
     entries = _global_system_github_https_config(repo_path)
     if not entries:
         return env
-    env["GIT_CONFIG_COUNT"] = str(len(entries))
-    for index, (key, value) in enumerate(entries):
-        env[f"GIT_CONFIG_KEY_{index}"] = key
-        env[f"GIT_CONFIG_VALUE_{index}"] = value
+    if safe_global_config is None:
+        raise RuntimeError(
+            "fleet member inherited Git configuration requires a scoped config path"
+        )
+    if not safe_global_config.is_absolute():
+        raise RuntimeError("fleet member scoped Git config path must be absolute")
+    try:
+        descriptor = os.open(
+            safe_global_config,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC,
+            0o600,
+        )
+    except OSError as exc:
+        raise RuntimeError(
+            "fleet member scoped Git configuration is unavailable"
+        ) from exc
+    os.close(descriptor)
+
+    writer_env = _authority_git_env()
+    for key, value in entries:
+        cp = subprocess.run(
+            [
+                "/usr/bin/git",
+                "config",
+                "--file",
+                str(safe_global_config),
+                "--add",
+                key,
+                value,
+            ],
+            env=writer_env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if cp.returncode != 0:
+            raise RuntimeError(
+                "fleet member scoped Git configuration could not be written"
+            )
+    os.chmod(safe_global_config, 0o600)
+    env["GIT_CONFIG_GLOBAL"] = str(safe_global_config)
+    env["GIT_CONFIG_SYSTEM"] = os.devnull
     return env
 
 
@@ -3088,12 +3131,19 @@ def remote_head_for_entry(entry: RepoEntry) -> tuple[str, str, str]:
             f"fleet repository origin transport must use HTTPS or SSH: {entry.key}"
         )
 
-    network_env = (
-        _fleet_repo_git_env(entry.path)
-        if origin_url.strip().lower().startswith("https://")
-        else _fleet_repo_ssh_env()
-    )
-    resolved = remote_head(entry.path, remote=origin_url, env=network_env)
+    if origin_url.strip().lower().startswith("https://"):
+        with tempfile.TemporaryDirectory(
+            prefix="repoground-fleet-member-gitconfig-",
+            dir="/tmp",
+        ) as raw_config_root:
+            network_env = _fleet_repo_git_env(
+                entry.path,
+                safe_global_config=Path(raw_config_root) / "global.gitconfig",
+            )
+            resolved = remote_head(entry.path, remote=origin_url, env=network_env)
+    else:
+        network_env = _fleet_repo_ssh_env()
+        resolved = remote_head(entry.path, remote=origin_url, env=network_env)
 
     assert_fleet_member_git_transport_safe(entry.path, env=transport_env)
     configured_after = run(

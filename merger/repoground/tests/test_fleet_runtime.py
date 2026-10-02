@@ -496,7 +496,14 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
     assert "GIT_SSL_CAPATH" not in authority_env
     assert "GIT_SSL_NO_VERIFY" not in authority_env
 
-    env = module._fleet_repo_git_env(repo)
+    safe_global_config = tmp_path / "sanitized-member-global.gitconfig"
+    env = module._fleet_repo_git_env(
+        repo,
+        safe_global_config=safe_global_config,
+    )
+    assert env["GIT_CONFIG_GLOBAL"] == str(safe_global_config)
+    assert env["GIT_CONFIG_SYSTEM"] == os.devnull
+    assert "GIT_CONFIG_COUNT" not in env
     assert env["HTTPS_PROXY"] == "http://127.0.0.1:18443"
     assert env["http_proxy"] == "http://127.0.0.1:18080"
     assert env["ALL_PROXY"] == "socks5h://127.0.0.1:11080"
@@ -507,13 +514,27 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
     assert env["GIT_SSL_CAINFO"] == "/tmp/git-ca.pem"
     assert env["GIT_SSL_CAPATH"] == "/tmp/git-ca-dir"
     assert "GIT_SSL_NO_VERIFY" not in env
-    injected = [
-        (
-            env[f"GIT_CONFIG_KEY_{index}"],
-            env[f"GIT_CONFIG_VALUE_{index}"],
-        )
-        for index in range(int(env.get("GIT_CONFIG_COUNT", "0")))
-    ]
+    sanitized_cp = subprocess.run(
+        [
+            "/usr/bin/git",
+            "config",
+            "--file",
+            str(safe_global_config),
+            "--null",
+            "--get-regexp",
+            r"^(credential|http)\.",
+        ],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    assert sanitized_cp.returncode == 0, sanitized_cp.stderr
+    injected = []
+    for record in [item for item in sanitized_cp.stdout.split("\0") if item]:
+        key, separator, value = record.partition("\n")
+        assert separator
+        injected.append((key, value))
     assert any(
         key == "credential.https://github.com.helper"
         and value == f"!{helper}"
@@ -582,6 +603,87 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
     )
     assert url_override.returncode == 1
     assert ssh_override.returncode == 1
+
+
+def test_fleet_repo_git_env_preserves_local_https_precedence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, _sha = initialize_repository(tmp_path, "member-local-precedence")
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".gitconfig").write_text(
+        "[credential \"https://github.com\"]\n"
+        "    helper = global-helper\n"
+        "[http]\n"
+        "    proxy = http://127.0.0.1:18081\n"
+        "    sslCAInfo = /tmp/global-ca.pem\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(home))
+    for name in module._AUTHORITY_GIT_FORBIDDEN_ENV:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.delenv("GIT_CONFIG_COUNT", raising=False)
+
+    git(repo, "config", "http.proxy", "http://127.0.0.1:18084")
+    git(repo, "config", "http.sslCAInfo", "/tmp/local-ca.pem")
+    git(repo, "config", "credential.https://github.com.helper", "")
+    git(repo, "config", "--add", "credential.https://github.com.helper", "local-helper")
+
+    safe_global_config = tmp_path / "precedence-global.gitconfig"
+    env = module._fleet_repo_git_env(
+        repo,
+        safe_global_config=safe_global_config,
+    )
+
+    proxy = subprocess.run(
+        [
+            "/usr/bin/git",
+            "-C",
+            str(repo),
+            "config",
+            "--get-urlmatch",
+            "http.proxy",
+            "https://github.com/heimgewebe/member.git",
+        ],
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    ca_info = subprocess.run(
+        ["/usr/bin/git", "-C", str(repo), "config", "--get", "http.sslCAInfo"],
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    helpers = subprocess.run(
+        [
+            "/usr/bin/git",
+            "-C",
+            str(repo),
+            "config",
+            "--get-all",
+            "credential.https://github.com.helper",
+        ],
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+    assert proxy.returncode == 0, proxy.stderr
+    assert proxy.stdout.strip() == "http://127.0.0.1:18084"
+    assert ca_info.returncode == 0, ca_info.stderr
+    assert ca_info.stdout.strip() == "/tmp/local-ca.pem"
+    assert helpers.returncode == 0, helpers.stderr
+    assert helpers.stdout.splitlines() == ["global-helper", "", "local-helper"]
+    assert "GIT_CONFIG_COUNT" not in env
 
 
 def test_fleet_member_local_config_allows_only_bounded_https_transport() -> None:
@@ -796,7 +898,10 @@ def test_fleet_repo_git_env_preserves_bounded_credential_helper_lookup(
         monkeypatch.delenv(name, raising=False)
     monkeypatch.delenv("GIT_CONFIG_COUNT", raising=False)
 
-    env = module._fleet_repo_git_env(repo)
+    env = module._fleet_repo_git_env(
+        repo,
+        safe_global_config=tmp_path / "credential-helper-global.gitconfig",
+    )
 
     assert env["PATH"] == os.pathsep.join(
         ["/usr/bin", "/bin", "/usr/local/bin", str(helper_dir)]
@@ -1122,8 +1227,13 @@ def test_remote_head_for_entry_uses_credential_env_for_https(
     credential_env["GIT_CONFIG_VALUE_0"] = "!/bin/true"
     observed: dict[str, object] = {}
 
-    def fake_fleet_repo_git_env(repo_path: Path) -> dict[str, str]:
+    def fake_fleet_repo_git_env(
+        repo_path: Path,
+        *,
+        safe_global_config: Path | None = None,
+    ) -> dict[str, str]:
         assert repo_path == repo
+        assert safe_global_config is not None
         return credential_env
 
     monkeypatch.setattr(module, "_fleet_repo_git_env", fake_fleet_repo_git_env)
