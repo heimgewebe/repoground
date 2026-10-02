@@ -429,6 +429,7 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
         f"    path = {included}\n"
         "[http]\n"
         "    sslCAInfo = /tmp/global-ca.pem\n"
+        "    sslCAPath = /tmp/global-ca-dir\n"
         "    proxy = http://attacker.invalid:8080\n"
         "[url \"ssh://attacker.invalid/\"]\n"
         "    insteadOf = https://github.com/\n"
@@ -448,6 +449,7 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
     monkeypatch.setenv("SSL_CERT_DIR", "/tmp/custom-ca-dir")
     monkeypatch.setenv("SSL_CERT_FILE", "/tmp/custom-ca.pem")
     monkeypatch.setenv("GIT_SSL_CAINFO", "/tmp/git-ca.pem")
+    monkeypatch.setenv("GIT_SSL_CAPATH", "/tmp/git-ca-dir")
     monkeypatch.setenv("GIT_SSL_NO_VERIFY", "1")
 
     authority_env = module._authority_git_env()
@@ -468,6 +470,7 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
     assert "SSL_CERT_DIR" not in authority_env
     assert "SSL_CERT_FILE" not in authority_env
     assert "GIT_SSL_CAINFO" not in authority_env
+    assert "GIT_SSL_CAPATH" not in authority_env
     assert "GIT_SSL_NO_VERIFY" not in authority_env
 
     env = module._fleet_repo_git_env(repo)
@@ -479,6 +482,7 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
     assert env["SSL_CERT_DIR"] == "/tmp/custom-ca-dir"
     assert env["SSL_CERT_FILE"] == "/tmp/custom-ca.pem"
     assert env["GIT_SSL_CAINFO"] == "/tmp/git-ca.pem"
+    assert env["GIT_SSL_CAPATH"] == "/tmp/git-ca-dir"
     assert "GIT_SSL_NO_VERIFY" not in env
     injected = [
         (
@@ -510,6 +514,11 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
     assert any(
         key.lower() == "http.sslcainfo"
         and value == "/tmp/global-ca.pem"
+        for key, value in injected
+    )
+    assert any(
+        key.lower() == "http.sslcapath"
+        and value == "/tmp/global-ca-dir"
         for key, value in injected
     )
     assert not any(key.lower().endswith(".proxy") for key, _value in injected)
@@ -4047,6 +4056,37 @@ def test_regression_canonical_inputs_only() -> None:
     assert "merger/repoground/cli/cmd_ground.py" in module.GENERATOR_INPUT_PATHS
     assert not any("lenskit" in path for path in module.GENERATOR_INPUT_PATHS)
     assert not any("repobrief" in path for path in module.GENERATOR_INPUT_PATHS)
+
+
+def test_discover_uses_literal_origin_when_global_insteadof_rewrites(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    repos_root = tmp_path / "repos"
+    repos_root.mkdir()
+    monkeypatch.setattr(module, "REPOS_ROOT", repos_root)
+
+    repo, _ = initialize_repository(repos_root, "member")
+    literal = "https://github.com/heimgewebe/member.git"
+    git(repo, "remote", "add", "origin", literal)
+
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".gitconfig").write_text(
+        "[url \"ssh://git@github.com/\"]\n"
+        "    insteadOf = https://github.com/\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(home))
+
+    assert git(repo, "remote", "get-url", "origin") == (
+        "ssh://git@github.com/heimgewebe/member.git"
+    )
+
+    entries = module.discover()
+    assert len(entries) == 1
+    assert entries[0].key == "heimgewebe/member"
+    assert entries[0].remote == literal
 
 
 def test_regression_discover_canonicalizes_retired_lenskit_alias(

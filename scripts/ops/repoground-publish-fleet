@@ -611,9 +611,28 @@ def discover() -> list[RepoEntry]:
             continue
         if not is_top_level_git(path):
             continue
-        remote = run(
-            ["git", "-C", str(path), "remote", "get-url", "origin"], check=False
-        ).stdout.strip()
+        configured = run(
+            [
+                "git",
+                "-C",
+                str(path),
+                "config",
+                "--local",
+                "--no-includes",
+                "--get-all",
+                "remote.origin.url",
+            ],
+            check=False,
+            env=_authority_git_env(),
+        )
+        configured_urls = [
+            line.strip()
+            for line in configured.stdout.splitlines()
+            if line.strip()
+        ]
+        if configured.returncode != 0 or not configured_urls:
+            continue
+        remote = configured_urls[0]
         parsed = parse_github_remote(remote)
         if not parsed:
             continue
@@ -2361,7 +2380,7 @@ _AUTHORITY_TLS_ENV_NAMES = frozenset(
     {"curl_ca_bundle", "ssl_cert_dir", "ssl_cert_file"}
 )
 _FLEET_MEMBER_TLS_ENV_NAMES = _AUTHORITY_TLS_ENV_NAMES | frozenset(
-    {"git_ssl_cainfo"}
+    {"git_ssl_cainfo", "git_ssl_capath"}
 )
 _AUTHORITY_LOADER_ENV_NAMES = frozenset({"ld_library_path", "ld_preload"})
 
@@ -2421,11 +2440,11 @@ def _fleet_credential_config_key_allowed(key: str) -> bool:
 
 def _fleet_tls_config_key_allowed(key: str) -> bool:
     normalized = key.strip().lower()
-    if normalized == "http.sslcainfo":
+    if normalized in {"http.sslcainfo", "http.sslcapath"}:
         return True
     scoped = re.fullmatch(
         r"http\.https://(?:[^/@:]+@)?github\.com(?::([0-9]+))?"
-        r"(?:/[^ \t\r\n]*)?\.sslcainfo",
+        r"(?:/[^ \t\r\n]*)?\.(?:sslcainfo|sslcapath)",
         normalized,
     )
     if scoped is None:
