@@ -3463,11 +3463,7 @@ def _fleet_member_ssh_auth_options(
             if value.startswith("~/"):
                 value = str(home / value[2:])
             if key == "identityfile":
-                if value.lower() == "none":
-                    identity_files.clear()
-                    identity_files.append("none")
-                    continue
-                identity_files.append(value)
+                identity_files.append("none" if value.lower() == "none" else value)
                 if len(identity_files) > _FLEET_MEMBER_SSH_MAX_AUTH_FILES:
                     raise RuntimeError("fleet member SSH identity file list is too large")
             elif key == "certificatefile":

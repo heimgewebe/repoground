@@ -2096,7 +2096,9 @@ def test_fleet_member_ssh_identity_file_none_is_preserved(
     argv = shlex.split(command)
 
     assert "IdentityFile=none" in argv
-    assert str(ssh_dir / "ignored-before-none") not in argv
+    preceding = str(ssh_dir / "ignored-before-none")
+    assert preceding in argv
+    assert argv.index(preceding) < argv.index("IdentityFile=none")
 
 
 def test_fleet_member_ssh_include_expands_nested_auth_only(
