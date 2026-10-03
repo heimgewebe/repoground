@@ -1239,6 +1239,82 @@ def test_fleet_repo_git_env_preserves_bounded_credential_helper_lookup(
     assert "password=path-pass" in filled.stdout
 
 
+def test_fleet_repo_git_env_preserves_bounded_git_askpass(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, _sha = initialize_repository(tmp_path, "askpass-member")
+    home = tmp_path / "home"
+    home.mkdir()
+    askpass = tmp_path / "git-askpass"
+    askpass.write_text(
+        "#!/bin/sh\n"
+        "case \"$1\" in\n"
+        "  *Username*) printf 'askpass-user\\n' ;;\n"
+        "  *Password*) printf 'askpass-pass\\n' ;;\n"
+        "  *) exit 1 ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    askpass.chmod(0o700)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("GIT_ASKPASS", str(askpass))
+
+    authority_env = module._authority_git_env()
+    assert "GIT_ASKPASS" not in authority_env
+
+    env = module._fleet_repo_git_env(repo)
+    assert env["GIT_ASKPASS"] == str(askpass.resolve())
+    assert env["GIT_TERMINAL_PROMPT"] == "0"
+
+    filled = subprocess.run(
+        ["/usr/bin/git", "credential", "fill"],
+        input="protocol=https\nhost=github.com\n\n",
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    assert filled.returncode == 0, filled.stderr
+    assert "username=askpass-user" in filled.stdout
+    assert "password=askpass-pass" in filled.stdout
+
+
+def test_fleet_member_git_askpass_rejects_unbounded_executables(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    target = tmp_path / "askpass"
+    target.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    target.chmod(0o700)
+
+    monkeypatch.setenv("GIT_ASKPASS", "askpass")
+    with pytest.raises(RuntimeError, match="must be absolute"):
+        module._fleet_member_git_askpass_path()
+
+    monkeypatch.setenv("GIT_ASKPASS", f"{target} --injected")
+    with pytest.raises(RuntimeError, match="unsafe characters"):
+        module._fleet_member_git_askpass_path()
+
+    link = tmp_path / "askpass-link"
+    link.symlink_to(target)
+    monkeypatch.setenv("GIT_ASKPASS", str(link))
+    with pytest.raises(RuntimeError, match="regular file"):
+        module._fleet_member_git_askpass_path()
+
+    target.chmod(0o722)
+    monkeypatch.setenv("GIT_ASKPASS", str(target))
+    with pytest.raises(RuntimeError, match="group/world writable"):
+        module._fleet_member_git_askpass_path()
+
+    target.chmod(0o600)
+    with pytest.raises(RuntimeError, match="must be executable"):
+        module._fleet_member_git_askpass_path()
+
+
 def test_fleet_member_credential_helper_path_rejects_path_injection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
