@@ -2623,7 +2623,7 @@ def _global_system_github_https_config(
             "--show-scope",
             "--null",
             "--get-regexp",
-            r"^(credential|http)\.",
+            r"^(credential|http)\.|^core\.askpass$",
         ],
         env=env,
         text=True,
@@ -2652,7 +2652,14 @@ def _global_system_github_https_config(
         key, separator, value = record.partition("\n")
         if not separator:
             raise RuntimeError("Git credential configuration record is malformed")
-        if _fleet_https_config_entry_allowed(key, value):
+        normalized = key.strip().lower()
+        if normalized == "core.askpass":
+            _validated_fleet_member_askpass_path(
+                value,
+                source="global/system core.askPass",
+            )
+            entries.append(("core.askPass", value))
+        elif _fleet_https_config_entry_allowed(key, value):
             entries.append((key, value))
     return entries
 

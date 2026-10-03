@@ -1239,6 +1239,142 @@ def test_fleet_repo_git_env_preserves_bounded_credential_helper_lookup(
     assert "password=path-pass" in filled.stdout
 
 
+def test_fleet_repo_git_env_preserves_bounded_global_core_askpass_with_local_precedence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, _sha = initialize_repository(tmp_path, "global-core-askpass-member")
+    home = tmp_path / "home"
+    home.mkdir()
+    global_askpass = tmp_path / "global-core-askpass"
+    global_askpass.write_text(
+        "#!/bin/sh\n"
+        "case \"$1\" in\n"
+        "  *Username*) printf 'global-user\\n' ;;\n"
+        "  *Password*) printf 'global-pass\\n' ;;\n"
+        "  *) exit 1 ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    global_askpass.chmod(0o700)
+    local_askpass = tmp_path / "local-core-askpass"
+    local_askpass.write_text(
+        "#!/bin/sh\n"
+        "case \"$1\" in\n"
+        "  *Username*) printf 'local-user\\n' ;;\n"
+        "  *Password*) printf 'local-pass\\n' ;;\n"
+        "  *) exit 1 ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    local_askpass.chmod(0o700)
+    (home / ".gitconfig").write_text(
+        "[core]\n"
+        f"    askPass = {global_askpass}\n"
+        "[url \"ssh://attacker.invalid/\"]\n"
+        "    insteadOf = https://github.com/\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("GIT_ASKPASS", raising=False)
+
+    authority_env = module._authority_git_env()
+    blocked = subprocess.run(
+        ["/usr/bin/git", "-C", str(repo), "credential", "fill"],
+        input="protocol=https\nhost=github.com\n\n",
+        env=authority_env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    assert blocked.returncode != 0
+
+    safe_global = tmp_path / "safe-global-core-askpass.gitconfig"
+    env = module._fleet_repo_git_env(repo, safe_global_config=safe_global)
+    assert "GIT_ASKPASS" not in env
+    copied = subprocess.run(
+        ["/usr/bin/git", "config", "--file", str(safe_global), "--get", "core.askPass"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    assert copied.returncode == 0, copied.stderr
+    assert copied.stdout.strip() == str(global_askpass)
+    assert subprocess.run(
+        ["/usr/bin/git", "config", "--file", str(safe_global), "--get-regexp", r"^url\."],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    ).returncode == 1
+
+    filled = subprocess.run(
+        ["/usr/bin/git", "-C", str(repo), "credential", "fill"],
+        input="protocol=https\nhost=github.com\n\n",
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    assert filled.returncode == 0, filled.stderr
+    assert "username=global-user" in filled.stdout
+    assert "password=global-pass" in filled.stdout
+
+    git(repo, "config", "core.askPass", str(local_askpass))
+    module.assert_fleet_member_git_transport_safe(repo, env=authority_env)
+    safe_global_local = tmp_path / "safe-global-with-local-core-askpass.gitconfig"
+    local_env = module._fleet_repo_git_env(
+        repo,
+        safe_global_config=safe_global_local,
+    )
+    local_filled = subprocess.run(
+        ["/usr/bin/git", "-C", str(repo), "credential", "fill"],
+        input="protocol=https\nhost=github.com\n\n",
+        env=local_env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    assert local_filled.returncode == 0, local_filled.stderr
+    assert "username=local-user" in local_filled.stdout
+    assert "password=local-pass" in local_filled.stdout
+    assert "global-user" not in local_filled.stdout
+
+
+def test_fleet_repo_git_env_rejects_unsafe_global_core_askpass(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, _sha = initialize_repository(tmp_path, "unsafe-global-core-askpass")
+    home = tmp_path / "home"
+    home.mkdir()
+    askpass = tmp_path / "global-core-askpass"
+    askpass.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    askpass.chmod(0o700)
+    (home / ".gitconfig").write_text(
+        "[core]\n"
+        f"    askPass = {askpass} --injected\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("GIT_ASKPASS", raising=False)
+
+    with pytest.raises(
+        RuntimeError,
+        match="global/system core.askPass path contains unsafe characters",
+    ):
+        module._fleet_repo_git_env(
+            repo,
+            safe_global_config=tmp_path / "unsafe-global.gitconfig",
+        )
+
+
 def test_fleet_repo_git_env_preserves_bounded_git_askpass(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
