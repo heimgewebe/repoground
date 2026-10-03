@@ -2012,6 +2012,34 @@ def test_fleet_member_ssh_match_supports_bounded_host_user_compound(
     assert without_remote_user.get("identity_files", ()) == ()
 
 
+def test_fleet_member_ssh_match_supports_bounded_originalhost_user_compound(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    home = tmp_path / "home"
+    ssh_dir = home / ".ssh"
+    ssh_dir.mkdir(parents=True)
+    config = ssh_dir / "config"
+    config.write_text(
+        "Match originalhost GitHub.COM user git\n"
+        "    IdentityFile ~/.ssh/original-host-user\n"
+        "Match originalhost attacker.invalid user git\n"
+        "    IdentityFile ~/.ssh/wrong-original-host\n",
+        encoding="utf-8",
+    )
+    config.chmod(0o600)
+    monkeypatch.setenv("HOME", str(home))
+
+    env = module._fleet_repo_ssh_env(
+        remote="git@github.com:heimgewebe/member.git"
+    )
+    command = env["GIT_SSH_COMMAND"]
+
+    assert str(ssh_dir / "original-host-user") in command
+    assert str(ssh_dir / "wrong-original-host") not in command
+
+
 def test_fleet_member_ssh_match_uses_bounded_substituted_hostname(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2044,6 +2072,31 @@ def test_fleet_member_ssh_match_uses_bounded_substituted_hostname(
     assert "HostName=ssh.github.com" in command
     assert "Port=443" in command
     assert "HostKeyAlias=github.com" in command
+
+
+def test_fleet_member_ssh_identity_file_none_is_preserved(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    home = tmp_path / "home"
+    ssh_dir = home / ".ssh"
+    ssh_dir.mkdir(parents=True)
+    config = ssh_dir / "config"
+    config.write_text(
+        "Host github.com\n"
+        "    IdentityFile ~/.ssh/ignored-before-none\n"
+        "    IdentityFile none\n",
+        encoding="utf-8",
+    )
+    config.chmod(0o600)
+    monkeypatch.setenv("HOME", str(home))
+
+    command = module._fleet_member_ssh_command(remote_user="git")
+    argv = shlex.split(command)
+
+    assert "IdentityFile=none" in argv
+    assert str(ssh_dir / "ignored-before-none") not in argv
 
 
 def test_fleet_member_ssh_include_expands_nested_auth_only(
@@ -3488,6 +3541,112 @@ def test_managed_worktree_preserves_only_global_checkout_filters(
         target=target,
     )
     assert sample.read_text(encoding="utf-8") == "materialized\n"
+
+
+def test_managed_worktree_uses_bounded_helper_path_without_global_filters(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    home = tmp_path / "home-empty-filter"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(
+        module,
+        "_global_system_checkout_filter_config",
+        lambda _repo: [],
+    )
+
+    env = module._managed_worktree_git_env(
+        tmp_path,
+        safe_global_config=tmp_path / "safe-empty-filter.gitconfig",
+    )
+
+    assert env["PATH"] == module._fleet_member_credential_helper_path()
+
+
+def test_managed_worktree_preserves_trusted_global_attributes_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, target = initialize_repository(tmp_path, "global-attributes")
+    sample = repo / "sample.dat"
+    sample.write_text("raw\n", encoding="utf-8")
+    git(repo, "add", "sample.dat")
+    git(repo, "commit", "-m", "add raw sample")
+    target = git(repo, "rev-parse", "HEAD")
+
+    home = tmp_path / "home-global-attributes"
+    helper_dir = home / ".local" / "bin"
+    helper_dir.mkdir(parents=True)
+    smudge = helper_dir / "probe-smudge"
+    smudge.write_text(
+        "#!/bin/sh\nsed 's/raw/materialized/'\n",
+        encoding="utf-8",
+    )
+    smudge.chmod(0o700)
+    clean = helper_dir / "probe-clean"
+    clean.write_text(
+        "#!/bin/sh\nsed 's/materialized/raw/'\n",
+        encoding="utf-8",
+    )
+    clean.chmod(0o700)
+    attributes = home / "global-attributes"
+    attributes.write_text("*.dat filter=probe\n", encoding="utf-8")
+    attributes.chmod(0o600)
+    (home / ".gitconfig").write_text(
+        f"[core]\n    attributesFile = {attributes}\n"
+        '[filter "probe"]\n'
+        "    smudge = probe-smudge\n"
+        "    clean = probe-clean\n"
+        "    required = true\n",
+        encoding="utf-8",
+    )
+    (home / ".gitconfig").chmod(0o600)
+    monkeypatch.setenv("HOME", str(home))
+
+    worktree = tmp_path / "managed-global-attributes"
+    module.prepare_managed_worktree(
+        worktree,
+        expected_repo=repo,
+        target=target,
+    )
+
+    assert (worktree / "sample.dat").read_text(encoding="utf-8") == "materialized\n"
+
+
+def test_managed_worktree_rejects_untrusted_global_attributes_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, _sha = initialize_repository(tmp_path, "untrusted-global-attributes")
+    home = tmp_path / "home-untrusted-attributes"
+    home.mkdir()
+    writable = tmp_path / "writable-attributes-parent"
+    writable.mkdir()
+    writable.chmod(0o777)
+    attributes = writable / "global-attributes"
+    attributes.write_text("*.dat filter=probe\n", encoding="utf-8")
+    attributes.chmod(0o600)
+    (home / ".gitconfig").write_text(
+        f"[core]\n    attributesFile = {attributes}\n"
+        '[filter "probe"]\n'
+        "    smudge = /bin/cat\n",
+        encoding="utf-8",
+    )
+    (home / ".gitconfig").chmod(0o600)
+    monkeypatch.setenv("HOME", str(home))
+
+    with pytest.raises(
+        RuntimeError,
+        match="fleet checkout attributes file parent directory",
+    ):
+        module._managed_worktree_git_env(
+            repo,
+            safe_global_config=tmp_path / "safe-untrusted-attributes.gitconfig",
+        )
 
 
 def test_checkout_filter_origin_allows_only_user_private_group_write(

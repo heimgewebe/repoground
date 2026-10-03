@@ -2625,8 +2625,11 @@ def _checkout_filter_private_group_write_trusted(metadata: os.stat_result) -> bo
     return primary_users <= {username} and explicit_members <= {username}
 
 
-def _assert_trusted_checkout_filter_config_origin(origin: str) -> None:
-    label = "fleet checkout filter config"
+def _assert_trusted_checkout_filter_config_origin(
+    origin: str,
+    *,
+    label: str = "fleet checkout filter config",
+) -> None:
     if not origin.startswith("file:"):
         raise RuntimeError(f"{label} origin must be a file")
     path = Path(origin.removeprefix("file:"))
@@ -2676,6 +2679,25 @@ def _assert_trusted_checkout_filter_config_origin(origin: str) -> None:
         os.close(descriptor)
 
 
+def _validated_checkout_attributes_file(raw: str) -> str:
+    if not raw or any(char in raw for char in ("\x00", "\n", "\r")):
+        raise RuntimeError("fleet checkout attributes file path is invalid")
+    expanded = os.path.expanduser(raw)
+    path = Path(expanded)
+    if not path.is_absolute():
+        raise RuntimeError(
+            "fleet checkout attributes file path must be absolute after expansion"
+        )
+    _assert_trusted_checkout_filter_config_origin(
+        f"file:{path}",
+        label="fleet checkout attributes file",
+    )
+    try:
+        return str(path.resolve(strict=True))
+    except OSError as exc:
+        raise RuntimeError("fleet checkout attributes file is unavailable") from exc
+
+
 def _global_system_checkout_filter_config(
     repo_path: Path,
 ) -> list[tuple[str, str]]:
@@ -2691,7 +2713,7 @@ def _global_system_checkout_filter_config(
             "--show-origin",
             "--null",
             "--get-regexp",
-            r"^filter\.",
+            r"^(filter\.|core\.attributesfile$)",
         ],
         env=env,
         text=True,
@@ -2731,7 +2753,9 @@ def _global_system_checkout_filter_config(
         if not separator:
             raise RuntimeError("Git checkout filter configuration record is malformed")
         normalized = key.strip().lower()
-        if _FLEET_CHECKOUT_FILTER_KEY_RE.fullmatch(normalized) is None:
+        if normalized == "core.attributesfile":
+            value = _validated_checkout_attributes_file(value)
+        elif _FLEET_CHECKOUT_FILTER_KEY_RE.fullmatch(normalized) is None:
             raise RuntimeError(
                 "Git checkout filter configuration contains an unsupported key"
             )
@@ -2749,6 +2773,7 @@ def _managed_worktree_git_env(
     safe_global_config: Path,
 ) -> dict[str, str]:
     env = _authority_git_env()
+    env["PATH"] = _fleet_member_credential_helper_path()
     entries = _global_system_checkout_filter_config(repo_path)
     if not entries:
         return env
@@ -3282,6 +3307,11 @@ def _fleet_member_ssh_match_applies(
                 patterns,
                 candidate_host=effective_host,
             )
+        elif criterion == "originalhost":
+            active = active and _fleet_member_ssh_host_patterns_match_github(
+                patterns,
+                candidate_host="github.com",
+            )
         elif criterion == "user":
             if remote_user is None:
                 return False
@@ -3435,6 +3465,7 @@ def _fleet_member_ssh_auth_options(
             if key == "identityfile":
                 if value.lower() == "none":
                     identity_files.clear()
+                    identity_files.append("none")
                     continue
                 identity_files.append(value)
                 if len(identity_files) > _FLEET_MEMBER_SSH_MAX_AUTH_FILES:
@@ -3517,7 +3548,10 @@ def _fleet_member_ssh_command(
             ]
         )
     for identity in options.get("identity_files", ()):
-        argv.extend(["-i", str(identity)])
+        if identity == "none":
+            argv.extend(["-o", "IdentityFile=none"])
+        else:
+            argv.extend(["-i", str(identity)])
     for certificate in options.get("certificate_files", ()):
         argv.extend(["-o", f"CertificateFile={certificate}"])
     identities_only = options.get("identitiesonly")
