@@ -393,6 +393,36 @@ def test_fleet_credential_config_key_allowed_matches_valid_https_github_scopes()
         assert module._fleet_credential_config_key_allowed(key) is False
 
 
+def test_fleet_tls_config_key_allowed_preserves_only_bounded_github_tls() -> None:
+    module = load_publisher()
+
+    for key in (
+        "http.pinnedPubkey",
+        "http.sslCAInfo",
+        "http.sslCAPath",
+        "http.sslCert",
+        "http.sslCertPasswordProtected",
+        "http.sslKey",
+        "http.https://github.com.pinnedPubkey",
+        "http.https://github.com.sslCert",
+        "http.https://github.com.sslCertPasswordProtected",
+        "http.https://github.com.sslKey",
+        "http.https://github.com:443.pinnedPubkey",
+        "http.https://bot@github.com/owner/repo.sslCert",
+    ):
+        assert module._fleet_tls_config_key_allowed(key) is True
+
+    for key in (
+        "http.https://github.com.evil.example.pinnedPubkey",
+        "http.https://github.com:0.sslCert",
+        "http.https://github.com:65536.sslKey",
+        "http.http://github.com.pinnedPubkey",
+        "http.pinnedPubkeyExtra",
+        "http.sslVerify",
+    ):
+        assert module._fleet_tls_config_key_allowed(key) is False
+
+
 def test_fleet_proxy_config_key_allowed_preserves_only_bounded_github_proxies() -> None:
     module = load_publisher()
 
@@ -471,6 +501,10 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
         "[http]\n"
         "    sslCAInfo = /tmp/global-ca.pem\n"
         "    sslCAPath = /tmp/global-ca-dir\n"
+        "    pinnedPubkey = sha256//global-github-pin\n"
+        "    sslCert = /tmp/global-client.pem\n"
+        "    sslCertPasswordProtected = true\n"
+        "    sslKey = /tmp/global-client.key\n"
         "    proxy = http://127.0.0.1:18081\n"
         "    proxyAuthMethod = basic\n"
         "    proxySSLCAInfo = /tmp/global-proxy-ca.pem\n"
@@ -500,6 +534,9 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
     monkeypatch.setenv("SSL_CERT_FILE", "/tmp/custom-ca.pem")
     monkeypatch.setenv("GIT_SSL_CAINFO", "/tmp/git-ca.pem")
     monkeypatch.setenv("GIT_SSL_CAPATH", "/tmp/git-ca-dir")
+    monkeypatch.setenv("GIT_SSL_CERT", "/tmp/git-client.pem")
+    monkeypatch.setenv("GIT_SSL_CERT_PASSWORD_PROTECTED", "true")
+    monkeypatch.setenv("GIT_SSL_KEY", "/tmp/git-client.key")
     monkeypatch.setenv("GIT_SSL_NO_VERIFY", "1")
 
     authority_env = module._authority_git_env()
@@ -521,6 +558,9 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
     assert "SSL_CERT_FILE" not in authority_env
     assert "GIT_SSL_CAINFO" not in authority_env
     assert "GIT_SSL_CAPATH" not in authority_env
+    assert "GIT_SSL_CERT" not in authority_env
+    assert "GIT_SSL_CERT_PASSWORD_PROTECTED" not in authority_env
+    assert "GIT_SSL_KEY" not in authority_env
     assert "GIT_SSL_NO_VERIFY" not in authority_env
 
     safe_global_config = tmp_path / "sanitized-member-global.gitconfig"
@@ -540,6 +580,9 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
     assert env["SSL_CERT_FILE"] == "/tmp/custom-ca.pem"
     assert env["GIT_SSL_CAINFO"] == "/tmp/git-ca.pem"
     assert env["GIT_SSL_CAPATH"] == "/tmp/git-ca-dir"
+    assert env["GIT_SSL_CERT"] == "/tmp/git-client.pem"
+    assert env["GIT_SSL_CERT_PASSWORD_PROTECTED"] == "true"
+    assert env["GIT_SSL_KEY"] == "/tmp/git-client.key"
     assert "GIT_SSL_NO_VERIFY" not in env
     sanitized_cp = subprocess.run(
         [
@@ -592,6 +635,18 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
         and value == "/tmp/global-ca-dir"
         for key, value in injected
     )
+    assert ("http.pinnedpubkey", "sha256//global-github-pin") in [
+        (key.lower(), value) for key, value in injected
+    ]
+    assert ("http.sslcert", "/tmp/global-client.pem") in [
+        (key.lower(), value) for key, value in injected
+    ]
+    assert ("http.sslcertpasswordprotected", "true") in [
+        (key.lower(), value) for key, value in injected
+    ]
+    assert ("http.sslkey", "/tmp/global-client.key") in [
+        (key.lower(), value) for key, value in injected
+    ]
     assert ("http.proxy", "http://127.0.0.1:18081") in [
         (key.lower(), value) for key, value in injected
     ]

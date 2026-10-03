@@ -2385,7 +2385,13 @@ _AUTHORITY_TLS_ENV_NAMES = frozenset(
     {"curl_ca_bundle", "ssl_cert_dir", "ssl_cert_file"}
 )
 _FLEET_MEMBER_TLS_ENV_NAMES = _AUTHORITY_TLS_ENV_NAMES | frozenset(
-    {"git_ssl_cainfo", "git_ssl_capath"}
+    {
+        "git_ssl_cainfo",
+        "git_ssl_capath",
+        "git_ssl_cert",
+        "git_ssl_cert_password_protected",
+        "git_ssl_key",
+    }
 )
 _AUTHORITY_LOADER_ENV_NAMES = frozenset({"ld_library_path", "ld_preload"})
 
@@ -2445,11 +2451,21 @@ def _fleet_credential_config_key_allowed(key: str) -> bool:
 
 def _fleet_tls_config_key_allowed(key: str) -> bool:
     normalized = key.strip().lower()
-    if normalized in {"http.sslcainfo", "http.sslcapath"}:
+    tls_keys = (
+        "pinnedpubkey",
+        "sslcainfo",
+        "sslcapath",
+        "sslcert",
+        "sslcertpasswordprotected",
+        "sslkey",
+    )
+    if normalized in {f"http.{name}" for name in tls_keys}:
         return True
     scoped = re.fullmatch(
         r"http\.https://(?:[^/@:]+@)?github\.com(?::([0-9]+))?"
-        r"(?:/[^ \t\r\n]*)?\.(?:sslcainfo|sslcapath)",
+        r"(?:/[^ \t\r\n]*)?\.(?:"
+        + "|".join(tls_keys)
+        + r")",
         normalized,
     )
     if scoped is None:
