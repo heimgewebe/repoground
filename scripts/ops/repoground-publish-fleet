@@ -3467,10 +3467,7 @@ def _fleet_member_ssh_auth_options(
                 if len(identity_files) > _FLEET_MEMBER_SSH_MAX_AUTH_FILES:
                     raise RuntimeError("fleet member SSH identity file list is too large")
             elif key == "certificatefile":
-                if value.lower() == "none":
-                    certificate_files.clear()
-                    continue
-                certificate_files.append(value)
+                certificate_files.append("none" if value.lower() == "none" else value)
                 if len(certificate_files) > _FLEET_MEMBER_SSH_MAX_AUTH_FILES:
                     raise RuntimeError(
                         "fleet member SSH certificate file list is too large"

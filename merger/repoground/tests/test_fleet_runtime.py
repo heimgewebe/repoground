@@ -2101,6 +2101,33 @@ def test_fleet_member_ssh_identity_file_none_is_preserved(
     assert argv.index(preceding) < argv.index("IdentityFile=none")
 
 
+def test_fleet_member_ssh_certificate_file_none_is_additive(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    home = tmp_path / "home"
+    ssh_dir = home / ".ssh"
+    ssh_dir.mkdir(parents=True)
+    config = ssh_dir / "config"
+    config.write_text(
+        "Host github.com\n"
+        "    CertificateFile ~/.ssh/member-cert.pub\n"
+        "    CertificateFile none\n",
+        encoding="utf-8",
+    )
+    config.chmod(0o600)
+    monkeypatch.setenv("HOME", str(home))
+
+    command = module._fleet_member_ssh_command(remote_user="git")
+    argv = shlex.split(command)
+
+    preceding = f"CertificateFile={ssh_dir / 'member-cert.pub'}"
+    assert preceding in argv
+    assert "CertificateFile=none" in argv
+    assert argv.index(preceding) < argv.index("CertificateFile=none")
+
+
 def test_fleet_member_ssh_include_expands_nested_auth_only(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
