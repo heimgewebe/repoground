@@ -2012,6 +2012,40 @@ def test_fleet_member_ssh_match_supports_bounded_host_user_compound(
     assert without_remote_user.get("identity_files", ()) == ()
 
 
+def test_fleet_member_ssh_match_uses_bounded_substituted_hostname(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    home = tmp_path / "home"
+    ssh_dir = home / ".ssh"
+    ssh_dir.mkdir(parents=True)
+    config = ssh_dir / "config"
+    config.write_text(
+        "Host github.com\n"
+        "    HostName ssh.github.com\n"
+        "    Port 443\n"
+        "Match host ssh.github.com user git\n"
+        "    IdentityFile ~/.ssh/substituted-host\n"
+        "Match host github.com user git\n"
+        "    IdentityFile ~/.ssh/original-host\n",
+        encoding="utf-8",
+    )
+    config.chmod(0o600)
+    monkeypatch.setenv("HOME", str(home))
+
+    env = module._fleet_repo_ssh_env(
+        remote="git@github.com:heimgewebe/member.git"
+    )
+    command = env["GIT_SSH_COMMAND"]
+
+    assert str(ssh_dir / "substituted-host") in command
+    assert str(ssh_dir / "original-host") not in command
+    assert "HostName=ssh.github.com" in command
+    assert "Port=443" in command
+    assert "HostKeyAlias=github.com" in command
+
+
 def test_fleet_member_ssh_include_expands_nested_auth_only(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -3347,6 +3381,113 @@ def test_managed_worktree_accepts_only_clean_detached_expected_repository(
         check=False,
     )
     assert detached.returncode != 0
+
+
+def test_managed_worktree_preserves_only_global_checkout_filters(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, _initial_sha = initialize_repository(tmp_path, "filtered-repo")
+    (repo / ".gitattributes").write_text(
+        "sample.txt filter=probe\n",
+        encoding="utf-8",
+    )
+    (repo / "sample.txt").write_text("raw\n", encoding="utf-8")
+    git(repo, "add", ".gitattributes", "sample.txt")
+    git(repo, "commit", "-m", "add filtered sample")
+    target = git(repo, "rev-parse", "HEAD")
+
+    clean_filter = tmp_path / "clean-filter"
+    clean_filter.write_text(
+        "#!/bin/sh\nsed 's/^materialized$/raw/'\n",
+        encoding="utf-8",
+    )
+    clean_filter.chmod(0o700)
+    smudge_filter = tmp_path / "smudge-filter"
+    smudge_filter.write_text(
+        "#!/bin/sh\nsed 's/^raw$/materialized/'\n",
+        encoding="utf-8",
+    )
+    smudge_filter.chmod(0o700)
+
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".gitconfig").write_text(
+        '[filter "probe"]\n'
+        f"    clean = {clean_filter}\n"
+        f"    smudge = {smudge_filter}\n"
+        "    required = true\n"
+        '[url "ssh://attacker.invalid/"]\n'
+        "    insteadOf = https://github.com/\n"
+        "[core]\n"
+        "    hooksPath = /tmp/attacker-hooks\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(home))
+
+    safe_global_config = tmp_path / "safe-checkout.gitconfig"
+    env = module._managed_worktree_git_env(
+        repo,
+        safe_global_config=safe_global_config,
+    )
+    assert env["GIT_CONFIG_GLOBAL"] == str(safe_global_config)
+    assert env["GIT_CONFIG_SYSTEM"] == os.devnull
+    assert env["GIT_CONFIG_NOSYSTEM"] == "1"
+    for key, expected_value in (
+        ("filter.probe.clean", str(clean_filter)),
+        ("filter.probe.smudge", str(smudge_filter)),
+        ("filter.probe.required", "true"),
+    ):
+        cp = subprocess.run(
+            [
+                "/usr/bin/git",
+                "config",
+                "--file",
+                str(safe_global_config),
+                "--get",
+                key,
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        assert cp.returncode == 0, cp.stderr
+        assert cp.stdout.strip() == expected_value
+    forbidden = subprocess.run(
+        [
+            "/usr/bin/git",
+            "config",
+            "--file",
+            str(safe_global_config),
+            "--get-regexp",
+            r"^(url\.|core\.hookspath$)",
+        ],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    assert forbidden.returncode == 1
+
+    worktree = tmp_path / "managed-filtered"
+    module.prepare_managed_worktree(
+        worktree,
+        expected_repo=repo,
+        target=target,
+    )
+    sample = worktree / "sample.txt"
+    assert sample.read_text(encoding="utf-8") == "materialized\n"
+
+    sample.write_text("materialized\n", encoding="utf-8")
+    module.assert_managed_worktree_clean(worktree, repo)
+    module.prepare_managed_worktree(
+        worktree,
+        expected_repo=repo,
+        target=target,
+    )
+    assert sample.read_text(encoding="utf-8") == "materialized\n"
 
 
 def test_managed_worktree_refuses_dirty_untracked_and_ignored_content(

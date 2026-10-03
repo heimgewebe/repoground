@@ -874,7 +874,11 @@ def assert_managed_worktree_identity(path: Path, expected_repo: Path) -> None:
         )
 
 
-def managed_worktree_status(path: Path) -> list[tuple[str, str]]:
+def managed_worktree_status(
+    path: Path,
+    *,
+    env: dict[str, str] | None = None,
+) -> list[tuple[str, str]]:
     raw = run(
         [
             "git",
@@ -885,7 +889,8 @@ def managed_worktree_status(path: Path) -> list[tuple[str, str]]:
             "-z",
             "--untracked-files=all",
             "--ignored=matching",
-        ]
+        ],
+        env=env,
     ).stdout
     rows: list[tuple[str, str]] = []
     for record in raw.split("\0"):
@@ -2061,10 +2066,29 @@ def remove_managed_disposable_artifact(path: Path, worktree: Path) -> None:
     shutil.rmtree(path)
 
 
-def cleanup_managed_disposable_artifacts(path: Path, expected_repo: Path) -> list[str]:
+def cleanup_managed_disposable_artifacts(
+    path: Path,
+    expected_repo: Path,
+    *,
+    env: dict[str, str] | None = None,
+) -> list[str]:
+    if env is None:
+        with tempfile.TemporaryDirectory(
+            prefix="repoground-managed-worktree-gitconfig-",
+            dir="/tmp",
+        ) as raw_config_root:
+            checkout_env = _managed_worktree_git_env(
+                expected_repo,
+                safe_global_config=Path(raw_config_root) / "global.gitconfig",
+            )
+            return cleanup_managed_disposable_artifacts(
+                path,
+                expected_repo,
+                env=checkout_env,
+            )
     assert_managed_worktree_identity(path, expected_repo)
     reconciled = reconcile_managed_build_quarantine(path, expected_repo)
-    status = managed_worktree_status(path)
+    status = managed_worktree_status(path, env=env)
     if not status:
         return [reconciled] if reconciled is not None else []
     roots: set[Path] = set()
@@ -2102,9 +2126,29 @@ def cleanup_managed_disposable_artifacts(path: Path, expected_repo: Path) -> lis
     return removed
 
 
-def assert_managed_worktree_clean(path: Path, expected_repo: Path) -> None:
+def assert_managed_worktree_clean(
+    path: Path,
+    expected_repo: Path,
+    *,
+    env: dict[str, str] | None = None,
+) -> None:
+    if env is None:
+        with tempfile.TemporaryDirectory(
+            prefix="repoground-managed-worktree-gitconfig-",
+            dir="/tmp",
+        ) as raw_config_root:
+            checkout_env = _managed_worktree_git_env(
+                expected_repo,
+                safe_global_config=Path(raw_config_root) / "global.gitconfig",
+            )
+            assert_managed_worktree_clean(
+                path,
+                expected_repo,
+                env=checkout_env,
+            )
+            return
     assert_managed_worktree_identity(path, expected_repo)
-    status = managed_worktree_status(path)
+    status = managed_worktree_status(path, env=env)
     if status:
         raise ManagedWorktreeDirtyError(path, status)
 
@@ -2135,27 +2179,43 @@ def prepare_managed_worktree(
     expected_repo: Path,
     target: str,
 ) -> None:
-    if path.exists() or path.is_symlink():
-        cleanup_managed_disposable_artifacts(path, expected_repo)
-        assert_managed_worktree_clean(path, expected_repo)
-        assert_managed_worktree_idle(path)
-        run(["git", "-C", str(path), "reset", "--hard", target])
-        assert_managed_worktree_clean(path, expected_repo)
-        return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    run(
-        [
-            "git",
-            "-C",
-            str(expected_repo),
-            "worktree",
-            "add",
-            "--detach",
-            str(path),
-            target,
-        ]
-    )
-    assert_managed_worktree_clean(path, expected_repo)
+    with tempfile.TemporaryDirectory(
+        prefix="repoground-managed-worktree-gitconfig-",
+        dir="/tmp",
+    ) as raw_config_root:
+        env = _managed_worktree_git_env(
+            expected_repo,
+            safe_global_config=Path(raw_config_root) / "global.gitconfig",
+        )
+        if path.exists() or path.is_symlink():
+            cleanup_managed_disposable_artifacts(
+                path,
+                expected_repo,
+                env=env,
+            )
+            assert_managed_worktree_clean(path, expected_repo, env=env)
+            assert_managed_worktree_idle(path)
+            run(
+                ["git", "-C", str(path), "reset", "--hard", target],
+                env=env,
+            )
+            assert_managed_worktree_clean(path, expected_repo, env=env)
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        run(
+            [
+                "git",
+                "-C",
+                str(expected_repo),
+                "worktree",
+                "add",
+                "--detach",
+                str(path),
+                target,
+            ],
+            env=env,
+        )
+        assert_managed_worktree_clean(path, expected_repo, env=env)
 
 
 def generator_inputs_sha(worktree: Path) -> str:
@@ -2530,6 +2590,124 @@ def _credential_config_discovery_env() -> dict[str, str]:
         and key.lower() not in _AUTHORITY_LOADER_ENV_NAMES
     }
     env["PATH"] = "/usr/bin:/bin"
+    return env
+
+
+_FLEET_CHECKOUT_FILTER_KEY_RE = re.compile(
+    r"filter\.[a-z0-9._@+-]+\.(?:clean|smudge|process|required)",
+    re.ASCII | re.IGNORECASE,
+)
+_FLEET_CHECKOUT_FILTER_MAX_ENTRIES = 128
+_FLEET_CHECKOUT_FILTER_MAX_BYTES = 128 * 1024
+
+
+def _global_system_checkout_filter_config(
+    repo_path: Path,
+) -> list[tuple[str, str]]:
+    env = _credential_config_discovery_env()
+    cp = subprocess.run(
+        [
+            "/usr/bin/git",
+            "-C",
+            str(repo_path),
+            "config",
+            "--includes",
+            "--show-scope",
+            "--null",
+            "--get-regexp",
+            r"^filter\.",
+        ],
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if cp.returncode == 1:
+        return []
+    if cp.returncode != 0:
+        raise RuntimeError(
+            "Git checkout filter configuration is unavailable for "
+            f"{repo_path}: {cp.stderr.strip()}"
+        )
+    if len(cp.stdout.encode("utf-8")) > _FLEET_CHECKOUT_FILTER_MAX_BYTES:
+        raise RuntimeError("Git checkout filter configuration exceeds bounded size")
+
+    fields = cp.stdout.split(chr(0))
+    if fields and fields[-1] == "":
+        fields.pop()
+    if len(fields) % 2:
+        raise RuntimeError("Git checkout filter configuration is malformed")
+
+    entries: list[tuple[str, str]] = []
+    for scope, record in zip(fields[0::2], fields[1::2]):
+        if scope not in {"system", "global"}:
+            continue
+        key, separator, value = record.partition("\n")
+        if not separator:
+            raise RuntimeError("Git checkout filter configuration record is malformed")
+        normalized = key.strip().lower()
+        if _FLEET_CHECKOUT_FILTER_KEY_RE.fullmatch(normalized) is None:
+            raise RuntimeError(
+                "Git checkout filter configuration contains an unsupported key"
+            )
+        entries.append((key, value))
+        if len(entries) > _FLEET_CHECKOUT_FILTER_MAX_ENTRIES:
+            raise RuntimeError(
+                "Git checkout filter configuration entry count is too large"
+            )
+    return entries
+
+
+def _managed_worktree_git_env(
+    repo_path: Path,
+    *,
+    safe_global_config: Path,
+) -> dict[str, str]:
+    env = _authority_git_env()
+    entries = _global_system_checkout_filter_config(repo_path)
+    if not entries:
+        return env
+    if not safe_global_config.is_absolute():
+        raise RuntimeError("managed worktree scoped Git config path must be absolute")
+    try:
+        descriptor = os.open(
+            safe_global_config,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC,
+            0o600,
+        )
+    except OSError as exc:
+        raise RuntimeError(
+            "managed worktree scoped Git configuration is unavailable"
+        ) from exc
+    os.close(descriptor)
+
+    writer_env = _authority_git_env()
+    for key, value in entries:
+        cp = subprocess.run(
+            [
+                "/usr/bin/git",
+                "config",
+                "--file",
+                str(safe_global_config),
+                "--add",
+                key,
+                value,
+            ],
+            env=writer_env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if cp.returncode != 0:
+            raise RuntimeError(
+                "managed worktree scoped Git configuration could not be written"
+            )
+    os.chmod(safe_global_config, 0o600)
+    env["GIT_CONFIG_GLOBAL"] = str(safe_global_config)
+    env["GIT_CONFIG_SYSTEM"] = os.devnull
+    env["PATH"] = _fleet_member_credential_helper_path()
     return env
 
 
@@ -2935,9 +3113,18 @@ def _read_fleet_member_ssh_config(config: Path) -> str | None:
         os.close(descriptor)
 
 
-def _fleet_member_ssh_host_patterns_match_github(values: list[str]) -> bool:
+def _fleet_member_ssh_host_patterns_match_github(
+    values: list[str],
+    *,
+    candidate_host: str = "github.com",
+) -> bool:
     if not values:
         raise RuntimeError("fleet member SSH Host requires at least one pattern")
+    if not isinstance(candidate_host, str):
+        raise RuntimeError("fleet member SSH host match target is invalid")
+    candidate = candidate_host.casefold()
+    if candidate not in {"github.com", "ssh.github.com"}:
+        raise RuntimeError("fleet member SSH host match target is invalid")
     matched = False
     for raw_pattern_list in values:
         if not raw_pattern_list or any(
@@ -2954,7 +3141,7 @@ def _fleet_member_ssh_host_patterns_match_github(values: list[str]) -> bool:
             normalized = pattern.casefold()
             if re.fullmatch(r"[a-z0-9.*?-]+", normalized) is None:
                 continue
-            if fnmatchcase("github.com", normalized):
+            if fnmatchcase(candidate, normalized):
                 if negated:
                     return False
                 matched = True
@@ -2993,6 +3180,7 @@ def _fleet_member_ssh_match_applies(
     values: list[str],
     *,
     remote_user: str | None,
+    effective_host: str = "github.com",
 ) -> bool:
     if not values:
         raise RuntimeError("fleet member SSH Match requires criteria")
@@ -3006,7 +3194,10 @@ def _fleet_member_ssh_match_applies(
         criterion = normalized[index]
         patterns = [values[index + 1]]
         if criterion == "host":
-            active = active and _fleet_member_ssh_host_patterns_match_github(patterns)
+            active = active and _fleet_member_ssh_host_patterns_match_github(
+                patterns,
+                candidate_host=effective_host,
+            )
         elif criterion == "user":
             if remote_user is None:
                 return False
@@ -3131,9 +3322,15 @@ def _fleet_member_ssh_auth_options(
                 active = _fleet_member_ssh_host_patterns_match_github(values)
                 continue
             if key == "match":
+                configured_host = scalar.get("hostname")
                 active = _fleet_member_ssh_match_applies(
                     values,
                     remote_user=remote_user,
+                    effective_host=(
+                        configured_host
+                        if isinstance(configured_host, str)
+                        else "github.com"
+                    ),
                 )
                 continue
             if (
