@@ -540,6 +540,20 @@ def parse_github_remote(remote: str) -> tuple[str, str] | None:
     return scp_match.group(1), scp_match.group(2)
 
 
+def github_ssh_remote_explicit_port(remote: str) -> int | None:
+    value = remote.strip()
+    match = re.fullmatch(
+        r"ssh://[^/@:]+@github\.com(?::([0-9]+))?/[^/]+/[^/]+(?:\.git)?/?",
+        value,
+    )
+    if match is None or match.group(1) is None:
+        return None
+    port = int(match.group(1))
+    if not 1 <= port <= 65535:
+        return None
+    return port
+
+
 def github_remote_uses_authenticated_transport(remote: str) -> bool:
     value = remote.strip()
     if value.startswith("https://"):
@@ -2948,7 +2962,13 @@ def _fleet_member_ssh_auth_options() -> dict[str, object]:
     }
 
 
-def _fleet_member_ssh_command() -> str:
+def _fleet_member_ssh_command(*, remote_port: int | None = None) -> str:
+    if remote_port is not None and (
+        isinstance(remote_port, bool)
+        or not isinstance(remote_port, int)
+        or not 1 <= remote_port <= 65535
+    ):
+        raise RuntimeError("fleet member SSH remote port is invalid")
     options = _fleet_member_ssh_auth_options()
     argv = [
         "/usr/bin/ssh",
@@ -2961,10 +2981,15 @@ def _fleet_member_ssh_command() -> str:
         "-o",
         "PermitLocalCommand=no",
     ]
-    if (
+    configured_port = options.get("port")
+    use_github_alternate_443 = (
         options.get("hostname") == "ssh.github.com"
-        and options.get("port") == "443"
-    ):
+        and (
+            remote_port == 443
+            or (remote_port is None and configured_port == "443")
+        )
+    )
+    if use_github_alternate_443:
         argv.extend(
             [
                 "-o",
@@ -2988,9 +3013,14 @@ def _fleet_member_ssh_command() -> str:
     return shlex.join(argv)
 
 
-def _fleet_repo_ssh_env() -> dict[str, str]:
+def _fleet_repo_ssh_env(*, remote: str | None = None) -> dict[str, str]:
     env = _authority_git_env()
-    env["GIT_SSH_COMMAND"] = _fleet_member_ssh_command()
+    remote_port = (
+        github_ssh_remote_explicit_port(remote)
+        if isinstance(remote, str)
+        else None
+    )
+    env["GIT_SSH_COMMAND"] = _fleet_member_ssh_command(remote_port=remote_port)
     return env
 
 
@@ -3287,7 +3317,7 @@ def remote_head_for_entry(entry: RepoEntry) -> tuple[str, str, str]:
             )
             resolved = remote_head(entry.path, remote=origin_url, env=network_env)
     else:
-        network_env = _fleet_repo_ssh_env()
+        network_env = _fleet_repo_ssh_env(remote=origin_url)
         resolved = remote_head(entry.path, remote=origin_url, env=network_env)
 
     assert_fleet_member_git_transport_safe(entry.path, env=transport_env)

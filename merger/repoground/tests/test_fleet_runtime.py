@@ -150,6 +150,31 @@ def test_parse_github_remote_requires_exact_github_host() -> None:
         assert module.parse_github_remote(remote) is None
 
 
+def test_github_ssh_remote_explicit_port_is_bounded() -> None:
+    module = load_publisher()
+
+    assert (
+        module.github_ssh_remote_explicit_port(
+            "ssh://git@github.com:443/heimgewebe/member.git"
+        )
+        == 443
+    )
+    assert (
+        module.github_ssh_remote_explicit_port(
+            "ssh://git@github.com:22/heimgewebe/member.git"
+        )
+        == 22
+    )
+    for remote in (
+        "ssh://git@github.com/heimgewebe/member.git",
+        "git@github.com:heimgewebe/member.git",
+        "https://github.com/heimgewebe/member.git",
+        "ssh://git@attacker.invalid:443/heimgewebe/member.git",
+        "ssh://git@github.com:0/heimgewebe/member.git",
+    ):
+        assert module.github_ssh_remote_explicit_port(remote) is None
+
+
 def test_authenticated_membership_transport_requires_https_or_explicit_ssh_user() -> None:
     module = load_publisher()
 
@@ -1184,6 +1209,59 @@ def test_fleet_member_credential_helper_path_rejects_path_injection(
         module._fleet_member_credential_helper_path()
 
 
+def test_remote_head_for_entry_uses_url_port_for_github_ssh_alternate_route(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path, "member-ssh-url-port")
+    remote = "ssh://git@github.com:443/heimgewebe/member.git"
+    git(repo, "remote", "add", "origin", remote)
+
+    home = tmp_path / "home"
+    ssh_dir = home / ".ssh"
+    ssh_dir.mkdir(parents=True)
+    (ssh_dir / "config").write_text(
+        "Host github.com\n"
+        "    HostName ssh.github.com\n",
+        encoding="utf-8",
+    )
+    (ssh_dir / "config").chmod(0o600)
+    monkeypatch.setenv("HOME", str(home))
+
+    entry = module.RepoEntry(
+        key="heimgewebe/member",
+        owner="heimgewebe",
+        repo="member",
+        path=repo,
+        remote=remote,
+    )
+    observed: dict[str, object] = {}
+
+    def fake_remote_head(
+        repo_path: Path,
+        *,
+        remote: str = "origin",
+        env: dict[str, str] | None = None,
+    ) -> tuple[str, str, str]:
+        observed["repo_path"] = repo_path
+        observed["remote"] = remote
+        observed["env"] = env
+        return "origin/main", "main", sha
+
+    monkeypatch.setattr(module, "remote_head", fake_remote_head)
+
+    assert module.remote_head_for_entry(entry) == ("origin/main", "main", sha)
+    assert observed["repo_path"] == repo
+    assert observed["remote"] == remote
+    env = observed["env"]
+    assert isinstance(env, dict)
+    command = env["GIT_SSH_COMMAND"]
+    assert "HostName=ssh.github.com" in command
+    assert "Port=443" in command
+    assert "HostKeyAlias=github.com" in command
+
+
 def test_fleet_repo_ssh_env_preserves_only_bounded_github_auth_config(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1234,6 +1312,33 @@ def test_fleet_repo_ssh_env_preserves_only_bounded_github_auth_config(
         str(ssh_dir / "other"),
     ):
         assert forbidden not in command
+
+
+def test_fleet_member_ssh_route_honors_url_port_443_with_bounded_hostname(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    home = tmp_path / "home"
+    ssh_dir = home / ".ssh"
+    ssh_dir.mkdir(parents=True)
+    config = ssh_dir / "config"
+    config.write_text(
+        "Host github.com\n"
+        "    HostName ssh.github.com\n",
+        encoding="utf-8",
+    )
+    config.chmod(0o600)
+    monkeypatch.setenv("HOME", str(home))
+
+    command_443 = module._fleet_member_ssh_command(remote_port=443)
+    assert "HostName=ssh.github.com" in command_443
+    assert "Port=443" in command_443
+    assert "HostKeyAlias=github.com" in command_443
+
+    command_22 = module._fleet_member_ssh_command(remote_port=22)
+    assert "HostName=ssh.github.com" not in command_22
+    assert "HostKeyAlias=github.com" not in command_22
 
 
 @pytest.mark.parametrize(
@@ -1494,7 +1599,11 @@ def test_remote_head_for_entry_uses_bounded_ssh_env(
     ssh_env["GIT_SSH_COMMAND"] = "/usr/bin/ssh -F /dev/null -i /tmp/member-key"
     observed: dict[str, object] = {}
 
-    monkeypatch.setattr(module, "_fleet_repo_ssh_env", lambda: ssh_env)
+    monkeypatch.setattr(
+        module,
+        "_fleet_repo_ssh_env",
+        lambda *, remote=None: ssh_env,
+    )
 
     def fake_remote_head(
         repo_path: Path,
