@@ -1315,6 +1315,118 @@ def test_fleet_member_git_askpass_rejects_unbounded_executables(
         module._fleet_member_git_askpass_path()
 
 
+def test_remote_head_for_entry_preserves_bounded_checkout_core_askpass(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path, "core-askpass-member")
+    remote = "https://github.com/heimgewebe/member.git"
+    git(repo, "remote", "add", "origin", remote)
+    home = tmp_path / "home"
+    home.mkdir()
+    askpass = tmp_path / "core-askpass"
+    askpass.write_text(
+        "#!/bin/sh\n"
+        "case \"$1\" in\n"
+        "  *Username*) printf 'core-user\\n' ;;\n"
+        "  *Password*) printf 'core-pass\\n' ;;\n"
+        "  *) exit 1 ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    askpass.chmod(0o700)
+    git(repo, "config", "core.askPass", str(askpass))
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("GIT_ASKPASS", raising=False)
+    monkeypatch.setattr(
+        module,
+        "_global_system_github_https_config",
+        lambda _repo_path: [],
+    )
+    entry = module.RepoEntry(
+        key="heimgewebe/member",
+        owner="heimgewebe",
+        repo="member",
+        path=repo,
+        remote=remote,
+    )
+
+    authority_env = module._authority_git_env()
+    with pytest.raises(
+        RuntimeError,
+        match="unsafe local Git transport configuration: core.askpass",
+    ):
+        module.assert_authority_git_transport_safe(repo, env=authority_env)
+
+    module.assert_fleet_member_git_transport_safe(repo, env=authority_env)
+    observed: dict[str, object] = {}
+
+    def fake_remote_head(
+        repo_path: Path,
+        *,
+        remote: str = "origin",
+        env: dict[str, str] | None = None,
+    ) -> tuple[str, str, str]:
+        assert isinstance(env, dict)
+        observed["env"] = env
+        filled = subprocess.run(
+            ["/usr/bin/git", "-C", str(repo_path), "credential", "fill"],
+            input="protocol=https\nhost=github.com\n\n",
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        assert filled.returncode == 0, filled.stderr
+        assert "username=core-user" in filled.stdout
+        assert "password=core-pass" in filled.stdout
+        return "origin/main", "main", sha
+
+    monkeypatch.setattr(module, "remote_head", fake_remote_head)
+
+    assert module.remote_head_for_entry(entry) == ("origin/main", "main", sha)
+    network_env = observed["env"]
+    assert isinstance(network_env, dict)
+    assert "GIT_ASKPASS" not in network_env
+
+
+def test_fleet_member_checkout_core_askpass_uses_bounded_path_validation(
+    tmp_path: Path,
+) -> None:
+    module = load_publisher()
+    repo, _sha = initialize_repository(tmp_path, "core-askpass-unsafe")
+    git(repo, "remote", "add", "origin", "https://github.com/heimgewebe/member.git")
+    target = tmp_path / "core-askpass"
+    target.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    target.chmod(0o700)
+
+    git(repo, "config", "core.askPass", f"{target} --injected")
+    with pytest.raises(RuntimeError, match="core.askPass path contains unsafe characters"):
+        module.assert_fleet_member_git_transport_safe(
+            repo,
+            env=module._authority_git_env(),
+        )
+
+    link = tmp_path / "core-askpass-link"
+    link.symlink_to(target)
+    git(repo, "config", "core.askPass", str(link))
+    with pytest.raises(RuntimeError, match="core.askPass must be a regular file"):
+        module.assert_fleet_member_git_transport_safe(
+            repo,
+            env=module._authority_git_env(),
+        )
+
+    target.chmod(0o722)
+    git(repo, "config", "core.askPass", str(target))
+    with pytest.raises(RuntimeError, match="core.askPass must not be group/world writable"):
+        module.assert_fleet_member_git_transport_safe(
+            repo,
+            env=module._authority_git_env(),
+        )
+
+
 def test_fleet_member_credential_helper_path_rejects_path_injection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

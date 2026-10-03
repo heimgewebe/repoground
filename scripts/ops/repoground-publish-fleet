@@ -2675,40 +2675,40 @@ def _fleet_member_credential_helper_path() -> str:
 _FLEET_MEMBER_ASKPASS_SEGMENT_RE = re.compile(r"[A-Za-z0-9._@+,:=-]+")
 
 
-def _fleet_member_git_askpass_path() -> str | None:
-    raw = os.environ.get("GIT_ASKPASS")
-    if raw is None or raw == "":
-        return None
+def _validated_fleet_member_askpass_path(raw: str, *, source: str) -> str:
+    label = f"fleet member {source}"
+    if raw == "":
+        raise RuntimeError(f"{label} path must not be empty")
     if any(char in raw for char in ("\x00", "\n", "\r", "\t", " ")):
-        raise RuntimeError("fleet member GIT_ASKPASS path contains unsafe characters")
+        raise RuntimeError(f"{label} path contains unsafe characters")
     path = Path(raw)
     if not path.is_absolute():
-        raise RuntimeError("fleet member GIT_ASKPASS path must be absolute")
+        raise RuntimeError(f"{label} path must be absolute")
     if any(
         part in {"", ".", ".."} or _FLEET_MEMBER_ASKPASS_SEGMENT_RE.fullmatch(part) is None
         for part in path.parts[1:]
     ):
-        raise RuntimeError("fleet member GIT_ASKPASS path is invalid")
+        raise RuntimeError(f"{label} path is invalid")
     try:
         raw_metadata = path.lstat()
     except OSError as exc:
-        raise RuntimeError("fleet member GIT_ASKPASS path is unavailable") from exc
+        raise RuntimeError(f"{label} path is unavailable") from exc
     if not stat.S_ISREG(raw_metadata.st_mode):
-        raise RuntimeError("fleet member GIT_ASKPASS must be a regular file")
+        raise RuntimeError(f"{label} must be a regular file")
     try:
         resolved = path.resolve(strict=True)
     except OSError as exc:
-        raise RuntimeError("fleet member GIT_ASKPASS path is unavailable") from exc
+        raise RuntimeError(f"{label} path is unavailable") from exc
     nofollow = getattr(os, "O_NOFOLLOW", 0)
     if not nofollow:
-        raise RuntimeError("fleet member GIT_ASKPASS requires O_NOFOLLOW support")
+        raise RuntimeError(f"{label} requires O_NOFOLLOW support")
     try:
         descriptor = os.open(
             resolved,
             os.O_RDONLY | os.O_CLOEXEC | nofollow,
         )
     except OSError as exc:
-        raise RuntimeError("fleet member GIT_ASKPASS is unavailable") from exc
+        raise RuntimeError(f"{label} is unavailable") from exc
     try:
         metadata = os.fstat(descriptor)
         mode = stat.S_IMODE(metadata.st_mode)
@@ -2718,17 +2718,24 @@ def _fleet_member_git_askpass_path() -> str | None:
             or metadata.st_uid not in {0, os.getuid()}
         ):
             raise RuntimeError(
-                "fleet member GIT_ASKPASS must be one user/root-owned regular file"
+                f"{label} must be one user/root-owned regular file"
             )
         if mode & 0o022:
             raise RuntimeError(
-                "fleet member GIT_ASKPASS must not be group/world writable"
+                f"{label} must not be group/world writable"
             )
         if not os.access(resolved, os.X_OK):
-            raise RuntimeError("fleet member GIT_ASKPASS must be executable")
+            raise RuntimeError(f"{label} must be executable")
     finally:
         os.close(descriptor)
     return str(resolved)
+
+
+def _fleet_member_git_askpass_path() -> str | None:
+    raw = os.environ.get("GIT_ASKPASS")
+    if raw is None or raw == "":
+        return None
+    return _validated_fleet_member_askpass_path(raw, source="GIT_ASKPASS")
 
 
 def _fleet_repo_git_env(
@@ -3176,6 +3183,10 @@ def _fleet_member_local_config_entry_is_transport_override(
     key: str,
     value: str,
 ) -> bool:
+    normalized = key.strip().lower()
+    if normalized == "core.askpass":
+        _validated_fleet_member_askpass_path(value, source="core.askPass")
+        return False
     if _fleet_github_extra_header_key_allowed(key):
         return not _fleet_github_authorization_header_value_allowed(value)
     return _fleet_member_local_config_is_transport_override(key)
