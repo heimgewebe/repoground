@@ -2693,6 +2693,31 @@ def _fleet_member_credential_helper_path() -> str:
 _FLEET_MEMBER_ASKPASS_SEGMENT_RE = re.compile(r"[A-Za-z0-9._@+,:=-]+")
 
 
+def _assert_fleet_member_askpass_ancestors_trusted(
+    resolved: Path,
+    *,
+    label: str,
+) -> None:
+    trusted_uids = {0, os.getuid()}
+    for parent in resolved.parents:
+        try:
+            metadata = parent.lstat()
+        except OSError as exc:
+            raise RuntimeError(f"{label} parent directory is unavailable") from exc
+        if not stat.S_ISDIR(metadata.st_mode):
+            raise RuntimeError(f"{label} parent path must remain a directory")
+        if metadata.st_uid not in trusted_uids:
+            raise RuntimeError(
+                f"{label} parent directories must be user/root-owned"
+            )
+        mode = stat.S_IMODE(metadata.st_mode)
+        if mode & 0o022 and not metadata.st_mode & stat.S_ISVTX:
+            raise RuntimeError(
+                f"{label} parent directory must not be group/world writable "
+                "without sticky protection"
+            )
+
+
 def _validated_fleet_member_askpass_path(raw: str, *, source: str) -> str:
     label = f"fleet member {source}"
     if raw == "":
@@ -2744,6 +2769,10 @@ def _validated_fleet_member_askpass_path(raw: str, *, source: str) -> str:
             )
         if not os.access(resolved, os.X_OK):
             raise RuntimeError(f"{label} must be executable")
+        _assert_fleet_member_askpass_ancestors_trusted(
+            resolved,
+            label=label,
+        )
     finally:
         os.close(descriptor)
     return str(resolved)

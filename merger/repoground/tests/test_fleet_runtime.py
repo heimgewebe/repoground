@@ -1543,6 +1543,42 @@ def test_fleet_member_git_askpass_rejects_unbounded_executables(
         module._fleet_member_git_askpass_path()
 
 
+def test_fleet_member_git_askpass_rejects_nonsticky_writable_parent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    shared.chmod(0o777)
+    askpass = shared / "askpass"
+    askpass.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    askpass.chmod(0o700)
+    monkeypatch.setenv("GIT_ASKPASS", str(askpass))
+
+    with pytest.raises(
+        RuntimeError,
+        match="parent directory must not be group/world writable without sticky protection",
+    ):
+        module._fleet_member_git_askpass_path()
+
+
+def test_fleet_member_git_askpass_accepts_sticky_writable_parent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    sticky = tmp_path / "sticky"
+    sticky.mkdir()
+    sticky.chmod(0o1777)
+    askpass = sticky / "askpass"
+    askpass.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    askpass.chmod(0o700)
+    monkeypatch.setenv("GIT_ASKPASS", str(askpass))
+
+    assert module._fleet_member_git_askpass_path() == str(askpass.resolve())
+
+
 def test_remote_head_for_entry_preserves_bounded_checkout_core_askpass(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
