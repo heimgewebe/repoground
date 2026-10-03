@@ -2494,6 +2494,7 @@ _FLEET_MEMBER_TLS_ENV_NAMES = _AUTHORITY_TLS_ENV_NAMES | frozenset(
     }
 )
 _AUTHORITY_LOADER_ENV_NAMES = frozenset({"ld_library_path", "ld_preload"})
+_AUTHORITY_ASKPASS_ENV_NAMES = frozenset({"ssh_askpass"})
 
 
 def _authority_git_env() -> dict[str, str]:
@@ -2501,6 +2502,7 @@ def _authority_git_env() -> dict[str, str]:
         key: value
         for key, value in os.environ.items()
         if not key.startswith("GIT_")
+        and key.lower() not in _AUTHORITY_ASKPASS_ENV_NAMES
         and key.lower() not in _AUTHORITY_PROXY_ENV_NAMES
         and key.lower() not in _AUTHORITY_TLS_ENV_NAMES
         and key.lower() not in _AUTHORITY_LOADER_ENV_NAMES
@@ -2524,6 +2526,7 @@ def _credential_config_discovery_env() -> dict[str, str]:
         key: value
         for key, value in os.environ.items()
         if not key.startswith("GIT_")
+        and key.lower() not in _AUTHORITY_ASKPASS_ENV_NAMES
         and key.lower() not in _AUTHORITY_LOADER_ENV_NAMES
     }
     env["PATH"] = "/usr/bin:/bin"

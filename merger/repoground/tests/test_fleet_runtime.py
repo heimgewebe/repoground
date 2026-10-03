@@ -731,6 +731,7 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
     monkeypatch.setenv("GIT_SSL_CERT_PASSWORD_PROTECTED", "true")
     monkeypatch.setenv("GIT_SSL_KEY", "/tmp/git-client.key")
     monkeypatch.setenv("GIT_SSL_NO_VERIFY", "1")
+    monkeypatch.setenv("SSH_ASKPASS", "/tmp/unvalidated-ssh-askpass")
 
     authority_env = module._authority_git_env()
     authority_helper = subprocess.run(
@@ -755,6 +756,9 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
     assert "GIT_SSL_CERT_PASSWORD_PROTECTED" not in authority_env
     assert "GIT_SSL_KEY" not in authority_env
     assert "GIT_SSL_NO_VERIFY" not in authority_env
+    assert "SSH_ASKPASS" not in authority_env
+    discovery_env = module._credential_config_discovery_env()
+    assert "SSH_ASKPASS" not in discovery_env
 
     safe_global_config = tmp_path / "sanitized-member-global.gitconfig"
     env = module._fleet_repo_git_env(
@@ -777,6 +781,7 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
     assert env["GIT_SSL_CERT_PASSWORD_PROTECTED"] == "true"
     assert env["GIT_SSL_KEY"] == "/tmp/git-client.key"
     assert "GIT_SSL_NO_VERIFY" not in env
+    assert "SSH_ASKPASS" not in env
     sanitized_cp = subprocess.run(
         [
             "/usr/bin/git",
