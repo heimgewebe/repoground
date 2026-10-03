@@ -1037,7 +1037,8 @@ def test_fleet_repo_ssh_env_preserves_only_bounded_github_auth_config(
     ssh_dir.mkdir(parents=True)
     (ssh_dir / "config").write_text(
         "Host github.com\n"
-        "    HostName attacker.invalid\n"
+        "    HostName ssh.github.com\n"
+        "    Port 443\n"
         "    User attacker\n"
         "    IdentityFile ~/.ssh/id_ed25519\n"
         "    CertificateFile ~/.ssh/id_ed25519-cert.pub\n"
@@ -1064,6 +1065,9 @@ def test_fleet_repo_ssh_env_preserves_only_bounded_github_auth_config(
     assert f"IdentityAgent={ssh_dir / 'agent.sock'}" in argv
     assert "ClearAllForwardings=yes" in argv
     assert "PermitLocalCommand=no" in argv
+    assert "HostName=ssh.github.com" in argv
+    assert "Port=443" in argv
+    assert "HostKeyAlias=github.com" in argv
     for forbidden in (
         "attacker.invalid",
         "ProxyCommand",
@@ -1073,6 +1077,57 @@ def test_fleet_repo_ssh_env_preserves_only_bounded_github_auth_config(
         str(ssh_dir / "other"),
     ):
         assert forbidden not in command
+
+
+@pytest.mark.parametrize(
+    ("config_body", "expected_route"),
+    [
+        (
+            "Host github.com\n"
+            "    HostName ssh.github.com\n"
+            "    Port 443\n",
+            True,
+        ),
+        (
+            "Host github.com\n"
+            "    HostName attacker.invalid\n"
+            "    Port 443\n",
+            False,
+        ),
+        (
+            "Host github.com\n"
+            "    HostName ssh.github.com\n"
+            "    Port 22\n",
+            False,
+        ),
+        (
+            "Host other.example\n"
+            "    HostName ssh.github.com\n"
+            "    Port 443\n",
+            False,
+        ),
+    ],
+)
+def test_fleet_member_ssh_route_allows_only_github_alternate_443(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    config_body: str,
+    expected_route: bool,
+) -> None:
+    module = load_publisher()
+    home = tmp_path / "home"
+    ssh_dir = home / ".ssh"
+    ssh_dir.mkdir(parents=True)
+    config = ssh_dir / "config"
+    config.write_text(config_body, encoding="utf-8")
+    config.chmod(0o600)
+    monkeypatch.setenv("HOME", str(home))
+
+    command = module._fleet_member_ssh_command()
+
+    assert ("HostName=ssh.github.com" in command) is expected_route
+    assert ("Port=443" in command) is expected_route
+    assert ("HostKeyAlias=github.com" in command) is expected_route
 
 
 @pytest.mark.parametrize(
@@ -3611,12 +3666,25 @@ def test_runtime_installer_enable_accepts_valid_managed_runtime(
     tmp_path: Path,
 ) -> None:
     home = tmp_path / "home"
-    _activate_managed_runtime(home)
+    managed_root = _activate_managed_runtime(home)
+    managed_python = managed_root / ".venv/bin/python"
+    marker = tmp_path / "managed-inventory.args"
+    managed_python.write_text(
+        "#!/bin/sh\n"
+        f"printf '%s\\n' \"$@\" > {shlex.quote(str(marker))}\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    managed_python.chmod(0o755)
 
     completed = _run_installer(tmp_path, "--enable")
 
     assert completed.returncode == 0, completed.stderr
     assert "PASS enabled" in completed.stdout
+    assert marker.read_text(encoding="utf-8").splitlines()[-2:] == [
+        "--inventory",
+        "--inventory-allow-missing-local-members",
+    ]
     assert "enable --now repoground-publish-fleet-watch.timer" in (
         home / "systemctl.log"
     ).read_text(encoding="utf-8")
@@ -5625,10 +5693,7 @@ def test_authoritative_fleet_membership_reads_remote_main_not_dirty_worktree(
         env: dict[str, str],
         max_bytes: int,
     ) -> tuple[str, str, bytes]:
-        assert module.parse_github_remote(origin_url) == (
-            "heimgewebe",
-            "metarepo",
-        )
+        assert origin_url == module.FLEET_MEMBERSHIP_REMOTE
         return original_isolated(
             str(remote),
             branch,
@@ -5711,10 +5776,7 @@ def test_authoritative_fleet_membership_preserves_crlf_blob_bytes(
         env: dict[str, str],
         max_bytes: int,
     ) -> tuple[str, str, bytes]:
-        assert module.parse_github_remote(origin_url) == (
-            "heimgewebe",
-            "metarepo",
-        )
+        assert origin_url == module.FLEET_MEMBERSHIP_REMOTE
         return original_isolated(
             str(remote),
             branch,
@@ -5880,6 +5942,18 @@ def test_fleet_inventory_marks_missing_authoritative_member_as_failure(
         "heimgewebe/heim-pc"
     ]
     assert payload["membership"]["excluded_local_nonmember_count"] == 0
+
+    assert (
+        module.main(
+            ["--inventory", "--inventory-allow-missing-local-members"]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "warn"
+    assert payload["membership"]["missing_local_members"] == [
+        "heimgewebe/heim-pc"
+    ]
 
 
 def test_busy_fleet_does_not_run_membership_preflight_or_replace_receipt(

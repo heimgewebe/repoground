@@ -497,21 +497,51 @@ def test_authoritative_fleet_membership_rejects_checkout_local_ssh_override(
         module.load_authoritative_fleet_membership()
 
 
-def test_authority_git_transport_guard_rejects_environment_override(
+def test_run_sanitizes_git_environment_by_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo = initialize_repository(tmp_path, "default-run-env")
+    monkeypatch.setenv("GIT_DIR", "/tmp/attacker-git-dir")
+    monkeypatch.setenv("GIT_SSH_COMMAND", "/bin/false")
+
+    completed = module.run(
+        ["git", "-C", str(repo), "rev-parse", "--show-toplevel"],
+    )
+
+    assert completed.returncode == 0
+    assert Path(completed.stdout.strip()).resolve() == repo.resolve()
+
+
+def test_authority_git_transport_guard_accepts_neutralized_parent_override(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     module = load_publisher()
     repo = initialize_repository(tmp_path, "metarepo-env")
-    for name in module._AUTHORITY_GIT_FORBIDDEN_ENV:
-        monkeypatch.delenv(name, raising=False)
-    monkeypatch.delenv("GIT_CONFIG_COUNT", raising=False)
+    monkeypatch.setenv("GIT_DIR", "/tmp/attacker-git-dir")
     monkeypatch.setenv("GIT_SSH_COMMAND", "ssh -F /tmp/attacker-config")
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "url.ssh://attacker.invalid/.insteadOf")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "git@github.com:")
 
-    with pytest.raises(
-        RuntimeError,
-        match="repository/transport overrides: GIT_SSH_COMMAND",
-    ):
+    env = module._authority_git_env()
+    module.assert_authority_git_transport_safe(repo, env=env)
+
+    assert env["GIT_SSH_COMMAND"] == "/usr/bin/ssh -F /dev/null -o BatchMode=yes"
+    assert "GIT_DIR" not in env
+    assert "GIT_CONFIG_COUNT" not in env
+    assert "GIT_CONFIG_KEY_0" not in env
+
+
+def test_authority_git_transport_guard_requires_explicit_sanitized_env(
+    tmp_path: Path,
+) -> None:
+    module = load_publisher()
+    repo = initialize_repository(tmp_path, "metarepo-explicit-env")
+
+    with pytest.raises(RuntimeError, match="Git environment must be explicit"):
         module.assert_authority_git_transport_safe(repo)
 
 
@@ -582,6 +612,35 @@ def test_authority_git_env_neutralizes_nonlocal_transport_configuration(
     assert effective_global.returncode == 0, effective_global.stdout
     assert "core.sshcommand" not in effective_global.stdout.lower()
     assert "insteadof" not in effective_global.stdout.lower()
+
+
+def test_discover_uses_sanitized_git_env_for_top_level_probe(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo = tmp_path / "candidate"
+    repo.mkdir()
+    monkeypatch.setattr(module, "REPOS_ROOT", tmp_path)
+    monkeypatch.setenv("GIT_DIR", "/tmp/attacker-git-dir")
+    observed: list[dict[str, str] | None] = []
+
+    def fake_is_top_level_git(
+        path: Path,
+        *,
+        env: dict[str, str] | None = None,
+    ) -> bool:
+        assert path == repo
+        observed.append(env)
+        return False
+
+    monkeypatch.setattr(module, "is_top_level_git", fake_is_top_level_git)
+
+    assert module.discover() == []
+    assert len(observed) == 1
+    assert observed[0] is not None
+    assert observed[0]["GIT_CONFIG_GLOBAL"] == os.devnull
+    assert "GIT_DIR" not in observed[0]
 
 
 @pytest.mark.parametrize(
