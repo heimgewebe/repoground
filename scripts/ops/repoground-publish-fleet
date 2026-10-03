@@ -518,12 +518,13 @@ def canonical_sha256(payload: dict[str, object]) -> str:
 
 def parse_github_remote(remote: str) -> tuple[str, str] | None:
     value = remote.strip()
-    if value.startswith("/") or value.startswith("file:"):
+    if value.startswith("/") or value.casefold().startswith("file:"):
         return None
     url_match = re.fullmatch(
         r"(?:https?|ssh|git)://(?:[^/@:]+@)?github\.com"
         r"(?::([0-9]+))?/([^/]+)/([^/]+?)(?:\.git)?/?",
         value,
+        flags=re.ASCII | re.IGNORECASE,
     )
     if url_match:
         port = url_match.group(1)
@@ -534,6 +535,7 @@ def parse_github_remote(remote: str) -> tuple[str, str] | None:
         r"(?:[^@/:]+@)?github\.com:"
         r"([^/]+)/([^/]+?)(?:\.git)?/?",
         value,
+        flags=re.ASCII | re.IGNORECASE,
     )
     if not scp_match:
         return None
@@ -545,6 +547,7 @@ def github_ssh_remote_explicit_port(remote: str) -> int | None:
     match = re.fullmatch(
         r"ssh://[^/@:]+@github\.com(?::([0-9]+))?/[^/]+/[^/]+(?:\.git)?/?",
         value,
+        flags=re.ASCII | re.IGNORECASE,
     )
     if match is None or match.group(1) is None:
         return None
@@ -554,18 +557,37 @@ def github_ssh_remote_explicit_port(remote: str) -> int | None:
     return port
 
 
+def github_ssh_remote_user(remote: str) -> str | None:
+    value = remote.strip()
+    url_match = re.fullmatch(
+        r"ssh://([^/@:]+)@github\.com(?::[0-9]+)?/[^/]+/[^/]+(?:\.git)?/?",
+        value,
+        flags=re.ASCII | re.IGNORECASE,
+    )
+    if url_match is not None:
+        return url_match.group(1)
+    scp_match = re.fullmatch(
+        r"([^@/:]+)@github\.com:[^/]+/[^/]+(?:\.git)?/?",
+        value,
+        flags=re.ASCII | re.IGNORECASE,
+    )
+    return scp_match.group(1) if scp_match is not None else None
+
+
 def github_remote_uses_authenticated_transport(remote: str) -> bool:
     value = remote.strip()
-    if value.startswith("https://"):
+    if value.casefold().startswith("https://"):
         return parse_github_remote(value) is not None
     if re.fullmatch(
         r"ssh://[^/@:]+@github\.com(?::[0-9]+)?/[^/]+/[^/]+(?:\.git)?/?",
         value,
+        flags=re.ASCII | re.IGNORECASE,
     ):
         return parse_github_remote(value) is not None
     if re.fullmatch(
         r"[^@/:]+@github\.com:[^/]+/[^/]+(?:\.git)?/?",
         value,
+        flags=re.ASCII | re.IGNORECASE,
     ):
         return parse_github_remote(value) is not None
     return False
@@ -2936,6 +2958,64 @@ def _fleet_member_ssh_host_patterns_match_github(values: list[str]) -> bool:
     return matched
 
 
+def _fleet_member_ssh_user_patterns_match(
+    values: list[str],
+    remote_user: str,
+) -> bool:
+    if not values or not remote_user:
+        return False
+    matched = False
+    for raw_pattern_list in values:
+        if not raw_pattern_list or any(
+            char in raw_pattern_list for char in ("\x00", "\n", "\r")
+        ):
+            raise RuntimeError("fleet member SSH Match user pattern is invalid")
+        for raw_pattern in raw_pattern_list.split(","):
+            if not raw_pattern:
+                raise RuntimeError("fleet member SSH Match user pattern is invalid")
+            negated = raw_pattern.startswith("!")
+            pattern = raw_pattern[1:] if negated else raw_pattern
+            if not pattern:
+                raise RuntimeError("fleet member SSH Match user pattern is invalid")
+            if re.fullmatch(r"[A-Za-z0-9._*?+-]+", pattern) is None:
+                continue
+            if fnmatchcase(remote_user, pattern):
+                if negated:
+                    return False
+                matched = True
+    return matched
+
+
+def _fleet_member_ssh_match_applies(
+    values: list[str],
+    *,
+    remote_user: str | None,
+) -> bool:
+    if not values:
+        raise RuntimeError("fleet member SSH Match requires criteria")
+    normalized = tuple(value.casefold() for value in values)
+    if normalized == ("all",):
+        return True
+    if len(values) % 2:
+        return False
+    active = True
+    for index in range(0, len(values), 2):
+        criterion = normalized[index]
+        patterns = [values[index + 1]]
+        if criterion == "host":
+            active = active and _fleet_member_ssh_host_patterns_match_github(patterns)
+        elif criterion == "user":
+            if remote_user is None:
+                return False
+            active = active and _fleet_member_ssh_user_patterns_match(
+                patterns,
+                remote_user,
+            )
+        else:
+            return False
+    return active
+
+
 def _fleet_member_ssh_include_paths(home: Path, values: list[str]) -> list[Path]:
     if not values:
         raise RuntimeError("fleet member SSH Include requires at least one path")
@@ -2977,7 +3057,10 @@ def _fleet_member_ssh_include_paths(home: Path, values: list[str]) -> list[Path]
     return matches
 
 
-def _fleet_member_ssh_auth_options() -> dict[str, object]:
+def _fleet_member_ssh_auth_options(
+    *,
+    remote_user: str | None = None,
+) -> dict[str, object]:
     home_raw = os.environ.get("HOME")
     if not home_raw:
         return {}
@@ -3045,34 +3128,10 @@ def _fleet_member_ssh_auth_options() -> dict[str, object]:
                 active = _fleet_member_ssh_host_patterns_match_github(values)
                 continue
             if key == "match":
-                normalized_match = tuple(value.casefold() for value in values)
-                if normalized_match == ("all",):
-                    active = True
-                elif (
-                    len(values) >= 2
-                    and normalized_match[0] == "host"
-                    and not any(
-                        token in {
-                            "all",
-                            "canonical",
-                            "command",
-                            "exec",
-                            "final",
-                            "host",
-                            "localnetwork",
-                            "localuser",
-                            "originalhost",
-                            "tagged",
-                            "user",
-                        }
-                        for token in normalized_match[1:]
-                    )
-                ):
-                    active = _fleet_member_ssh_host_patterns_match_github(
-                        values[1:]
-                    )
-                else:
-                    active = False
+                active = _fleet_member_ssh_match_applies(
+                    values,
+                    remote_user=remote_user,
+                )
                 continue
             if (
                 not active
@@ -3131,14 +3190,18 @@ def _fleet_member_ssh_auth_options() -> dict[str, object]:
     }
 
 
-def _fleet_member_ssh_command(*, remote_port: int | None = None) -> str:
+def _fleet_member_ssh_command(
+    *,
+    remote_port: int | None = None,
+    remote_user: str | None = None,
+) -> str:
     if remote_port is not None and (
         isinstance(remote_port, bool)
         or not isinstance(remote_port, int)
         or not 1 <= remote_port <= 65535
     ):
         raise RuntimeError("fleet member SSH remote port is invalid")
-    options = _fleet_member_ssh_auth_options()
+    options = _fleet_member_ssh_auth_options(remote_user=remote_user)
     argv = [
         "/usr/bin/ssh",
         "-F",
@@ -3189,7 +3252,15 @@ def _fleet_repo_ssh_env(*, remote: str | None = None) -> dict[str, str]:
         if isinstance(remote, str)
         else None
     )
-    env["GIT_SSH_COMMAND"] = _fleet_member_ssh_command(remote_port=remote_port)
+    remote_user = (
+        github_ssh_remote_user(remote)
+        if isinstance(remote, str)
+        else None
+    )
+    env["GIT_SSH_COMMAND"] = _fleet_member_ssh_command(
+        remote_port=remote_port,
+        remote_user=remote_user,
+    )
     return env
 
 

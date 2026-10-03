@@ -150,6 +150,47 @@ def test_parse_github_remote_requires_exact_github_host() -> None:
         assert module.parse_github_remote(remote) is None
 
 
+def test_github_remote_host_and_scheme_are_ascii_case_insensitive() -> None:
+    module = load_publisher()
+
+    https_remote = "HTTPS://GitHub.COM/HeimGewebe/RepoGround.git"
+    assert module.parse_github_remote(https_remote) == (
+        "HeimGewebe",
+        "RepoGround",
+    )
+    assert module.github_remote_uses_authenticated_transport(https_remote) is True
+
+    scp_remote = "git@GitHub.COM:HeimGewebe/RepoGround.git"
+    assert module.parse_github_remote(scp_remote) == (
+        "HeimGewebe",
+        "RepoGround",
+    )
+    assert module.github_ssh_remote_user(scp_remote) == "git"
+    assert module.github_remote_uses_authenticated_transport(scp_remote) is True
+
+    ssh_remote = "SSH://git@GitHub.COM:443/HeimGewebe/RepoGround.git"
+    assert module.parse_github_remote(ssh_remote) == (
+        "HeimGewebe",
+        "RepoGround",
+    )
+    assert module.github_ssh_remote_explicit_port(ssh_remote) == 443
+    assert module.github_ssh_remote_user(ssh_remote) == "git"
+    assert module.github_remote_uses_authenticated_transport(ssh_remote) is True
+
+    assert (
+        module.parse_github_remote(
+            "https://GitHub.COM.evil.example/heimgewebe/repoground.git"
+        )
+        is None
+    )
+    assert (
+        module.parse_github_remote(
+            "https://gİthub.com/heimgewebe/repoground.git"
+        )
+        is None
+    )
+
+
 def test_github_ssh_remote_explicit_port_is_bounded() -> None:
     module = load_publisher()
 
@@ -384,7 +425,7 @@ def test_remote_head_for_entry_accepts_mixed_case_github_identity(
 ) -> None:
     module = load_publisher()
     repo, sha = initialize_repository(tmp_path, "member-mixed-case")
-    remote = "https://github.com/HeimGewebe/MeMbEr.git"
+    remote = "https://GitHub.COM/HeimGewebe/MeMbEr.git"
     git(repo, "remote", "add", "origin", remote)
     entry = module.RepoEntry(
         key="heimgewebe/member",
@@ -1926,6 +1967,46 @@ def test_fleet_member_ssh_match_supports_bounded_host_and_all(
     assert tuple(Path(value).name for value in identities) == expected_names
 
 
+def test_fleet_member_ssh_match_supports_bounded_host_user_compound(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    home = tmp_path / "home"
+    ssh_dir = home / ".ssh"
+    ssh_dir.mkdir(parents=True)
+    config = ssh_dir / "config"
+    config.write_text(
+        "Match host GitHub.COM user git\n"
+        "    IdentityFile ~/.ssh/host-user\n"
+        "Match user git host github.com\n"
+        "    IdentityFile ~/.ssh/user-host\n"
+        "Match host github.com user other\n"
+        "    IdentityFile ~/.ssh/wrong-user\n"
+        "Match host github.com exec true\n"
+        "    IdentityFile ~/.ssh/unsupported-exec\n"
+        "Match host github.com user !git,*\n"
+        "    IdentityFile ~/.ssh/negated-user\n",
+        encoding="utf-8",
+    )
+    config.chmod(0o600)
+    monkeypatch.setenv("HOME", str(home))
+
+    env = module._fleet_repo_ssh_env(
+        remote="git@GitHub.COM:heimgewebe/member.git"
+    )
+    command = env["GIT_SSH_COMMAND"]
+
+    assert str(ssh_dir / "host-user") in command
+    assert str(ssh_dir / "user-host") in command
+    assert str(ssh_dir / "wrong-user") not in command
+    assert str(ssh_dir / "unsupported-exec") not in command
+    assert str(ssh_dir / "negated-user") not in command
+
+    without_remote_user = module._fleet_member_ssh_auth_options()
+    assert without_remote_user.get("identity_files", ()) == ()
+
+
 def test_fleet_member_ssh_include_expands_nested_auth_only(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2561,7 +2642,7 @@ def test_repoground_tool_head_reuses_bounded_member_transport(
 ) -> None:
     module = load_publisher()
     repo, sha = initialize_repository(tmp_path, "repoground")
-    remote = "git@github.com:HeimGewebe/RepoGround.git"
+    remote = "git@GitHub.COM:HeimGewebe/RepoGround.git"
     git(repo, "remote", "add", "origin", remote)
     monkeypatch.setattr(module, "REPOGROUND_REPO", repo)
 
@@ -2605,7 +2686,7 @@ def test_repoground_tool_entry_rejects_retired_alias_even_with_mixed_case(
         "remote",
         "add",
         "origin",
-        "git@github.com:HeimGewebe/LensKit.git",
+        "git@GitHub.COM:HeimGewebe/LensKit.git",
     )
     monkeypatch.setattr(module, "REPOGROUND_REPO", repo)
 
@@ -5384,7 +5465,7 @@ def test_discover_normalizes_github_identity_case_without_reviving_retired_alias
         "remote",
         "add",
         "origin",
-        "git@github.com:HeimGewebe/RepoGround.git",
+        "git@GitHub.COM:HeimGewebe/RepoGround.git",
     )
     excluded, _ = initialize_repository(repos_root, "mixed-excluded")
     git(
@@ -5392,7 +5473,7 @@ def test_discover_normalizes_github_identity_case_without_reviving_retired_alias
         "remote",
         "add",
         "origin",
-        "https://github.com/HeimGewebe/Vault-Gewebe.git",
+        "https://GitHub.COM/HeimGewebe/Vault-Gewebe.git",
     )
     retired, _ = initialize_repository(repos_root, "mixed-retired")
     git(
@@ -5400,7 +5481,7 @@ def test_discover_normalizes_github_identity_case_without_reviving_retired_alias
         "remote",
         "add",
         "origin",
-        "git@github.com:HeimGewebe/LensKit.git",
+        "git@GitHub.COM:HeimGewebe/LensKit.git",
     )
 
     entries = module.discover()
@@ -5410,7 +5491,7 @@ def test_discover_normalizes_github_identity_case_without_reviving_retired_alias
     assert entries[0].owner == "heimgewebe"
     assert entries[0].repo == "repoground"
     assert entries[0].path == active
-    assert entries[0].remote == "git@github.com:HeimGewebe/RepoGround.git"
+    assert entries[0].remote == "git@GitHub.COM:HeimGewebe/RepoGround.git"
 
 
 def test_membership_keys_normalize_github_identity_case() -> None:
@@ -5431,7 +5512,7 @@ def test_membership_keys_normalize_github_identity_case() -> None:
             {
                 "owner": "heimgewebe",
                 "name": "repoground",
-                "url": "https://github.com/HeimGewebe/RepoGround.git",
+                "url": "https://GitHub.COM/HeimGewebe/RepoGround.git",
             }
         )
         == "heimgewebe/repoground"
@@ -6746,7 +6827,7 @@ def test_authoritative_fleet_membership_accepts_mixed_case_github_origin(
         "remote",
         "add",
         "origin",
-        "git@github.com:HeimGewebe/MetaRepo.git",
+        "git@GitHub.COM:HeimGewebe/MetaRepo.git",
     )
     monkeypatch.setattr(module, "METAREPO_REPO", checkout)
     authoritative = b"repos:\n  - name: repoground\n"
