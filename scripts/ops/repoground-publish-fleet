@@ -3296,12 +3296,26 @@ def _fleet_member_ssh_match_applies(
     normalized = tuple(value.casefold() for value in values)
     if normalized == ("all",):
         return True
-    if len(values) % 2:
-        return False
+
+    criteria: list[tuple[str, str]] = []
+    index = 0
+    while index < len(values):
+        token = values[index]
+        if "=" in token:
+            criterion, pattern = token.split("=", 1)
+            if not criterion or not pattern:
+                return False
+            criteria.append((criterion.casefold(), pattern))
+            index += 1
+            continue
+        if index + 1 >= len(values):
+            return False
+        criteria.append((token.casefold(), values[index + 1]))
+        index += 2
+
     active = True
-    for index in range(0, len(values), 2):
-        criterion = normalized[index]
-        patterns = [values[index + 1]]
+    for criterion, pattern in criteria:
+        patterns = [pattern]
         if criterion == "host":
             active = active and _fleet_member_ssh_host_patterns_match_github(
                 patterns,

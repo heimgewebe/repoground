@@ -2012,6 +2012,43 @@ def test_fleet_member_ssh_match_supports_bounded_host_user_compound(
     assert without_remote_user.get("identity_files", ()) == ()
 
 
+def test_fleet_member_ssh_match_supports_equals_form_bounded_criteria(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    home = tmp_path / "home"
+    ssh_dir = home / ".ssh"
+    ssh_dir.mkdir(parents=True)
+    config = ssh_dir / "config"
+    config.write_text(
+        "Match host=GitHub.COM user=git\n"
+        "    IdentityFile ~/.ssh/equals-host-user\n"
+        "Match originalhost=GitHub.COM user=git\n"
+        "    IdentityFile ~/.ssh/equals-original-user\n"
+        "Match user=git\n"
+        "    IdentityFile ~/.ssh/equals-user\n"
+        "Match host=github.com user=other\n"
+        "    IdentityFile ~/.ssh/equals-wrong-user\n"
+        "Match exec=true user=git\n"
+        "    IdentityFile ~/.ssh/equals-unsupported\n",
+        encoding="utf-8",
+    )
+    config.chmod(0o600)
+    monkeypatch.setenv("HOME", str(home))
+
+    env = module._fleet_repo_ssh_env(
+        remote="git@github.com:heimgewebe/member.git"
+    )
+    command = env["GIT_SSH_COMMAND"]
+
+    assert str(ssh_dir / "equals-host-user") in command
+    assert str(ssh_dir / "equals-original-user") in command
+    assert str(ssh_dir / "equals-user") in command
+    assert str(ssh_dir / "equals-wrong-user") not in command
+    assert str(ssh_dir / "equals-unsupported") not in command
+
+
 def test_fleet_member_ssh_match_supports_bounded_originalhost_user_compound(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
