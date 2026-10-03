@@ -55,9 +55,9 @@ else
 fi
 
 if (( REPOGROUND_FLEET_ENTRYPOINT )); then
-  REPOGROUND_FLEET_IMPLEMENTATION="$HOME/.local/libexec/repoground/repoground-publish-fleet.py"
+  REPOGROUND_FLEET_IMPLEMENTATION="$REPOGROUND_ROOT/scripts/ops/repoground-publish-fleet"
   if [[ ! -f "$REPOGROUND_FLEET_IMPLEMENTATION" || -L "$REPOGROUND_FLEET_IMPLEMENTATION" ]]; then
-    printf 'repoground-publish-fleet: installed implementation is unavailable or unsafe: %s\n' "$REPOGROUND_FLEET_IMPLEMENTATION" >&2
+    printf 'repoground-publish-fleet: managed runtime implementation is unavailable or unsafe: %s\n' "$REPOGROUND_FLEET_IMPLEMENTATION" >&2
     exit 1
   fi
   exec "$REPOGROUND_PYTHON" -I "$REPOGROUND_FLEET_IMPLEMENTATION" "$@"

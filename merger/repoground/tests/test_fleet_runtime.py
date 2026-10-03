@@ -4954,6 +4954,9 @@ def _activate_managed_runtime(home: Path, commit: str = "a" * 40) -> Path:
     managed_python.parent.mkdir(parents=True)
     managed_python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     managed_python.chmod(0o755)
+    runtime_publisher = managed_root / "scripts/ops/repoground-publish-fleet"
+    runtime_publisher.parent.mkdir(parents=True)
+    runtime_publisher.write_text("# runtime publisher\n", encoding="utf-8")
     (managed_root.parent / "current").symlink_to(
         managed_root,
         target_is_directory=True,
@@ -4977,9 +4980,14 @@ def test_fleet_wrapper_uses_managed_runtime_python(tmp_path: Path) -> None:
     managed_base.mkdir(parents=True, exist_ok=True)
     (managed_base / "current").symlink_to(managed_root, target_is_directory=True)
 
-    implementation = home / ".local/libexec/repoground/repoground-publish-fleet.py"
-    implementation.parent.mkdir(parents=True)
-    implementation.write_text("# implementation marker\n", encoding="utf-8")
+    implementation = managed_root / "scripts/ops/repoground-publish-fleet"
+    implementation.parent.mkdir(parents=True, exist_ok=True)
+    implementation.write_text("# runtime implementation marker\n", encoding="utf-8")
+    stale_implementation = (
+        home / ".local/libexec/repoground/repoground-publish-fleet.py"
+    )
+    stale_implementation.parent.mkdir(parents=True)
+    stale_implementation.write_text("# stale implementation marker\n", encoding="utf-8")
 
     fleet_command = tmp_path / "repoground-publish-fleet"
     shutil.copy2(CLI_WRAPPER, fleet_command)
@@ -5001,6 +5009,7 @@ def test_fleet_wrapper_uses_managed_runtime_python(tmp_path: Path) -> None:
         str(implementation),
         "--inventory",
     ]
+    assert str(stale_implementation) not in marker.read_text(encoding="utf-8")
 
 
 def test_runtime_installer_enable_fails_before_mutation_without_managed_runtime(
@@ -5034,7 +5043,9 @@ def test_runtime_installer_enable_accepts_valid_managed_runtime(
 
     assert completed.returncode == 0, completed.stderr
     assert "PASS enabled" in completed.stdout
-    assert marker.read_text(encoding="utf-8").splitlines()[-2:] == [
+    assert marker.read_text(encoding="utf-8").splitlines() == [
+        "-I",
+        str(managed_root / "scripts/ops/repoground-publish-fleet"),
         "--inventory",
         "--inventory-allow-missing-local-members",
     ]
@@ -5087,7 +5098,7 @@ def test_installer_atomically_migrates_state_and_starts_canonical_logs(
     )
     assert installed_wrapper.read_bytes() == CLI_WRAPPER.read_bytes()
     assert installed_wrapper.stat().st_mode & 0o111
-    assert installed_impl.read_bytes() == PUBLISHER.read_bytes()
+    assert not installed_impl.exists()
     assert "PASS paused" in completed.stdout
 
 
