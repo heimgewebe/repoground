@@ -294,6 +294,46 @@ def test_remote_head_for_entry_allows_separate_pushurl(
     assert module.remote_head_for_entry(entry) == ("origin/main", "main", sha)
 
 
+def test_remote_head_for_entry_allows_origin_prune(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path, "member-prune")
+    remote = "git@github.com:heimgewebe/member.git"
+    git(repo, "remote", "add", "origin", remote)
+    git(repo, "config", "remote.origin.prune", "true")
+    entry = module.RepoEntry(
+        key="heimgewebe/member",
+        owner="heimgewebe",
+        repo="member",
+        path=repo,
+        remote=remote,
+    )
+
+    assert module._fleet_member_local_config_is_transport_override(
+        "remote.origin.prune"
+    ) is False
+    assert module._fleet_member_local_config_is_transport_override(
+        "remote.origin.uploadpack"
+    ) is True
+
+    def fake_remote_head(
+        repo_path: Path,
+        *,
+        remote: str = "origin",
+        env: dict[str, str] | None = None,
+    ) -> tuple[str, str, str]:
+        assert repo_path == repo
+        assert remote == entry.remote
+        assert isinstance(env, dict)
+        return "origin/main", "main", sha
+
+    monkeypatch.setattr(module, "remote_head", fake_remote_head)
+
+    assert module.remote_head_for_entry(entry) == ("origin/main", "main", sha)
+
+
 def test_remote_head_for_entry_allows_secondary_fetch_urls(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

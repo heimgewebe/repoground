@@ -2394,6 +2394,9 @@ _AUTHORITY_GIT_FORBIDDEN_ENV = frozenset(
 _AUTHORITY_GIT_ALLOWED_ORIGIN_CONFIG = frozenset(
     {"remote.origin.fetch", "remote.origin.pushurl", "remote.origin.url"}
 )
+_FLEET_MEMBER_ALLOWED_ORIGIN_CONFIG = _AUTHORITY_GIT_ALLOWED_ORIGIN_CONFIG | frozenset(
+    {"remote.origin.prune"}
+)
 _AUTHORITY_PROXY_ENV_NAMES = frozenset({"all_proxy", "http_proxy", "https_proxy"})
 _AUTHORITY_TLS_ENV_NAMES = frozenset(
     {"curl_ca_bundle", "ssl_cert_dir", "ssl_cert_file"}
@@ -3048,6 +3051,8 @@ def _fleet_member_local_config_is_transport_override(key: str) -> bool:
     normalized = key.strip().lower()
     if normalized == "extensions.worktreeconfig":
         return False
+    if normalized.startswith("remote.origin."):
+        return normalized not in _FLEET_MEMBER_ALLOWED_ORIGIN_CONFIG
     if normalized.startswith("credential."):
         return not _fleet_credential_config_key_allowed(normalized)
     if normalized.startswith("http."):
