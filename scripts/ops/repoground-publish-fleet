@@ -2305,8 +2305,31 @@ def _repoground_tool_entry() -> RepoEntry:
     )
 
 
+def _managed_runtime_commit_for_publisher() -> str | None:
+    publisher_path = Path(__file__).resolve(strict=True)
+    managed_base = Path.home() / ".local" / "share" / "repoground-runtime"
+    try:
+        managed_base_resolved = managed_base.resolve(strict=True)
+        relative = publisher_path.relative_to(managed_base_resolved)
+    except (FileNotFoundError, ValueError):
+        return None
+    if relative.parts[1:] != ("scripts", "ops", "repoground-publish-fleet"):
+        raise RuntimeError(
+            "managed RepoGround publisher path does not match the release layout"
+        )
+    release = relative.parts[0]
+    if SOURCE_REVISION_RE.fullmatch(release) is None:
+        raise RuntimeError(
+            "managed RepoGround publisher release directory is not a commit"
+        )
+    return release
+
+
 def _repoground_tool_head() -> str:
     entry = _repoground_tool_entry()
+    managed_release = _managed_runtime_commit_for_publisher()
+    if managed_release is not None:
+        return managed_release
     _remote_ref, branch, tool_sha = remote_head_for_entry(entry)
     if branch != "main":
         raise RuntimeError(

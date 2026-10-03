@@ -2833,6 +2833,45 @@ def test_repoground_tool_head_reuses_bounded_member_transport(
     assert observed["env"] is ssh_env
 
 
+def test_repoground_tool_head_uses_managed_release_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    home = tmp_path / "home"
+    release = "a" * 40
+    managed_publisher = (
+        home
+        / ".local"
+        / "share"
+        / "repoground-runtime"
+        / release
+        / "scripts"
+        / "ops"
+        / "repoground-publish-fleet"
+    )
+    managed_publisher.parent.mkdir(parents=True)
+    managed_publisher.write_text("# managed publisher\n", encoding="utf-8")
+    repository = tmp_path / "repoground"
+    entry = module.RepoEntry(
+        key="heimgewebe/repoground",
+        owner="heimgewebe",
+        repo="repoground",
+        path=repository,
+        remote="git@github.com:heimgewebe/repoground.git",
+    )
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(module, "__file__", str(managed_publisher))
+    monkeypatch.setattr(module, "_repoground_tool_entry", lambda: entry)
+
+    def unexpected_remote_head(_entry: object) -> tuple[str, str, str]:
+        pytest.fail("managed publisher must not select generator code from remote main")
+
+    monkeypatch.setattr(module, "remote_head_for_entry", unexpected_remote_head)
+
+    assert module._repoground_tool_head() == release
+
+
 def test_repoground_tool_entry_rejects_retired_alias_even_with_mixed_case(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
