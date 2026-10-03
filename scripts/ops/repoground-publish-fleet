@@ -2175,14 +2175,64 @@ def generator_inputs_sha(worktree: Path) -> str:
     return canonical_sha256(entries)
 
 
+def _repoground_tool_entry() -> RepoEntry:
+    transport_env = _authority_git_env()
+    configured = run(
+        [
+            "git",
+            "-C",
+            str(REPOGROUND_REPO),
+            "config",
+            "--local",
+            "--no-includes",
+            "--get-all",
+            "remote.origin.url",
+        ],
+        check=False,
+        env=transport_env,
+    )
+    configured_urls = [
+        line.strip() for line in configured.stdout.splitlines() if line.strip()
+    ]
+    if configured.returncode != 0 or not configured_urls:
+        raise RuntimeError("RepoGround generator origin is unavailable")
+    remote = configured_urls[0]
+    if parse_github_remote(remote) != ("heimgewebe", "repoground"):
+        raise RuntimeError("RepoGround generator origin identity mismatch")
+    if not github_remote_uses_authenticated_transport(remote):
+        raise RuntimeError("RepoGround generator origin must use HTTPS or SSH")
+    return RepoEntry(
+        key="heimgewebe/repoground",
+        owner="heimgewebe",
+        repo="repoground",
+        path=REPOGROUND_REPO,
+        remote=remote,
+    )
+
+
+def _repoground_tool_head() -> str:
+    entry = _repoground_tool_entry()
+    _remote_ref, branch, tool_sha = remote_head_for_entry(entry)
+    if branch != "main":
+        raise RuntimeError(
+            f"RepoGround generator origin default branch must be main, got {branch!r}"
+        )
+    return tool_sha
+
+
 def ensure_tool_worktree() -> tuple[str, str]:
-    run(["git", "-C", str(REPOGROUND_REPO), "fetch", "origin", "--prune"])
+    tool_sha = _repoground_tool_head()
     prepare_managed_worktree(
         TOOL_WT,
         expected_repo=REPOGROUND_REPO,
-        target="origin/main",
+        target=tool_sha,
     )
-    tool_sha = run(["git", "-C", str(TOOL_WT), "rev-parse", "HEAD"]).stdout.strip()
+    confirmed = run(
+        ["git", "-C", str(TOOL_WT), "rev-parse", "HEAD"],
+        env=_authority_git_env(),
+    ).stdout.strip()
+    if confirmed != tool_sha:
+        raise RuntimeError("RepoGround generator worktree revision mismatch")
     return tool_sha, generator_inputs_sha(TOOL_WT)
 
 
@@ -5218,7 +5268,7 @@ def build_refresh_command(
     config: PublicationConfig,
 ) -> list[str]:
     command = [
-        "python3",
+        sys.executable,
         "-B",
         "-m",
         "merger.repoground.cli.ground",

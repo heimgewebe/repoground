@@ -2103,6 +2103,91 @@ def test_remote_head_fetches_nested_advertised_branch(
     assert advertised_fetched is True
 
 
+def test_repoground_tool_head_reuses_bounded_member_transport(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path, "repoground")
+    remote = "git@github.com:heimgewebe/repoground.git"
+    git(repo, "remote", "add", "origin", remote)
+    monkeypatch.setattr(module, "REPOGROUND_REPO", repo)
+
+    ssh_env = module._authority_git_env()
+    ssh_env["GIT_SSH_COMMAND"] = "/usr/bin/ssh -F /dev/null -i /tmp/tool-key"
+    observed: dict[str, object] = {}
+
+    def fake_ssh_env(*, remote: str | None = None) -> dict[str, str]:
+        observed["ssh_remote"] = remote
+        return ssh_env
+
+    def fake_remote_head(
+        repo_path: Path,
+        *,
+        remote: str = "origin",
+        env: dict[str, str] | None = None,
+    ) -> tuple[str, str, str]:
+        observed["repo_path"] = repo_path
+        observed["remote"] = remote
+        observed["env"] = env
+        return "origin/main", "main", sha
+
+    monkeypatch.setattr(module, "_fleet_repo_ssh_env", fake_ssh_env)
+    monkeypatch.setattr(module, "remote_head", fake_remote_head)
+
+    assert module._repoground_tool_head() == sha
+    assert observed["ssh_remote"] == remote
+    assert observed["repo_path"] == repo
+    assert observed["remote"] == remote
+    assert observed["env"] is ssh_env
+
+
+def test_ensure_tool_worktree_pins_resolved_generator_sha(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    sha = "a" * 40
+    tool_wt = tmp_path / "tool-worktree"
+    repository = tmp_path / "repoground"
+    observed: dict[str, object] = {}
+
+    monkeypatch.setattr(module, "TOOL_WT", tool_wt)
+    monkeypatch.setattr(module, "REPOGROUND_REPO", repository)
+    monkeypatch.setattr(module, "_repoground_tool_head", lambda: sha)
+    monkeypatch.setattr(module, "generator_inputs_sha", lambda path: "b" * 64)
+
+    def fake_prepare(
+        path: Path,
+        *,
+        expected_repo: Path,
+        target: str,
+    ) -> None:
+        observed["path"] = path
+        observed["expected_repo"] = expected_repo
+        observed["target"] = target
+
+    def fake_run(
+        argv: list[str],
+        cwd: Path | None = None,
+        check: bool = True,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        assert argv[-3:] == ["rev-parse", "HEAD"] or argv[-2:] == ["rev-parse", "HEAD"]
+        assert env == module._authority_git_env()
+        return subprocess.CompletedProcess(argv, 0, stdout=f"{sha}\n")
+
+    monkeypatch.setattr(module, "prepare_managed_worktree", fake_prepare)
+    monkeypatch.setattr(module, "run", fake_run)
+
+    assert module.ensure_tool_worktree() == (sha, "b" * 64)
+    assert observed == {
+        "path": tool_wt,
+        "expected_repo": repository,
+        "target": sha,
+    }
+
+
 def test_publication_config_uses_compact_daily_profile(tmp_path: Path) -> None:
     module = load_publisher()
     default = module.RepoEntry(
@@ -2147,6 +2232,8 @@ def test_fleet_refresh_command_explicitly_opts_into_language_structure(
         config=config,
     )
 
+    assert command[0] == sys.executable
+    assert command[1] == "-B"
     assert command[command.index("--profile") + 1] == "fleet-context"
     assert "--language-structure" in command
     assert command[command.index("--publication-root") + 1] == str(publication_root)
