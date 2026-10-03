@@ -423,6 +423,46 @@ def test_fleet_tls_config_key_allowed_preserves_only_bounded_github_tls() -> Non
         assert module._fleet_tls_config_key_allowed(key) is False
 
 
+def test_fleet_github_authorization_extra_header_is_value_bounded() -> None:
+    module = load_publisher()
+    key = "http.https://github.com/.extraHeader"
+
+    for allowed_key in (
+        key,
+        "http.https://github.com:443/.extraHeader",
+        "http.https://bot@github.com/owner/repo.extraHeader",
+    ):
+        assert module._fleet_github_extra_header_key_allowed(allowed_key) is True
+
+    for forbidden_key in (
+        "http.extraHeader",
+        "http.http://github.com/.extraHeader",
+        "http.https://github.com.evil.example/.extraHeader",
+        "http.https://github.com:0/.extraHeader",
+        "http.https://github.com:65536/.extraHeader",
+    ):
+        assert module._fleet_github_extra_header_key_allowed(forbidden_key) is False
+
+    for value in (
+        "",
+        "Authorization: Bearer placeholder-token",
+        "authorization:\tBasic cGxhY2Vob2xkZXI=",
+    ):
+        assert module._fleet_github_authorization_header_value_allowed(value) is True
+        assert module._fleet_https_config_entry_allowed(key, value) is True
+
+    for value in (
+        "Authorization:",
+        " Host: attacker.invalid",
+        "Host: attacker.invalid",
+        "Proxy-Authorization: Basic cGxhY2Vob2xkZXI=",
+        "Authorization: Bearer token\nHost: attacker.invalid",
+        "Authorization: Bearer token\x01",
+    ):
+        assert module._fleet_github_authorization_header_value_allowed(value) is False
+        assert module._fleet_https_config_entry_allowed(key, value) is False
+
+
 def test_fleet_proxy_config_key_allowed_preserves_only_bounded_github_proxies() -> None:
     module = load_publisher()
 
@@ -511,6 +551,10 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
         "    proxySSLCert = /tmp/global-proxy-client.pem\n"
         "    proxySSLCertPasswordProtected = true\n"
         "    proxySSLKey = /tmp/global-proxy-client.key\n"
+        "[http \"https://github.com/\"]\n"
+        "    extraHeader =\n"
+        "    extraHeader = Authorization: Bearer placeholder-global-token\n"
+        "    extraHeader = Host: attacker.invalid\n"
         "[http \"https://github.com\"]\n"
         "    proxy = http://127.0.0.1:18082\n"
         "    proxyAuthMethod = ntlm\n"
@@ -675,6 +719,16 @@ def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overr
     assert ("http.proxysslkey", "/tmp/global-proxy-client.key") in [
         (key.lower(), value) for key, value in injected
     ]
+    github_extra_headers = [
+        value
+        for key, value in injected
+        if key.lower() == "http.https://github.com/.extraheader"
+    ]
+    assert github_extra_headers == [
+        "",
+        "Authorization: Bearer placeholder-global-token",
+    ]
+    assert "Host: attacker.invalid" not in github_extra_headers
 
     filled = subprocess.run(
         ["/usr/bin/git", "credential", "fill"],
@@ -843,6 +897,20 @@ def test_fleet_member_local_config_allows_only_bounded_https_transport() -> None
     ):
         assert module._fleet_member_local_config_is_transport_override(key) is False
 
+    assert (
+        module._fleet_member_local_config_is_transport_override(
+            "http.https://github.com/.extraHeader"
+        )
+        is True
+    )
+    assert (
+        module._fleet_member_local_config_entry_is_transport_override(
+            "http.https://github.com/.extraHeader",
+            "Authorization: Bearer placeholder-local-token",
+        )
+        is False
+    )
+
     for key in (
         "http.sslVerify",
         "http.proxySSLVerify",
@@ -869,6 +937,14 @@ def test_fleet_member_transport_safety_validates_worktree_scope(
     git(repo, "config", "--worktree", "http.proxySSLCert", "/tmp/worktree-proxy-client.pem")
     git(repo, "config", "--worktree", "http.proxySSLCertPasswordProtected", "true")
     git(repo, "config", "--worktree", "http.proxySSLKey", "/tmp/worktree-proxy-client.key")
+    git(
+        repo,
+        "config",
+        "--worktree",
+        "--add",
+        "http.https://github.com/.extraHeader",
+        "Authorization: Bearer placeholder-worktree-token",
+    )
 
     module.assert_fleet_member_git_transport_safe(
         repo,
@@ -879,6 +955,32 @@ def test_fleet_member_transport_safety_validates_worktree_scope(
     with pytest.raises(
         RuntimeError,
         match="unsafe worktree Git transport configuration: core.sshcommand",
+    ):
+        module.assert_fleet_member_git_transport_safe(
+            repo,
+            env=module._authority_git_env(),
+        )
+
+
+def test_fleet_member_transport_safety_rejects_non_authorization_extra_header(
+    tmp_path: Path,
+) -> None:
+    module = load_publisher()
+    repo, _sha = initialize_repository(tmp_path, "member-extra-header")
+    git(repo, "remote", "add", "origin", "https://github.com/heimgewebe/member.git")
+    key = "http.https://github.com/.extraHeader"
+    git(repo, "config", "--add", key, "")
+    git(repo, "config", "--add", key, "Authorization: Bearer placeholder-local-token")
+
+    module.assert_fleet_member_git_transport_safe(
+        repo,
+        env=module._authority_git_env(),
+    )
+
+    git(repo, "config", "--add", key, "Host: attacker.invalid")
+    with pytest.raises(
+        RuntimeError,
+        match=r"unsafe local Git transport configuration: .*extraheader",
     ):
         module.assert_fleet_member_git_transport_safe(
             repo,

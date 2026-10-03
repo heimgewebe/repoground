@@ -2498,11 +2498,47 @@ def _fleet_proxy_config_key_allowed(key: str) -> bool:
     return port is None or 1 <= int(port) <= 65535
 
 
+def _fleet_github_extra_header_key_allowed(key: str) -> bool:
+    normalized = key.strip().lower()
+    scoped = re.fullmatch(
+        r"http\.https://(?:[^/@:]+@)?github\.com(?::([0-9]+))?"
+        r"(?:/[^ \t\r\n]*)?\.extraheader",
+        normalized,
+    )
+    if scoped is None:
+        return False
+    port = scoped.group(1)
+    return port is None or 1 <= int(port) <= 65535
+
+
+def _fleet_github_authorization_header_value_allowed(value: str) -> bool:
+    if value == "":
+        return True
+    if any(
+        ord(char) < 0x20 and char != "\t" or ord(char) == 0x7F
+        for char in value
+    ):
+        return False
+    prefix = "authorization:"
+    if value[: len(prefix)].casefold() != prefix:
+        return False
+    return bool(value[len(prefix) :].strip())
+
+
 def _fleet_https_config_key_allowed(key: str) -> bool:
     return (
         _fleet_credential_config_key_allowed(key)
         or _fleet_tls_config_key_allowed(key)
         or _fleet_proxy_config_key_allowed(key)
+    )
+
+
+def _fleet_https_config_entry_allowed(key: str, value: str) -> bool:
+    if _fleet_https_config_key_allowed(key):
+        return True
+    return (
+        _fleet_github_extra_header_key_allowed(key)
+        and _fleet_github_authorization_header_value_allowed(value)
     )
 
 
@@ -2549,7 +2585,7 @@ def _global_system_github_https_config(
         key, separator, value = record.partition("\n")
         if not separator:
             raise RuntimeError("Git credential configuration record is malformed")
-        if _fleet_https_config_key_allowed(key):
+        if _fleet_https_config_entry_allowed(key, value):
             entries.append((key, value))
     return entries
 
@@ -2989,6 +3025,32 @@ def _fleet_member_local_config_is_transport_override(key: str) -> bool:
     return _authority_git_local_config_is_transport_override(normalized)
 
 
+def _fleet_member_local_config_entry_is_transport_override(
+    key: str,
+    value: str,
+) -> bool:
+    if _fleet_github_extra_header_key_allowed(key):
+        return not _fleet_github_authorization_header_value_allowed(value)
+    return _fleet_member_local_config_is_transport_override(key)
+
+
+def _parse_git_config_list_entries(
+    raw: str,
+    *,
+    label: str,
+) -> list[tuple[str, str]]:
+    records = raw.split("\0")
+    if records and records[-1] == "":
+        records.pop()
+    entries: list[tuple[str, str]] = []
+    for record in records:
+        key, separator, value = record.partition("\n")
+        if not separator or not key.strip():
+            raise RuntimeError(f"{label} Git configuration is malformed")
+        entries.append((key, value))
+    return entries
+
+
 def _assert_authority_git_env_sanitized(
     env: dict[str, str] | None,
     *,
@@ -3083,7 +3145,7 @@ def assert_fleet_member_git_transport_safe(
             "config",
             "--local",
             "--no-includes",
-            "--name-only",
+            "--null",
             "--list",
         ],
         check=False,
@@ -3093,15 +3155,21 @@ def assert_fleet_member_git_transport_safe(
         raise RuntimeError(
             "fleet repository local Git configuration is unavailable"
         )
+    local_entries = _parse_git_config_list_entries(
+        local_config.stdout,
+        label="fleet repository local",
+    )
     local_keys = {
         key.strip().lower()
-        for key in local_config.stdout.splitlines()
+        for key, _value in local_entries
         if key.strip()
     }
     unsafe_keys = sorted(
-        key
-        for key in local_keys
-        if _fleet_member_local_config_is_transport_override(key)
+        {
+            key.strip().lower()
+            for key, value in local_entries
+            if _fleet_member_local_config_entry_is_transport_override(key, value)
+        }
     )
     if unsafe_keys:
         raise RuntimeError(
@@ -3138,7 +3206,7 @@ def assert_fleet_member_git_transport_safe(
                     "config",
                     "--worktree",
                     "--no-includes",
-                    "--name-only",
+                    "--null",
                     "--list",
                 ],
                 check=False,
@@ -3148,11 +3216,18 @@ def assert_fleet_member_git_transport_safe(
                 raise RuntimeError(
                     "fleet repository worktree Git configuration is unavailable"
                 )
+            worktree_entries = _parse_git_config_list_entries(
+                worktree_config.stdout,
+                label="fleet repository worktree",
+            )
             unsafe_worktree_keys = sorted(
                 {
                     key.strip().lower()
-                    for key in worktree_config.stdout.splitlines()
-                    if _fleet_member_local_config_is_transport_override(key)
+                    for key, value in worktree_entries
+                    if _fleet_member_local_config_entry_is_transport_override(
+                        key,
+                        value,
+                    )
                 }
             )
             if unsafe_worktree_keys:
