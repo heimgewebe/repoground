@@ -12,9 +12,11 @@ from __future__ import annotations
 import argparse
 import fcntl
 import glob
+import grp
 import hashlib
 import json
 import os
+import pwd
 import re
 import resource
 import shlex
@@ -2601,6 +2603,79 @@ _FLEET_CHECKOUT_FILTER_MAX_ENTRIES = 128
 _FLEET_CHECKOUT_FILTER_MAX_BYTES = 128 * 1024
 
 
+def _checkout_filter_private_group_write_trusted(metadata: os.stat_result) -> bool:
+    mode = stat.S_IMODE(metadata.st_mode)
+    if mode & stat.S_IWOTH:
+        return False
+    if not mode & stat.S_IWGRP:
+        return True
+    if metadata.st_uid != os.getuid() or metadata.st_gid != os.getgid():
+        return False
+    try:
+        username = pwd.getpwuid(os.getuid()).pw_name
+        group = grp.getgrgid(metadata.st_gid)
+        primary_users = {
+            entry.pw_name
+            for entry in pwd.getpwall()
+            if entry.pw_gid == metadata.st_gid
+        }
+    except (KeyError, OSError):
+        return False
+    explicit_members = set(group.gr_mem)
+    return primary_users <= {username} and explicit_members <= {username}
+
+
+def _assert_trusted_checkout_filter_config_origin(origin: str) -> None:
+    label = "fleet checkout filter config"
+    if not origin.startswith("file:"):
+        raise RuntimeError(f"{label} origin must be a file")
+    path = Path(origin.removeprefix("file:"))
+    if not path.is_absolute():
+        raise RuntimeError(f"{label} path must be absolute")
+    try:
+        raw_metadata = path.lstat()
+    except OSError as exc:
+        raise RuntimeError(f"{label} path is unavailable") from exc
+    if raw_metadata.st_uid not in {0, os.getuid()}:
+        raise RuntimeError(f"{label} must be user/root-owned")
+    _assert_fleet_member_askpass_ancestors_trusted(path, label=label)
+    try:
+        resolved = path.resolve(strict=True)
+    except OSError as exc:
+        raise RuntimeError(f"{label} path is unavailable") from exc
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    if not nofollow:
+        raise RuntimeError(f"{label} requires O_NOFOLLOW support")
+    try:
+        descriptor = os.open(
+            resolved,
+            os.O_RDONLY | os.O_CLOEXEC | nofollow,
+        )
+    except OSError as exc:
+        raise RuntimeError(f"{label} is unavailable") from exc
+    try:
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_nlink != 1
+            or metadata.st_uid not in {0, os.getuid()}
+        ):
+            raise RuntimeError(
+                f"{label} must be one user/root-owned regular file"
+            )
+        if not _checkout_filter_private_group_write_trusted(metadata):
+            raise RuntimeError(
+                f"{label} must not be world-writable or writable by "
+                "an untrusted group"
+            )
+        _assert_fleet_member_askpass_ancestors_trusted(
+            resolved,
+            label=label,
+        )
+    finally:
+        os.close(descriptor)
+
+
 def _global_system_checkout_filter_config(
     repo_path: Path,
 ) -> list[tuple[str, str]]:
@@ -2613,6 +2688,7 @@ def _global_system_checkout_filter_config(
             "config",
             "--includes",
             "--show-scope",
+            "--show-origin",
             "--null",
             "--get-regexp",
             r"^filter\.",
@@ -2636,13 +2712,21 @@ def _global_system_checkout_filter_config(
     fields = cp.stdout.split(chr(0))
     if fields and fields[-1] == "":
         fields.pop()
-    if len(fields) % 2:
+    if len(fields) % 3:
         raise RuntimeError("Git checkout filter configuration is malformed")
 
     entries: list[tuple[str, str]] = []
-    for scope, record in zip(fields[0::2], fields[1::2]):
+    validated_origins: set[str] = set()
+    for scope, origin, record in zip(
+        fields[0::3],
+        fields[1::3],
+        fields[2::3],
+    ):
         if scope not in {"system", "global"}:
             continue
+        if origin not in validated_origins:
+            _assert_trusted_checkout_filter_config_origin(origin)
+            validated_origins.add(origin)
         key, separator, value = record.partition("\n")
         if not separator:
             raise RuntimeError("Git checkout filter configuration record is malformed")

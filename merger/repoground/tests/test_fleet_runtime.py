@@ -13,7 +13,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -3488,6 +3488,80 @@ def test_managed_worktree_preserves_only_global_checkout_filters(
         target=target,
     )
     assert sample.read_text(encoding="utf-8") == "materialized\n"
+
+
+def test_checkout_filter_origin_allows_only_user_private_group_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    config = tmp_path / "filters.gitconfig"
+    config.write_text(
+        '[filter "probe"]\n    smudge = /bin/cat\n',
+        encoding="utf-8",
+    )
+    config.chmod(0o660)
+    current_gid = os.getgid()
+    monkeypatch.setattr(
+        module.pwd,
+        "getpwuid",
+        lambda _uid: SimpleNamespace(pw_name="owner"),
+    )
+    monkeypatch.setattr(
+        module.pwd,
+        "getpwall",
+        lambda: [SimpleNamespace(pw_name="owner", pw_gid=current_gid)],
+    )
+    monkeypatch.setattr(
+        module.grp,
+        "getgrgid",
+        lambda _gid: SimpleNamespace(gr_mem=[]),
+    )
+    module._assert_trusted_checkout_filter_config_origin(f"file:{config}")
+
+    monkeypatch.setattr(
+        module.pwd,
+        "getpwall",
+        lambda: [
+            SimpleNamespace(pw_name="owner", pw_gid=current_gid),
+            SimpleNamespace(pw_name="other", pw_gid=current_gid),
+        ],
+    )
+    with pytest.raises(RuntimeError, match="untrusted group"):
+        module._assert_trusted_checkout_filter_config_origin(f"file:{config}")
+
+
+def test_managed_worktree_rejects_checkout_filter_from_untrusted_include(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, _sha = initialize_repository(tmp_path, "filtered-untrusted")
+    home = tmp_path / "home-untrusted"
+    home.mkdir()
+    writable = tmp_path / "writable-config-parent"
+    writable.mkdir()
+    writable.chmod(0o777)
+    included = writable / "filters.gitconfig"
+    included.write_text(
+        '[filter "probe"]\n    smudge = /bin/cat\n',
+        encoding="utf-8",
+    )
+    included.chmod(0o600)
+    (home / ".gitconfig").write_text(
+        f"[include]\n    path = {included}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(home))
+
+    with pytest.raises(
+        RuntimeError,
+        match="parent directory must not be group/world writable",
+    ):
+        module._managed_worktree_git_env(
+            repo,
+            safe_global_config=tmp_path / "safe-untrusted.gitconfig",
+        )
 
 
 def test_managed_worktree_refuses_dirty_untracked_and_ignored_content(
