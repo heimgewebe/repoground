@@ -378,6 +378,49 @@ def test_remote_head_for_entry_allows_secondary_fetch_urls(
     assert isinstance(observed["env"], dict)
 
 
+def test_remote_head_for_entry_accepts_mixed_case_github_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path, "member-mixed-case")
+    remote = "https://github.com/HeimGewebe/MeMbEr.git"
+    git(repo, "remote", "add", "origin", remote)
+    entry = module.RepoEntry(
+        key="heimgewebe/member",
+        owner="heimgewebe",
+        repo="member",
+        path=repo,
+        remote=remote,
+    )
+    network_env = module._authority_git_env()
+    observed: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        module,
+        "_fleet_repo_git_env",
+        lambda repo_path, *, safe_global_config=None: network_env,
+    )
+
+    def fake_remote_head(
+        repo_path: Path,
+        *,
+        remote: str = "origin",
+        env: dict[str, str] | None = None,
+    ) -> tuple[str, str, str]:
+        observed["repo_path"] = repo_path
+        observed["remote"] = remote
+        observed["env"] = env
+        return "origin/main", "main", sha
+
+    monkeypatch.setattr(module, "remote_head", fake_remote_head)
+
+    assert module.remote_head_for_entry(entry) == ("origin/main", "main", sha)
+    assert observed["repo_path"] == repo
+    assert observed["remote"] == remote
+    assert observed["env"] is network_env
+
+
 def test_remote_head_for_entry_rejects_origin_change_since_discovery(
     tmp_path: Path,
 ) -> None:
@@ -985,6 +1028,55 @@ def test_fleet_member_local_config_allows_only_bounded_https_transport() -> None
         "http.https://github.com:0.sslCAPath",
     ):
         assert module._fleet_member_local_config_is_transport_override(key) is True
+
+
+def test_authority_transport_safety_validates_worktree_scope(
+    tmp_path: Path,
+) -> None:
+    module = load_publisher()
+    repo, _sha = initialize_repository(tmp_path, "authority-worktree-config")
+    git(repo, "config", "extensions.worktreeConfig", "true")
+    git(repo, "config", "--worktree", "user.name", "Worktree User")
+    git(repo, "config", "--worktree", "user.email", "worktree@example.invalid")
+
+    module.assert_authority_git_transport_safe(
+        repo,
+        env=module._authority_git_env(),
+    )
+
+    git(repo, "config", "--worktree", "core.askPass", "/usr/bin/false")
+    with pytest.raises(
+        RuntimeError,
+        match="unsafe worktree Git transport configuration: core.askpass",
+    ):
+        module.assert_authority_git_transport_safe(
+            repo,
+            env=module._authority_git_env(),
+        )
+
+
+def test_authority_transport_safety_rejects_worktree_url_rewrite(
+    tmp_path: Path,
+) -> None:
+    module = load_publisher()
+    repo, _sha = initialize_repository(tmp_path, "authority-worktree-url-rewrite")
+    git(repo, "config", "extensions.worktreeConfig", "true")
+    git(
+        repo,
+        "config",
+        "--worktree",
+        "url.ssh://attacker.invalid/.insteadOf",
+        "https://github.com/",
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"unsafe worktree Git transport configuration: .*insteadof",
+    ):
+        module.assert_authority_git_transport_safe(
+            repo,
+            env=module._authority_git_env(),
+        )
 
 
 def test_fleet_member_transport_safety_validates_worktree_scope(
@@ -2433,7 +2525,7 @@ def test_repoground_tool_head_reuses_bounded_member_transport(
 ) -> None:
     module = load_publisher()
     repo, sha = initialize_repository(tmp_path, "repoground")
-    remote = "git@github.com:heimgewebe/repoground.git"
+    remote = "git@github.com:HeimGewebe/RepoGround.git"
     git(repo, "remote", "add", "origin", remote)
     monkeypatch.setattr(module, "REPOGROUND_REPO", repo)
 
@@ -2464,6 +2556,25 @@ def test_repoground_tool_head_reuses_bounded_member_transport(
     assert observed["repo_path"] == repo
     assert observed["remote"] == remote
     assert observed["env"] is ssh_env
+
+
+def test_repoground_tool_entry_rejects_retired_alias_even_with_mixed_case(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, _sha = initialize_repository(tmp_path, "repoground-retired-alias")
+    git(
+        repo,
+        "remote",
+        "add",
+        "origin",
+        "git@github.com:HeimGewebe/LensKit.git",
+    )
+    monkeypatch.setattr(module, "REPOGROUND_REPO", repo)
+
+    with pytest.raises(RuntimeError, match="origin identity mismatch"):
+        module._repoground_tool_entry()
 
 
 def test_ensure_tool_worktree_pins_resolved_generator_sha(
@@ -5222,6 +5333,78 @@ def test_discover_uses_literal_origin_when_global_insteadof_rewrites(
     assert entries[0].remote == literal
 
 
+def test_discover_normalizes_github_identity_case_without_reviving_retired_aliases(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repos_root = tmp_path / "repos"
+    repos_root.mkdir()
+    monkeypatch.setattr(module, "REPOS_ROOT", repos_root)
+
+    active, _ = initialize_repository(repos_root, "mixed-active")
+    git(
+        active,
+        "remote",
+        "add",
+        "origin",
+        "git@github.com:HeimGewebe/RepoGround.git",
+    )
+    excluded, _ = initialize_repository(repos_root, "mixed-excluded")
+    git(
+        excluded,
+        "remote",
+        "add",
+        "origin",
+        "https://github.com/HeimGewebe/Vault-Gewebe.git",
+    )
+    retired, _ = initialize_repository(repos_root, "mixed-retired")
+    git(
+        retired,
+        "remote",
+        "add",
+        "origin",
+        "git@github.com:HeimGewebe/LensKit.git",
+    )
+
+    entries = module.discover()
+
+    assert len(entries) == 1
+    assert entries[0].key == "heimgewebe/repoground"
+    assert entries[0].owner == "heimgewebe"
+    assert entries[0].repo == "repoground"
+    assert entries[0].path == active
+    assert entries[0].remote == "git@github.com:HeimGewebe/RepoGround.git"
+
+
+def test_membership_keys_normalize_github_identity_case() -> None:
+    module = load_publisher()
+
+    keys = module._fleet_membership_keys(
+        {
+            "repos": [
+                {"owner": "HeimGewebe", "name": "RepoGround"},
+                {"name": "HEIMGEWEBE/HEIM-PC"},
+            ]
+        }
+    )
+
+    assert keys == ("heimgewebe/repoground", "heimgewebe/heim-pc")
+    assert (
+        module._fleet_membership_entry_key(
+            {
+                "owner": "heimgewebe",
+                "name": "repoground",
+                "url": "https://github.com/HeimGewebe/RepoGround.git",
+            }
+        )
+        == "heimgewebe/repoground"
+    )
+    assert module.canonical_repository_key("HeimGewebe/LensKit") == (
+        "heimgewebe/repoground"
+    )
+
+
 def test_regression_discover_canonicalizes_retired_lenskit_alias(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -6514,6 +6697,45 @@ def test_authoritative_fleet_membership_preserves_crlf_blob_bytes(
         "heimgewebe/heim-pc",
     )
     assert membership.content_sha256 == hashlib.sha256(authoritative).hexdigest()
+
+
+def test_authoritative_fleet_membership_accepts_mixed_case_github_origin(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    checkout, _ = initialize_repository(tmp_path, "metarepo-mixed-case")
+    git(
+        checkout,
+        "remote",
+        "add",
+        "origin",
+        "git@github.com:HeimGewebe/MetaRepo.git",
+    )
+    monkeypatch.setattr(module, "METAREPO_REPO", checkout)
+    authoritative = b"repos:\n  - name: repoground\n"
+
+    def fake_read(
+        origin_url: str,
+        branch: str,
+        path: str,
+        *,
+        env: dict[str, str],
+        max_bytes: int,
+    ) -> tuple[str, str, bytes]:
+        assert origin_url == module.FLEET_MEMBERSHIP_REMOTE
+        assert branch == module.FLEET_MEMBERSHIP_REF
+        assert path == module.FLEET_MEMBERSHIP_PATH
+        assert env == module._authority_git_env()
+        assert max_bytes == module.FLEET_MEMBERSHIP_MAX_BYTES
+        return "refs/heads/main", "a" * 40, authoritative
+
+    monkeypatch.setattr(module, "read_remote_branch_blob_isolated", fake_read)
+
+    membership = module.load_authoritative_fleet_membership()
+
+    assert membership.keys == ("heimgewebe/repoground",)
+    assert membership.source_commit == "a" * 40
 
 
 def test_authoritative_fleet_membership_rejects_wrong_origin(

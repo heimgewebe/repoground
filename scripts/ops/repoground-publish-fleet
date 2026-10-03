@@ -571,8 +571,13 @@ def github_remote_uses_authenticated_transport(remote: str) -> bool:
     return False
 
 
+def normalized_repository_key(key: str) -> str:
+    return key.casefold()
+
+
 def canonical_repository_key(key: str) -> str:
-    return RETIRED_REPOSITORY_ALIASES.get(key, key)
+    normalized = normalized_repository_key(key)
+    return RETIRED_REPOSITORY_ALIASES.get(normalized, normalized)
 
 
 def is_top_level_git(
@@ -657,9 +662,10 @@ def discover() -> list[RepoEntry]:
             continue
         observed_owner, observed_repo = parsed
         observed_key = f"{observed_owner}/{observed_repo}"
-        if observed_key in RETIRED_REPOSITORY_ALIASES:
+        normalized_observed_key = normalized_repository_key(observed_key)
+        if normalized_observed_key in RETIRED_REPOSITORY_ALIASES:
             continue
-        key = canonical_repository_key(observed_key)
+        key = canonical_repository_key(normalized_observed_key)
         if key in EXCLUDED_REPO_KEYS:
             continue
         owner, repo = key.split("/", 1)
@@ -2197,7 +2203,12 @@ def _repoground_tool_entry() -> RepoEntry:
     if configured.returncode != 0 or not configured_urls:
         raise RuntimeError("RepoGround generator origin is unavailable")
     remote = configured_urls[0]
-    if parse_github_remote(remote) != ("heimgewebe", "repoground"):
+    parsed_remote = parse_github_remote(remote)
+    if (
+        parsed_remote is None
+        or normalized_repository_key(f"{parsed_remote[0]}/{parsed_remote[1]}")
+        != "heimgewebe/repoground"
+    ):
         raise RuntimeError("RepoGround generator origin identity mismatch")
     if not github_remote_uses_authenticated_transport(remote):
         raise RuntimeError("RepoGround generator origin must use HTTPS or SSH")
@@ -3266,7 +3277,8 @@ def assert_authority_git_transport_safe(
             str(repo_path),
             "config",
             "--local",
-            "--name-only",
+            "--no-includes",
+            "--null",
             "--list",
         ],
         check=False,
@@ -3277,11 +3289,21 @@ def assert_authority_git_transport_safe(
             "authoritative fleet membership repository local Git "
             "configuration is unavailable"
         )
+    local_entries = _parse_git_config_list_entries(
+        local_config.stdout,
+        label="authoritative fleet membership repository local",
+    )
+    local_keys = {
+        key.strip().lower()
+        for key, _value in local_entries
+        if key.strip()
+    }
     unsafe_keys = sorted(
         {
             key.strip().lower()
-            for key in local_config.stdout.splitlines()
-            if _authority_git_local_config_is_transport_override(key)
+            for key, _value in local_entries
+            if key.strip().lower() != "extensions.worktreeconfig"
+            and _authority_git_local_config_is_transport_override(key)
         }
     )
     if unsafe_keys:
@@ -3290,6 +3312,71 @@ def assert_authority_git_transport_safe(
             "Git transport configuration: "
             + ", ".join(unsafe_keys)
         )
+
+    if "extensions.worktreeconfig" in local_keys:
+        worktree_flag = run(
+            [
+                "git",
+                "-C",
+                str(repo_path),
+                "config",
+                "--local",
+                "--no-includes",
+                "--bool",
+                "--get",
+                "extensions.worktreeConfig",
+            ],
+            check=False,
+            env=env,
+        )
+        if worktree_flag.returncode != 0:
+            raise RuntimeError(
+                "authoritative fleet membership repository worktree Git "
+                "configuration flag is unavailable"
+            )
+        normalized_flag = worktree_flag.stdout.strip().lower()
+        if normalized_flag not in {"true", "false"}:
+            raise RuntimeError(
+                "authoritative fleet membership repository worktree Git "
+                "configuration flag is invalid"
+            )
+        if normalized_flag == "true":
+            worktree_config = run(
+                [
+                    "git",
+                    "-C",
+                    str(repo_path),
+                    "config",
+                    "--worktree",
+                    "--no-includes",
+                    "--null",
+                    "--list",
+                ],
+                check=False,
+                env=env,
+            )
+            if worktree_config.returncode != 0:
+                raise RuntimeError(
+                    "authoritative fleet membership repository worktree Git "
+                    "configuration is unavailable"
+                )
+            worktree_entries = _parse_git_config_list_entries(
+                worktree_config.stdout,
+                label="authoritative fleet membership repository worktree",
+            )
+            unsafe_worktree_keys = sorted(
+                {
+                    key.strip().lower()
+                    for key, _value in worktree_entries
+                    if _authority_git_local_config_is_transport_override(key)
+                }
+            )
+            if unsafe_worktree_keys:
+                raise RuntimeError(
+                    "authoritative fleet membership repository has unsafe "
+                    "worktree Git transport configuration: "
+                    + ", ".join(unsafe_worktree_keys)
+                )
 
 
 def assert_fleet_member_git_transport_safe(
@@ -3432,7 +3519,12 @@ def remote_head_for_entry(entry: RepoEntry) -> tuple[str, str, str]:
             f"fleet repository origin changed since discovery: {entry.key}"
         )
     origin_url = configured_urls[0]
-    if parse_github_remote(origin_url) != (entry.owner, entry.repo):
+    parsed_origin = parse_github_remote(origin_url)
+    if (
+        parsed_origin is None
+        or normalized_repository_key(f"{parsed_origin[0]}/{parsed_origin[1]}")
+        != normalized_repository_key(f"{entry.owner}/{entry.repo}")
+    ):
         raise RuntimeError(
             f"fleet repository origin identity mismatch: expected {entry.key}"
         )
@@ -3826,11 +3918,18 @@ def _fleet_membership_entry_key(
         parsed = parse_github_remote(url)
         if parsed is None:
             raise RuntimeError(f"invalid fleet membership GitHub URL: {url!r}")
-        if isinstance(name, str) and parsed != (owner, name):
+        if isinstance(name, str) and (
+            normalized_repository_key(f"{parsed[0]}/{parsed[1]}")
+            != normalized_repository_key(f"{owner}/{name}")
+        ):
             raise RuntimeError(
                 "fleet membership entry URL conflicts with declared repository"
             )
-        if name is None and owner_explicit and parsed[0] != owner:
+        if (
+            name is None
+            and owner_explicit
+            and parsed[0].casefold() != owner.casefold()
+        ):
             raise RuntimeError(
                 "fleet membership entry URL conflicts with declared owner"
             )
@@ -3938,9 +4037,12 @@ def load_authoritative_fleet_membership() -> FleetMembership:
         env=git_env,
     )
     origin_url = origin.stdout.strip() if origin.returncode == 0 else ""
+    parsed_origin = parse_github_remote(origin_url)
     if (
         origin.returncode != 0
-        or parse_github_remote(origin_url) != ("heimgewebe", "metarepo")
+        or parsed_origin is None
+        or normalized_repository_key(f"{parsed_origin[0]}/{parsed_origin[1]}")
+        != "heimgewebe/metarepo"
     ):
         raise RuntimeError(
             "authoritative fleet membership repository origin mismatch: "
