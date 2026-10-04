@@ -851,7 +851,7 @@ def _bind_live_manifest(
     receipt["repoground_evidence"]["bundle_commit"] = bundle_commit
 
 
-def _ask_context_payload(commit: str) -> dict:
+def _ask_context_payload(manifest_sha256: str) -> dict:
     return {
         "kind": "repobrief.mcp.read_only_frontdoor",
         "version": "v1",
@@ -860,14 +860,14 @@ def _ask_context_payload(commit: str) -> dict:
         "context_pack": {
             "kind": "repobrief.ask_context_pack",
             "version": "1.0",
-            "resolved_ranges": [{"path": "src/example.py"}],
+            "snapshot_ref": {
+                "manifest_sha256": manifest_sha256,
+                "git_commit": None,
+                "freshness_status": "fresh",
+            },
+            "freshness": {"status": "fresh"},
+            "resolved_ranges": [{"path": "src/example.py", "status": "resolved"}],
             "budget": {"context_bytes_used": 321},
-        },
-        "live_freshness": {
-            "kind": "repobrief.live_freshness",
-            "version": "v1",
-            "status": "fresh",
-            "snapshot_provenance": {"git_commit": commit},
         },
     }
 
@@ -909,7 +909,7 @@ def test_live_claude_evidence_must_match_bound_transcript(tmp_path: Path) -> Non
         sampling={},
         bundle_commit=commit,
     )
-    payload = _ask_context_payload(commit)
+    payload = _ask_context_payload(request["repobrief"]["manifest_sha256"])
     events = [
         {
             "type": "assistant",
@@ -947,6 +947,23 @@ def test_live_claude_evidence_must_match_bound_transcript(tmp_path: Path) -> Non
     )
     assert validate_receipt(request, receipt, transcript_root=tmp_path) == []
 
+    wrong_payload = _ask_context_payload("0" * 64)
+    wrong_events = copy.deepcopy(events)
+    wrong_events[1]["message"]["content"][0]["content"] = json.dumps(
+        {"structuredContent": wrong_payload}, sort_keys=True
+    )
+    wrong_manifest = copy.deepcopy(receipt)
+    _bind_transcript(
+        wrong_manifest,
+        tmp_path,
+        "claude-wrong-manifest.jsonl",
+        wrong_events,
+    )
+    assert (
+        "receipt RepoGround evidence is not supported by bound transcript"
+        in validate_receipt(request, wrong_manifest, transcript_root=tmp_path)
+    )
+
     missing = json.loads(json.dumps(receipt))
     missing.pop("repoground_evidence")
     assert (
@@ -959,6 +976,315 @@ def test_live_claude_evidence_must_match_bound_transcript(tmp_path: Path) -> Non
         "receipt RepoGround evidence does not match bound transcript"
         in validate_receipt(request, receipt, transcript_root=tmp_path)
     )
+
+
+def test_live_ask_context_counts_only_semantically_resolved_ranges(
+    tmp_path: Path,
+) -> None:
+    taskset = _taskset()
+    request = next(
+        item
+        for item in _planned_requests(taskset)
+        if item["case_id"] == "nav-lenskit-mcp-startup"
+        and item["condition"] == "treatment"
+    )
+    case = _cases(taskset)[request["case_id"]]
+    receipt = _receipt(request, case)
+    commit = request["repository"]["commit"]
+    _bind_live_manifest(
+        request,
+        receipt,
+        tmp_path,
+        execution_contract="grabowski-claude-code-live-v1",
+        provider="anthropic-claude-code",
+        model="claude-haiku-4-5-20251001",
+        sampling={},
+        bundle_commit=commit,
+    )
+    payload = _ask_context_payload(request["repobrief"]["manifest_sha256"])
+    payload["context_pack"]["resolved_ranges"] = [
+        {"path": "src/missing.py", "status": "missing"}
+    ]
+    events = [
+        {
+            "type": "assistant",
+            "message": {
+                "content": [{
+                    "type": "tool_use",
+                    "id": "tool-1",
+                    "name": "mcp__repobrief__ask_context",
+                    "input": {"query": "example"},
+                }]
+            },
+        },
+        {
+            "type": "user",
+            "message": {
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "tool-1",
+                    "content": json.dumps(
+                        {"structuredContent": payload}, sort_keys=True
+                    ),
+                    "is_error": False,
+                }]
+            },
+        },
+    ]
+    _bind_transcript(receipt, tmp_path, "claude-unresolved.jsonl", events)
+    receipt["tool_calls"][0]["output_bytes"] = 1000
+    receipt["repoground_evidence"]["calls"][0].update(
+        {
+            "freshness_status": "fresh",
+            "resolved_range_count": 0,
+            "context_bytes_used": 321,
+        }
+    )
+
+    assert validate_receipt(request, receipt, transcript_root=tmp_path) == []
+    assert score_receipt(
+        case, "treatment", request, receipt, transcript_root=tmp_path
+    )["exposure"] == {
+        "status": "not_exposed",
+        "reason": "ask_context_no_resolved_ranges",
+    }
+
+
+def test_live_freshness_not_comparable_uses_bound_manifest_commit(
+    tmp_path: Path,
+) -> None:
+    taskset = _taskset()
+    request = next(
+        item
+        for item in _planned_requests(taskset)
+        if item["case_id"] == "grounding-head-mismatch"
+        and item["condition"] == "treatment"
+    )
+    case = _cases(taskset)[request["case_id"]]
+    receipt = _receipt(request, case)
+    commit = request["repository"]["commit"]
+    _bind_live_manifest(
+        request,
+        receipt,
+        tmp_path,
+        execution_contract="grabowski-claude-code-live-v1",
+        provider="anthropic-claude-code",
+        model="claude-haiku-4-5-20251001",
+        sampling={},
+        bundle_commit=commit,
+    )
+    payload = {
+        "kind": "repobrief.live_freshness",
+        "version": "v1",
+        "status": "not_comparable",
+        "reason": "repo_root_not_configured",
+        "bundle_manifest": str(request["repobrief"]["manifest"]),
+        "repo_root": None,
+        "snapshot_provenance": None,
+    }
+    events = [
+        {
+            "type": "assistant",
+            "message": {
+                "content": [{
+                    "type": "tool_use",
+                    "id": "tool-1",
+                    "name": "mcp__repobrief__live_freshness",
+                    "input": {},
+                }]
+            },
+        },
+        {
+            "type": "user",
+            "message": {
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "tool-1",
+                    "content": json.dumps(
+                        {"structuredContent": payload}, sort_keys=True
+                    ),
+                    "is_error": False,
+                }]
+            },
+        },
+    ]
+    _bind_transcript(receipt, tmp_path, "claude-not-comparable.jsonl", events)
+    receipt["tool_calls"][0]["output_bytes"] = 1000
+    receipt["repoground_evidence"]["bundle_commit"] = commit
+    receipt["repoground_evidence"]["calls"][0].update(
+        {
+            "freshness_status": "not_comparable",
+            "resolved_range_count": None,
+            "context_bytes_used": None,
+            "grounding_status": None,
+        }
+    )
+
+    assert validate_receipt(request, receipt, transcript_root=tmp_path) == []
+    assert score_receipt(
+        case, "treatment", request, receipt, transcript_root=tmp_path
+    )["exposure"] == {
+        "status": "exposed",
+        "reason": "live_freshness_signal",
+    }
+
+
+def test_live_freshness_fresh_requires_snapshot_provenance(
+    tmp_path: Path,
+) -> None:
+    taskset = _taskset()
+    request = next(
+        item
+        for item in _planned_requests(taskset)
+        if item["case_id"] == "grounding-head-mismatch"
+        and item["condition"] == "treatment"
+    )
+    case = _cases(taskset)[request["case_id"]]
+    receipt = _receipt(request, case)
+    commit = request["repository"]["commit"]
+    _bind_live_manifest(
+        request,
+        receipt,
+        tmp_path,
+        execution_contract="grabowski-claude-code-live-v1",
+        provider="anthropic-claude-code",
+        model="claude-haiku-4-5-20251001",
+        sampling={},
+        bundle_commit=commit,
+    )
+    payload = {
+        "kind": "repobrief.live_freshness",
+        "version": "v1",
+        "status": "fresh",
+        "reason": "invalid_fixture_missing_snapshot",
+        "bundle_manifest": str(request["repobrief"]["manifest"]),
+        "repo_root": "/tmp/repo",
+        "snapshot_provenance": None,
+    }
+    events = [
+        {
+            "type": "assistant",
+            "message": {
+                "content": [{
+                    "type": "tool_use",
+                    "id": "tool-1",
+                    "name": "mcp__repobrief__live_freshness",
+                    "input": {},
+                }]
+            },
+        },
+        {
+            "type": "user",
+            "message": {
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "tool-1",
+                    "content": json.dumps(
+                        {"structuredContent": payload}, sort_keys=True
+                    ),
+                    "is_error": False,
+                }]
+            },
+        },
+    ]
+    _bind_transcript(receipt, tmp_path, "claude-fresh-without-snapshot.jsonl", events)
+    receipt["tool_calls"][0]["output_bytes"] = 1000
+    receipt["repoground_evidence"]["bundle_commit"] = commit
+    receipt["repoground_evidence"]["calls"][0].update(
+        {
+            "freshness_status": "fresh",
+            "resolved_range_count": None,
+            "context_bytes_used": None,
+            "grounding_status": None,
+        }
+    )
+
+    assert (
+        "receipt RepoGround evidence is not supported by bound transcript"
+        in validate_receipt(request, receipt, transcript_root=tmp_path)
+    )
+
+
+def test_live_grounding_verify_uses_production_verdict_shape(
+    tmp_path: Path,
+) -> None:
+    taskset = _taskset()
+    request = next(
+        item
+        for item in _planned_requests(taskset)
+        if item["case_id"] == "grounding-head-mismatch"
+        and item["condition"] == "treatment"
+    )
+    case = _cases(taskset)[request["case_id"]]
+    receipt = _receipt(request, case)
+    commit = request["repository"]["commit"]
+    _bind_live_manifest(
+        request,
+        receipt,
+        tmp_path,
+        execution_contract="grabowski-claude-code-live-v1",
+        provider="anthropic-claude-code",
+        model="claude-haiku-4-5-20251001",
+        sampling={},
+        bundle_commit=commit,
+    )
+    payload = {
+        "kind": "repobrief.mcp.read_only_frontdoor",
+        "version": "v1",
+        "tool": "grounding_verify",
+        "status": "pass",
+        "verdict": {
+            "kind": "repobrief.answer_grounding_verdict",
+            "version": "1.0",
+            "status": "pass",
+            "snapshot_ref": {
+                "manifest_path": str(request["repobrief"]["manifest"]),
+                "freshness_status": "fresh",
+            },
+        },
+    }
+    events = [
+        {
+            "type": "assistant",
+            "message": {
+                "content": [{
+                    "type": "tool_use",
+                    "id": "tool-1",
+                    "name": "mcp__repobrief__grounding_verify",
+                    "input": {"declaration": {}},
+                }]
+            },
+        },
+        {
+            "type": "user",
+            "message": {
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "tool-1",
+                    "content": json.dumps(
+                        {"structuredContent": payload}, sort_keys=True
+                    ),
+                    "is_error": False,
+                }]
+            },
+        },
+    ]
+    _bind_transcript(receipt, tmp_path, "claude-grounding-verify.jsonl", events)
+    receipt["tool_calls"][0].update(
+        {"name": "grounding_verify", "output_bytes": 1000}
+    )
+    receipt["repoground_evidence"]["bundle_commit"] = commit
+    receipt["repoground_evidence"]["calls"][0].update(
+        {
+            "tool": "grounding_verify",
+            "freshness_status": "fresh",
+            "resolved_range_count": None,
+            "context_bytes_used": None,
+            "grounding_status": "pass",
+        }
+    )
+
+    assert validate_receipt(request, receipt, transcript_root=tmp_path) == []
 
 
 def test_live_codex_evidence_must_match_bound_transcript(tmp_path: Path) -> None:
@@ -982,7 +1308,7 @@ def test_live_codex_evidence_must_match_bound_transcript(tmp_path: Path) -> None
         sampling={"reasoning_effort": "medium"},
         bundle_commit=commit,
     )
-    payload = _ask_context_payload(commit)
+    payload = _ask_context_payload(request["repobrief"]["manifest_sha256"])
     events = [{
         "type": "item.completed",
         "item": {
