@@ -469,8 +469,6 @@ def _bound_transcript_evidence(
         if runner == "claude"
         else _codex_transcript_evidence(request, events)
     )
-    if expected is None:
-        return None, ["receipt RepoGround evidence is not supported by bound transcript"]
     return expected, []
 
 
@@ -636,8 +634,16 @@ def _validate_repoground_evidence(
     receipt: Mapping[str, Any],
     transcript_content: bytes | None,
 ) -> list[str]:
+    contract = mapping_value(request.get("runner")).get("execution_contract")
+    live_contract = str(contract) in _LIVE_RUNNER_CONTRACTS
+    expected, transcript_errors = _bound_transcript_evidence(request, transcript_content)
     if "repoground_evidence" not in receipt:
-        return []
+        errors = list(transcript_errors)
+        if live_contract and expected is not None:
+            errors.append(
+                "receipt RepoGround evidence is required by bound transcript"
+            )
+        return errors
     if request.get("condition") != "treatment":
         return ["baseline receipt must not contain RepoGround evidence"]
     evidence = receipt.get("repoground_evidence")
@@ -647,10 +653,14 @@ def _validate_repoground_evidence(
         return ["receipt RepoGround evidence fields mismatch"]
     errors = _validate_repoground_header(request, evidence)
     errors.extend(_validate_repoground_calls(receipt, evidence))
-    expected, transcript_errors = _bound_transcript_evidence(request, transcript_content)
     errors.extend(transcript_errors)
-    if expected is not None and dict(evidence) != expected:
-        errors.append("receipt RepoGround evidence does not match bound transcript")
+    if live_contract:
+        if expected is None and not transcript_errors:
+            errors.append(
+                "receipt RepoGround evidence is not supported by bound transcript"
+            )
+        elif expected is not None and dict(evidence) != expected:
+            errors.append("receipt RepoGround evidence does not match bound transcript")
     return errors
 
 

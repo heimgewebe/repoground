@@ -947,6 +947,13 @@ def test_live_claude_evidence_must_match_bound_transcript(tmp_path: Path) -> Non
     )
     assert validate_receipt(request, receipt, transcript_root=tmp_path) == []
 
+    missing = json.loads(json.dumps(receipt))
+    missing.pop("repoground_evidence")
+    assert (
+        "receipt RepoGround evidence is required by bound transcript"
+        in validate_receipt(request, missing, transcript_root=tmp_path)
+    )
+
     receipt["repoground_evidence"]["calls"][0]["resolved_range_count"] = 999
     assert (
         "receipt RepoGround evidence does not match bound transcript"
@@ -998,6 +1005,13 @@ def test_live_codex_evidence_must_match_bound_transcript(tmp_path: Path) -> None
         }
     )
     assert validate_receipt(request, receipt, transcript_root=tmp_path) == []
+
+    missing = json.loads(json.dumps(receipt))
+    missing.pop("repoground_evidence")
+    assert (
+        "receipt RepoGround evidence is required by bound transcript"
+        in validate_receipt(request, missing, transcript_root=tmp_path)
+    )
 
     receipt["repoground_evidence"]["calls"][0]["freshness_status"] = "stale"
     assert (
