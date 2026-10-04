@@ -297,6 +297,9 @@ class FleetMembership:
         return {
             "schema": FLEET_MEMBERSHIP_SCHEMA,
             "authority_repository": "heimgewebe/metarepo",
+            "fetch_url": FLEET_MEMBERSHIP_REMOTE,
+            "transport": "isolated_anonymous_https",
+            "origin_role": "identity_validation_only",
             "source_commit": self.source_commit,
             "source_ref": self.source_ref,
             "source_path": self.source_path,
@@ -2162,9 +2165,17 @@ def generation_environment(cache_root: Path) -> dict[str, str]:
     temporary = cache_root / "tmp"
     for directory in (pycache, xdg_cache, pip_cache, temporary):
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-    env = os.environ.copy()
+    # Interpreter flags in the parent do not sanitize a child's environment.
+    # Keep Python path/user-site overrides out of the managed generator process.
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("PYTHON")
+        and key.lower() not in _AUTHORITY_LOADER_ENV_NAMES
+    }
     env.update(
         {
+            "PYTHONNOUSERSITE": "1",
             "PYTHONDONTWRITEBYTECODE": "1",
             "PYTHONPYCACHEPREFIX": str(pycache),
             "XDG_CACHE_HOME": str(xdg_cache),
@@ -2221,6 +2232,8 @@ def prepare_managed_worktree(
 
 
 def generator_inputs_sha(worktree: Path) -> str:
+    git_env = _authority_git_env()
+    git_env["GIT_NO_REPLACE_OBJECTS"] = "1"
     raw = run(
         [
             "git",
@@ -2232,7 +2245,8 @@ def generator_inputs_sha(worktree: Path) -> str:
             "HEAD",
             "--",
             *GENERATOR_INPUT_PATHS,
-        ]
+        ],
+        env=git_env,
     ).stdout
     entries: list[dict[str, str]] = []
     for record in raw.split("\0"):
@@ -2262,6 +2276,40 @@ def generator_inputs_sha(worktree: Path) -> str:
     missing = sorted(required_files - present_paths)
     if missing:
         raise RuntimeError(f"missing required generator inputs: {missing}")
+    # Git status can be clean after a round-tripping smudge/clean filter even
+    # when the executed generator bytes differ from the blobs in this digest.
+    # Source worktrees retain their filter support; generator inputs must match
+    # canonical commit bytes before any unchanged/publication decision.
+    root = worktree.resolve(strict=True)
+    for entry in entries:
+        candidate = root / entry["path"]
+        if (
+            entry["mode"] not in {"100644", "100755"}
+            or candidate.is_symlink()
+            or not candidate.is_file()
+            or candidate.resolve(strict=True) != candidate
+        ):
+            raise RuntimeError(
+                f"generator input is not a canonical regular file: {entry['path']}"
+            )
+    # Bound argv size without invoking one subprocess per input file.
+    for start in range(0, len(entries), 128):
+        batch = entries[start : start + 128]
+        observed = run(
+            [
+                "git", "-C", str(root), "hash-object", "--no-filters", "--",
+                *(entry["path"] for entry in batch),
+            ],
+            env=git_env,
+        ).stdout.splitlines()
+        if len(observed) != len(batch):
+            raise RuntimeError("generator input hash verification is incomplete")
+        for entry, object_id in zip(batch, observed):
+            if object_id != entry["object_id"]:
+                raise RuntimeError(
+                    "materialized generator input differs from committed blob: "
+                    f"{entry['path']}"
+                )
     return canonical_sha256(entries)
 
 
@@ -2938,15 +2986,37 @@ def _fleet_github_authorization_header_value_allowed(value: str) -> bool:
     return bool(value[len(prefix) :].strip())
 
 
+def _fleet_http_version_config_key_allowed(key: str) -> bool:
+    normalized = key.strip().lower()
+    if normalized == "http.version":
+        return True
+    scoped = re.fullmatch(
+        r"http\.https://(?:[^/@:]+@)?github\.com(?::([0-9]+))?"
+        r"(?:/[^ \t\r\n]*)?\.version",
+        normalized,
+    )
+    if scoped is None:
+        return False
+    port = scoped.group(1)
+    return port is None or 1 <= int(port) <= 65535
+
+
+def _fleet_http_version_value_allowed(value: str) -> bool:
+    return value in {"HTTP/1.1", "HTTP/2"}
+
+
 def _fleet_https_config_key_allowed(key: str) -> bool:
     return (
         _fleet_credential_config_key_allowed(key)
         or _fleet_tls_config_key_allowed(key)
         or _fleet_proxy_config_key_allowed(key)
+        or _fleet_http_version_config_key_allowed(key)
     )
 
 
 def _fleet_https_config_entry_allowed(key: str, value: str) -> bool:
+    if _fleet_http_version_config_key_allowed(key):
+        return _fleet_http_version_value_allowed(value)
     if _fleet_https_config_key_allowed(key):
         return True
     return (
@@ -3653,6 +3723,10 @@ def _fleet_member_local_config_entry_is_transport_override(
     if normalized == "core.askpass":
         _validated_fleet_member_askpass_path(value, source="core.askPass")
         return False
+    if normalized == "remote.origin.tagopt":
+        return value not in {"--no-tags", "--tags"}
+    if _fleet_http_version_config_key_allowed(key):
+        return not _fleet_http_version_value_allowed(value)
     if _fleet_github_extra_header_key_allowed(key):
         return not _fleet_github_authorization_header_value_allowed(value)
     return _fleet_member_local_config_is_transport_override(key)
@@ -4527,11 +4601,18 @@ def select_authoritative_fleet_entries(
     entries: list[RepoEntry],
     membership: FleetMembership,
 ) -> tuple[list[RepoEntry], list[str], int]:
-    by_key = {entry.key: entry for entry in entries}
+    member_keys = set(membership.keys)
+    by_key: dict[str, RepoEntry] = {}
+    excluded_count = 0
+    for entry in entries:
+        if entry.key not in member_keys:
+            excluded_count += 1
+            continue
+        if entry.key in by_key:
+            raise RuntimeError(f"ambiguous local fleet member checkout: {entry.key}")
+        by_key[entry.key] = entry
     selected = [by_key[key] for key in membership.keys if key in by_key]
     missing = [key for key in membership.keys if key not in by_key]
-    member_keys = set(membership.keys)
-    excluded_count = sum(1 for key in by_key if key not in member_keys)
     return selected, missing, excluded_count
 
 
@@ -5900,6 +5981,8 @@ def build_refresh_command(
     command = [
         sys.executable,
         "-B",
+        "-E",
+        "-s",
         "-m",
         "merger.repoground.cli.ground",
         "external-manifest",

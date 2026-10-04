@@ -4738,7 +4738,7 @@ def test_generation_environment_redirects_runtime_artifacts(tmp_path: Path) -> N
     env = module.generation_environment(runtime)
 
     assert env["PYTHONDONTWRITEBYTECODE"] == "1"
-    assert env.get("PYTHONNOUSERSITE") == os.environ.get("PYTHONNOUSERSITE")
+    assert env["PYTHONNOUSERSITE"] == "1"
     assert Path(env["PYTHONPYCACHEPREFIX"]) == runtime / "pycache"
     assert Path(env["XDG_CACHE_HOME"]) == runtime / "xdg-cache"
     assert Path(env["PIP_CACHE_DIR"]) == runtime / "pip-cache"
@@ -7571,3 +7571,313 @@ def test_fleet_membership_preflight_failure_persists_fleet_last(
 
     persisted = json.loads((log_root / "fleet-last.json").read_text(encoding="utf-8"))
     assert persisted == payload
+
+
+@pytest.mark.parametrize("policy", ["--no-tags", "--tags"])
+@pytest.mark.parametrize("scope", ["local", "worktree"])
+def test_review_tag_policy_reaches_member_resolution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, policy: str, scope: str
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path, "member-tag-policy")
+    remote = "https://github.com/heimgewebe/member.git"
+    git(repo, "remote", "add", "--no-tags", "origin", remote)
+    git(repo, "config", "--local", "--unset-all", "remote.origin.tagOpt")
+    if scope == "worktree":
+        git(repo, "config", "extensions.worktreeConfig", "true")
+    git(repo, "config", f"--{scope}", "remote.origin.tagOpt", policy)
+    entry = module.RepoEntry("heimgewebe/member", "heimgewebe", "member", repo, remote)
+    monkeypatch.setattr(module, "_global_system_github_https_config", lambda _: [])
+
+    def observe(repo_path: Path, *, remote: str, env: dict[str, str]):
+        assert repo_path == repo
+        assert remote == entry.remote
+        result = subprocess.run(
+            ["git", "-C", str(repo), "config", "--get", "remote.origin.tagOpt"],
+            env=env,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        assert result.stdout.strip() == policy
+        return "origin/main", "main", sha
+
+    monkeypatch.setattr(module, "remote_head", observe)
+    assert module.remote_head_for_entry(entry) == ("origin/main", "main", sha)
+    git(repo, "config", f"--{scope}", "remote.origin.tagOpt", "invalid-policy")
+    with pytest.raises(RuntimeError, match="unsafe.*configuration"):
+        module.remote_head_for_entry(entry)
+
+
+@pytest.mark.parametrize("version", ["HTTP/1.1", "HTTP/2"])
+@pytest.mark.parametrize("key", ["http.version", "http.https://github.com/.version"])
+@pytest.mark.parametrize("scope", ["local", "worktree", "global", "system"])
+def test_review_http_version_survives_member_git_environment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    version: str,
+    key: str,
+    scope: str,
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path, "member-http-version")
+    remote = "https://github.com/heimgewebe/member.git"
+    git(repo, "remote", "add", "origin", remote)
+    entry = module.RepoEntry("heimgewebe/member", "heimgewebe", "member", repo, remote)
+    global_config = tmp_path / "global.gitconfig"
+    system_config = tmp_path / "system.gitconfig"
+    global_config.write_text("", encoding="utf-8")
+    system_config.write_text("", encoding="utf-8")
+    discovery_env = dict(os.environ)
+    for variable in list(discovery_env):
+        if variable.startswith("GIT_"):
+            discovery_env.pop(variable)
+    discovery_env.update(
+        {
+            "GIT_CONFIG_GLOBAL": str(global_config),
+            "GIT_CONFIG_SYSTEM": str(system_config),
+        }
+    )
+    monkeypatch.setattr(
+        module, "_credential_config_discovery_env", lambda: discovery_env
+    )
+    if scope in {"global", "system"}:
+        selected = global_config if scope == "global" else system_config
+        git(repo, "config", "--file", str(selected), key, version)
+    else:
+        if scope == "worktree":
+            git(repo, "config", "extensions.worktreeConfig", "true")
+        git(repo, "config", f"--{scope}", key, version)
+
+    def observe(repo_path: Path, *, remote: str, env: dict[str, str]):
+        assert repo_path == repo
+        assert remote == entry.remote
+        result = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo),
+                "config",
+                "--get-urlmatch",
+                "http.version",
+                remote,
+            ],
+            env=env,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        assert result.stdout.strip() == version
+        assert env["GIT_CONFIG_SYSTEM"] == os.devnull
+        return "origin/main", "main", sha
+
+    monkeypatch.setattr(module, "remote_head", observe)
+    assert module.remote_head_for_entry(entry) == ("origin/main", "main", sha)
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "http.version",
+        "http.https://github.com/.version",
+        "http.https://git@github.com:443/heimgewebe/member.git.version",
+    ],
+)
+@pytest.mark.parametrize("value", ["", "HTTP/3", "http/1.1", "HTTP/1.1\nHTTP/2"])
+def test_review_http_version_rejects_unbounded_values(key: str, value: str) -> None:
+    module = load_publisher()
+    assert module._fleet_https_config_entry_allowed(key, value) is False
+    assert (
+        module._fleet_member_local_config_entry_is_transport_override(key, value)
+        is True
+    )
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "http.https://github.com.example/.version",
+        "http.https://example.com/.version",
+        "http.http://github.com/.version",
+        "http.https://github.com:0/.version",
+        "http.https://github.com:65536/.version",
+    ],
+)
+def test_review_http_version_rejects_other_authorities(key: str) -> None:
+    module = load_publisher()
+    assert module._fleet_https_config_entry_allowed(key, "HTTP/1.1") is False
+    assert (
+        module._fleet_member_local_config_entry_is_transport_override(key, "HTTP/1.1")
+        is True
+    )
+
+
+def test_review_generator_environment_discards_python_and_loader_overrides(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    for key in (
+        "PYTHONPATH",
+        "PYTHONHOME",
+        "PYTHONUSERBASE",
+        "PYTHONINSPECT",
+        "LD_PRELOAD",
+    ):
+        monkeypatch.setenv(key, str(tmp_path / "untrusted"))
+    env = module.generation_environment(tmp_path / "cache")
+    for key in (
+        "PYTHONPATH",
+        "PYTHONHOME",
+        "PYTHONUSERBASE",
+        "PYTHONINSPECT",
+        "LD_PRELOAD",
+    ):
+        assert key not in env
+    assert env["PYTHONNOUSERSITE"] == "1"
+
+
+def test_review_refresh_python_flags_preserve_only_tool_tree_imports(
+    tmp_path: Path,
+) -> None:
+    module = load_publisher()
+    # An empty ordinary package must not mask the intended namespace package.
+    shadow = tmp_path / "shadow"
+    (shadow / "merger").mkdir(parents=True)
+    (shadow / "merger/__init__.py").write_text("", encoding="utf-8")
+    command = module.build_refresh_command(
+        source_wt=tmp_path / "source",
+        out_dir=tmp_path / "out",
+        registry_repository="heimgewebe__member",
+        ref_segment="main",
+        config=module.PublicationConfig(profile="fleet-context"),
+    )
+    flags = command[: command.index("-m")]
+    assert flags == [sys.executable, "-B", "-E", "-s"]
+    env = module.generation_environment(tmp_path / "runtime")
+    env.update(
+        {
+            "PYTHONPATH": str(shadow),
+            "PYTHONHOME": str(tmp_path / "absent-home"),
+            "PYTHONUSERBASE": str(tmp_path / "user-site"),
+        }
+    )
+    result = subprocess.run(
+        flags
+        + [
+            "-c",
+            (
+                "import importlib.util,json,site; "
+                "print(json.dumps({'origin':importlib.util.find_spec("
+                "'merger.repoground.cli.ground').origin,'user_site':site.ENABLE_USER_SITE}))"
+            ),
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    observed = json.loads(result.stdout)
+    assert Path(observed["origin"]) == ROOT / "merger/repoground/cli/ground.py"
+    assert observed["user_site"] is False
+
+
+def test_review_generator_preflight_rejects_clean_filtered_bytes(
+    tmp_path: Path,
+) -> None:
+    module = load_publisher()
+    repo, _ = initialize_repository(tmp_path, "filtered-generator")
+    for relative in (
+        "merger/repoground/cli/ground.py",
+        "merger/repoground/cli/cmd_ground.py",
+    ):
+        path = repo / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("canonical\n", encoding="utf-8")
+    git(repo, "add", ".")
+    git(repo, "commit", "-m", "canonical generator fixture")
+    baseline = module.generator_inputs_sha(repo)
+    attributes = repo / ".git/info/attributes"
+    attributes.parent.mkdir(parents=True, exist_ok=True)
+    attributes.write_text("*.py filter=casefixture\n", encoding="utf-8")
+    git(repo, "config", "filter.casefixture.clean", "tr A-Z a-z")
+    git(repo, "config", "filter.casefixture.smudge", "tr a-z A-Z")
+    target = repo / "merger/repoground/cli/ground.py"
+    target.unlink()
+    git(repo, "checkout", "--", "merger/repoground/cli/ground.py")
+    assert target.read_text() == "CANONICAL\n"
+    assert git(repo, "status", "--porcelain") == ""
+    with pytest.raises(RuntimeError, match="materialized generator input differs"):
+        module.generator_inputs_sha(repo)
+    # A canonical materialization restores the same identity; no gratuitous churn.
+    target.write_text("canonical\n", encoding="utf-8")
+    assert module.generator_inputs_sha(repo) == baseline
+
+
+def test_review_generator_preflight_rejects_symlink_input(tmp_path: Path) -> None:
+    module = load_publisher()
+    repo, _ = initialize_repository(tmp_path, "symlink-generator")
+    cli = repo / "merger/repoground/cli"
+    cli.mkdir(parents=True)
+    (cli / "ground.py").write_text("canonical\n", encoding="utf-8")
+    (cli / "cmd_ground.py").symlink_to("ground.py")
+    git(repo, "add", ".")
+    git(repo, "commit", "-m", "symlink generator fixture")
+    with pytest.raises(RuntimeError, match="canonical regular file"):
+        module.generator_inputs_sha(repo)
+
+
+def test_review_membership_receipt_declares_fixed_transport() -> None:
+    module = load_publisher()
+    membership = module.FleetMembership(
+        ("heimgewebe/member",), "a" * 40, "main", "fleet/repos.yml", "b" * 64
+    )
+    receipt = membership.receipt()
+    assert receipt["fetch_url"] == "https://github.com/heimgewebe/metarepo.git"
+    assert receipt["transport"] == "isolated_anonymous_https"
+    assert receipt["origin_role"] == "identity_validation_only"
+
+
+def test_review_membership_rejects_ambiguous_member_checkouts(tmp_path: Path) -> None:
+    module = load_publisher()
+    membership = module.FleetMembership(
+        ("heimgewebe/member",), "a" * 40, "main", "fleet/repos.yml", "b" * 64
+    )
+    entries = [
+        module.RepoEntry(
+            "heimgewebe/member",
+            "heimgewebe",
+            "member",
+            tmp_path / name,
+            "https://github.com/heimgewebe/member.git",
+        )
+        for name in ("first", "second")
+    ]
+    with pytest.raises(RuntimeError, match="ambiguous local fleet member checkout"):
+        module.select_authoritative_fleet_entries(entries, membership)
+
+
+def test_review_membership_counts_excluded_checkouts_not_distinct_keys(
+    tmp_path: Path,
+) -> None:
+    module = load_publisher()
+    membership = module.FleetMembership(
+        ("heimgewebe/member",), "a" * 40, "main", "fleet/repos.yml", "b" * 64
+    )
+    entries = [
+        module.RepoEntry(
+            "heimgewebe/nonmember",
+            "heimgewebe",
+            "nonmember",
+            tmp_path / name,
+            "https://github.com/heimgewebe/nonmember.git",
+        )
+        for name in ("first", "second")
+    ]
+    selected, missing, excluded = module.select_authoritative_fleet_entries(
+        entries, membership
+    )
+    assert selected == []
+    assert missing == ["heimgewebe/member"]
+    assert excluded == 2
