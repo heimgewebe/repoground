@@ -1196,6 +1196,104 @@ def _bind_transcript(receipt: dict, tmp_path: Path, name: str, events: list[dict
     }
 
 
+@pytest.mark.parametrize("runner_kind", ["claude", "codex"])
+def test_live_transcript_accepts_documented_repoground_server_alias(
+    tmp_path: Path, runner_kind: str
+) -> None:
+    taskset = _taskset()
+    request = next(
+        item
+        for item in _planned_requests(taskset)
+        if item["case_id"] == "nav-lenskit-mcp-startup"
+        and item["condition"] == "treatment"
+    )
+    case = _cases(taskset)[request["case_id"]]
+    receipt = _receipt(request, case)
+    commit = request["repository"]["commit"]
+    if runner_kind == "claude":
+        _bind_live_manifest(
+            request,
+            receipt,
+            tmp_path,
+            execution_contract="grabowski-claude-code-live-v1",
+            provider="anthropic-claude-code",
+            model="claude-haiku-4-5-20251001",
+            sampling={},
+            bundle_commit=commit,
+        )
+    else:
+        _bind_live_manifest(
+            request,
+            receipt,
+            tmp_path,
+            execution_contract="grabowski-codex-cli-live-v1",
+            provider="openai-codex-cli",
+            model="gpt-6-astra",
+            sampling={"reasoning_effort": "medium"},
+            bundle_commit=commit,
+        )
+    payload = _ask_context_payload(
+        request["repobrief"]["manifest_sha256"],
+        request["repobrief"]["manifest"],
+    )
+    if runner_kind == "claude":
+        events = [
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [{
+                        "type": "tool_use",
+                        "id": "tool-1",
+                        "name": "mcp__repoground__ask_context",
+                        "input": {"query": "example"},
+                    }]
+                },
+            },
+            {
+                "type": "user",
+                "message": {
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": "tool-1",
+                        "content": json.dumps(
+                            {"structuredContent": payload}, sort_keys=True
+                        ),
+                        "is_error": False,
+                    }]
+                },
+            },
+        ]
+    else:
+        events = [{
+            "type": "item.completed",
+            "item": {
+                "type": "mcp_tool_call",
+                "server": "repoground",
+                "tool": "ask_context",
+                "arguments": {"query": "example"},
+                "result": {"structured_content": payload},
+                "error": None,
+                "status": "completed",
+            },
+        }]
+    _bind_transcript(
+        receipt,
+        tmp_path,
+        f"{runner_kind}-repoground-alias.jsonl",
+        events,
+    )
+    receipt["tool_calls"][0]["output_bytes"] = 1000
+    receipt["repoground_evidence"]["calls"][0].update(
+        {
+            "freshness_status": "fresh",
+            "resolved_range_count": 1,
+            "context_bytes_used": 321,
+        }
+    )
+
+    assert validate_receipt(request, receipt, transcript_root=tmp_path) == []
+
+
 def test_live_claude_evidence_must_match_bound_transcript(tmp_path: Path) -> None:
     taskset = _taskset()
     request = next(

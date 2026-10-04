@@ -134,10 +134,11 @@ _LIVE_RUNNER_CONTRACTS = {
     "grabowski-claude-code-live-v1": "claude",
     "grabowski-codex-cli-live-v1": "codex",
 }
+_REPOGROUND_MCP_SERVER_ALIASES = {"repobrief", "repoground"}
 _CLAUDE_REPOGROUND_TOOLS = {
-    "mcp__repobrief__ask_context": "ask_context",
-    "mcp__repobrief__grounding_verify": "grounding_verify",
-    "mcp__repobrief__live_freshness": "live_freshness",
+    f"mcp__{server}__{tool}": tool
+    for server in _REPOGROUND_MCP_SERVER_ALIASES
+    for tool in _REPOGROUND_EVIDENCE_TOOLS
 }
 
 
@@ -602,7 +603,7 @@ def _codex_transcript_evidence(
         tool = item.get("tool")
         if (
             item_type != "mcp_tool_call"
-            or item.get("server") != "repobrief"
+            or item.get("server") not in _REPOGROUND_MCP_SERVER_ALIASES
             or tool not in _REPOGROUND_EVIDENCE_TOOLS
             or item.get("status") != "completed"
             or item.get("error") is not None
