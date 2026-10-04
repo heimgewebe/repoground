@@ -765,6 +765,7 @@ def test_live_grounding_evidence_bundle_commit_must_match_bound_manifest(
         "kind": "repobrief.live_freshness",
         "version": "v1",
         "status": "stale",
+        "bundle_manifest": str(manifest_path),
         "snapshot_provenance": {"git_commit": stale_commit},
     }
     _bind_transcript(
@@ -851,7 +852,28 @@ def _bind_live_manifest(
     receipt["repoground_evidence"]["bundle_commit"] = bundle_commit
 
 
-def _ask_context_payload(manifest_sha256: str) -> dict:
+def _not_comparable_live_freshness(manifest_path: str) -> dict:
+    return {
+        "kind": "repobrief.live_freshness",
+        "version": "v1",
+        "status": "not_comparable",
+        "reason": "repo_root_not_configured",
+        "bundle_manifest": manifest_path,
+        "repo_root": None,
+        "read_only_git_probe": False,
+        "implicit_refresh": False,
+        "does_not_establish": [
+            "freshness_against_remote",
+            "remote_branch_state",
+            "pull_request_diff_current",
+            "runtime_correctness",
+            "repo_understood",
+            "merge_readiness",
+        ],
+    }
+
+
+def _ask_context_payload(manifest_sha256: str, manifest_path: str) -> dict:
     return {
         "kind": "repobrief.mcp.read_only_frontdoor",
         "version": "v1",
@@ -869,6 +891,7 @@ def _ask_context_payload(manifest_sha256: str) -> dict:
             "resolved_ranges": [{"path": "src/example.py", "status": "resolved"}],
             "budget": {"context_bytes_used": 321},
         },
+        "live_freshness": _not_comparable_live_freshness(manifest_path),
     }
 
 
@@ -909,7 +932,10 @@ def test_live_claude_evidence_must_match_bound_transcript(tmp_path: Path) -> Non
         sampling={},
         bundle_commit=commit,
     )
-    payload = _ask_context_payload(request["repobrief"]["manifest_sha256"])
+    payload = _ask_context_payload(
+        request["repobrief"]["manifest_sha256"],
+        request["repobrief"]["manifest"],
+    )
     events = [
         {
             "type": "assistant",
@@ -947,7 +973,48 @@ def test_live_claude_evidence_must_match_bound_transcript(tmp_path: Path) -> Non
     )
     assert validate_receipt(request, receipt, transcript_root=tmp_path) == []
 
-    wrong_payload = _ask_context_payload("0" * 64)
+    missing_frontdoor_freshness = copy.deepcopy(payload)
+    missing_frontdoor_freshness.pop("live_freshness")
+    missing_freshness_events = copy.deepcopy(events)
+    missing_freshness_events[1]["message"]["content"][0]["content"] = json.dumps(
+        {"structuredContent": missing_frontdoor_freshness}, sort_keys=True
+    )
+    missing_freshness = copy.deepcopy(receipt)
+    _bind_transcript(
+        missing_freshness,
+        tmp_path,
+        "claude-missing-frontdoor-freshness.jsonl",
+        missing_freshness_events,
+    )
+    assert (
+        "receipt RepoGround evidence is not supported by bound transcript"
+        in validate_receipt(request, missing_freshness, transcript_root=tmp_path)
+    )
+
+    wrong_live_payload = copy.deepcopy(payload)
+    wrong_live_payload["live_freshness"]["bundle_manifest"] = str(
+        tmp_path / "other.bundle.manifest.json"
+    )
+    wrong_live_events = copy.deepcopy(events)
+    wrong_live_events[1]["message"]["content"][0]["content"] = json.dumps(
+        {"structuredContent": wrong_live_payload}, sort_keys=True
+    )
+    wrong_live = copy.deepcopy(receipt)
+    _bind_transcript(
+        wrong_live,
+        tmp_path,
+        "claude-wrong-live-manifest.jsonl",
+        wrong_live_events,
+    )
+    assert (
+        "receipt RepoGround evidence is not supported by bound transcript"
+        in validate_receipt(request, wrong_live, transcript_root=tmp_path)
+    )
+
+    wrong_payload = _ask_context_payload(
+        "0" * 64,
+        request["repobrief"]["manifest"],
+    )
     wrong_events = copy.deepcopy(events)
     wrong_events[1]["message"]["content"][0]["content"] = json.dumps(
         {"structuredContent": wrong_payload}, sort_keys=True
@@ -1001,7 +1068,10 @@ def test_live_ask_context_counts_only_semantically_resolved_ranges(
         sampling={},
         bundle_commit=commit,
     )
-    payload = _ask_context_payload(request["repobrief"]["manifest_sha256"])
+    payload = _ask_context_payload(
+        request["repobrief"]["manifest_sha256"],
+        request["repobrief"]["manifest"],
+    )
     payload["context_pack"]["resolved_ranges"] = [
         {"path": "src/missing.py", "status": "missing"}
     ]
@@ -1073,15 +1143,9 @@ def test_live_freshness_not_comparable_uses_bound_manifest_commit(
         sampling={},
         bundle_commit=commit,
     )
-    payload = {
-        "kind": "repobrief.live_freshness",
-        "version": "v1",
-        "status": "not_comparable",
-        "reason": "repo_root_not_configured",
-        "bundle_manifest": str(request["repobrief"]["manifest"]),
-        "repo_root": None,
-        "snapshot_provenance": None,
-    }
+    payload = _not_comparable_live_freshness(
+        request["repobrief"]["manifest"]
+    )
     events = [
         {
             "type": "assistant",
@@ -1242,6 +1306,9 @@ def test_live_grounding_verify_uses_production_verdict_shape(
                 "freshness_status": "fresh",
             },
         },
+        "live_freshness": _not_comparable_live_freshness(
+            request["repobrief"]["manifest"]
+        ),
     }
     events = [
         {
@@ -1308,7 +1375,10 @@ def test_live_codex_evidence_must_match_bound_transcript(tmp_path: Path) -> None
         sampling={"reasoning_effort": "medium"},
         bundle_commit=commit,
     )
-    payload = _ask_context_payload(request["repobrief"]["manifest_sha256"])
+    payload = _ask_context_payload(
+        request["repobrief"]["manifest_sha256"],
+        request["repobrief"]["manifest"],
+    )
     events = [{
         "type": "item.completed",
         "item": {

@@ -225,15 +225,30 @@ def _decoded_repoground_payload(value: Mapping[str, Any]) -> Mapping[str, Any] |
 
 
 def _live_snapshot_commit(
-    freshness: Mapping[str, Any], *, fallback_commit: str | None
+    freshness: Mapping[str, Any],
+    *,
+    fallback_commit: str | None,
+    expected_manifest_path: str | None,
 ) -> str | None:
+    if (
+        freshness.get("kind") != "repobrief.live_freshness"
+        or freshness.get("version") != "v1"
+        or freshness.get("status") not in _FRESHNESS_STATUSES
+        or not isinstance(expected_manifest_path, str)
+        or freshness.get("bundle_manifest") != expected_manifest_path
+    ):
+        return None
     snapshot = freshness.get("snapshot_provenance")
     if isinstance(snapshot, Mapping):
         commit = snapshot.get("git_commit")
-        return str(commit) if _is_commit(commit) else None
+        if _is_commit(commit) and commit == fallback_commit:
+            return str(commit)
+        return None
     if (
         freshness.get("status") == "not_comparable"
-        and "snapshot_provenance" in freshness
+        and freshness.get("reason") == "repo_root_not_configured"
+        and freshness.get("repo_root") is None
+        and freshness.get("read_only_git_probe") is False
         and snapshot is None
         and _is_commit(fallback_commit)
     ):
@@ -246,14 +261,13 @@ def _live_freshness_evidence(
     payload: Mapping[str, Any],
     *,
     fallback_commit: str | None,
+    expected_manifest_path: str | None,
 ) -> tuple[str, dict[str, Any]] | None:
-    if (
-        payload.get("kind") != "repobrief.live_freshness"
-        or payload.get("version") != "v1"
-        or payload.get("status") not in _FRESHNESS_STATUSES
-    ):
-        return None
-    commit = _live_snapshot_commit(payload, fallback_commit=fallback_commit)
+    commit = _live_snapshot_commit(
+        payload,
+        fallback_commit=fallback_commit,
+        expected_manifest_path=expected_manifest_path,
+    )
     if commit is None:
         return None
     return commit, {
@@ -271,6 +285,22 @@ def _frontdoor_header_matches(tool: str, payload: Mapping[str, Any]) -> bool:
         payload.get("kind") == "repobrief.mcp.read_only_frontdoor"
         and payload.get("version") == "v1"
         and payload.get("tool") == tool
+    )
+
+
+def _frontdoor_live_freshness_commit(
+    payload: Mapping[str, Any],
+    *,
+    fallback_commit: str | None,
+    expected_manifest_path: str | None,
+) -> str | None:
+    freshness = payload.get("live_freshness")
+    if not isinstance(freshness, Mapping):
+        return None
+    return _live_snapshot_commit(
+        freshness,
+        fallback_commit=fallback_commit,
+        expected_manifest_path=expected_manifest_path,
     )
 
 
@@ -305,11 +335,20 @@ def _ask_context_evidence(
     payload: Mapping[str, Any],
     *,
     fallback_commit: str | None,
+    expected_manifest_path: str | None,
     expected_manifest_sha256: str | None,
 ) -> tuple[str, dict[str, Any]] | None:
     if not _frontdoor_header_matches("ask_context", payload):
         return None
-    if payload.get("status") != "ok":
+    if (
+        payload.get("status") != "ok"
+        or _frontdoor_live_freshness_commit(
+            payload,
+            fallback_commit=fallback_commit,
+            expected_manifest_path=expected_manifest_path,
+        )
+        is None
+    ):
         return None
     pack = payload.get("context_pack")
     if (
@@ -351,13 +390,44 @@ def _ask_context_evidence(
     }
 
 
+def _grounding_snapshot_commit(
+    snapshot_ref: Mapping[str, Any],
+    *,
+    fallback_commit: str | None,
+    expected_manifest_sha256: str | None,
+) -> str | None:
+    observed_manifest_sha256 = snapshot_ref.get("manifest_sha256")
+    if (
+        observed_manifest_sha256 is not None
+        and observed_manifest_sha256 != expected_manifest_sha256
+    ):
+        return None
+    raw_commit = snapshot_ref.get("git_commit")
+    if _is_commit(raw_commit):
+        return str(raw_commit) if raw_commit == fallback_commit else None
+    if raw_commit is None and _is_commit(fallback_commit):
+        return str(fallback_commit)
+    return None
+
+
 def _grounding_evidence(
     sequence: int,
     payload: Mapping[str, Any],
     *,
     fallback_commit: str | None,
+    expected_manifest_path: str | None,
+    expected_manifest_sha256: str | None,
 ) -> tuple[str, dict[str, Any]] | None:
     if not _frontdoor_header_matches("grounding_verify", payload):
+        return None
+    if (
+        _frontdoor_live_freshness_commit(
+            payload,
+            fallback_commit=fallback_commit,
+            expected_manifest_path=expected_manifest_path,
+        )
+        is None
+    ):
         return None
     verdict = payload.get("verdict")
     if (
@@ -371,12 +441,12 @@ def _grounding_evidence(
     snapshot_ref = verdict.get("snapshot_ref")
     if not isinstance(snapshot_ref, Mapping):
         return None
-    raw_commit = snapshot_ref.get("git_commit")
-    if _is_commit(raw_commit):
-        commit = str(raw_commit)
-    elif raw_commit is None and _is_commit(fallback_commit):
-        commit = str(fallback_commit)
-    else:
+    commit = _grounding_snapshot_commit(
+        snapshot_ref,
+        fallback_commit=fallback_commit,
+        expected_manifest_sha256=expected_manifest_sha256,
+    )
+    if commit is None:
         return None
     raw_freshness = snapshot_ref.get("freshness_status")
     if raw_freshness is None:
@@ -401,22 +471,31 @@ def _evidence_call_from_payload(
     payload: Mapping[str, Any],
     *,
     fallback_commit: str | None,
+    expected_manifest_path: str | None,
     expected_manifest_sha256: str | None,
 ) -> tuple[str, dict[str, Any]] | None:
     if tool == "live_freshness":
         return _live_freshness_evidence(
-            sequence, payload, fallback_commit=fallback_commit
+            sequence,
+            payload,
+            fallback_commit=fallback_commit,
+            expected_manifest_path=expected_manifest_path,
         )
     if tool == "ask_context":
         return _ask_context_evidence(
             sequence,
             payload,
             fallback_commit=fallback_commit,
+            expected_manifest_path=expected_manifest_path,
             expected_manifest_sha256=expected_manifest_sha256,
         )
     if tool == "grounding_verify":
         return _grounding_evidence(
-            sequence, payload, fallback_commit=fallback_commit
+            sequence,
+            payload,
+            fallback_commit=fallback_commit,
+            expected_manifest_path=expected_manifest_path,
+            expected_manifest_sha256=expected_manifest_sha256,
         )
     return None
 
@@ -462,6 +541,7 @@ def _claude_transcript_evidence(
     events: list[Mapping[str, Any]],
     *,
     fallback_commit: str | None,
+    expected_manifest_path: str | None,
     expected_manifest_sha256: str | None,
 ) -> dict[str, Any] | None:
     uses, results = _claude_tool_blocks(events)
@@ -482,6 +562,7 @@ def _claude_transcript_evidence(
                 sequence,
                 payload,
                 fallback_commit=fallback_commit,
+                expected_manifest_path=expected_manifest_path,
                 expected_manifest_sha256=expected_manifest_sha256,
             )
             if isinstance(payload, Mapping)
@@ -500,6 +581,7 @@ def _codex_transcript_evidence(
     events: list[Mapping[str, Any]],
     *,
     fallback_commit: str | None,
+    expected_manifest_path: str | None,
     expected_manifest_sha256: str | None,
 ) -> dict[str, Any] | None:
     sequence = 0
@@ -535,6 +617,7 @@ def _codex_transcript_evidence(
             sequence,
             payload,
             fallback_commit=fallback_commit,
+            expected_manifest_path=expected_manifest_path,
             expected_manifest_sha256=expected_manifest_sha256,
         )
         if normalized is None:
@@ -557,9 +640,9 @@ def _bound_transcript_evidence(
     fallback_commit, manifest_errors = _bound_manifest_commit(request)
     if manifest_errors:
         return None, manifest_errors
-    expected_manifest_sha256 = mapping_value(request.get("repobrief")).get(
-        "manifest_sha256"
-    )
+    repobrief = mapping_value(request.get("repobrief"))
+    expected_manifest_path = repobrief.get("manifest")
+    expected_manifest_sha256 = repobrief.get("manifest_sha256")
     events, errors = _jsonl_objects(content)
     if events is None:
         return None, errors
@@ -568,6 +651,7 @@ def _bound_transcript_evidence(
             request,
             events,
             fallback_commit=fallback_commit,
+            expected_manifest_path=expected_manifest_path,
             expected_manifest_sha256=expected_manifest_sha256,
         )
         if runner == "claude"
@@ -575,6 +659,7 @@ def _bound_transcript_evidence(
             request,
             events,
             fallback_commit=fallback_commit,
+            expected_manifest_path=expected_manifest_path,
             expected_manifest_sha256=expected_manifest_sha256,
         )
     )
