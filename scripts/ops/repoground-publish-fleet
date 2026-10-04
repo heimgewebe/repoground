@@ -3137,6 +3137,7 @@ def _validated_fleet_member_askpass_path(raw: str, *, source: str) -> str:
         for part in path.parts[1:]
     ):
         raise RuntimeError(f"{label} path is invalid")
+    _assert_fleet_member_askpass_ancestors_trusted(path, label=label)
     try:
         raw_metadata = path.lstat()
     except OSError as exc:

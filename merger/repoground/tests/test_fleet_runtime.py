@@ -1377,6 +1377,26 @@ def test_fleet_repo_git_env_preserves_bounded_credential_helper_lookup(
     assert "password=path-pass" in filled.stdout
 
 
+def test_fleet_member_askpass_rejects_lexical_symlink_ancestor(
+    tmp_path: Path,
+) -> None:
+    module = load_publisher()
+    trusted = tmp_path / "trusted"
+    trusted.mkdir()
+    helper = trusted / "helper"
+    helper.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    helper.chmod(0o700)
+    lexical = tmp_path / "lexical"
+    lexical.mkdir()
+    (lexical / "link").symlink_to(trusted, target_is_directory=True)
+
+    with pytest.raises(RuntimeError, match="parent path must remain a directory"):
+        module._validated_fleet_member_askpass_path(
+            str(lexical / "link" / "helper"),
+            source="core.askPass",
+        )
+
+
 def test_fleet_repo_git_env_preserves_bounded_global_core_askpass_with_local_precedence(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
