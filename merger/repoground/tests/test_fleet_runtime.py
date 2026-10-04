@@ -5,19 +5,22 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import shlex
 import shutil
 import sqlite3
+import stat
 import subprocess
 import sys
 import time
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
 
 ROOT = Path(__file__).resolve().parents[3]
 PUBLISHER = ROOT / "scripts/ops/repoground-publish-fleet"
+CLI_WRAPPER = ROOT / "scripts/ops/repoground-cli-wrapper"
 LEGACY_PUBLISHER = ROOT / "scripts/ops/rb-publish-fleet"
 INSTALLER = ROOT / "scripts/ops/install_repoground_publish_fleet_runtime.sh"
 LEGACY_INSTALLER = ROOT / "scripts/ops/install_rb_publish_fleet_runtime.sh"
@@ -122,6 +125,119 @@ def test_remote_head_explicitly_fetches_remote_advertised_nonstandard_default_br
     assert not any("set-head" in argv for argv in calls)
 
 
+def test_parse_github_remote_requires_exact_github_host() -> None:
+    module = load_publisher()
+    expected = ("heimgewebe", "metarepo")
+
+    for remote in (
+        "git@github.com:heimgewebe/metarepo.git",
+        "org-236528253@github.com:heimgewebe/metarepo.git",
+        "https://github.com/heimgewebe/metarepo",
+        "ssh://git@github.com/heimgewebe/metarepo.git",
+        "ssh://git@github.com:22/heimgewebe/metarepo.git",
+        "https://github.com:443/heimgewebe/metarepo.git",
+    ):
+        assert module.parse_github_remote(remote) == expected
+
+    for remote in (
+        "git@notgithub.com:heimgewebe/metarepo.git",
+        "https://notgithub.com/heimgewebe/metarepo",
+        "ssh://git@github.com.evil.example/heimgewebe/metarepo.git",
+        "github.com/heimgewebe/metarepo",
+        "ssh://git@github.com:0/heimgewebe/metarepo.git",
+        "ssh://git@github.com:65536/heimgewebe/metarepo.git",
+    ):
+        assert module.parse_github_remote(remote) is None
+
+
+def test_github_remote_host_and_scheme_are_ascii_case_insensitive() -> None:
+    module = load_publisher()
+
+    https_remote = "HTTPS://GitHub.COM/HeimGewebe/RepoGround.git"
+    assert module.parse_github_remote(https_remote) == (
+        "HeimGewebe",
+        "RepoGround",
+    )
+    assert module.github_remote_uses_authenticated_transport(https_remote) is True
+
+    scp_remote = "git@GitHub.COM:HeimGewebe/RepoGround.git"
+    assert module.parse_github_remote(scp_remote) == (
+        "HeimGewebe",
+        "RepoGround",
+    )
+    assert module.github_ssh_remote_user(scp_remote) == "git"
+    assert module.github_remote_uses_authenticated_transport(scp_remote) is True
+
+    ssh_remote = "SSH://git@GitHub.COM:443/HeimGewebe/RepoGround.git"
+    assert module.parse_github_remote(ssh_remote) == (
+        "HeimGewebe",
+        "RepoGround",
+    )
+    assert module.github_ssh_remote_explicit_port(ssh_remote) == 443
+    assert module.github_ssh_remote_user(ssh_remote) == "git"
+    assert module.github_remote_uses_authenticated_transport(ssh_remote) is True
+
+    assert (
+        module.parse_github_remote(
+            "https://GitHub.COM.evil.example/heimgewebe/repoground.git"
+        )
+        is None
+    )
+    assert (
+        module.parse_github_remote(
+            "https://gİthub.com/heimgewebe/repoground.git"
+        )
+        is None
+    )
+
+
+def test_github_ssh_remote_explicit_port_is_bounded() -> None:
+    module = load_publisher()
+
+    assert (
+        module.github_ssh_remote_explicit_port(
+            "ssh://git@github.com:443/heimgewebe/member.git"
+        )
+        == 443
+    )
+    assert (
+        module.github_ssh_remote_explicit_port(
+            "ssh://git@github.com:22/heimgewebe/member.git"
+        )
+        == 22
+    )
+    for remote in (
+        "ssh://git@github.com/heimgewebe/member.git",
+        "git@github.com:heimgewebe/member.git",
+        "https://github.com/heimgewebe/member.git",
+        "ssh://git@attacker.invalid:443/heimgewebe/member.git",
+        "ssh://git@github.com:0/heimgewebe/member.git",
+    ):
+        assert module.github_ssh_remote_explicit_port(remote) is None
+
+
+def test_authenticated_membership_transport_requires_https_or_explicit_ssh_user() -> None:
+    module = load_publisher()
+
+    for remote in (
+        "https://github.com/heimgewebe/metarepo.git",
+        "ssh://git@github.com/heimgewebe/metarepo.git",
+        "ssh://git@github.com:22/heimgewebe/metarepo.git",
+        "git@github.com:heimgewebe/metarepo.git",
+        "org-236528253@github.com:heimgewebe/metarepo.git",
+    ):
+        assert module.github_remote_uses_authenticated_transport(remote) is True
+
+    for remote in (
+        "http://github.com/heimgewebe/metarepo.git",
+        "git://github.com/heimgewebe/metarepo.git",
+        "ssh://github.com/heimgewebe/metarepo.git",
+        "github.com:heimgewebe/metarepo.git",
+    ):
+        assert module.parse_github_remote(remote) == ("heimgewebe", "metarepo")
+        assert module.github_remote_uses_authenticated_transport(remote) is False
+
+
 def test_remote_head_rejects_remote_head_that_moves_after_fetch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -157,12 +273,2165 @@ def test_remote_head_rejects_remote_head_that_moves_after_fetch(
         module.remote_head(repo)
 
 
-def test_remote_head_falls_back_to_existing_local_origin_head(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+
+def test_remote_head_for_entry_rejects_checkout_local_transport_override(
+    tmp_path: Path,
 ) -> None:
     module = load_publisher()
-    repo = tmp_path / "demo"
+    repo, _ = initialize_repository(tmp_path, "member-unsafe-transport")
+    remote = "git@github.com:heimgewebe/member.git"
+    git(repo, "remote", "add", "origin", remote)
+    git(repo, "config", "core.sshCommand", "/bin/false")
+    entry = module.RepoEntry(
+        key="heimgewebe/member",
+        owner="heimgewebe",
+        repo="member",
+        path=repo,
+        remote=remote,
+    )
+
+    with pytest.raises(RuntimeError, match="unsafe local Git transport configuration"):
+        module.remote_head_for_entry(entry)
+
+
+def test_remote_head_for_entry_allows_separate_pushurl(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path, "member-pushurl")
+    remote = "git@github.com:heimgewebe/member.git"
+    git(repo, "remote", "add", "origin", remote)
+    git(
+        repo,
+        "remote",
+        "set-url",
+        "--add",
+        "--push",
+        "origin",
+        "git@github.com:heimgewebe/member-write.git",
+    )
+    entry = module.RepoEntry(
+        key="heimgewebe/member",
+        owner="heimgewebe",
+        repo="member",
+        path=repo,
+        remote=remote,
+    )
+
+    def fake_remote_head(
+        repo_path: Path,
+        *,
+        remote: str = "origin",
+        env: dict[str, str] | None = None,
+    ) -> tuple[str, str, str]:
+        assert repo_path == repo
+        assert remote == entry.remote
+        assert isinstance(env, dict)
+        return "origin/main", "main", sha
+
+    monkeypatch.setattr(module, "remote_head", fake_remote_head)
+
+    assert module.remote_head_for_entry(entry) == ("origin/main", "main", sha)
+
+
+def test_remote_head_for_entry_allows_origin_prune(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path, "member-prune")
+    remote = "git@github.com:heimgewebe/member.git"
+    git(repo, "remote", "add", "origin", remote)
+    git(repo, "config", "remote.origin.prune", "true")
+    entry = module.RepoEntry(
+        key="heimgewebe/member",
+        owner="heimgewebe",
+        repo="member",
+        path=repo,
+        remote=remote,
+    )
+
+    assert module._fleet_member_local_config_is_transport_override(
+        "remote.origin.prune"
+    ) is False
+    assert module._fleet_member_local_config_is_transport_override(
+        "remote.origin.uploadpack"
+    ) is True
+
+    def fake_remote_head(
+        repo_path: Path,
+        *,
+        remote: str = "origin",
+        env: dict[str, str] | None = None,
+    ) -> tuple[str, str, str]:
+        assert repo_path == repo
+        assert remote == entry.remote
+        assert isinstance(env, dict)
+        return "origin/main", "main", sha
+
+    monkeypatch.setattr(module, "remote_head", fake_remote_head)
+
+    assert module.remote_head_for_entry(entry) == ("origin/main", "main", sha)
+
+
+def test_remote_head_for_entry_allows_secondary_fetch_urls(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path, "member-secondary-fetch")
+    remote = "https://github.com/heimgewebe/member.git"
+    git(repo, "remote", "add", "origin", remote)
+    git(
+        repo,
+        "remote",
+        "set-url",
+        "--add",
+        "origin",
+        "https://github.com/heimgewebe/member-mirror.git",
+    )
+    entry = module.RepoEntry(
+        key="heimgewebe/member",
+        owner="heimgewebe",
+        repo="member",
+        path=repo,
+        remote=remote,
+    )
+    observed: dict[str, object] = {}
+
+    def fake_remote_head(
+        repo_path: Path,
+        *,
+        remote: str = "origin",
+        env: dict[str, str] | None = None,
+    ) -> tuple[str, str, str]:
+        observed["repo_path"] = repo_path
+        observed["remote"] = remote
+        observed["env"] = env
+        return "origin/main", "main", sha
+
+    monkeypatch.setattr(module, "remote_head", fake_remote_head)
+
+    assert module.remote_head_for_entry(entry) == ("origin/main", "main", sha)
+    assert observed["repo_path"] == repo
+    assert observed["remote"] == remote
+    assert isinstance(observed["env"], dict)
+
+
+def test_remote_head_for_entry_accepts_mixed_case_github_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path, "member-mixed-case")
+    remote = "https://GitHub.COM/HeimGewebe/MeMbEr.git"
+    git(repo, "remote", "add", "origin", remote)
+    entry = module.RepoEntry(
+        key="heimgewebe/member",
+        owner="heimgewebe",
+        repo="member",
+        path=repo,
+        remote=remote,
+    )
+    network_env = module._authority_git_env()
+    observed: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        module,
+        "_fleet_repo_git_env",
+        lambda repo_path, *, safe_global_config=None: network_env,
+    )
+
+    def fake_remote_head(
+        repo_path: Path,
+        *,
+        remote: str = "origin",
+        env: dict[str, str] | None = None,
+    ) -> tuple[str, str, str]:
+        observed["repo_path"] = repo_path
+        observed["remote"] = remote
+        observed["env"] = env
+        return "origin/main", "main", sha
+
+    monkeypatch.setattr(module, "remote_head", fake_remote_head)
+
+    assert module.remote_head_for_entry(entry) == ("origin/main", "main", sha)
+    assert observed["repo_path"] == repo
+    assert observed["remote"] == remote
+    assert observed["env"] is network_env
+
+
+def test_remote_head_for_entry_rejects_origin_change_since_discovery(
+    tmp_path: Path,
+) -> None:
+    module = load_publisher()
+    repo, _ = initialize_repository(tmp_path, "member-origin-change")
+    discovered = "git@github.com:heimgewebe/member.git"
+    git(repo, "remote", "add", "origin", discovered)
+    entry = module.RepoEntry(
+        key="heimgewebe/member",
+        owner="heimgewebe",
+        repo="member",
+        path=repo,
+        remote=discovered,
+    )
+    git(repo, "remote", "set-url", "origin", "https://github.com/heimgewebe/member.git")
+
+    with pytest.raises(RuntimeError, match="origin changed since discovery"):
+        module.remote_head_for_entry(entry)
+
+
+def test_remote_head_for_entry_uses_exact_validated_origin_url(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path, "member-bound-origin")
+    remote = "git@github.com:heimgewebe/member.git"
+    git(repo, "remote", "add", "origin", remote)
+    entry = module.RepoEntry(
+        key="heimgewebe/member",
+        owner="heimgewebe",
+        repo="member",
+        path=repo,
+        remote=remote,
+    )
+    observed: dict[str, object] = {}
+
+    def fake_remote_head(
+        repo_path: Path,
+        *,
+        remote: str = "origin",
+        env: dict[str, str] | None = None,
+    ) -> tuple[str, str, str]:
+        observed["repo_path"] = repo_path
+        observed["remote"] = remote
+        observed["env"] = env
+        return "origin/main", "main", sha
+
+    monkeypatch.setattr(module, "remote_head", fake_remote_head)
+
+    assert module.remote_head_for_entry(entry) == ("origin/main", "main", sha)
+    assert observed["repo_path"] == repo
+    assert observed["remote"] == remote
+    env = observed["env"]
+    assert isinstance(env, dict)
+    assert env["GIT_CONFIG_GLOBAL"] == os.devnull
+    assert env["GIT_CONFIG_SYSTEM"] == os.devnull
+
+
+def test_fleet_credential_config_key_allowed_matches_valid_https_github_scopes() -> None:
+    module = load_publisher()
+
+    for key in (
+        "credential.https://github.com:443.helper",
+        "credential.https://bot@github.com.helper",
+        "credential.https://bot@github.com:443.username",
+        "credential.https://bot@github.com:443/owner/repo.usehttppath",
+    ):
+        assert module._fleet_credential_config_key_allowed(key) is True
+
+    for key in (
+        "credential.https://github.com:0.helper",
+        "credential.https://github.com:65536.helper",
+        "credential.https://bot:secret@github.com.helper",
+        "credential.http://github.com:443.helper",
+        "credential.https://github.com.evil.example:443.helper",
+    ):
+        assert module._fleet_credential_config_key_allowed(key) is False
+
+
+def test_fleet_tls_config_key_allowed_preserves_only_bounded_github_tls() -> None:
+    module = load_publisher()
+
+    for key in (
+        "http.pinnedPubkey",
+        "http.sslCAInfo",
+        "http.sslCAPath",
+        "http.sslCert",
+        "http.sslCertPasswordProtected",
+        "http.sslKey",
+        "http.https://github.com.pinnedPubkey",
+        "http.https://github.com.sslCert",
+        "http.https://github.com.sslCertPasswordProtected",
+        "http.https://github.com.sslKey",
+        "http.https://github.com:443.pinnedPubkey",
+        "http.https://bot@github.com/owner/repo.sslCert",
+    ):
+        assert module._fleet_tls_config_key_allowed(key) is True
+
+    for key in (
+        "http.https://github.com.evil.example.pinnedPubkey",
+        "http.https://github.com:0.sslCert",
+        "http.https://github.com:65536.sslKey",
+        "http.http://github.com.pinnedPubkey",
+        "http.pinnedPubkeyExtra",
+        "http.sslVerify",
+    ):
+        assert module._fleet_tls_config_key_allowed(key) is False
+
+
+def test_fleet_github_authorization_extra_header_is_value_bounded() -> None:
+    module = load_publisher()
+    key = "http.https://github.com/.extraHeader"
+
+    for allowed_key in (
+        key,
+        "http.https://github.com:443/.extraHeader",
+        "http.https://bot@github.com/owner/repo.extraHeader",
+    ):
+        assert module._fleet_github_extra_header_key_allowed(allowed_key) is True
+
+    for forbidden_key in (
+        "http.extraHeader",
+        "http.http://github.com/.extraHeader",
+        "http.https://github.com.evil.example/.extraHeader",
+        "http.https://github.com:0/.extraHeader",
+        "http.https://github.com:65536/.extraHeader",
+    ):
+        assert module._fleet_github_extra_header_key_allowed(forbidden_key) is False
+
+    for value in (
+        "",
+        "Authorization: Bearer placeholder-token",
+        "authorization:\tBasic cGxhY2Vob2xkZXI=",
+    ):
+        assert module._fleet_github_authorization_header_value_allowed(value) is True
+        assert module._fleet_https_config_entry_allowed(key, value) is True
+
+    for value in (
+        "Authorization:",
+        " Host: attacker.invalid",
+        "Host: attacker.invalid",
+        "Proxy-Authorization: Basic cGxhY2Vob2xkZXI=",
+        "Authorization: Bearer token\nHost: attacker.invalid",
+        "Authorization: Bearer token\x01",
+    ):
+        assert module._fleet_github_authorization_header_value_allowed(value) is False
+        assert module._fleet_https_config_entry_allowed(key, value) is False
+
+
+def test_fleet_proxy_config_key_allowed_preserves_only_bounded_github_proxies() -> None:
+    module = load_publisher()
+
+    for key in (
+        "http.proxy",
+        "http.proxyAuthMethod",
+        "http.proxySSLCAInfo",
+        "http.proxySSLCert",
+        "http.proxySSLCertPasswordProtected",
+        "http.proxySSLKey",
+        "http.https://github.com.proxy",
+        "http.https://github.com.proxyAuthMethod",
+        "http.https://github.com.proxySSLCAInfo",
+        "http.https://github.com.proxySSLCert",
+        "http.https://github.com.proxySSLCertPasswordProtected",
+        "http.https://github.com.proxySSLKey",
+        "http.https://github.com:443.proxy",
+        "http.https://github.com:443.proxyAuthMethod",
+        "http.https://bot@github.com/owner/repo.proxy",
+        "http.https://bot@github.com/owner/repo.proxyAuthMethod",
+        "http.https://bot@github.com/owner/repo.proxySSLKey",
+    ):
+        assert module._fleet_proxy_config_key_allowed(key) is True
+
+    for key in (
+        "http.https://github.com.evil.example.proxy",
+        "http.https://github.com.evil.example.proxyAuthMethod",
+        "http.https://github.com.evil.example.proxySSLCAInfo",
+        "http.https://github.com.evil.example.proxySSLKey",
+        "http.https://github.com:0.proxy",
+        "http.https://github.com:65536.proxyAuthMethod",
+        "http.http://github.com.proxy",
+        "http.proxyAuthMethodExtra",
+        "http.proxySSLCAPath",
+        "http.proxySSLVerify",
+        "http.proxySSLCertExtra",
+        "http.sslVerify",
+    ):
+        assert module._fleet_proxy_config_key_allowed(key) is False
+
+
+def test_fleet_repo_git_env_preserves_github_credentials_without_transport_overrides(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, _sha = initialize_repository(tmp_path, "credential-member")
+
+    home = tmp_path / "home"
+    home.mkdir()
+    helper = tmp_path / "credential-helper"
+    helper.write_text(
+        "#!/bin/sh\n"
+        "cat >/dev/null\n"
+        "printf 'username=probe-user\\npassword=probe-pass\\n'\n",
+        encoding="utf-8",
+    )
+    helper.chmod(0o700)
+    included = tmp_path / "member-credentials.inc"
+    included.write_text(
+        "[credential \"https://github.com\"]\n"
+        "    helper =\n"
+        f"    helper = !{helper}\n"
+        "[credential \"https://github.com:443\"]\n"
+        f"    helper = !{helper}\n"
+        "[credential \"https://bot@github.com\"]\n"
+        f"    helper = !{helper}\n"
+        "[credential \"https://bot@github.com:443\"]\n"
+        "    username = bot\n",
+        encoding="utf-8",
+    )
+    git_dir = (repo / ".git").resolve()
+    (home / ".gitconfig").write_text(
+        f"[includeIf \"gitdir:{git_dir}\"]\n"
+        f"    path = {included}\n"
+        "[http]\n"
+        "    sslCAInfo = /tmp/global-ca.pem\n"
+        "    sslCAPath = /tmp/global-ca-dir\n"
+        "    pinnedPubkey = sha256//global-github-pin\n"
+        "    sslCert = /tmp/global-client.pem\n"
+        "    sslCertPasswordProtected = true\n"
+        "    sslKey = /tmp/global-client.key\n"
+        "    proxy = http://127.0.0.1:18081\n"
+        "    proxyAuthMethod = basic\n"
+        "    proxySSLCAInfo = /tmp/global-proxy-ca.pem\n"
+        "    proxySSLCert = /tmp/global-proxy-client.pem\n"
+        "    proxySSLCertPasswordProtected = true\n"
+        "    proxySSLKey = /tmp/global-proxy-client.key\n"
+        "[http \"https://github.com/\"]\n"
+        "    extraHeader =\n"
+        "    extraHeader = Authorization: Bearer placeholder-global-token\n"
+        "    extraHeader = Host: attacker.invalid\n"
+        "[http \"https://github.com\"]\n"
+        "    proxy = http://127.0.0.1:18082\n"
+        "    proxyAuthMethod = ntlm\n"
+        "    proxySSLCAInfo = /tmp/github-proxy-ca.pem\n"
+        "[url \"ssh://attacker.invalid/\"]\n"
+        "    insteadOf = https://github.com/\n"
+        "[core]\n"
+        "    sshCommand = /bin/false\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(home))
+    for name in module._AUTHORITY_GIT_FORBIDDEN_ENV:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.delenv("GIT_CONFIG_COUNT", raising=False)
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:18443")
+    monkeypatch.setenv("http_proxy", "http://127.0.0.1:18080")
+    monkeypatch.setenv("ALL_PROXY", "socks5h://127.0.0.1:11080")
+    monkeypatch.setenv("NO_PROXY", "localhost,github.example.invalid")
+    monkeypatch.setenv("CURL_CA_BUNDLE", "/tmp/curl-ca.pem")
+    monkeypatch.setenv("SSL_CERT_DIR", "/tmp/custom-ca-dir")
+    monkeypatch.setenv("SSL_CERT_FILE", "/tmp/custom-ca.pem")
+    monkeypatch.setenv("GIT_SSL_CAINFO", "/tmp/git-ca.pem")
+    monkeypatch.setenv("GIT_SSL_CAPATH", "/tmp/git-ca-dir")
+    monkeypatch.setenv("GIT_SSL_CERT", "/tmp/git-client.pem")
+    monkeypatch.setenv("GIT_SSL_CERT_PASSWORD_PROTECTED", "true")
+    monkeypatch.setenv("GIT_SSL_KEY", "/tmp/git-client.key")
+    monkeypatch.setenv("GIT_SSL_NO_VERIFY", "1")
+    monkeypatch.setenv("SSH_ASKPASS", "/tmp/unvalidated-ssh-askpass")
+
+    authority_env = module._authority_git_env()
+    authority_helper = subprocess.run(
+        ["/usr/bin/git", "config", "--get-all", "credential.https://github.com.helper"],
+        env=authority_env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    assert authority_helper.returncode == 1
+    assert "HTTPS_PROXY" not in authority_env
+    assert "http_proxy" not in authority_env
+    assert "ALL_PROXY" not in authority_env
+    assert authority_env["NO_PROXY"] == "localhost,github.example.invalid"
+    assert "CURL_CA_BUNDLE" not in authority_env
+    assert "SSL_CERT_DIR" not in authority_env
+    assert "SSL_CERT_FILE" not in authority_env
+    assert "GIT_SSL_CAINFO" not in authority_env
+    assert "GIT_SSL_CAPATH" not in authority_env
+    assert "GIT_SSL_CERT" not in authority_env
+    assert "GIT_SSL_CERT_PASSWORD_PROTECTED" not in authority_env
+    assert "GIT_SSL_KEY" not in authority_env
+    assert "GIT_SSL_NO_VERIFY" not in authority_env
+    assert "SSH_ASKPASS" not in authority_env
+    discovery_env = module._credential_config_discovery_env()
+    assert "SSH_ASKPASS" not in discovery_env
+
+    safe_global_config = tmp_path / "sanitized-member-global.gitconfig"
+    env = module._fleet_repo_git_env(
+        repo,
+        safe_global_config=safe_global_config,
+    )
+    assert env["GIT_CONFIG_GLOBAL"] == str(safe_global_config)
+    assert env["GIT_CONFIG_SYSTEM"] == os.devnull
+    assert "GIT_CONFIG_COUNT" not in env
+    assert env["HTTPS_PROXY"] == "http://127.0.0.1:18443"
+    assert env["http_proxy"] == "http://127.0.0.1:18080"
+    assert env["ALL_PROXY"] == "socks5h://127.0.0.1:11080"
+    assert env["NO_PROXY"] == "localhost,github.example.invalid"
+    assert env["CURL_CA_BUNDLE"] == "/tmp/curl-ca.pem"
+    assert env["SSL_CERT_DIR"] == "/tmp/custom-ca-dir"
+    assert env["SSL_CERT_FILE"] == "/tmp/custom-ca.pem"
+    assert env["GIT_SSL_CAINFO"] == "/tmp/git-ca.pem"
+    assert env["GIT_SSL_CAPATH"] == "/tmp/git-ca-dir"
+    assert env["GIT_SSL_CERT"] == "/tmp/git-client.pem"
+    assert env["GIT_SSL_CERT_PASSWORD_PROTECTED"] == "true"
+    assert env["GIT_SSL_KEY"] == "/tmp/git-client.key"
+    assert "GIT_SSL_NO_VERIFY" not in env
+    assert "SSH_ASKPASS" not in env
+    sanitized_cp = subprocess.run(
+        [
+            "/usr/bin/git",
+            "config",
+            "--file",
+            str(safe_global_config),
+            "--null",
+            "--get-regexp",
+            r"^(credential|http)\.",
+        ],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    assert sanitized_cp.returncode == 0, sanitized_cp.stderr
+    injected = []
+    for record in [item for item in sanitized_cp.stdout.split("\0") if item]:
+        key, separator, value = record.partition("\n")
+        assert separator
+        injected.append((key, value))
+    assert any(
+        key == "credential.https://github.com.helper"
+        and value == f"!{helper}"
+        for key, value in injected
+    )
+    assert any(
+        key == "credential.https://github.com:443.helper"
+        and value == f"!{helper}"
+        for key, value in injected
+    )
+    assert any(
+        key == "credential.https://bot@github.com.helper"
+        and value == f"!{helper}"
+        for key, value in injected
+    )
+    assert any(
+        key == "credential.https://bot@github.com:443.username"
+        and value == "bot"
+        for key, value in injected
+    )
+    assert any(
+        key.lower() == "http.sslcainfo"
+        and value == "/tmp/global-ca.pem"
+        for key, value in injected
+    )
+    assert any(
+        key.lower() == "http.sslcapath"
+        and value == "/tmp/global-ca-dir"
+        for key, value in injected
+    )
+    assert ("http.pinnedpubkey", "sha256//global-github-pin") in [
+        (key.lower(), value) for key, value in injected
+    ]
+    assert ("http.sslcert", "/tmp/global-client.pem") in [
+        (key.lower(), value) for key, value in injected
+    ]
+    assert ("http.sslcertpasswordprotected", "true") in [
+        (key.lower(), value) for key, value in injected
+    ]
+    assert ("http.sslkey", "/tmp/global-client.key") in [
+        (key.lower(), value) for key, value in injected
+    ]
+    assert ("http.proxy", "http://127.0.0.1:18081") in [
+        (key.lower(), value) for key, value in injected
+    ]
+    assert ("http.https://github.com.proxy", "http://127.0.0.1:18082") in [
+        (key.lower(), value) for key, value in injected
+    ]
+    assert ("http.proxyauthmethod", "basic") in [
+        (key.lower(), value) for key, value in injected
+    ]
+    assert ("http.https://github.com.proxyauthmethod", "ntlm") in [
+        (key.lower(), value) for key, value in injected
+    ]
+    assert ("http.proxysslcainfo", "/tmp/global-proxy-ca.pem") in [
+        (key.lower(), value) for key, value in injected
+    ]
+    assert (
+        "http.https://github.com.proxysslcainfo",
+        "/tmp/github-proxy-ca.pem",
+    ) in [(key.lower(), value) for key, value in injected]
+    assert ("http.proxysslcert", "/tmp/global-proxy-client.pem") in [
+        (key.lower(), value) for key, value in injected
+    ]
+    assert ("http.proxysslcertpasswordprotected", "true") in [
+        (key.lower(), value) for key, value in injected
+    ]
+    assert ("http.proxysslkey", "/tmp/global-proxy-client.key") in [
+        (key.lower(), value) for key, value in injected
+    ]
+    github_extra_headers = [
+        value
+        for key, value in injected
+        if key.lower() == "http.https://github.com/.extraheader"
+    ]
+    assert github_extra_headers == [
+        "",
+        "Authorization: Bearer placeholder-global-token",
+    ]
+    assert "Host: attacker.invalid" not in github_extra_headers
+
+    filled = subprocess.run(
+        ["/usr/bin/git", "credential", "fill"],
+        input="protocol=https\nhost=github.com\n\n",
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    assert filled.returncode == 0, filled.stderr
+    assert "username=probe-user" in filled.stdout
+    assert "password=probe-pass" in filled.stdout
+
+    url_override = subprocess.run(
+        ["/usr/bin/git", "config", "--get-regexp", r"^url\."],
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    ssh_override = subprocess.run(
+        ["/usr/bin/git", "config", "--get", "core.sshCommand"],
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    assert url_override.returncode == 1
+    assert ssh_override.returncode == 1
+
+
+def test_fleet_repo_git_env_preserves_local_https_precedence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, _sha = initialize_repository(tmp_path, "member-local-precedence")
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".gitconfig").write_text(
+        "[credential \"https://github.com\"]\n"
+        "    helper = global-helper\n"
+        "[http]\n"
+        "    proxy = http://127.0.0.1:18081\n"
+        "    proxyAuthMethod = basic\n"
+        "    proxySSLCAInfo = /tmp/global-proxy-ca.pem\n"
+        "    sslCAInfo = /tmp/global-ca.pem\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(home))
+    for name in module._AUTHORITY_GIT_FORBIDDEN_ENV:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.delenv("GIT_CONFIG_COUNT", raising=False)
+
+    git(repo, "config", "http.proxy", "http://127.0.0.1:18084")
+    git(repo, "config", "http.proxyAuthMethod", "digest")
+    git(repo, "config", "http.proxySSLCAInfo", "/tmp/local-proxy-ca.pem")
+    git(repo, "config", "http.sslCAInfo", "/tmp/local-ca.pem")
+    git(repo, "config", "credential.https://github.com.helper", "")
+    git(repo, "config", "--add", "credential.https://github.com.helper", "local-helper")
+
+    safe_global_config = tmp_path / "precedence-global.gitconfig"
+    env = module._fleet_repo_git_env(
+        repo,
+        safe_global_config=safe_global_config,
+    )
+
+    proxy = subprocess.run(
+        [
+            "/usr/bin/git",
+            "-C",
+            str(repo),
+            "config",
+            "--get-urlmatch",
+            "http.proxy",
+            "https://github.com/heimgewebe/member.git",
+        ],
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    proxy_auth_method = subprocess.run(
+        [
+            "/usr/bin/git",
+            "-C",
+            str(repo),
+            "config",
+            "--get-urlmatch",
+            "http.proxyAuthMethod",
+            "https://github.com/heimgewebe/member.git",
+        ],
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    proxy_ca_info = subprocess.run(
+        ["/usr/bin/git", "-C", str(repo), "config", "--get", "http.proxySSLCAInfo"],
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    ca_info = subprocess.run(
+        ["/usr/bin/git", "-C", str(repo), "config", "--get", "http.sslCAInfo"],
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    helpers = subprocess.run(
+        [
+            "/usr/bin/git",
+            "-C",
+            str(repo),
+            "config",
+            "--get-all",
+            "credential.https://github.com.helper",
+        ],
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+    assert proxy.returncode == 0, proxy.stderr
+    assert proxy.stdout.strip() == "http://127.0.0.1:18084"
+    assert proxy_auth_method.returncode == 0, proxy_auth_method.stderr
+    assert proxy_auth_method.stdout.strip() == "digest"
+    assert proxy_ca_info.returncode == 0, proxy_ca_info.stderr
+    assert proxy_ca_info.stdout.strip() == "/tmp/local-proxy-ca.pem"
+    assert ca_info.returncode == 0, ca_info.stderr
+    assert ca_info.stdout.strip() == "/tmp/local-ca.pem"
+    assert helpers.returncode == 0, helpers.stderr
+    assert helpers.stdout.splitlines() == ["global-helper", "", "local-helper"]
+    assert "GIT_CONFIG_COUNT" not in env
+
+
+def test_fleet_member_local_config_allows_only_bounded_https_transport() -> None:
+    module = load_publisher()
+
+    for key in (
+        "http.sslCAInfo",
+        "http.sslCAPath",
+        "http.proxy",
+        "http.proxyAuthMethod",
+        "http.proxySSLCAInfo",
+        "http.proxySSLCert",
+        "http.proxySSLCertPasswordProtected",
+        "http.proxySSLKey",
+        "http.https://github.com.proxy",
+        "http.https://github.com.proxyAuthMethod",
+        "http.https://github.com.proxySSLCAInfo",
+        "http.https://github.com.proxySSLKey",
+        "http.https://github.com.sslCAInfo",
+        "http.https://github.com:443.sslCAPath",
+    ):
+        assert module._fleet_member_local_config_is_transport_override(key) is False
+
+    assert (
+        module._fleet_member_local_config_is_transport_override(
+            "http.https://github.com/.extraHeader"
+        )
+        is True
+    )
+    assert (
+        module._fleet_member_local_config_entry_is_transport_override(
+            "http.https://github.com/.extraHeader",
+            "Authorization: Bearer placeholder-local-token",
+        )
+        is False
+    )
+
+    for key in (
+        "http.sslVerify",
+        "http.proxySSLVerify",
+        "http.proxySSLCAPath",
+        "http.https://github.com.evil.example.proxy",
+        "http.https://github.com.evil.example.sslCAInfo",
+        "http.https://github.com:0.sslCAPath",
+    ):
+        assert module._fleet_member_local_config_is_transport_override(key) is True
+
+
+def test_authority_transport_safety_validates_worktree_scope(
+    tmp_path: Path,
+) -> None:
+    module = load_publisher()
+    repo, _sha = initialize_repository(tmp_path, "authority-worktree-config")
+    git(repo, "config", "extensions.worktreeConfig", "true")
+    git(repo, "config", "--worktree", "user.name", "Worktree User")
+    git(repo, "config", "--worktree", "user.email", "worktree@example.invalid")
+
+    module.assert_authority_git_transport_safe(
+        repo,
+        env=module._authority_git_env(),
+    )
+
+    git(repo, "config", "--worktree", "core.askPass", "/usr/bin/false")
+    with pytest.raises(
+        RuntimeError,
+        match="unsafe worktree Git transport configuration: core.askpass",
+    ):
+        module.assert_authority_git_transport_safe(
+            repo,
+            env=module._authority_git_env(),
+        )
+
+
+def test_authority_transport_safety_rejects_worktree_url_rewrite(
+    tmp_path: Path,
+) -> None:
+    module = load_publisher()
+    repo, _sha = initialize_repository(tmp_path, "authority-worktree-url-rewrite")
+    git(repo, "config", "extensions.worktreeConfig", "true")
+    git(
+        repo,
+        "config",
+        "--worktree",
+        "url.ssh://attacker.invalid/.insteadOf",
+        "https://github.com/",
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"unsafe worktree Git transport configuration: .*insteadof",
+    ):
+        module.assert_authority_git_transport_safe(
+            repo,
+            env=module._authority_git_env(),
+        )
+
+
+def test_fleet_member_transport_safety_validates_worktree_scope(
+    tmp_path: Path,
+) -> None:
+    module = load_publisher()
+    repo, _sha = initialize_repository(tmp_path, "member-worktree-config")
+    git(repo, "remote", "add", "origin", "https://github.com/heimgewebe/member.git")
+    git(repo, "config", "extensions.worktreeConfig", "true")
+    git(repo, "config", "--worktree", "core.sparseCheckout", "true")
+    git(repo, "config", "--worktree", "http.sslCAPath", "/tmp/worktree-ca-dir")
+    git(repo, "config", "--worktree", "http.proxy", "http://127.0.0.1:18083")
+    git(repo, "config", "--worktree", "http.proxyAuthMethod", "negotiate")
+    git(repo, "config", "--worktree", "http.proxySSLCAInfo", "/tmp/worktree-proxy-ca.pem")
+    git(repo, "config", "--worktree", "http.proxySSLCert", "/tmp/worktree-proxy-client.pem")
+    git(repo, "config", "--worktree", "http.proxySSLCertPasswordProtected", "true")
+    git(repo, "config", "--worktree", "http.proxySSLKey", "/tmp/worktree-proxy-client.key")
+    git(
+        repo,
+        "config",
+        "--worktree",
+        "--add",
+        "http.https://github.com/.extraHeader",
+        "Authorization: Bearer placeholder-worktree-token",
+    )
+
+    module.assert_fleet_member_git_transport_safe(
+        repo,
+        env=module._authority_git_env(),
+    )
+
+    git(repo, "config", "--worktree", "core.sshCommand", "/bin/false")
+    with pytest.raises(
+        RuntimeError,
+        match="unsafe worktree Git transport configuration: core.sshcommand",
+    ):
+        module.assert_fleet_member_git_transport_safe(
+            repo,
+            env=module._authority_git_env(),
+        )
+
+
+def test_fleet_member_transport_safety_rejects_non_authorization_extra_header(
+    tmp_path: Path,
+) -> None:
+    module = load_publisher()
+    repo, _sha = initialize_repository(tmp_path, "member-extra-header")
+    git(repo, "remote", "add", "origin", "https://github.com/heimgewebe/member.git")
+    key = "http.https://github.com/.extraHeader"
+    git(repo, "config", "--add", key, "")
+    git(repo, "config", "--add", key, "Authorization: Bearer placeholder-local-token")
+
+    module.assert_fleet_member_git_transport_safe(
+        repo,
+        env=module._authority_git_env(),
+    )
+
+    git(repo, "config", "--add", key, "Host: attacker.invalid")
+    with pytest.raises(
+        RuntimeError,
+        match=r"unsafe local Git transport configuration: .*extraheader",
+    ):
+        module.assert_fleet_member_git_transport_safe(
+            repo,
+            env=module._authority_git_env(),
+        )
+
+
+def test_remote_head_for_entry_preserves_checkout_local_https_tls_trust(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path, "member-local-tls")
+    remote = "https://github.com/heimgewebe/member.git"
+    git(repo, "remote", "add", "origin", remote)
+    git(repo, "config", "http.sslCAInfo", "/tmp/local-ca.pem")
+    git(repo, "config", "http.sslCAPath", "/tmp/local-ca-dir")
+    monkeypatch.setattr(
+        module,
+        "_global_system_github_https_config",
+        lambda _repo_path: [],
+    )
+    entry = module.RepoEntry(
+        key="heimgewebe/member",
+        owner="heimgewebe",
+        repo="member",
+        path=repo,
+        remote=remote,
+    )
+    observed: dict[str, object] = {}
+
+    def fake_remote_head(
+        repo_path: Path,
+        *,
+        remote: str = "origin",
+        env: dict[str, str] | None = None,
+    ) -> tuple[str, str, str]:
+        observed["repo_path"] = repo_path
+        observed["remote"] = remote
+        observed["env"] = env
+        return "origin/main", "main", sha
+
+    monkeypatch.setattr(module, "remote_head", fake_remote_head)
+
+    assert module.remote_head_for_entry(entry) == ("origin/main", "main", sha)
+    assert observed["repo_path"] == repo
+    assert observed["remote"] == remote
+    env = observed["env"]
+    assert isinstance(env, dict)
+
+    local_ca_info = subprocess.run(
+        ["/usr/bin/git", "-C", str(repo), "config", "--get", "http.sslCAInfo"],
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    local_ca_path = subprocess.run(
+        ["/usr/bin/git", "-C", str(repo), "config", "--get", "http.sslCAPath"],
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    assert local_ca_info.returncode == 0
+    assert local_ca_info.stdout.strip() == "/tmp/local-ca.pem"
+    assert local_ca_path.returncode == 0
+    assert local_ca_path.stdout.strip() == "/tmp/local-ca-dir"
+
+
+def test_remote_head_for_entry_preserves_checkout_local_https_credentials(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path, "member-local-credential")
+    remote = "https://github.com/heimgewebe/member.git"
+    git(repo, "remote", "add", "origin", remote)
+    helper = tmp_path / "local-helper"
+    helper.write_text(
+        "#!/bin/sh\n"
+        "cat >/dev/null\n"
+        "printf 'username=local-user\\npassword=local-pass\\n'\n",
+        encoding="utf-8",
+    )
+    helper.chmod(0o700)
+    git(repo, "config", "credential.https://github.com.helper", f"!{helper}")
+    monkeypatch.setattr(
+        module,
+        "_global_system_github_https_config",
+        lambda _repo_path: [],
+    )
+    entry = module.RepoEntry(
+        key="heimgewebe/member",
+        owner="heimgewebe",
+        repo="member",
+        path=repo,
+        remote=remote,
+    )
+    observed: dict[str, object] = {}
+
+    def fake_remote_head(
+        repo_path: Path,
+        *,
+        remote: str = "origin",
+        env: dict[str, str] | None = None,
+    ) -> tuple[str, str, str]:
+        observed["env"] = env
+        return "origin/main", "main", sha
+
+    monkeypatch.setattr(module, "remote_head", fake_remote_head)
+
+    assert module.remote_head_for_entry(entry) == ("origin/main", "main", sha)
+    env = observed["env"]
+    assert isinstance(env, dict)
+    injected = [
+        (env[f"GIT_CONFIG_KEY_{i}"], env[f"GIT_CONFIG_VALUE_{i}"])
+        for i in range(int(env.get("GIT_CONFIG_COUNT", "0")))
+    ]
+    assert (
+        "credential.https://github.com.helper",
+        f"!{helper}",
+    ) not in injected
+    filled = subprocess.run(
+        ["/usr/bin/git", "-C", str(repo), "credential", "fill"],
+        input="protocol=https\nhost=github.com\n\n",
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    assert filled.returncode == 0, filled.stderr
+    assert "username=local-user" in filled.stdout
+    assert "password=local-pass" in filled.stdout
+
+
+def test_fleet_repo_git_env_preserves_bounded_credential_helper_lookup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, _sha = initialize_repository(tmp_path, "credential-helper-path")
+    home = tmp_path / "home"
+    helper_dir = home / ".local" / "bin"
+    helper_dir.mkdir(parents=True)
+    helper = helper_dir / "git-credential-demo"
+    helper.write_text(
+        "#!/bin/sh\n"
+        "cat >/dev/null\n"
+        "printf 'username=path-user\\npassword=path-pass\\n'\n",
+        encoding="utf-8",
+    )
+    helper.chmod(0o700)
+    home.mkdir(exist_ok=True)
+    (home / ".gitconfig").write_text(
+        "[credential \"https://github.com\"]\n"
+        "    helper = demo\n",
+        encoding="utf-8",
+    )
+    attacker_bin = tmp_path / "attacker-bin"
+    attacker_bin.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("PATH", str(attacker_bin))
+    for name in module._AUTHORITY_GIT_FORBIDDEN_ENV:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.delenv("GIT_CONFIG_COUNT", raising=False)
+
+    env = module._fleet_repo_git_env(
+        repo,
+        safe_global_config=tmp_path / "credential-helper-global.gitconfig",
+    )
+
+    assert env["PATH"] == os.pathsep.join(
+        ["/usr/bin", "/bin", "/usr/local/bin", str(helper_dir)]
+    )
+    assert str(attacker_bin) not in env["PATH"].split(os.pathsep)
+    filled = subprocess.run(
+        ["/usr/bin/git", "credential", "fill"],
+        input="protocol=https\nhost=github.com\n\n",
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    assert filled.returncode == 0, filled.stderr
+    assert "username=path-user" in filled.stdout
+    assert "password=path-pass" in filled.stdout
+
+
+def test_fleet_member_askpass_rejects_lexical_symlink_ancestor(
+    tmp_path: Path,
+) -> None:
+    module = load_publisher()
+    trusted = tmp_path / "trusted"
+    trusted.mkdir()
+    helper = trusted / "helper"
+    helper.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    helper.chmod(0o700)
+    lexical = tmp_path / "lexical"
+    lexical.mkdir()
+    (lexical / "link").symlink_to(trusted, target_is_directory=True)
+
+    with pytest.raises(RuntimeError, match="parent path must remain a directory"):
+        module._validated_fleet_member_askpass_path(
+            str(lexical / "link" / "helper"),
+            source="core.askPass",
+        )
+
+
+def test_fleet_repo_git_env_preserves_bounded_global_core_askpass_with_local_precedence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, _sha = initialize_repository(tmp_path, "global-core-askpass-member")
+    home = tmp_path / "home"
+    home.mkdir()
+    global_askpass = tmp_path / "global-core-askpass"
+    global_askpass.write_text(
+        "#!/bin/sh\n"
+        "case \"$1\" in\n"
+        "  *Username*) printf 'global-user\\n' ;;\n"
+        "  *Password*) printf 'global-pass\\n' ;;\n"
+        "  *) exit 1 ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    global_askpass.chmod(0o700)
+    local_askpass = tmp_path / "local-core-askpass"
+    local_askpass.write_text(
+        "#!/bin/sh\n"
+        "case \"$1\" in\n"
+        "  *Username*) printf 'local-user\\n' ;;\n"
+        "  *Password*) printf 'local-pass\\n' ;;\n"
+        "  *) exit 1 ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    local_askpass.chmod(0o700)
+    (home / ".gitconfig").write_text(
+        "[core]\n"
+        f"    askPass = {global_askpass}\n"
+        "[url \"ssh://attacker.invalid/\"]\n"
+        "    insteadOf = https://github.com/\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("GIT_ASKPASS", raising=False)
+
+    authority_env = module._authority_git_env()
+    blocked = subprocess.run(
+        ["/usr/bin/git", "-C", str(repo), "credential", "fill"],
+        input="protocol=https\nhost=github.com\n\n",
+        env=authority_env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    assert blocked.returncode != 0
+
+    safe_global = tmp_path / "safe-global-core-askpass.gitconfig"
+    env = module._fleet_repo_git_env(repo, safe_global_config=safe_global)
+    assert "GIT_ASKPASS" not in env
+    copied = subprocess.run(
+        ["/usr/bin/git", "config", "--file", str(safe_global), "--get", "core.askPass"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    assert copied.returncode == 0, copied.stderr
+    assert copied.stdout.strip() == str(global_askpass)
+    assert subprocess.run(
+        ["/usr/bin/git", "config", "--file", str(safe_global), "--get-regexp", r"^url\."],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    ).returncode == 1
+
+    filled = subprocess.run(
+        ["/usr/bin/git", "-C", str(repo), "credential", "fill"],
+        input="protocol=https\nhost=github.com\n\n",
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    assert filled.returncode == 0, filled.stderr
+    assert "username=global-user" in filled.stdout
+    assert "password=global-pass" in filled.stdout
+
+    git(repo, "config", "core.askPass", str(local_askpass))
+    module.assert_fleet_member_git_transport_safe(repo, env=authority_env)
+    safe_global_local = tmp_path / "safe-global-with-local-core-askpass.gitconfig"
+    local_env = module._fleet_repo_git_env(
+        repo,
+        safe_global_config=safe_global_local,
+    )
+    local_filled = subprocess.run(
+        ["/usr/bin/git", "-C", str(repo), "credential", "fill"],
+        input="protocol=https\nhost=github.com\n\n",
+        env=local_env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    assert local_filled.returncode == 0, local_filled.stderr
+    assert "username=local-user" in local_filled.stdout
+    assert "password=local-pass" in local_filled.stdout
+    assert "global-user" not in local_filled.stdout
+
+
+def test_fleet_repo_git_env_rejects_unsafe_global_core_askpass(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, _sha = initialize_repository(tmp_path, "unsafe-global-core-askpass")
+    home = tmp_path / "home"
+    home.mkdir()
+    askpass = tmp_path / "global-core-askpass"
+    askpass.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    askpass.chmod(0o700)
+    (home / ".gitconfig").write_text(
+        "[core]\n"
+        f"    askPass = {askpass} --injected\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("GIT_ASKPASS", raising=False)
+
+    with pytest.raises(
+        RuntimeError,
+        match="global/system core.askPass path contains unsafe characters",
+    ):
+        module._fleet_repo_git_env(
+            repo,
+            safe_global_config=tmp_path / "unsafe-global.gitconfig",
+        )
+
+
+def test_fleet_repo_git_env_preserves_bounded_git_askpass(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, _sha = initialize_repository(tmp_path, "askpass-member")
+    home = tmp_path / "home"
+    home.mkdir()
+    askpass = tmp_path / "git-askpass"
+    askpass.write_text(
+        "#!/bin/sh\n"
+        "case \"$1\" in\n"
+        "  *Username*) printf 'askpass-user\\n' ;;\n"
+        "  *Password*) printf 'askpass-pass\\n' ;;\n"
+        "  *) exit 1 ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    askpass.chmod(0o700)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("GIT_ASKPASS", str(askpass))
+
+    authority_env = module._authority_git_env()
+    assert "GIT_ASKPASS" not in authority_env
+
+    env = module._fleet_repo_git_env(repo)
+    assert env["GIT_ASKPASS"] == str(askpass.resolve())
+    assert env["GIT_TERMINAL_PROMPT"] == "0"
+
+    filled = subprocess.run(
+        ["/usr/bin/git", "credential", "fill"],
+        input="protocol=https\nhost=github.com\n\n",
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    assert filled.returncode == 0, filled.stderr
+    assert "username=askpass-user" in filled.stdout
+    assert "password=askpass-pass" in filled.stdout
+
+
+def test_fleet_member_git_askpass_rejects_unbounded_executables(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    target = tmp_path / "askpass"
+    target.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    target.chmod(0o700)
+
+    monkeypatch.setenv("GIT_ASKPASS", "askpass")
+    with pytest.raises(RuntimeError, match="must be absolute"):
+        module._fleet_member_git_askpass_path()
+
+    monkeypatch.setenv("GIT_ASKPASS", f"{target} --injected")
+    with pytest.raises(RuntimeError, match="unsafe characters"):
+        module._fleet_member_git_askpass_path()
+
+    link = tmp_path / "askpass-link"
+    link.symlink_to(target)
+    monkeypatch.setenv("GIT_ASKPASS", str(link))
+    with pytest.raises(RuntimeError, match="regular file"):
+        module._fleet_member_git_askpass_path()
+
+    target.chmod(0o722)
+    monkeypatch.setenv("GIT_ASKPASS", str(target))
+    with pytest.raises(RuntimeError, match="group/world writable"):
+        module._fleet_member_git_askpass_path()
+
+    target.chmod(0o600)
+    with pytest.raises(RuntimeError, match="must be executable"):
+        module._fleet_member_git_askpass_path()
+
+
+def test_fleet_member_git_askpass_rejects_nonsticky_writable_parent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    shared.chmod(0o777)
+    askpass = shared / "askpass"
+    askpass.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    askpass.chmod(0o700)
+    monkeypatch.setenv("GIT_ASKPASS", str(askpass))
+
+    with pytest.raises(
+        RuntimeError,
+        match="parent directory must not be group/world writable without sticky protection",
+    ):
+        module._fleet_member_git_askpass_path()
+
+
+def test_fleet_member_git_askpass_accepts_sticky_writable_parent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    sticky = tmp_path / "sticky"
+    sticky.mkdir()
+    sticky.chmod(0o1777)
+    askpass = sticky / "askpass"
+    askpass.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    askpass.chmod(0o700)
+    monkeypatch.setenv("GIT_ASKPASS", str(askpass))
+
+    assert module._fleet_member_git_askpass_path() == str(askpass.resolve())
+
+
+def test_remote_head_for_entry_preserves_bounded_checkout_core_askpass(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path, "core-askpass-member")
+    remote = "https://github.com/heimgewebe/member.git"
+    git(repo, "remote", "add", "origin", remote)
+    home = tmp_path / "home"
+    home.mkdir()
+    askpass = tmp_path / "core-askpass"
+    askpass.write_text(
+        "#!/bin/sh\n"
+        "case \"$1\" in\n"
+        "  *Username*) printf 'core-user\\n' ;;\n"
+        "  *Password*) printf 'core-pass\\n' ;;\n"
+        "  *) exit 1 ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    askpass.chmod(0o700)
+    git(repo, "config", "core.askPass", str(askpass))
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("GIT_ASKPASS", raising=False)
+    monkeypatch.setattr(
+        module,
+        "_global_system_github_https_config",
+        lambda _repo_path: [],
+    )
+    entry = module.RepoEntry(
+        key="heimgewebe/member",
+        owner="heimgewebe",
+        repo="member",
+        path=repo,
+        remote=remote,
+    )
+
+    authority_env = module._authority_git_env()
+    with pytest.raises(
+        RuntimeError,
+        match="unsafe local Git transport configuration: core.askpass",
+    ):
+        module.assert_authority_git_transport_safe(repo, env=authority_env)
+
+    module.assert_fleet_member_git_transport_safe(repo, env=authority_env)
+    observed: dict[str, object] = {}
+
+    def fake_remote_head(
+        repo_path: Path,
+        *,
+        remote: str = "origin",
+        env: dict[str, str] | None = None,
+    ) -> tuple[str, str, str]:
+        assert isinstance(env, dict)
+        observed["env"] = env
+        filled = subprocess.run(
+            ["/usr/bin/git", "-C", str(repo_path), "credential", "fill"],
+            input="protocol=https\nhost=github.com\n\n",
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        assert filled.returncode == 0, filled.stderr
+        assert "username=core-user" in filled.stdout
+        assert "password=core-pass" in filled.stdout
+        return "origin/main", "main", sha
+
+    monkeypatch.setattr(module, "remote_head", fake_remote_head)
+
+    assert module.remote_head_for_entry(entry) == ("origin/main", "main", sha)
+    network_env = observed["env"]
+    assert isinstance(network_env, dict)
+    assert "GIT_ASKPASS" not in network_env
+
+
+def test_fleet_member_checkout_core_askpass_uses_bounded_path_validation(
+    tmp_path: Path,
+) -> None:
+    module = load_publisher()
+    repo, _sha = initialize_repository(tmp_path, "core-askpass-unsafe")
+    git(repo, "remote", "add", "origin", "https://github.com/heimgewebe/member.git")
+    target = tmp_path / "core-askpass"
+    target.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    target.chmod(0o700)
+
+    git(repo, "config", "core.askPass", f"{target} --injected")
+    with pytest.raises(RuntimeError, match="core.askPass path contains unsafe characters"):
+        module.assert_fleet_member_git_transport_safe(
+            repo,
+            env=module._authority_git_env(),
+        )
+
+    link = tmp_path / "core-askpass-link"
+    link.symlink_to(target)
+    git(repo, "config", "core.askPass", str(link))
+    with pytest.raises(RuntimeError, match="core.askPass must be a regular file"):
+        module.assert_fleet_member_git_transport_safe(
+            repo,
+            env=module._authority_git_env(),
+        )
+
+    target.chmod(0o722)
+    git(repo, "config", "core.askPass", str(target))
+    with pytest.raises(RuntimeError, match="core.askPass must not be group/world writable"):
+        module.assert_fleet_member_git_transport_safe(
+            repo,
+            env=module._authority_git_env(),
+        )
+
+
+def test_fleet_member_credential_helper_path_rejects_path_injection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    monkeypatch.setenv("HOME", "/tmp/safe:/tmp/attacker")
+
+    with pytest.raises(RuntimeError, match="unsafe for PATH"):
+        module._fleet_member_credential_helper_path()
+
+
+def test_remote_head_for_entry_uses_url_port_for_github_ssh_alternate_route(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path, "member-ssh-url-port")
+    remote = "ssh://git@github.com:443/heimgewebe/member.git"
+    git(repo, "remote", "add", "origin", remote)
+
+    home = tmp_path / "home"
+    ssh_dir = home / ".ssh"
+    ssh_dir.mkdir(parents=True)
+    (ssh_dir / "config").write_text(
+        "Host github.com\n"
+        "    HostName ssh.github.com\n",
+        encoding="utf-8",
+    )
+    (ssh_dir / "config").chmod(0o600)
+    monkeypatch.setenv("HOME", str(home))
+
+    entry = module.RepoEntry(
+        key="heimgewebe/member",
+        owner="heimgewebe",
+        repo="member",
+        path=repo,
+        remote=remote,
+    )
+    observed: dict[str, object] = {}
+
+    def fake_remote_head(
+        repo_path: Path,
+        *,
+        remote: str = "origin",
+        env: dict[str, str] | None = None,
+    ) -> tuple[str, str, str]:
+        observed["repo_path"] = repo_path
+        observed["remote"] = remote
+        observed["env"] = env
+        return "origin/main", "main", sha
+
+    monkeypatch.setattr(module, "remote_head", fake_remote_head)
+
+    assert module.remote_head_for_entry(entry) == ("origin/main", "main", sha)
+    assert observed["repo_path"] == repo
+    assert observed["remote"] == remote
+    env = observed["env"]
+    assert isinstance(env, dict)
+    command = env["GIT_SSH_COMMAND"]
+    assert "HostName=ssh.github.com" in command
+    assert "Port=443" in command
+    assert "HostKeyAlias=github.com" in command
+
+
+def test_fleet_repo_ssh_env_preserves_only_bounded_github_auth_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    home = tmp_path / "home"
+    ssh_dir = home / ".ssh"
+    ssh_dir.mkdir(parents=True)
+    (ssh_dir / "config").write_text(
+        "Host github.com\n"
+        "    HostName ssh.github.com\n"
+        "    Port 443\n"
+        "    User attacker\n"
+        "    IdentityFile ~/.ssh/id_ed25519\n"
+        "    CertificateFile ~/.ssh/id_ed25519-cert.pub\n"
+        "    IdentitiesOnly yes\n"
+        "    IdentityAgent ~/.ssh/agent.sock\n"
+        "    ProxyCommand /bin/false\n"
+        "    StrictHostKeyChecking no\n"
+        "    UserKnownHostsFile /dev/null\n"
+        "    LocalCommand /bin/false\n"
+        "Host other.example\n"
+        "    IdentityFile ~/.ssh/other\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(home))
+
+    env = module._fleet_repo_ssh_env()
+    command = env["GIT_SSH_COMMAND"]
+    argv = __import__("shlex").split(command)
+
+    assert argv[:3] == ["/usr/bin/ssh", "-F", os.devnull]
+    assert str(ssh_dir / "id_ed25519") in argv
+    assert f"CertificateFile={ssh_dir / 'id_ed25519-cert.pub'}" in argv
+    assert "IdentitiesOnly=yes" in argv
+    assert f"IdentityAgent={ssh_dir / 'agent.sock'}" in argv
+    assert "ClearAllForwardings=yes" in argv
+    assert "PermitLocalCommand=no" in argv
+    assert "HostName=ssh.github.com" in argv
+    assert "Port=443" in argv
+    assert "HostKeyAlias=github.com" in argv
+    for forbidden in (
+        "attacker.invalid",
+        "ProxyCommand",
+        "StrictHostKeyChecking=no",
+        "UserKnownHostsFile=/dev/null",
+        "/bin/false",
+        str(ssh_dir / "other"),
+    ):
+        assert forbidden not in command
+
+
+def test_fleet_member_ssh_route_honors_url_port_443_with_bounded_hostname(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    home = tmp_path / "home"
+    ssh_dir = home / ".ssh"
+    ssh_dir.mkdir(parents=True)
+    config = ssh_dir / "config"
+    config.write_text(
+        "Host github.com\n"
+        "    HostName ssh.github.com\n",
+        encoding="utf-8",
+    )
+    config.chmod(0o600)
+    monkeypatch.setenv("HOME", str(home))
+
+    command_443 = module._fleet_member_ssh_command(remote_port=443)
+    assert "HostName=ssh.github.com" in command_443
+    assert "Port=443" in command_443
+    assert "HostKeyAlias=github.com" in command_443
+
+    command_22 = module._fleet_member_ssh_command(remote_port=22)
+    assert "HostName=ssh.github.com" not in command_22
+    assert "HostKeyAlias=github.com" not in command_22
+
+
+@pytest.mark.parametrize(
+    ("config_body", "expected_route"),
+    [
+        (
+            "Host github.com\n"
+            "    HostName ssh.github.com\n"
+            "    Port 443\n",
+            True,
+        ),
+        (
+            "Host github.com\n"
+            "    HostName attacker.invalid\n"
+            "    Port 443\n",
+            False,
+        ),
+        (
+            "Host github.com\n"
+            "    HostName ssh.github.com\n"
+            "    Port 22\n",
+            False,
+        ),
+        (
+            "Host other.example\n"
+            "    HostName ssh.github.com\n"
+            "    Port 443\n",
+            False,
+        ),
+    ],
+)
+def test_fleet_member_ssh_route_allows_only_github_alternate_443(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    config_body: str,
+    expected_route: bool,
+) -> None:
+    module = load_publisher()
+    home = tmp_path / "home"
+    ssh_dir = home / ".ssh"
+    ssh_dir.mkdir(parents=True)
+    config = ssh_dir / "config"
+    config.write_text(config_body, encoding="utf-8")
+    config.chmod(0o600)
+    monkeypatch.setenv("HOME", str(home))
+
+    command = module._fleet_member_ssh_command()
+
+    assert ("HostName=ssh.github.com" in command) is expected_route
+    assert ("Port=443" in command) is expected_route
+    assert ("HostKeyAlias=github.com" in command) is expected_route
+
+
+@pytest.mark.parametrize(
+    ("config_body", "expected_names"),
+    [
+        (
+            "Match host github.com\n"
+            "    IdentityFile ~/.ssh/match-host\n",
+            ("match-host",),
+        ),
+        (
+            "Host other.example\n"
+            "    IdentityFile ~/.ssh/other\n"
+            "Match all\n"
+            "    IdentityFile ~/.ssh/match-all\n",
+            ("match-all",),
+        ),
+        (
+            "Match host !github.com,*\n"
+            "    IdentityFile ~/.ssh/blocked\n",
+            (),
+        ),
+    ],
+)
+def test_fleet_member_ssh_match_supports_bounded_host_and_all(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    config_body: str,
+    expected_names: tuple[str, ...],
+) -> None:
+    module = load_publisher()
+    home = tmp_path / "home"
+    ssh_dir = home / ".ssh"
+    ssh_dir.mkdir(parents=True)
+    config = ssh_dir / "config"
+    config.write_text(config_body, encoding="utf-8")
+    config.chmod(0o600)
+    monkeypatch.setenv("HOME", str(home))
+
+    identities = module._fleet_member_ssh_auth_options().get("identity_files", ())
+
+    assert tuple(Path(value).name for value in identities) == expected_names
+
+
+def test_fleet_member_ssh_match_supports_bounded_host_user_compound(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    home = tmp_path / "home"
+    ssh_dir = home / ".ssh"
+    ssh_dir.mkdir(parents=True)
+    config = ssh_dir / "config"
+    config.write_text(
+        "Match host GitHub.COM user git\n"
+        "    IdentityFile ~/.ssh/host-user\n"
+        "Match user git host github.com\n"
+        "    IdentityFile ~/.ssh/user-host\n"
+        "Match host github.com user other\n"
+        "    IdentityFile ~/.ssh/wrong-user\n"
+        "Match host github.com exec true\n"
+        "    IdentityFile ~/.ssh/unsupported-exec\n"
+        "Match host github.com user !git,*\n"
+        "    IdentityFile ~/.ssh/negated-user\n",
+        encoding="utf-8",
+    )
+    config.chmod(0o600)
+    monkeypatch.setenv("HOME", str(home))
+
+    env = module._fleet_repo_ssh_env(
+        remote="git@GitHub.COM:heimgewebe/member.git"
+    )
+    command = env["GIT_SSH_COMMAND"]
+
+    assert str(ssh_dir / "host-user") in command
+    assert str(ssh_dir / "user-host") in command
+    assert str(ssh_dir / "wrong-user") not in command
+    assert str(ssh_dir / "unsupported-exec") not in command
+    assert str(ssh_dir / "negated-user") not in command
+
+    without_remote_user = module._fleet_member_ssh_auth_options()
+    assert without_remote_user.get("identity_files", ()) == ()
+
+
+def test_fleet_member_ssh_match_supports_equals_form_bounded_criteria(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    home = tmp_path / "home"
+    ssh_dir = home / ".ssh"
+    ssh_dir.mkdir(parents=True)
+    config = ssh_dir / "config"
+    config.write_text(
+        "Match host=GitHub.COM user=git\n"
+        "    IdentityFile ~/.ssh/equals-host-user\n"
+        "Match originalhost=GitHub.COM user=git\n"
+        "    IdentityFile ~/.ssh/equals-original-user\n"
+        "Match user=git\n"
+        "    IdentityFile ~/.ssh/equals-user\n"
+        "Match host=github.com user=other\n"
+        "    IdentityFile ~/.ssh/equals-wrong-user\n"
+        "Match exec=true user=git\n"
+        "    IdentityFile ~/.ssh/equals-unsupported\n",
+        encoding="utf-8",
+    )
+    config.chmod(0o600)
+    monkeypatch.setenv("HOME", str(home))
+
+    env = module._fleet_repo_ssh_env(
+        remote="git@github.com:heimgewebe/member.git"
+    )
+    command = env["GIT_SSH_COMMAND"]
+
+    assert str(ssh_dir / "equals-host-user") in command
+    assert str(ssh_dir / "equals-original-user") in command
+    assert str(ssh_dir / "equals-user") in command
+    assert str(ssh_dir / "equals-wrong-user") not in command
+    assert str(ssh_dir / "equals-unsupported") not in command
+
+
+def test_fleet_member_ssh_match_supports_bounded_originalhost_user_compound(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    home = tmp_path / "home"
+    ssh_dir = home / ".ssh"
+    ssh_dir.mkdir(parents=True)
+    config = ssh_dir / "config"
+    config.write_text(
+        "Match originalhost GitHub.COM user git\n"
+        "    IdentityFile ~/.ssh/original-host-user\n"
+        "Match originalhost attacker.invalid user git\n"
+        "    IdentityFile ~/.ssh/wrong-original-host\n",
+        encoding="utf-8",
+    )
+    config.chmod(0o600)
+    monkeypatch.setenv("HOME", str(home))
+
+    env = module._fleet_repo_ssh_env(
+        remote="git@github.com:heimgewebe/member.git"
+    )
+    command = env["GIT_SSH_COMMAND"]
+
+    assert str(ssh_dir / "original-host-user") in command
+    assert str(ssh_dir / "wrong-original-host") not in command
+
+
+def test_fleet_member_ssh_match_uses_bounded_substituted_hostname(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    home = tmp_path / "home"
+    ssh_dir = home / ".ssh"
+    ssh_dir.mkdir(parents=True)
+    config = ssh_dir / "config"
+    config.write_text(
+        "Host github.com\n"
+        "    HostName ssh.github.com\n"
+        "    Port 443\n"
+        "Match host ssh.github.com user git\n"
+        "    IdentityFile ~/.ssh/substituted-host\n"
+        "Match host github.com user git\n"
+        "    IdentityFile ~/.ssh/original-host\n",
+        encoding="utf-8",
+    )
+    config.chmod(0o600)
+    monkeypatch.setenv("HOME", str(home))
+
+    env = module._fleet_repo_ssh_env(
+        remote="git@github.com:heimgewebe/member.git"
+    )
+    command = env["GIT_SSH_COMMAND"]
+
+    assert str(ssh_dir / "substituted-host") in command
+    assert str(ssh_dir / "original-host") not in command
+    assert "HostName=ssh.github.com" in command
+    assert "Port=443" in command
+    assert "HostKeyAlias=github.com" in command
+
+
+def test_fleet_member_ssh_identity_file_none_is_preserved(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    home = tmp_path / "home"
+    ssh_dir = home / ".ssh"
+    ssh_dir.mkdir(parents=True)
+    config = ssh_dir / "config"
+    config.write_text(
+        "Host github.com\n"
+        "    IdentityFile ~/.ssh/ignored-before-none\n"
+        "    IdentityFile none\n",
+        encoding="utf-8",
+    )
+    config.chmod(0o600)
+    monkeypatch.setenv("HOME", str(home))
+
+    command = module._fleet_member_ssh_command(remote_user="git")
+    argv = shlex.split(command)
+
+    assert "IdentityFile=none" in argv
+    preceding = str(ssh_dir / "ignored-before-none")
+    assert preceding in argv
+    assert argv.index(preceding) < argv.index("IdentityFile=none")
+
+
+def test_fleet_member_ssh_certificate_file_none_is_additive(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    home = tmp_path / "home"
+    ssh_dir = home / ".ssh"
+    ssh_dir.mkdir(parents=True)
+    config = ssh_dir / "config"
+    config.write_text(
+        "Host github.com\n"
+        "    CertificateFile ~/.ssh/member-cert.pub\n"
+        "    CertificateFile none\n",
+        encoding="utf-8",
+    )
+    config.chmod(0o600)
+    monkeypatch.setenv("HOME", str(home))
+
+    command = module._fleet_member_ssh_command(remote_user="git")
+    argv = shlex.split(command)
+
+    preceding = f"CertificateFile={ssh_dir / 'member-cert.pub'}"
+    assert preceding in argv
+    assert "CertificateFile=none" in argv
+    assert argv.index(preceding) < argv.index("CertificateFile=none")
+
+
+def test_fleet_member_ssh_include_expands_nested_auth_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    home = tmp_path / "home"
+    ssh_dir = home / ".ssh"
+    conf_dir = ssh_dir / "conf.d"
+    conf_dir.mkdir(parents=True)
+    (ssh_dir / "config").write_text(
+        "Include ~/.ssh/conf.d/first\n"
+        "Host github.com\n"
+        "    IdentitiesOnly yes\n",
+        encoding="utf-8",
+    )
+    (conf_dir / "first").write_text(
+        "Include ~/.ssh/conf.d/second\n",
+        encoding="utf-8",
+    )
+    (conf_dir / "second").write_text(
+        "Host *\n"
+        "    IdentityFile ~/.ssh/include-key\n"
+        "    CertificateFile ~/.ssh/include-cert.pub\n"
+        "    HostName attacker.invalid\n"
+        "    ProxyCommand /bin/false\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(home))
+
+    command = module._fleet_member_ssh_command()
+
+    assert str(ssh_dir / "include-key") in command
+    assert f"CertificateFile={ssh_dir / 'include-cert.pub'}" in command
+    assert "IdentitiesOnly=yes" in command
+    assert "attacker.invalid" not in command
+    assert "ProxyCommand" not in command
+    assert "/bin/false" not in command
+
+
+def test_fleet_member_ssh_include_rejects_targets_outside_ssh_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    home = tmp_path / "home"
+    ssh_dir = home / ".ssh"
+    ssh_dir.mkdir(parents=True)
+    outside = tmp_path / "outside.conf"
+    outside.write_text(
+        "Host github.com\n    IdentityFile ~/.ssh/outside-key\n",
+        encoding="utf-8",
+    )
+    (ssh_dir / "config").write_text(
+        f"Include {outside}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(home))
+
+    with pytest.raises(RuntimeError, match="must remain under ~/.ssh"):
+        module._fleet_member_ssh_auth_options()
+
+
+@pytest.mark.parametrize(
+    ("host_patterns", "expected_identity"),
+    [
+        ("GitHub.COM", True),
+        ("*", True),
+        ("github.*", True),
+        ("!github.com *", False),
+        ("github.com !github.com", False),
+        ("*.github.com", False),
+        ("attacker-github.com", False),
+        ("github.com.evil.example", False),
+    ],
+)
+def test_fleet_member_ssh_host_patterns_require_exact_github_match(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    host_patterns: str,
+    expected_identity: bool,
+) -> None:
+    module = load_publisher()
+    home = tmp_path / "home"
+    ssh_dir = home / ".ssh"
+    ssh_dir.mkdir(parents=True)
+    config = ssh_dir / "config"
+    config.write_text(
+        f"Host {host_patterns}\n"
+        "    IdentityFile ~/.ssh/id_ed25519\n",
+        encoding="utf-8",
+    )
+    config.chmod(0o600)
+    monkeypatch.setenv("HOME", str(home))
+
+    options = module._fleet_member_ssh_auth_options()
+
+    identities = options.get("identity_files", ())
+    if expected_identity:
+        assert identities == (str(ssh_dir / "id_ed25519"),)
+    else:
+        assert identities == ()
+
+
+def test_fleet_member_ssh_config_rejects_symlink_and_insecure_permissions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    home = tmp_path / "home"
+    ssh_dir = home / ".ssh"
+    ssh_dir.mkdir(parents=True)
+    target = tmp_path / "shared-config"
+    target.write_text(
+        "Host github.com\n    IdentityFile ~/.ssh/id_ed25519\n",
+        encoding="utf-8",
+    )
+    config = ssh_dir / "config"
+    config.symlink_to(target)
+    monkeypatch.setenv("HOME", str(home))
+
+    with pytest.raises(RuntimeError, match="configuration is unavailable"):
+        module._fleet_member_ssh_auth_options()
+
+    config.unlink()
+    config.write_text(
+        "Host github.com\n    IdentityFile ~/.ssh/id_ed25519\n",
+        encoding="utf-8",
+    )
+    config.chmod(0o622)
+    with pytest.raises(RuntimeError, match="must not be group/world writable"):
+        module._fleet_member_ssh_auth_options()
+
+
+def test_fleet_member_ssh_config_enforces_actual_read_bound(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    home = tmp_path / "home"
+    ssh_dir = home / ".ssh"
+    ssh_dir.mkdir(parents=True)
+    config = ssh_dir / "config"
+    config.write_bytes(b"x" * (module._FLEET_MEMBER_SSH_CONFIG_MAX_BYTES + 1))
+    config.chmod(0o600)
+    monkeypatch.setenv("HOME", str(home))
+
+    with pytest.raises(RuntimeError, match="exceeds bounded size"):
+        module._fleet_member_ssh_auth_options()
+
+
+def test_remote_head_for_entry_uses_bounded_ssh_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path, "member-ssh-auth")
+    remote = "git@github.com:heimgewebe/member.git"
+    git(repo, "remote", "add", "origin", remote)
+    entry = module.RepoEntry(
+        key="heimgewebe/member", owner="heimgewebe", repo="member", path=repo, remote=remote
+    )
+    ssh_env = module._authority_git_env()
+    ssh_env["GIT_SSH_COMMAND"] = "/usr/bin/ssh -F /dev/null -i /tmp/member-key"
+    observed: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        module,
+        "_fleet_repo_ssh_env",
+        lambda *, remote=None: ssh_env,
+    )
+
+    def fake_remote_head(
+        repo_path: Path,
+        *,
+        remote: str = "origin",
+        env: dict[str, str] | None = None,
+    ) -> tuple[str, str, str]:
+        observed["repo_path"] = repo_path
+        observed["remote"] = remote
+        observed["env"] = env
+        return "origin/main", "main", sha
+
+    monkeypatch.setattr(module, "remote_head", fake_remote_head)
+
+    assert module.remote_head_for_entry(entry) == ("origin/main", "main", sha)
+    assert observed["remote"] == remote
+    assert observed["env"] is ssh_env
+
+
+def test_remote_head_for_entry_uses_credential_env_for_https(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path, "member-https-credentials")
+    remote = "https://github.com/heimgewebe/member.git"
+    git(repo, "remote", "add", "origin", remote)
+    entry = module.RepoEntry(
+        key="heimgewebe/member",
+        owner="heimgewebe",
+        repo="member",
+        path=repo,
+        remote=remote,
+    )
+    credential_env = module._authority_git_env()
+    credential_env["GIT_CONFIG_COUNT"] = "1"
+    credential_env["GIT_CONFIG_KEY_0"] = "credential.helper"
+    credential_env["GIT_CONFIG_VALUE_0"] = "!/bin/true"
+    observed: dict[str, object] = {}
+
+    def fake_fleet_repo_git_env(
+        repo_path: Path,
+        *,
+        safe_global_config: Path | None = None,
+    ) -> dict[str, str]:
+        assert repo_path == repo
+        assert safe_global_config is not None
+        return credential_env
+
+    monkeypatch.setattr(module, "_fleet_repo_git_env", fake_fleet_repo_git_env)
+
+    def fake_remote_head(
+        repo_path: Path,
+        *,
+        remote: str = "origin",
+        env: dict[str, str] | None = None,
+    ) -> tuple[str, str, str]:
+        observed["repo_path"] = repo_path
+        observed["remote"] = remote
+        observed["env"] = env
+        return "origin/main", "main", sha
+
+    monkeypatch.setattr(module, "remote_head", fake_remote_head)
+
+    assert module.remote_head_for_entry(entry) == ("origin/main", "main", sha)
+    assert observed["remote"] == remote
+    assert observed["env"] is credential_env
+
+
+def test_remote_branch_head_ignores_non_ref_diagnostics_without_shared_ref_update(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo = tmp_path / "metarepo"
     sha = "a" * 40
+    fetched = False
     calls: list[list[str]] = []
 
     def fake_run(
@@ -171,30 +2440,54 @@ def test_remote_head_falls_back_to_existing_local_origin_head(
         check: bool = True,
         env: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
+        nonlocal fetched
         calls.append(argv)
-        if argv[-3:] == ["fetch", "origin", "--prune"]:
+        if argv[-3:] == ["--", "origin", "refs/heads/main"]:
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout=(
+                    "Warning: Permanently added github.com to known hosts.\n"
+                    f"{sha}\trefs/heads/main\n"
+                ),
+            )
+        if argv[-6:] == [
+            "fetch",
+            "--no-tags",
+            "--no-write-fetch-head",
+            "--refmap=",
+            "origin",
+            "refs/heads/main",
+        ]:
+            fetched = True
             return subprocess.CompletedProcess(argv, 0, stdout="")
-        if argv[-4:] == ["ls-remote", "--symref", "origin", "HEAD"]:
-            return subprocess.CompletedProcess(argv, 0, stdout=f"{sha}\tHEAD\n")
-        if argv[-3:] == ["symbolic-ref", "refs/remotes/origin/HEAD", "--short"]:
-            return subprocess.CompletedProcess(argv, 0, stdout="origin/release\n")
-        if argv[-2:] == ["rev-parse", "origin/release"]:
-            return subprocess.CompletedProcess(argv, 0, stdout=f"{sha}\n")
+        if argv[-3:] == ["rev-parse", "--verify", f"{sha}^{{commit}}"]:
+            return subprocess.CompletedProcess(
+                argv,
+                0 if fetched else 1,
+                stdout=f"{sha}\n" if fetched else "",
+            )
         raise AssertionError(f"unexpected command: {argv}")
 
     monkeypatch.setattr(module, "run", fake_run)
 
-    assert module.remote_head(repo) == ("origin/release", "release", sha)
-    assert not any("set-head" in argv for argv in calls)
+    assert module.remote_branch_head(repo, "main") == ("refs/heads/main", "main", sha)
+    assert not any(
+        "refs/remotes/origin/main" in argument
+        for argv in calls
+        for argument in argv
+    )
 
 
-def test_remote_head_rejects_fallback_that_disagrees_with_remote_head_sha(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_remote_branch_head_rejects_branch_that_moves_during_isolated_fetch_when_old_tip_is_local(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     module = load_publisher()
-    repo = tmp_path / "stale-local-head"
-    advertised_sha = "a" * 40
-    local_sha = "b" * 40
+    repo = tmp_path / "metarepo"
+    old_sha = "a" * 40
+    new_sha = "b" * 40
+    advertisements = iter((old_sha, new_sha))
 
     def fake_run(
         argv: list[str],
@@ -202,21 +2495,198 @@ def test_remote_head_rejects_fallback_that_disagrees_with_remote_head_sha(
         check: bool = True,
         env: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
-        if argv[-3:] == ["fetch", "origin", "--prune"]:
+        if argv[-3:] == ["--", "origin", "refs/heads/main"]:
+            sha = next(advertisements)
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout=f"{sha}\trefs/heads/main\n",
+            )
+        if argv[-6:] == [
+            "fetch",
+            "--no-tags",
+            "--no-write-fetch-head",
+            "--refmap=",
+            "origin",
+            "refs/heads/main",
+        ]:
             return subprocess.CompletedProcess(argv, 0, stdout="")
+        if argv[-3:] == ["rev-parse", "--verify", f"{old_sha}^{{commit}}"]:
+            return subprocess.CompletedProcess(argv, 0, stdout=f"{old_sha}\n")
+        raise AssertionError(f"unexpected command: {argv}")
+
+    monkeypatch.setattr(module, "run", fake_run)
+
+    with pytest.raises(RuntimeError, match="moved during resolution"):
+        module.remote_branch_head(repo, "main")
+
+
+def test_remote_branch_head_fetch_does_not_update_origin_tracking_ref(
+    tmp_path: Path,
+) -> None:
+    module = load_publisher()
+    source, first_sha = initialize_repository(tmp_path, "authority-source")
+    remote = tmp_path / "authority-remote.git"
+    completed = subprocess.run(
+        ["git", "clone", "--quiet", "--bare", str(source), str(remote)],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stdout
+
+    checkout = tmp_path / "authority-checkout"
+    completed = subprocess.run(
+        ["git", "clone", "--quiet", str(remote), str(checkout)],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stdout
+    assert git(checkout, "rev-parse", "refs/remotes/origin/main") == first_sha
+
+    tracked = source / "tracked.txt"
+    tracked.write_text("second\n", encoding="utf-8")
+    git(source, "add", "tracked.txt")
+    git(source, "commit", "-m", "second authority commit")
+    second_sha = git(source, "rev-parse", "HEAD")
+    assert second_sha != first_sha
+    assert (
+        subprocess.run(
+            ["git", "-C", str(checkout), "cat-file", "-e", f"{second_sha}^{{commit}}"],
+            check=False,
+        ).returncode
+        != 0
+    )
+
+    completed = subprocess.run(
+        [
+            "git",
+            "--git-dir",
+            str(remote),
+            "fetch",
+            "--quiet",
+            "--no-tags",
+            str(source),
+            second_sha,
+        ],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stdout
+    git(remote, "update-ref", "refs/heads/main", second_sha)
+
+    assert module.remote_branch_head(checkout, "main") == (
+        "refs/heads/main",
+        "main",
+        second_sha,
+    )
+    assert git(checkout, "rev-parse", "refs/remotes/origin/main") == first_sha
+    assert (
+        subprocess.run(
+            ["git", "-C", str(checkout), "cat-file", "-e", f"{second_sha}^{{commit}}"],
+            check=False,
+        ).returncode
+        == 0
+    )
+
+
+def test_remote_head_falls_back_to_existing_local_origin_head(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    repo = tmp_path / "demo"
+    sha = "a" * 40
+    validated_url = "git@github.com:heimgewebe/demo.git"
+    calls: list[list[str]] = []
+    fetched = False
+
+    def fake_run(
+        argv: list[str],
+        cwd: Path | None = None,
+        check: bool = True,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal fetched
+        calls.append(argv)
+        if argv[-4:] == ["ls-remote", "--symref", validated_url, "HEAD"]:
+            return subprocess.CompletedProcess(argv, 0, stdout=f"{sha}\tHEAD\n")
+        if argv[-3:] == ["symbolic-ref", "refs/remotes/origin/HEAD", "--short"]:
+            return subprocess.CompletedProcess(argv, 0, stdout="origin/release\n")
+        if argv[-3:] == ["--", validated_url, "refs/heads/release"]:
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout=f"{sha}\trefs/heads/release\n",
+            )
+        if argv[-4:] == [
+            "fetch",
+            "--no-tags",
+            validated_url,
+            "+refs/heads/release:refs/remotes/origin/release",
+        ]:
+            fetched = True
+            return subprocess.CompletedProcess(argv, 0, stdout="")
+        if argv[-3:] == ["rev-parse", "--verify", "refs/remotes/origin/release"]:
+            return subprocess.CompletedProcess(
+                argv,
+                0 if fetched else 1,
+                stdout=f"{sha}\n" if fetched else "",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    monkeypatch.setattr(module, "run", fake_run)
+
+    assert module.remote_head(repo, remote=validated_url) == (
+        "origin/release",
+        "release",
+        sha,
+    )
+    assert fetched is True
+    assert not any(
+        argv[-3:] == ["fetch", validated_url, "--prune"] for argv in calls
+    )
+    assert not any("set-head" in argv for argv in calls)
+
+def test_remote_head_rejects_fallback_that_disagrees_with_remote_head_sha(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    repo = tmp_path / "stale-local-head"
+    advertised_sha = "a" * 40
+    fallback_sha = "b" * 40
+
+    def fake_run(
+        argv: list[str],
+        cwd: Path | None = None,
+        check: bool = True,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
         if argv[-4:] == ["ls-remote", "--symref", "origin", "HEAD"]:
             return subprocess.CompletedProcess(argv, 0, stdout=f"{advertised_sha}\tHEAD\n")
         if argv[-3:] == ["symbolic-ref", "refs/remotes/origin/HEAD", "--short"]:
             return subprocess.CompletedProcess(argv, 0, stdout="origin/release\n")
-        if argv[-2:] == ["rev-parse", "origin/release"]:
-            return subprocess.CompletedProcess(argv, 0, stdout=f"{local_sha}\n")
+        if argv[-3:] == ["--", "origin", "refs/heads/release"]:
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout=f"{fallback_sha}\trefs/heads/release\n",
+            )
+        if argv[-3:] in (
+            ["--", "origin", "refs/heads/main"],
+            ["--", "origin", "refs/heads/master"],
+        ):
+            return subprocess.CompletedProcess(argv, 2, stdout="")
         raise AssertionError(f"unexpected command: {argv}")
 
     monkeypatch.setattr(module, "run", fake_run)
 
     with pytest.raises(RuntimeError, match="remote HEAD disagrees"):
         module.remote_head(repo)
-
 
 def test_remote_head_remains_fail_closed_without_any_default_branch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -232,14 +2702,15 @@ def test_remote_head_remains_fail_closed_without_any_default_branch(
         env: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         calls.append(argv)
-        if argv[-3:] == ["fetch", "origin", "--prune"]:
-            return subprocess.CompletedProcess(argv, 0, stdout="")
         if argv[-4:] == ["ls-remote", "--symref", "origin", "HEAD"]:
             return subprocess.CompletedProcess(argv, 0, stdout="")
         if argv[-3:] == ["symbolic-ref", "refs/remotes/origin/HEAD", "--short"]:
             return subprocess.CompletedProcess(argv, 1, stdout="")
-        if len(argv) >= 2 and argv[-2] == "rev-parse":
-            return subprocess.CompletedProcess(argv, 1, stdout="")
+        if argv[-3:] in (
+            ["--", "origin", "refs/heads/main"],
+            ["--", "origin", "refs/heads/master"],
+        ):
+            return subprocess.CompletedProcess(argv, 2, stdout="")
         raise AssertionError(f"unexpected command: {argv}")
 
     monkeypatch.setattr(module, "run", fake_run)
@@ -247,7 +2718,6 @@ def test_remote_head_remains_fail_closed_without_any_default_branch(
     with pytest.raises(RuntimeError, match="no remote default branch"):
         module.remote_head(repo)
     assert not any("set-head" in argv for argv in calls)
-
 
 def test_remote_head_rejects_non_branch_remote_head_symref(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -344,6 +2814,149 @@ def test_remote_head_fetches_nested_advertised_branch(
     assert advertised_fetched is True
 
 
+def test_repoground_tool_head_reuses_bounded_member_transport(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path, "repoground")
+    remote = "git@GitHub.COM:HeimGewebe/RepoGround.git"
+    git(repo, "remote", "add", "origin", remote)
+    monkeypatch.setattr(module, "REPOGROUND_REPO", repo)
+
+    ssh_env = module._authority_git_env()
+    ssh_env["GIT_SSH_COMMAND"] = "/usr/bin/ssh -F /dev/null -i /tmp/tool-key"
+    observed: dict[str, object] = {}
+
+    def fake_ssh_env(*, remote: str | None = None) -> dict[str, str]:
+        observed["ssh_remote"] = remote
+        return ssh_env
+
+    def fake_remote_head(
+        repo_path: Path,
+        *,
+        remote: str = "origin",
+        env: dict[str, str] | None = None,
+    ) -> tuple[str, str, str]:
+        observed["repo_path"] = repo_path
+        observed["remote"] = remote
+        observed["env"] = env
+        return "origin/main", "main", sha
+
+    monkeypatch.setattr(module, "_fleet_repo_ssh_env", fake_ssh_env)
+    monkeypatch.setattr(module, "remote_head", fake_remote_head)
+
+    assert module._repoground_tool_head() == sha
+    assert observed["ssh_remote"] == remote
+    assert observed["repo_path"] == repo
+    assert observed["remote"] == remote
+    assert observed["env"] is ssh_env
+
+
+def test_repoground_tool_head_uses_managed_release_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    home = tmp_path / "home"
+    release = "a" * 40
+    managed_publisher = (
+        home
+        / ".local"
+        / "share"
+        / "repoground-runtime"
+        / release
+        / "scripts"
+        / "ops"
+        / "repoground-publish-fleet"
+    )
+    managed_publisher.parent.mkdir(parents=True)
+    managed_publisher.write_text("# managed publisher\n", encoding="utf-8")
+    repository = tmp_path / "repoground"
+    entry = module.RepoEntry(
+        key="heimgewebe/repoground",
+        owner="heimgewebe",
+        repo="repoground",
+        path=repository,
+        remote="git@github.com:heimgewebe/repoground.git",
+    )
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(module, "__file__", str(managed_publisher))
+    monkeypatch.setattr(module, "_repoground_tool_entry", lambda: entry)
+
+    def unexpected_remote_head(_entry: object) -> tuple[str, str, str]:
+        pytest.fail("managed publisher must not select generator code from remote main")
+
+    monkeypatch.setattr(module, "remote_head_for_entry", unexpected_remote_head)
+
+    assert module._repoground_tool_head() == release
+
+
+def test_repoground_tool_entry_rejects_retired_alias_even_with_mixed_case(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, _sha = initialize_repository(tmp_path, "repoground-retired-alias")
+    git(
+        repo,
+        "remote",
+        "add",
+        "origin",
+        "git@GitHub.COM:HeimGewebe/LensKit.git",
+    )
+    monkeypatch.setattr(module, "REPOGROUND_REPO", repo)
+
+    with pytest.raises(RuntimeError, match="origin identity mismatch"):
+        module._repoground_tool_entry()
+
+
+def test_ensure_tool_worktree_pins_resolved_generator_sha(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    sha = "a" * 40
+    tool_wt = tmp_path / "tool-worktree"
+    repository = tmp_path / "repoground"
+    observed: dict[str, object] = {}
+
+    monkeypatch.setattr(module, "TOOL_WT", tool_wt)
+    monkeypatch.setattr(module, "REPOGROUND_REPO", repository)
+    monkeypatch.setattr(module, "_repoground_tool_head", lambda: sha)
+    monkeypatch.setattr(module, "generator_inputs_sha", lambda path: "b" * 64)
+
+    def fake_prepare(
+        path: Path,
+        *,
+        expected_repo: Path,
+        target: str,
+    ) -> None:
+        observed["path"] = path
+        observed["expected_repo"] = expected_repo
+        observed["target"] = target
+
+    def fake_run(
+        argv: list[str],
+        cwd: Path | None = None,
+        check: bool = True,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        assert argv[-3:] == ["rev-parse", "HEAD"] or argv[-2:] == ["rev-parse", "HEAD"]
+        assert env == module._authority_git_env()
+        return subprocess.CompletedProcess(argv, 0, stdout=f"{sha}\n")
+
+    monkeypatch.setattr(module, "prepare_managed_worktree", fake_prepare)
+    monkeypatch.setattr(module, "run", fake_run)
+
+    assert module.ensure_tool_worktree() == (sha, "b" * 64)
+    assert observed == {
+        "path": tool_wt,
+        "expected_repo": repository,
+        "target": sha,
+    }
+
+
 def test_publication_config_uses_compact_daily_profile(tmp_path: Path) -> None:
     module = load_publisher()
     default = module.RepoEntry(
@@ -388,6 +3001,8 @@ def test_fleet_refresh_command_explicitly_opts_into_language_structure(
         config=config,
     )
 
+    assert command[0] == sys.executable
+    assert command[1] == "-B"
     assert command[command.index("--profile") + 1] == "fleet-context"
     assert "--language-structure" in command
     assert command[command.index("--publication-root") + 1] == str(publication_root)
@@ -946,6 +3561,293 @@ def test_managed_worktree_accepts_only_clean_detached_expected_repository(
     assert detached.returncode != 0
 
 
+def test_managed_worktree_preserves_only_global_checkout_filters(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, _initial_sha = initialize_repository(tmp_path, "filtered-repo")
+    (repo / ".gitattributes").write_text(
+        "sample.txt filter=probe\n",
+        encoding="utf-8",
+    )
+    (repo / "sample.txt").write_text("raw\n", encoding="utf-8")
+    git(repo, "add", ".gitattributes", "sample.txt")
+    git(repo, "commit", "-m", "add filtered sample")
+    target = git(repo, "rev-parse", "HEAD")
+
+    clean_filter = tmp_path / "clean-filter"
+    clean_filter.write_text(
+        "#!/bin/sh\nsed 's/^materialized$/raw/'\n",
+        encoding="utf-8",
+    )
+    clean_filter.chmod(0o700)
+    smudge_filter = tmp_path / "smudge-filter"
+    smudge_filter.write_text(
+        "#!/bin/sh\nsed 's/^raw$/materialized/'\n",
+        encoding="utf-8",
+    )
+    smudge_filter.chmod(0o700)
+
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".gitconfig").write_text(
+        '[filter "probe"]\n'
+        f"    clean = {clean_filter}\n"
+        f"    smudge = {smudge_filter}\n"
+        "    required = true\n"
+        '[url "ssh://attacker.invalid/"]\n'
+        "    insteadOf = https://github.com/\n"
+        "[core]\n"
+        "    hooksPath = /tmp/attacker-hooks\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(home))
+
+    safe_global_config = tmp_path / "safe-checkout.gitconfig"
+    env = module._managed_worktree_git_env(
+        repo,
+        safe_global_config=safe_global_config,
+    )
+    assert env["GIT_CONFIG_GLOBAL"] == str(safe_global_config)
+    assert env["GIT_CONFIG_SYSTEM"] == os.devnull
+    assert env["GIT_CONFIG_NOSYSTEM"] == "1"
+    for key, expected_value in (
+        ("filter.probe.clean", str(clean_filter)),
+        ("filter.probe.smudge", str(smudge_filter)),
+        ("filter.probe.required", "true"),
+    ):
+        cp = subprocess.run(
+            [
+                "/usr/bin/git",
+                "config",
+                "--file",
+                str(safe_global_config),
+                "--get",
+                key,
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        assert cp.returncode == 0, cp.stderr
+        assert cp.stdout.strip() == expected_value
+    forbidden = subprocess.run(
+        [
+            "/usr/bin/git",
+            "config",
+            "--file",
+            str(safe_global_config),
+            "--get-regexp",
+            r"^(url\.|core\.hookspath$)",
+        ],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    assert forbidden.returncode == 1
+
+    worktree = tmp_path / "managed-filtered"
+    module.prepare_managed_worktree(
+        worktree,
+        expected_repo=repo,
+        target=target,
+    )
+    sample = worktree / "sample.txt"
+    assert sample.read_text(encoding="utf-8") == "materialized\n"
+
+    sample.write_text("materialized\n", encoding="utf-8")
+    module.assert_managed_worktree_clean(worktree, repo)
+    module.prepare_managed_worktree(
+        worktree,
+        expected_repo=repo,
+        target=target,
+    )
+    assert sample.read_text(encoding="utf-8") == "materialized\n"
+
+
+def test_managed_worktree_uses_bounded_helper_path_without_global_filters(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    home = tmp_path / "home-empty-filter"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(
+        module,
+        "_global_system_checkout_filter_config",
+        lambda _repo: [],
+    )
+
+    env = module._managed_worktree_git_env(
+        tmp_path,
+        safe_global_config=tmp_path / "safe-empty-filter.gitconfig",
+    )
+
+    assert env["PATH"] == module._fleet_member_credential_helper_path()
+
+
+def test_managed_worktree_preserves_trusted_global_attributes_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, target = initialize_repository(tmp_path, "global-attributes")
+    sample = repo / "sample.dat"
+    sample.write_text("raw\n", encoding="utf-8")
+    git(repo, "add", "sample.dat")
+    git(repo, "commit", "-m", "add raw sample")
+    target = git(repo, "rev-parse", "HEAD")
+
+    home = tmp_path / "home-global-attributes"
+    helper_dir = home / ".local" / "bin"
+    helper_dir.mkdir(parents=True)
+    smudge = helper_dir / "probe-smudge"
+    smudge.write_text(
+        "#!/bin/sh\nsed 's/raw/materialized/'\n",
+        encoding="utf-8",
+    )
+    smudge.chmod(0o700)
+    clean = helper_dir / "probe-clean"
+    clean.write_text(
+        "#!/bin/sh\nsed 's/materialized/raw/'\n",
+        encoding="utf-8",
+    )
+    clean.chmod(0o700)
+    attributes = home / "global-attributes"
+    attributes.write_text("*.dat filter=probe\n", encoding="utf-8")
+    attributes.chmod(0o600)
+    (home / ".gitconfig").write_text(
+        f"[core]\n    attributesFile = {attributes}\n"
+        '[filter "probe"]\n'
+        "    smudge = probe-smudge\n"
+        "    clean = probe-clean\n"
+        "    required = true\n",
+        encoding="utf-8",
+    )
+    (home / ".gitconfig").chmod(0o600)
+    monkeypatch.setenv("HOME", str(home))
+
+    worktree = tmp_path / "managed-global-attributes"
+    module.prepare_managed_worktree(
+        worktree,
+        expected_repo=repo,
+        target=target,
+    )
+
+    assert (worktree / "sample.dat").read_text(encoding="utf-8") == "materialized\n"
+
+
+def test_managed_worktree_rejects_untrusted_global_attributes_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, _sha = initialize_repository(tmp_path, "untrusted-global-attributes")
+    home = tmp_path / "home-untrusted-attributes"
+    home.mkdir()
+    writable = tmp_path / "writable-attributes-parent"
+    writable.mkdir()
+    writable.chmod(0o777)
+    attributes = writable / "global-attributes"
+    attributes.write_text("*.dat filter=probe\n", encoding="utf-8")
+    attributes.chmod(0o600)
+    (home / ".gitconfig").write_text(
+        f"[core]\n    attributesFile = {attributes}\n"
+        '[filter "probe"]\n'
+        "    smudge = /bin/cat\n",
+        encoding="utf-8",
+    )
+    (home / ".gitconfig").chmod(0o600)
+    monkeypatch.setenv("HOME", str(home))
+
+    with pytest.raises(
+        RuntimeError,
+        match="fleet checkout attributes file parent directory",
+    ):
+        module._managed_worktree_git_env(
+            repo,
+            safe_global_config=tmp_path / "safe-untrusted-attributes.gitconfig",
+        )
+
+
+def test_checkout_filter_origin_allows_only_user_private_group_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    config = tmp_path / "filters.gitconfig"
+    config.write_text(
+        '[filter "probe"]\n    smudge = /bin/cat\n',
+        encoding="utf-8",
+    )
+    config.chmod(0o660)
+    current_gid = os.getgid()
+    monkeypatch.setattr(
+        module.pwd,
+        "getpwuid",
+        lambda _uid: SimpleNamespace(pw_name="owner"),
+    )
+    monkeypatch.setattr(
+        module.pwd,
+        "getpwall",
+        lambda: [SimpleNamespace(pw_name="owner", pw_gid=current_gid)],
+    )
+    monkeypatch.setattr(
+        module.grp,
+        "getgrgid",
+        lambda _gid: SimpleNamespace(gr_mem=[]),
+    )
+    module._assert_trusted_checkout_filter_config_origin(f"file:{config}")
+
+    monkeypatch.setattr(
+        module.pwd,
+        "getpwall",
+        lambda: [
+            SimpleNamespace(pw_name="owner", pw_gid=current_gid),
+            SimpleNamespace(pw_name="other", pw_gid=current_gid),
+        ],
+    )
+    with pytest.raises(RuntimeError, match="untrusted group"):
+        module._assert_trusted_checkout_filter_config_origin(f"file:{config}")
+
+
+def test_managed_worktree_rejects_checkout_filter_from_untrusted_include(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, _sha = initialize_repository(tmp_path, "filtered-untrusted")
+    home = tmp_path / "home-untrusted"
+    home.mkdir()
+    writable = tmp_path / "writable-config-parent"
+    writable.mkdir()
+    writable.chmod(0o777)
+    included = writable / "filters.gitconfig"
+    included.write_text(
+        '[filter "probe"]\n    smudge = /bin/cat\n',
+        encoding="utf-8",
+    )
+    included.chmod(0o600)
+    (home / ".gitconfig").write_text(
+        f"[include]\n    path = {included}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(home))
+
+    with pytest.raises(
+        RuntimeError,
+        match="parent directory must not be group/world writable",
+    ):
+        module._managed_worktree_git_env(
+            repo,
+            safe_global_config=tmp_path / "safe-untrusted.gitconfig",
+        )
+
+
 def test_managed_worktree_refuses_dirty_untracked_and_ignored_content(
     tmp_path: Path,
 ) -> None:
@@ -1042,6 +3944,28 @@ def test_managed_worktree_cleanup_rejects_unrelated_and_nonempty_build(
     assert blocker["automatic_mutation_authorized"] is False
     assert payload.read_bytes() == b"preserve"
     assert (ruff_cache / "CACHEDIR.TAG").read_text(encoding="utf-8") == "preserve"
+
+
+
+def test_atomic_write_json_fsyncs_parent_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    path = tmp_path / "receipts" / "fleet-last.json"
+    observed_modes: list[int] = []
+    real_fsync = module.os.fsync
+
+    def tracking_fsync(descriptor: int) -> None:
+        observed_modes.append(module.os.fstat(descriptor).st_mode)
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(module.os, "fsync", tracking_fsync)
+
+    module.atomic_write_json(path, {"status": "ok"})
+
+    assert path.is_file()
+    assert any(stat.S_ISDIR(mode) for mode in observed_modes)
 
 
 def test_atomic_create_json_preserves_concurrent_replacement(
@@ -1834,7 +4758,7 @@ def test_generation_environment_redirects_runtime_artifacts(tmp_path: Path) -> N
     env = module.generation_environment(runtime)
 
     assert env["PYTHONDONTWRITEBYTECODE"] == "1"
-    assert env.get("PYTHONNOUSERSITE") == os.environ.get("PYTHONNOUSERSITE")
+    assert env["PYTHONNOUSERSITE"] == "1"
     assert Path(env["PYTHONPYCACHEPREFIX"]) == runtime / "pycache"
     assert Path(env["XDG_CACHE_HOME"]) == runtime / "xdg-cache"
     assert Path(env["PIP_CACHE_DIR"]) == runtime / "pip-cache"
@@ -1879,11 +4803,15 @@ def test_generator_repository_is_prioritized_without_reordering_other_entries(
 def test_generator_repository_priority_is_applied_before_publication_loop() -> None:
     source = PUBLISHER.read_text(encoding="utf-8")
     inventory_return = source.index("if args.inventory:")
-    lock = source.index("lock = acquire_lock()", inventory_return)
+    lock = source.index("\n    lock = acquire_lock()", inventory_return)
+    membership = source.index(
+        "fleet_membership = load_authoritative_fleet_membership()",
+        lock,
+    )
     priority = source.index("entries, scheduling = prioritize_fleet_publication(entries)")
     loop = source.index("for entry in entries:", priority)
 
-    assert inventory_return < lock < priority < loop
+    assert inventory_return < lock < membership < priority < loop
 
 
 def test_fleet_fairness_converges_42_repository_backlog_with_limit_8(
@@ -2089,7 +5017,10 @@ def test_runtime_has_one_hourly_changed_only_timer_and_no_force_fallback() -> No
     ]
 
 
-def _run_installer(tmp_path: Path) -> subprocess.CompletedProcess[str]:
+def _run_installer(
+    tmp_path: Path,
+    *arguments: str,
+) -> subprocess.CompletedProcess[str]:
     home = tmp_path / "home"
     fake_bin = tmp_path / "bin"
     home.mkdir(exist_ok=True)
@@ -2104,13 +5035,137 @@ def _run_installer(tmp_path: Path) -> subprocess.CompletedProcess[str]:
     env["HOME"] = str(home)
     env["PATH"] = str(fake_bin) + os.pathsep + env["PATH"]
     return subprocess.run(
-        [str(INSTALLER)],
+        [str(INSTALLER), *arguments],
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         env=env,
         check=False,
     )
+
+
+def _activate_managed_runtime(home: Path, commit: str = "a" * 40) -> Path:
+    managed_root = home / ".local/share/repoground-runtime" / commit
+    managed_python = managed_root / ".venv/bin/python"
+    managed_python.parent.mkdir(parents=True)
+    managed_python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    managed_python.chmod(0o755)
+    runtime_publisher = managed_root / "scripts/ops/repoground-publish-fleet"
+    runtime_publisher.parent.mkdir(parents=True)
+    runtime_publisher.write_text("# runtime publisher\n", encoding="utf-8")
+    (managed_root.parent / "current").symlink_to(
+        managed_root,
+        target_is_directory=True,
+    )
+    return managed_root
+
+
+def test_fleet_wrapper_uses_managed_runtime_python(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    managed_base = home / ".local/share/repoground-runtime"
+    managed_root = managed_base / ("a" * 40)
+    managed_python = managed_root / ".venv/bin/python"
+    managed_python.parent.mkdir(parents=True)
+    marker = tmp_path / "managed-python.args"
+    managed_python.write_text(
+        "#!/bin/sh\n"
+        f"printf '%s\\n' \"$@\" > {shlex.quote(str(marker))}\n",
+        encoding="utf-8",
+    )
+    managed_python.chmod(0o755)
+    managed_base.mkdir(parents=True, exist_ok=True)
+    (managed_base / "current").symlink_to(managed_root, target_is_directory=True)
+
+    implementation = managed_root / "scripts/ops/repoground-publish-fleet"
+    implementation.parent.mkdir(parents=True, exist_ok=True)
+    implementation.write_text("# runtime implementation marker\n", encoding="utf-8")
+    stale_implementation = (
+        home / ".local/libexec/repoground/repoground-publish-fleet.py"
+    )
+    stale_implementation.parent.mkdir(parents=True)
+    stale_implementation.write_text("# stale implementation marker\n", encoding="utf-8")
+
+    fleet_command = tmp_path / "repoground-publish-fleet"
+    shutil.copy2(CLI_WRAPPER, fleet_command)
+
+    env = os.environ.copy()
+    env["HOME"] = str(home)
+    completed = subprocess.run(
+        ["bash", str(fleet_command), "--inventory"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+        env=env,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert marker.read_text(encoding="utf-8").splitlines() == [
+        "-I",
+        str(implementation),
+        "--inventory",
+    ]
+    assert str(stale_implementation) not in marker.read_text(encoding="utf-8")
+
+
+def test_runtime_installer_enable_fails_before_mutation_without_managed_runtime(
+    tmp_path: Path,
+) -> None:
+    completed = _run_installer(tmp_path, "--enable")
+    home = tmp_path / "home"
+
+    assert completed.returncode == 1
+    assert "managed runtime activation is unavailable" in completed.stderr
+    assert not (home / "systemctl.log").exists()
+    assert not (home / ".local/bin/repoground-publish-fleet").exists()
+
+
+def test_runtime_installer_enable_accepts_valid_managed_runtime(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    managed_root = _activate_managed_runtime(home)
+    managed_python = managed_root / ".venv/bin/python"
+    marker = tmp_path / "managed-inventory.args"
+    managed_python.write_text(
+        "#!/bin/sh\n"
+        f"printf '%s\\n' \"$@\" > {shlex.quote(str(marker))}\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    managed_python.chmod(0o755)
+
+    completed = _run_installer(tmp_path, "--enable")
+
+    assert completed.returncode == 0, completed.stderr
+    assert "PASS enabled" in completed.stdout
+    assert marker.read_text(encoding="utf-8").splitlines() == [
+        "-I",
+        str(managed_root / "scripts/ops/repoground-publish-fleet"),
+        "--inventory",
+        "--inventory-allow-missing-local-members",
+    ]
+    assert "enable --now repoground-publish-fleet-watch.timer" in (
+        home / "systemctl.log"
+    ).read_text(encoding="utf-8")
+
+
+
+def test_runtime_installer_enable_fails_before_mutation_when_inventory_preflight_fails(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    managed_root = _activate_managed_runtime(home)
+    managed_python = managed_root / ".venv/bin/python"
+    managed_python.write_text("#!/bin/sh\nexit 7\n", encoding="utf-8")
+    managed_python.chmod(0o755)
+
+    completed = _run_installer(tmp_path, "--enable")
+
+    assert completed.returncode == 1
+    assert "authoritative fleet inventory preflight failed" in completed.stderr
+    assert not (home / "systemctl.log").exists()
+    assert not (home / ".local/bin/repoground-publish-fleet").exists()
 
 
 def test_installer_atomically_migrates_state_and_starts_canonical_logs(
@@ -2133,7 +5188,13 @@ def test_installer_atomically_migrates_state_and_starts_canonical_logs(
     assert (new_state / "marker.json").read_text(encoding="utf-8") == "{}\n"
     assert new_log.is_dir()
     assert (old_log / "historical.log").read_text(encoding="utf-8") == "old\n"
-    assert (home / ".local/bin/repoground-publish-fleet").is_file()
+    installed_wrapper = home / ".local/bin/repoground-publish-fleet"
+    installed_impl = (
+        home / ".local/libexec/repoground/repoground-publish-fleet.py"
+    )
+    assert installed_wrapper.read_bytes() == CLI_WRAPPER.read_bytes()
+    assert installed_wrapper.stat().st_mode & 0o111
+    assert not installed_impl.exists()
     assert "PASS paused" in completed.stdout
 
 
@@ -2873,6 +5934,109 @@ def test_regression_canonical_inputs_only() -> None:
     assert not any("repobrief" in path for path in module.GENERATOR_INPUT_PATHS)
 
 
+def test_discover_uses_literal_origin_when_global_insteadof_rewrites(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    repos_root = tmp_path / "repos"
+    repos_root.mkdir()
+    monkeypatch.setattr(module, "REPOS_ROOT", repos_root)
+
+    repo, _ = initialize_repository(repos_root, "member")
+    literal = "https://github.com/heimgewebe/member.git"
+    git(repo, "remote", "add", "origin", literal)
+
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".gitconfig").write_text(
+        "[url \"ssh://git@github.com/\"]\n"
+        "    insteadOf = https://github.com/\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(home))
+
+    assert git(repo, "remote", "get-url", "origin") == (
+        "ssh://git@github.com/heimgewebe/member.git"
+    )
+
+    entries = module.discover()
+    assert len(entries) == 1
+    assert entries[0].key == "heimgewebe/member"
+    assert entries[0].remote == literal
+
+
+def test_discover_normalizes_github_identity_case_without_reviving_retired_aliases(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repos_root = tmp_path / "repos"
+    repos_root.mkdir()
+    monkeypatch.setattr(module, "REPOS_ROOT", repos_root)
+
+    active, _ = initialize_repository(repos_root, "mixed-active")
+    git(
+        active,
+        "remote",
+        "add",
+        "origin",
+        "git@GitHub.COM:HeimGewebe/RepoGround.git",
+    )
+    excluded, _ = initialize_repository(repos_root, "mixed-excluded")
+    git(
+        excluded,
+        "remote",
+        "add",
+        "origin",
+        "https://GitHub.COM/HeimGewebe/Vault-Gewebe.git",
+    )
+    retired, _ = initialize_repository(repos_root, "mixed-retired")
+    git(
+        retired,
+        "remote",
+        "add",
+        "origin",
+        "git@GitHub.COM:HeimGewebe/LensKit.git",
+    )
+
+    entries = module.discover()
+
+    assert len(entries) == 1
+    assert entries[0].key == "heimgewebe/repoground"
+    assert entries[0].owner == "heimgewebe"
+    assert entries[0].repo == "repoground"
+    assert entries[0].path == active
+    assert entries[0].remote == "git@GitHub.COM:HeimGewebe/RepoGround.git"
+
+
+def test_membership_keys_normalize_github_identity_case() -> None:
+    module = load_publisher()
+
+    keys = module._fleet_membership_keys(
+        {
+            "repos": [
+                {"owner": "HeimGewebe", "name": "RepoGround"},
+                {"name": "HEIMGEWEBE/HEIM-PC"},
+            ]
+        }
+    )
+
+    assert keys == ("heimgewebe/repoground", "heimgewebe/heim-pc")
+    assert (
+        module._fleet_membership_entry_key(
+            {
+                "owner": "heimgewebe",
+                "name": "repoground",
+                "url": "https://GitHub.COM/HeimGewebe/RepoGround.git",
+            }
+        )
+        == "heimgewebe/repoground"
+    )
+    assert module.canonical_repository_key("HeimGewebe/LensKit") == (
+        "heimgewebe/repoground"
+    )
+
+
 def test_regression_discover_canonicalizes_retired_lenskit_alias(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -3361,7 +6525,7 @@ def test_managed_build_blocker_is_structured_in_fleet_receipt(
     )
     monkeypatch.setattr(module, "ensure_tool_worktree", lambda: ("b" * 40, "c" * 64))
     monkeypatch.setattr(
-        module, "remote_head", lambda path: ("origin/main", "main", "a" * 40)
+        module, "remote_head_for_entry", lambda entry: ("origin/main", "main", "a" * 40)
     )
     monkeypatch.setattr(
         module,
@@ -3418,7 +6582,7 @@ def test_durable_retain_blocker_is_nonfatal_but_visible_in_fleet_receipt(
     )
     monkeypatch.setattr(module, "ensure_tool_worktree", lambda: ("b" * 40, "c" * 64))
     monkeypatch.setattr(
-        module, "remote_head", lambda path: ("origin/main", "main", "a" * 40)
+        module, "remote_head_for_entry", lambda entry: ("origin/main", "main", "a" * 40)
     )
     monkeypatch.setattr(
         module,
@@ -3548,8 +6712,8 @@ def test_idempotent_second_run_does_not_publish_or_create_bundle(
     )
     monkeypatch.setattr(
         module,
-        "remote_head",
-        lambda path: ("origin/main", "main", source_sha),
+        "remote_head_for_entry",
+        lambda entry: ("origin/main", "main", source_sha),
     )
     monkeypatch.setattr(module, "clear_active_publication_lease", lambda path: None)
     monkeypatch.setattr(
@@ -3712,3 +6876,1081 @@ def test_runtime_installer_rejects_legacy_publication_marker_spoof(
     assert "unknown file at legacy publication-policy command path" in completed.stderr
     assert legacy.is_file()
     assert not systemctl_log.exists()
+
+
+def test_fleet_membership_authority_ref_is_not_environment_overridable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("REPOGROUND_FLEET_MEMBERSHIP_REF", "attacker-branch")
+    module = load_publisher()
+
+    assert module.FLEET_MEMBERSHIP_REF == "main"
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "repos:\n  - name: repoground\nrepos:\n  - name: heim-pc\n",
+        (
+            "repos:\n"
+            "  - name: repoground\n"
+            "    owner: heimgewebe\n"
+            "    owner: attacker\n"
+        ),
+        (
+            "repos:\n"
+            "  - <<: &trusted {owner: heimgewebe}\n"
+            "    <<: &attacker {owner: attacker}\n"
+            "    name: demo\n"
+        ),
+        (
+            "repos:\n"
+            "  - <<: [{owner: heimgewebe}, {owner: attacker}]\n"
+            "    name: demo\n"
+        ),
+    ],
+)
+def test_fleet_membership_yaml_rejects_duplicate_mapping_keys(raw: str) -> None:
+    module = load_publisher()
+
+    with pytest.raises(RuntimeError, match="fleet membership YAML is invalid"):
+        module._load_fleet_membership_yaml(raw)
+
+
+def test_fleet_membership_yaml_preserves_merge_key_overrides() -> None:
+    module = load_publisher()
+    document = module._load_fleet_membership_yaml(
+        "defaults: &defaults\n"
+        "  owner: heimgewebe\n"
+        "repos:\n"
+        "  - <<: *defaults\n"
+        "    owner: other\n"
+        "    name: demo\n"
+    )
+
+    assert isinstance(document, dict)
+    assert document["repos"][0] == {"owner": "other", "name": "demo"}
+
+
+def test_fleet_membership_keys_follow_authoritative_semantics() -> None:
+    module = load_publisher()
+    document = {
+        "static": {
+            "include": [
+                {
+                    "name": "commonthing",
+                    "url": "https://github.com/heimgewebe/commonthing",
+                    "status": "related",
+                },
+                {
+                    "name": "explicit-warm",
+                    "url": "https://github.com/heimgewebe/explicit-warm",
+                    "fleet": True,
+                },
+            ]
+        },
+        "repos": [
+            {"name": "repoground"},
+            "heimgewebe/wgx",
+            {"name": "retired", "fleet": False},
+        ],
+    }
+
+    assert module._fleet_membership_keys(document) == (
+        "heimgewebe/repoground",
+        "heimgewebe/wgx",
+        "heimgewebe/explicit-warm",
+    )
+
+
+def test_fleet_membership_keys_reject_unknown_root_fields() -> None:
+    module = load_publisher()
+
+    with pytest.raises(RuntimeError, match="root has unknown fields.*statci"):
+        module._fleet_membership_keys(
+            {
+                "repos": [{"name": "repoground"}],
+                "statci": {
+                    "include": [
+                        {
+                            "name": "wgx",
+                            "fleet": True,
+                        }
+                    ]
+                },
+            }
+        )
+
+
+def test_fleet_membership_keys_reject_unknown_entry_fields() -> None:
+    module = load_publisher()
+
+    with pytest.raises(RuntimeError, match="unknown fields.*fleat"):
+        module._fleet_membership_keys(
+            {
+                "repos": [
+                    {
+                        "name": "repoground",
+                        "fleat": False,
+                    }
+                ]
+            }
+        )
+
+
+
+def test_fleet_membership_keys_reject_unknown_static_fields() -> None:
+    module = load_publisher()
+
+    with pytest.raises(RuntimeError, match="static has unknown fields.*incldue"):
+        module._fleet_membership_keys(
+            {
+                "repos": [{"name": "repoground"}],
+                "static": {
+                    "incldue": [
+                        {
+                            "name": "wgx",
+                            "fleet": True,
+                        }
+                    ]
+                },
+            }
+        )
+
+
+@pytest.mark.parametrize("fleet_value", ["false", 0, 1, None, [], {}])
+def test_fleet_membership_keys_reject_non_boolean_fleet_flags(
+    fleet_value: object,
+) -> None:
+    module = load_publisher()
+    with pytest.raises(RuntimeError, match="fleet must be a boolean"):
+        module._fleet_membership_keys(
+            {
+                "repos": [
+                    {
+                        "name": "repoground",
+                        "fleet": fleet_value,
+                    }
+                ]
+            }
+        )
+
+
+@pytest.mark.parametrize("static_value", [None, [], "invalid", 1, True])
+def test_fleet_membership_keys_reject_malformed_static_sections(
+    static_value: object,
+) -> None:
+    module = load_publisher()
+    with pytest.raises(RuntimeError, match="static must be an object"):
+        module._fleet_membership_keys(
+            {
+                "repos": [{"name": "repoground"}],
+                "static": static_value,
+            }
+        )
+
+
+def test_fleet_membership_keys_reject_null_static_include() -> None:
+    module = load_publisher()
+    with pytest.raises(RuntimeError, match=r"static\.include must be a list"):
+        module._fleet_membership_keys(
+            {
+                "repos": [{"name": "repoground"}],
+                "static": {"include": None},
+            }
+        )
+
+
+def test_fleet_membership_keys_reject_conflicting_name_repo_fields() -> None:
+    module = load_publisher()
+
+    with pytest.raises(RuntimeError, match="name/repo must match"):
+        module._fleet_membership_keys(
+            {
+                "repos": [
+                    {
+                        "name": "repoground",
+                        "repo": "wgx",
+                    }
+                ]
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    ("entry", "message"),
+    [
+        (
+            {"name": "repoground", "url": "https://github.com/heimgewebe/wgx"},
+            "URL conflicts with declared repository",
+        ),
+        (
+            {
+                "name": "repoground",
+                "owner": "other",
+                "url": "https://github.com/heimgewebe/repoground",
+            },
+            "URL conflicts with declared repository",
+        ),
+        (
+            {"name": "heimgewebe/repoground", "owner": "other"},
+            "owner conflicts with qualified repository",
+        ),
+    ],
+)
+def test_fleet_membership_keys_reject_conflicting_identity_fields(
+    entry: dict[str, object],
+    message: str,
+) -> None:
+    module = load_publisher()
+    with pytest.raises(RuntimeError, match=message):
+        module._fleet_membership_keys({"repos": [entry]})
+
+
+def test_fleet_membership_keys_accept_case_insensitive_identity_fields() -> None:
+    module = load_publisher()
+    assert module._fleet_membership_keys(
+        {
+            "repos": [
+                {
+                    "name": "HeimGewebe/RepoGround",
+                    "repo": "heimgewebe/repoground",
+                    "owner": "heimgewebe",
+                }
+            ]
+        }
+    ) == ("heimgewebe/repoground",)
+
+
+def test_fleet_membership_keys_accept_url_only_identity() -> None:
+    module = load_publisher()
+    assert module._fleet_membership_keys(
+        {"repos": [{"url": "https://github.com/other/demo"}]}
+    ) == ("other/demo",)
+
+
+def test_fleet_membership_keys_accept_matching_name_repo_fields() -> None:
+    module = load_publisher()
+
+    assert module._fleet_membership_keys(
+        {
+            "repos": [
+                {
+                    "name": "repoground",
+                    "repo": "repoground",
+                }
+            ]
+        }
+    ) == ("heimgewebe/repoground",)
+
+
+@pytest.mark.parametrize("owner_value", [False, 0, None, [], {}, "", "   "])
+def test_fleet_membership_keys_reject_malformed_owner_values(
+    owner_value: object,
+) -> None:
+    module = load_publisher()
+    with pytest.raises(RuntimeError, match="owner must be a non-empty string"):
+        module._fleet_membership_keys(
+            {
+                "repos": [
+                    {
+                        "name": "repoground",
+                        "owner": owner_value,
+                    }
+                ]
+            }
+        )
+
+
+def test_fleet_membership_keys_reject_duplicates() -> None:
+    module = load_publisher()
+    with pytest.raises(RuntimeError, match="duplicate fleet membership"):
+        module._fleet_membership_keys(
+            {
+                "repos": [
+                    {"name": "repoground"},
+                    "heimgewebe/repoground",
+                ]
+            }
+        )
+
+
+def test_authoritative_fleet_membership_reads_remote_main_not_dirty_worktree(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    remote, _ = initialize_repository(tmp_path, "metarepo-remote")
+    (remote / "fleet").mkdir()
+    authoritative = (
+        "---\n"
+        "static:\n"
+        "  include:\n"
+        "    - name: commonthing\n"
+        "      status: related\n"
+        "repos:\n"
+        "  - name: repoground\n"
+        "  - name: heim-pc\n"
+    )
+    (remote / "fleet" / "repos.yml").write_text(authoritative, encoding="utf-8")
+    git(remote, "add", "fleet/repos.yml")
+    git(remote, "commit", "-m", "authoritative fleet")
+    remote_head = git(remote, "rev-parse", "HEAD")
+
+    checkout = tmp_path / "metarepo-checkout"
+    completed = subprocess.run(
+        ["git", "clone", "--quiet", str(remote), str(checkout)],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stdout
+    (checkout / "fleet" / "repos.yml").write_text(
+        "repos:\n  - name: wrong-local-value\n",
+        encoding="utf-8",
+    )
+    assert git(checkout, "status", "--porcelain")
+
+    monkeypatch.setattr(module, "METAREPO_REPO", checkout)
+    original_run = module.run
+
+    def run_with_authority_origin(
+        argv: list[str],
+        cwd: Path | None = None,
+        check: bool = True,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        if argv[-3:] == ["remote", "get-url", "origin"]:
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout="org-236528253@github.com:heimgewebe/metarepo.git\n",
+            )
+        return original_run(argv, cwd=cwd, check=check, env=env)
+
+    monkeypatch.setattr(module, "run", run_with_authority_origin)
+    original_isolated = module.read_remote_branch_blob_isolated
+
+    def read_fixture_remote(
+        origin_url: str,
+        branch: str,
+        path: str,
+        *,
+        env: dict[str, str],
+        max_bytes: int,
+    ) -> tuple[str, str, bytes]:
+        assert origin_url == module.FLEET_MEMBERSHIP_REMOTE
+        return original_isolated(
+            str(remote),
+            branch,
+            path,
+            env=env,
+            max_bytes=max_bytes,
+        )
+
+    monkeypatch.setattr(
+        module,
+        "read_remote_branch_blob_isolated",
+        read_fixture_remote,
+    )
+    membership = module.load_authoritative_fleet_membership()
+
+    assert membership.keys == (
+        "heimgewebe/repoground",
+        "heimgewebe/heim-pc",
+    )
+    assert membership.source_commit == remote_head
+    assert membership.source_ref == "refs/heads/main"
+    assert membership.receipt()["source_ref"] == "refs/heads/main"
+    assert membership.content_sha256 == hashlib.sha256(
+        authoritative.encode("utf-8")
+    ).hexdigest()
+
+
+def test_authoritative_fleet_membership_preserves_crlf_blob_bytes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    remote, _ = initialize_repository(tmp_path, "metarepo-crlf")
+    (remote / "fleet").mkdir()
+    authoritative = (
+        b"---\r\n"
+        b"repos:\r\n"
+        b"  - name: repoground\r\n"
+        b"  - name: heim-pc\r\n"
+    )
+    (remote / "fleet" / "repos.yml").write_bytes(authoritative)
+    git(remote, "add", "fleet/repos.yml")
+    git(remote, "commit", "-m", "authoritative fleet crlf")
+
+    checkout = tmp_path / "metarepo-crlf-checkout"
+    completed = subprocess.run(
+        ["git", "clone", "--quiet", str(remote), str(checkout)],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stdout
+
+    monkeypatch.setattr(module, "METAREPO_REPO", checkout)
+    original_run = module.run
+
+    def run_with_authority_origin(
+        argv: list[str],
+        cwd: Path | None = None,
+        check: bool = True,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        if argv[-3:] == ["remote", "get-url", "origin"]:
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout="org-236528253@github.com:heimgewebe/metarepo.git\n",
+            )
+        return original_run(argv, cwd=cwd, check=check, env=env)
+
+    monkeypatch.setattr(module, "run", run_with_authority_origin)
+    original_isolated = module.read_remote_branch_blob_isolated
+
+    def read_fixture_remote(
+        origin_url: str,
+        branch: str,
+        path: str,
+        *,
+        env: dict[str, str],
+        max_bytes: int,
+    ) -> tuple[str, str, bytes]:
+        assert origin_url == module.FLEET_MEMBERSHIP_REMOTE
+        return original_isolated(
+            str(remote),
+            branch,
+            path,
+            env=env,
+            max_bytes=max_bytes,
+        )
+
+    monkeypatch.setattr(
+        module,
+        "read_remote_branch_blob_isolated",
+        read_fixture_remote,
+    )
+    membership = module.load_authoritative_fleet_membership()
+
+    assert membership.keys == (
+        "heimgewebe/repoground",
+        "heimgewebe/heim-pc",
+    )
+    assert membership.content_sha256 == hashlib.sha256(authoritative).hexdigest()
+
+
+def test_authoritative_fleet_membership_accepts_mixed_case_github_origin(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    checkout, _ = initialize_repository(tmp_path, "metarepo-mixed-case")
+    git(
+        checkout,
+        "remote",
+        "add",
+        "origin",
+        "git@GitHub.COM:HeimGewebe/MetaRepo.git",
+    )
+    monkeypatch.setattr(module, "METAREPO_REPO", checkout)
+    authoritative = b"repos:\n  - name: repoground\n"
+
+    def fake_read(
+        origin_url: str,
+        branch: str,
+        path: str,
+        *,
+        env: dict[str, str],
+        max_bytes: int,
+    ) -> tuple[str, str, bytes]:
+        assert origin_url == module.FLEET_MEMBERSHIP_REMOTE
+        assert branch == module.FLEET_MEMBERSHIP_REF
+        assert path == module.FLEET_MEMBERSHIP_PATH
+        assert env == module._authority_git_env()
+        assert max_bytes == module.FLEET_MEMBERSHIP_MAX_BYTES
+        return "refs/heads/main", "a" * 40, authoritative
+
+    monkeypatch.setattr(module, "read_remote_branch_blob_isolated", fake_read)
+
+    membership = module.load_authoritative_fleet_membership()
+
+    assert membership.keys == ("heimgewebe/repoground",)
+    assert membership.source_commit == "a" * 40
+
+
+def test_authoritative_fleet_membership_rejects_wrong_origin(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    checkout, _ = initialize_repository(tmp_path, "metarepo")
+    git(
+        checkout,
+        "remote",
+        "add",
+        "origin",
+        "git@notgithub.com:heimgewebe/metarepo.git",
+    )
+
+    monkeypatch.setattr(module, "METAREPO_REPO", checkout)
+
+    with pytest.raises(RuntimeError, match="origin mismatch"):
+        module.load_authoritative_fleet_membership()
+
+
+def test_authoritative_fleet_membership_rejects_unauthenticated_transport(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    checkout, _ = initialize_repository(tmp_path, "metarepo")
+    git(
+        checkout,
+        "remote",
+        "add",
+        "origin",
+        "http://github.com/heimgewebe/metarepo.git",
+    )
+
+    monkeypatch.setattr(module, "METAREPO_REPO", checkout)
+
+    with pytest.raises(RuntimeError, match="must use HTTPS or SSH"):
+        module.load_authoritative_fleet_membership()
+
+
+def test_select_authoritative_fleet_entries_reports_missing_and_excluded(
+    tmp_path: Path,
+) -> None:
+    module = load_publisher()
+    entries = [
+        module.RepoEntry(
+            key="heimgewebe/repoground",
+            owner="heimgewebe",
+            repo="repoground",
+            path=tmp_path / "repoground",
+            remote="git@github.com:heimgewebe/repoground.git",
+        ),
+        module.RepoEntry(
+            key="heimgewebe/old-local",
+            owner="heimgewebe",
+            repo="old-local",
+            path=tmp_path / "old-local",
+            remote="git@github.com:heimgewebe/old-local.git",
+        ),
+    ]
+    membership = module.FleetMembership(
+        keys=("heimgewebe/repoground", "heimgewebe/heim-pc"),
+        source_commit="a" * 40,
+        source_ref="origin/main",
+        source_path="fleet/repos.yml",
+        content_sha256="b" * 64,
+    )
+
+    selected, missing, excluded = module.select_authoritative_fleet_entries(
+        entries,
+        membership,
+    )
+
+    assert [entry.key for entry in selected] == ["heimgewebe/repoground"]
+    assert missing == ["heimgewebe/heim-pc"]
+    assert excluded == 1
+
+
+def test_targeted_inventory_bypasses_fleet_membership_authority(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = load_publisher()
+    entry = module.RepoEntry(
+        key="heimgewebe/nonfleet",
+        owner="heimgewebe",
+        repo="nonfleet",
+        path=tmp_path / "nonfleet",
+        remote="git@github.com:heimgewebe/nonfleet.git",
+    )
+    monkeypatch.setattr(module, "discover", lambda: [entry])
+
+    def forbidden_membership() -> module.FleetMembership:
+        raise AssertionError("targeted --repo must not require Fleet membership")
+
+    monkeypatch.setattr(
+        module,
+        "load_authoritative_fleet_membership",
+        forbidden_membership,
+    )
+
+    assert module.main(["--inventory", "--repo", "heimgewebe/nonfleet"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["repos"][0]["key"] == "heimgewebe/nonfleet"
+    assert payload["membership"]["authority_required"] is False
+
+
+def test_fleet_inventory_marks_missing_authoritative_member_as_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = load_publisher()
+    entry = module.RepoEntry(
+        key="heimgewebe/repoground",
+        owner="heimgewebe",
+        repo="repoground",
+        path=tmp_path / "repoground",
+        remote="git@github.com:heimgewebe/repoground.git",
+    )
+    membership = module.FleetMembership(
+        keys=("heimgewebe/repoground", "heimgewebe/heim-pc"),
+        source_commit="a" * 40,
+        source_ref="origin/main",
+        source_path="fleet/repos.yml",
+        content_sha256="b" * 64,
+    )
+    monkeypatch.setattr(module, "discover", lambda: [entry])
+    monkeypatch.setattr(
+        module,
+        "load_authoritative_fleet_membership",
+        lambda: membership,
+    )
+
+    assert module.main(["--inventory"]) == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "warn"
+    assert payload["count"] == 2
+    assert payload["membership"]["missing_local_members"] == [
+        "heimgewebe/heim-pc"
+    ]
+    assert payload["membership"]["excluded_local_nonmember_count"] == 0
+
+    assert (
+        module.main(
+            ["--inventory", "--inventory-allow-missing-local-members"]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "warn"
+    assert payload["membership"]["missing_local_members"] == [
+        "heimgewebe/heim-pc"
+    ]
+
+
+def test_busy_fleet_does_not_run_membership_preflight_or_replace_receipt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = load_publisher()
+    lock_path = tmp_path / "fleet.lock"
+    log_root = tmp_path / "logs"
+    monkeypatch.setattr(module, "LOCK_PATH", lock_path)
+    monkeypatch.setattr(module, "LOG_ROOT", log_root)
+    monkeypatch.setattr(module, "STATE_ROOT", tmp_path / "state")
+    monkeypatch.setattr(module, "discover", lambda: [])
+
+    def forbidden_membership() -> module.FleetMembership:
+        raise AssertionError("busy invocation must not run membership preflight")
+
+    monkeypatch.setattr(
+        module,
+        "load_authoritative_fleet_membership",
+        forbidden_membership,
+    )
+
+    held_lock = module.acquire_lock()
+    assert held_lock is not None
+    try:
+        assert module.main([]) == 0
+    finally:
+        held_lock.close()
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "status": "busy",
+        "reason": "fleet publisher already running",
+    }
+    assert not (log_root / "fleet-last.json").exists()
+
+
+def test_fleet_membership_preflight_failure_persists_fleet_last(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = load_publisher()
+    log_root = tmp_path / "logs"
+    monkeypatch.setattr(module, "LOCK_PATH", tmp_path / "fleet.lock")
+    monkeypatch.setattr(module, "LOG_ROOT", log_root)
+    monkeypatch.setattr(module, "STATE_ROOT", tmp_path / "state")
+    monkeypatch.setattr(module, "discover", lambda: [])
+
+    def unavailable_membership() -> module.FleetMembership:
+        raise RuntimeError("membership unavailable")
+
+    monkeypatch.setattr(
+        module,
+        "load_authoritative_fleet_membership",
+        unavailable_membership,
+    )
+
+    assert module.main([]) == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["phase"] == "fleet_membership"
+
+    persisted = json.loads((log_root / "fleet-last.json").read_text(encoding="utf-8"))
+    assert persisted == payload
+
+
+@pytest.mark.parametrize("policy", ["--no-tags", "--tags"])
+@pytest.mark.parametrize("scope", ["local", "worktree"])
+def test_review_tag_policy_reaches_member_resolution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, policy: str, scope: str
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path, "member-tag-policy")
+    remote = "https://github.com/heimgewebe/member.git"
+    git(repo, "remote", "add", "--no-tags", "origin", remote)
+    git(repo, "config", "--local", "--unset-all", "remote.origin.tagOpt")
+    if scope == "worktree":
+        git(repo, "config", "extensions.worktreeConfig", "true")
+    git(repo, "config", f"--{scope}", "remote.origin.tagOpt", policy)
+    entry = module.RepoEntry("heimgewebe/member", "heimgewebe", "member", repo, remote)
+    monkeypatch.setattr(module, "_global_system_github_https_config", lambda _: [])
+
+    def observe(repo_path: Path, *, remote: str, env: dict[str, str]):
+        assert repo_path == repo
+        assert remote == entry.remote
+        result = subprocess.run(
+            ["git", "-C", str(repo), "config", "--get", "remote.origin.tagOpt"],
+            env=env,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        assert result.stdout.strip() == policy
+        return "origin/main", "main", sha
+
+    monkeypatch.setattr(module, "remote_head", observe)
+    assert module.remote_head_for_entry(entry) == ("origin/main", "main", sha)
+    git(repo, "config", f"--{scope}", "remote.origin.tagOpt", "invalid-policy")
+    with pytest.raises(RuntimeError, match="unsafe.*configuration"):
+        module.remote_head_for_entry(entry)
+
+
+@pytest.mark.parametrize(
+    "policy",
+    ["", "0", "1", "false", "no", "off", "on", "true", "yes", "TRUE", "False"],
+)
+@pytest.mark.parametrize("scope", ["local", "worktree"])
+def test_review_prune_tags_policy_reaches_member_resolution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, policy: str, scope: str
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path, "member-prune-tags-policy")
+    remote = "https://github.com/heimgewebe/member.git"
+    git(repo, "remote", "add", "origin", remote)
+    if scope == "worktree":
+        git(repo, "config", "extensions.worktreeConfig", "true")
+    git(repo, "config", f"--{scope}", "remote.origin.pruneTags", policy)
+    entry = module.RepoEntry("heimgewebe/member", "heimgewebe", "member", repo, remote)
+    monkeypatch.setattr(module, "_global_system_github_https_config", lambda _: [])
+
+    def observe(repo_path: Path, *, remote: str, env: dict[str, str]):
+        assert repo_path == repo
+        assert remote == entry.remote
+        result = subprocess.run(
+            ["git", "-C", str(repo), "config", "--get", "remote.origin.pruneTags"],
+            env=env,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        assert result.stdout.rstrip("\n") == policy
+        return "origin/main", "main", sha
+
+    monkeypatch.setattr(module, "remote_head", observe)
+    assert module.remote_head_for_entry(entry) == ("origin/main", "main", sha)
+    git(repo, "config", f"--{scope}", "remote.origin.pruneTags", "invalid-policy")
+    with pytest.raises(RuntimeError, match="unsafe.*configuration"):
+        module.remote_head_for_entry(entry)
+
+
+@pytest.mark.parametrize("version", ["HTTP/1.1", "HTTP/2"])
+@pytest.mark.parametrize("key", ["http.version", "http.https://github.com/.version"])
+@pytest.mark.parametrize("scope", ["local", "worktree", "global", "system"])
+def test_review_http_version_survives_member_git_environment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    version: str,
+    key: str,
+    scope: str,
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path, "member-http-version")
+    remote = "https://github.com/heimgewebe/member.git"
+    git(repo, "remote", "add", "origin", remote)
+    entry = module.RepoEntry("heimgewebe/member", "heimgewebe", "member", repo, remote)
+    global_config = tmp_path / "global.gitconfig"
+    system_config = tmp_path / "system.gitconfig"
+    global_config.write_text("", encoding="utf-8")
+    system_config.write_text("", encoding="utf-8")
+    discovery_env = dict(os.environ)
+    for variable in list(discovery_env):
+        if variable.startswith("GIT_"):
+            discovery_env.pop(variable)
+    discovery_env.update(
+        {
+            "GIT_CONFIG_GLOBAL": str(global_config),
+            "GIT_CONFIG_SYSTEM": str(system_config),
+        }
+    )
+    monkeypatch.setattr(
+        module, "_credential_config_discovery_env", lambda: discovery_env
+    )
+    if scope in {"global", "system"}:
+        selected = global_config if scope == "global" else system_config
+        git(repo, "config", "--file", str(selected), key, version)
+    else:
+        if scope == "worktree":
+            git(repo, "config", "extensions.worktreeConfig", "true")
+        git(repo, "config", f"--{scope}", key, version)
+
+    def observe(repo_path: Path, *, remote: str, env: dict[str, str]):
+        assert repo_path == repo
+        assert remote == entry.remote
+        result = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo),
+                "config",
+                "--get-urlmatch",
+                "http.version",
+                remote,
+            ],
+            env=env,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        assert result.stdout.strip() == version
+        assert env["GIT_CONFIG_SYSTEM"] == os.devnull
+        return "origin/main", "main", sha
+
+    monkeypatch.setattr(module, "remote_head", observe)
+    assert module.remote_head_for_entry(entry) == ("origin/main", "main", sha)
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "http.version",
+        "http.https://github.com/.version",
+        "http.https://git@github.com:443/heimgewebe/member.git.version",
+    ],
+)
+@pytest.mark.parametrize("value", ["", "HTTP/3", "http/1.1", "HTTP/1.1\nHTTP/2"])
+def test_review_http_version_rejects_unbounded_values(key: str, value: str) -> None:
+    module = load_publisher()
+    assert module._fleet_https_config_entry_allowed(key, value) is False
+    assert (
+        module._fleet_member_local_config_entry_is_transport_override(key, value)
+        is True
+    )
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "http.https://github.com.example/.version",
+        "http.https://example.com/.version",
+        "http.http://github.com/.version",
+        "http.https://github.com:0/.version",
+        "http.https://github.com:65536/.version",
+    ],
+)
+def test_review_http_version_rejects_other_authorities(key: str) -> None:
+    module = load_publisher()
+    assert module._fleet_https_config_entry_allowed(key, "HTTP/1.1") is False
+    assert (
+        module._fleet_member_local_config_entry_is_transport_override(key, "HTTP/1.1")
+        is True
+    )
+
+
+def test_review_generator_environment_discards_python_and_loader_overrides(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    for key in (
+        "PYTHONPATH",
+        "PYTHONHOME",
+        "PYTHONUSERBASE",
+        "PYTHONINSPECT",
+        "LD_PRELOAD",
+    ):
+        monkeypatch.setenv(key, str(tmp_path / "untrusted"))
+    env = module.generation_environment(tmp_path / "cache")
+    for key in (
+        "PYTHONPATH",
+        "PYTHONHOME",
+        "PYTHONUSERBASE",
+        "PYTHONINSPECT",
+        "LD_PRELOAD",
+    ):
+        assert key not in env
+    assert env["PYTHONNOUSERSITE"] == "1"
+
+
+def test_review_refresh_python_flags_preserve_only_tool_tree_imports(
+    tmp_path: Path,
+) -> None:
+    module = load_publisher()
+    # An empty ordinary package must not mask the intended namespace package.
+    shadow = tmp_path / "shadow"
+    (shadow / "merger").mkdir(parents=True)
+    (shadow / "merger/__init__.py").write_text("", encoding="utf-8")
+    command = module.build_refresh_command(
+        source_wt=tmp_path / "source",
+        out_dir=tmp_path / "out",
+        registry_repository="heimgewebe__member",
+        ref_segment="main",
+        config=module.PublicationConfig(profile="fleet-context"),
+    )
+    flags = command[: command.index("-m")]
+    assert flags == [sys.executable, "-B", "-E", "-s"]
+    env = module.generation_environment(tmp_path / "runtime")
+    env.update(
+        {
+            "PYTHONPATH": str(shadow),
+            "PYTHONHOME": str(tmp_path / "absent-home"),
+            "PYTHONUSERBASE": str(tmp_path / "user-site"),
+        }
+    )
+    result = subprocess.run(
+        flags
+        + [
+            "-c",
+            (
+                "import importlib.util,json,site; "
+                "print(json.dumps({'origin':importlib.util.find_spec("
+                "'merger.repoground.cli.ground').origin,'user_site':site.ENABLE_USER_SITE}))"
+            ),
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    observed = json.loads(result.stdout)
+    assert Path(observed["origin"]) == ROOT / "merger/repoground/cli/ground.py"
+    assert observed["user_site"] is False
+
+
+def test_review_generator_preflight_rejects_clean_filtered_bytes(
+    tmp_path: Path,
+) -> None:
+    module = load_publisher()
+    repo, _ = initialize_repository(tmp_path, "filtered-generator")
+    for relative in (
+        "merger/repoground/cli/ground.py",
+        "merger/repoground/cli/cmd_ground.py",
+    ):
+        path = repo / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("canonical\n", encoding="utf-8")
+    git(repo, "add", ".")
+    git(repo, "commit", "-m", "canonical generator fixture")
+    baseline = module.generator_inputs_sha(repo)
+    attributes = repo / ".git/info/attributes"
+    attributes.parent.mkdir(parents=True, exist_ok=True)
+    attributes.write_text("*.py filter=casefixture\n", encoding="utf-8")
+    git(repo, "config", "filter.casefixture.clean", "tr A-Z a-z")
+    git(repo, "config", "filter.casefixture.smudge", "tr a-z A-Z")
+    target = repo / "merger/repoground/cli/ground.py"
+    target.unlink()
+    git(repo, "checkout", "--", "merger/repoground/cli/ground.py")
+    assert target.read_text() == "CANONICAL\n"
+    assert git(repo, "status", "--porcelain") == ""
+    with pytest.raises(RuntimeError, match="materialized generator input differs"):
+        module.generator_inputs_sha(repo)
+    # A canonical materialization restores the same identity; no gratuitous churn.
+    target.write_text("canonical\n", encoding="utf-8")
+    assert module.generator_inputs_sha(repo) == baseline
+
+
+def test_review_generator_preflight_rejects_symlink_input(tmp_path: Path) -> None:
+    module = load_publisher()
+    repo, _ = initialize_repository(tmp_path, "symlink-generator")
+    cli = repo / "merger/repoground/cli"
+    cli.mkdir(parents=True)
+    (cli / "ground.py").write_text("canonical\n", encoding="utf-8")
+    (cli / "cmd_ground.py").symlink_to("ground.py")
+    git(repo, "add", ".")
+    git(repo, "commit", "-m", "symlink generator fixture")
+    with pytest.raises(RuntimeError, match="canonical regular file"):
+        module.generator_inputs_sha(repo)
+
+
+def test_review_membership_receipt_declares_fixed_transport() -> None:
+    module = load_publisher()
+    membership = module.FleetMembership(
+        ("heimgewebe/member",), "a" * 40, "main", "fleet/repos.yml", "b" * 64
+    )
+    receipt = membership.receipt()
+    assert receipt["fetch_url"] == "https://github.com/heimgewebe/metarepo.git"
+    assert receipt["transport"] == "isolated_anonymous_https"
+    assert receipt["origin_role"] == "identity_validation_only"
+
+
+def test_review_membership_rejects_ambiguous_member_checkouts(tmp_path: Path) -> None:
+    module = load_publisher()
+    membership = module.FleetMembership(
+        ("heimgewebe/member",), "a" * 40, "main", "fleet/repos.yml", "b" * 64
+    )
+    entries = [
+        module.RepoEntry(
+            "heimgewebe/member",
+            "heimgewebe",
+            "member",
+            tmp_path / name,
+            "https://github.com/heimgewebe/member.git",
+        )
+        for name in ("first", "second")
+    ]
+    with pytest.raises(RuntimeError, match="ambiguous local fleet member checkout"):
+        module.select_authoritative_fleet_entries(entries, membership)
+
+
+def test_review_membership_counts_excluded_checkouts_not_distinct_keys(
+    tmp_path: Path,
+) -> None:
+    module = load_publisher()
+    membership = module.FleetMembership(
+        ("heimgewebe/member",), "a" * 40, "main", "fleet/repos.yml", "b" * 64
+    )
+    entries = [
+        module.RepoEntry(
+            "heimgewebe/nonmember",
+            "heimgewebe",
+            "nonmember",
+            tmp_path / name,
+            "https://github.com/heimgewebe/nonmember.git",
+        )
+        for name in ("first", "second")
+    ]
+    selected, missing, excluded = module.select_authoritative_fleet_entries(
+        entries, membership
+    )
+    assert selected == []
+    assert missing == ["heimgewebe/member"]
+    assert excluded == 2

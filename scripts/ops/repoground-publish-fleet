@@ -11,10 +11,15 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import glob
+import grp
 import hashlib
 import json
 import os
+import pwd
 import re
+import resource
+import shlex
 import shutil
 import sqlite3
 import stat
@@ -25,8 +30,11 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any, Iterable
+
+import yaml
 
 
 REPOS_ROOT = Path(
@@ -35,6 +43,31 @@ REPOS_ROOT = Path(
 REPOGROUND_REPO = Path(
     os.environ.get("REPOGROUND_REPOSITORY_PATH") or (REPOS_ROOT / "repoground")
 )
+METAREPO_REPO = Path(
+    os.environ.get("REPOGROUND_FLEET_MEMBERSHIP_REPOSITORY")
+    or (REPOS_ROOT / "metarepo")
+).expanduser()
+FLEET_MEMBERSHIP_REF = "main"
+FLEET_MEMBERSHIP_PATH = "fleet/repos.yml"
+FLEET_MEMBERSHIP_REMOTE = "https://github.com/heimgewebe/metarepo.git"
+FLEET_MEMBERSHIP_MAX_BYTES = 256 * 1024
+FLEET_AUTHORITY_FETCH_MAX_BYTES = 4 * 1024 * 1024
+FLEET_MEMBERSHIP_FETCH_OVERHEAD_BYTES = 256 * 1024
+FLEET_MEMBERSHIP_SCHEMA = "repoground.fleet-membership-authority.v1"
+FLEET_MEMBERSHIP_ENTRY_KEYS = frozenset(
+    {
+        "default_branch",
+        "depends_on",
+        "fleet",
+        "name",
+        "owner",
+        "repo",
+        "status",
+        "url",
+    }
+)
+FLEET_MEMBERSHIP_ROOT_KEYS = frozenset({"repos", "static"})
+FLEET_MEMBERSHIP_STATIC_KEYS = frozenset({"include"})
 TOOL_WT = Path(
     os.environ.get("REPOGROUND_TOOL_WORKTREE")
     or (REPOS_ROOT / ".repoground-tools" / "repoground-main")
@@ -140,6 +173,109 @@ SOURCE_RECOVERY_SCHEMA = "repoground.managed-source-recovery.v1"
 _UNSAFE_GIT_BRANCH_TOKENS = (" ", "\t", "\n", "..", "~", "^", ":", "?", "*", "[", "\\", "@{")
 
 
+class StrictFleetMembershipLoader(yaml.SafeLoader):
+    def _mapping_key(self, node: yaml.MappingNode, key_node: yaml.Node) -> object:
+        key = self.construct_object(key_node, deep=False)
+        try:
+            hash(key)
+        except TypeError as exc:
+            raise yaml.constructor.ConstructorError(
+                "while constructing a mapping",
+                node.start_mark,
+                "found unhashable mapping key",
+                key_node.start_mark,
+            ) from exc
+        return key
+
+    def _effective_mapping_keys(
+        self,
+        node: yaml.MappingNode,
+        trail: set[int],
+    ) -> set[object]:
+        marker = id(node)
+        if marker in trail:
+            raise yaml.constructor.ConstructorError(
+                "while constructing a mapping",
+                node.start_mark,
+                "found recursive YAML merge mapping",
+                node.start_mark,
+            )
+        trail.add(marker)
+        try:
+            explicit_seen: set[object] = set()
+            merged_keys: set[object] = set()
+            merge_seen = False
+            for key_node, value_node in node.value:
+                if key_node.tag == "tag:yaml.org,2002:merge":
+                    if merge_seen:
+                        raise yaml.constructor.ConstructorError(
+                            "while constructing a mapping",
+                            node.start_mark,
+                            "found duplicate mapping key '<<'",
+                            key_node.start_mark,
+                        )
+                    merge_seen = True
+                    if isinstance(value_node, yaml.MappingNode):
+                        merged_keys.update(
+                            self._effective_mapping_keys(value_node, trail)
+                        )
+                    elif isinstance(value_node, yaml.SequenceNode):
+                        sequence_seen: set[object] = set()
+                        for child in value_node.value:
+                            if not isinstance(child, yaml.MappingNode):
+                                raise yaml.constructor.ConstructorError(
+                                    "while constructing a mapping",
+                                    node.start_mark,
+                                    "expected a mapping in YAML merge sequence",
+                                    child.start_mark,
+                                )
+                            child_keys = self._effective_mapping_keys(child, trail)
+                            collisions = sequence_seen.intersection(child_keys)
+                            if collisions:
+                                rendered = ", ".join(
+                                    repr(key)
+                                    for key in sorted(collisions, key=repr)
+                                )
+                                raise yaml.constructor.ConstructorError(
+                                    "while constructing a mapping",
+                                    node.start_mark,
+                                    "found duplicate key(s) in YAML merge sequence: "
+                                    + rendered,
+                                    child.start_mark,
+                                )
+                            sequence_seen.update(child_keys)
+                        merged_keys.update(sequence_seen)
+                    else:
+                        raise yaml.constructor.ConstructorError(
+                            "while constructing a mapping",
+                            node.start_mark,
+                            "expected a mapping or list of mappings for YAML merge",
+                            value_node.start_mark,
+                        )
+                    continue
+
+                key = self._mapping_key(node, key_node)
+                if key in explicit_seen:
+                    raise yaml.constructor.ConstructorError(
+                        "while constructing a mapping",
+                        node.start_mark,
+                        f"found duplicate mapping key {key!r}",
+                        key_node.start_mark,
+                    )
+                explicit_seen.add(key)
+
+            # Explicit keys are allowed to override one merged value, matching
+            # standard YAML merge semantics. Only collisions *between* members
+            # of one merge sequence are ambiguous and rejected above.
+            return merged_keys.union(explicit_seen)
+        finally:
+            trail.remove(marker)
+
+    def flatten_mapping(self, node: yaml.MappingNode) -> None:
+        self._effective_mapping_keys(node, set())
+        super().flatten_mapping(node)
+
+
 @dataclass(frozen=True)
 class RepoEntry:
     key: str
@@ -147,6 +283,30 @@ class RepoEntry:
     repo: str
     path: Path
     remote: str
+
+
+@dataclass(frozen=True)
+class FleetMembership:
+    keys: tuple[str, ...]
+    source_commit: str
+    source_ref: str
+    source_path: str
+    content_sha256: str
+
+    def receipt(self) -> dict[str, object]:
+        return {
+            "schema": FLEET_MEMBERSHIP_SCHEMA,
+            "authority_repository": "heimgewebe/metarepo",
+            "fetch_url": FLEET_MEMBERSHIP_REMOTE,
+            "transport": "isolated_anonymous_https",
+            "origin_role": "identity_validation_only",
+            "source_commit": self.source_commit,
+            "source_ref": self.source_ref,
+            "source_path": self.source_path,
+            "content_sha256": self.content_sha256,
+            "member_count": len(self.keys),
+            "members": list(self.keys),
+        }
 
 
 @dataclass(frozen=True)
@@ -210,10 +370,13 @@ def run(
     check: bool = True,
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    effective_env = env
+    if effective_env is None and argv and Path(argv[0]).name == "git":
+        effective_env = _authority_git_env()
     cp = subprocess.run(
         argv,
         cwd=str(cwd) if cwd else None,
-        env=env,
+        env=effective_env,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -242,6 +405,17 @@ def atomic_write_json(path: Path, payload: dict[str, object]) -> None:
             fh.flush()
             os.fsync(fh.fileno())
         os.replace(tmp, path)
+        directory_flag = getattr(os, "O_DIRECTORY", 0)
+        if not directory_flag:
+            raise RuntimeError("atomic JSON replacement requires directory fsync support")
+        directory_fd = os.open(
+            path.parent,
+            os.O_RDONLY | os.O_CLOEXEC | directory_flag,
+        )
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
     finally:
         if tmp.exists():
             tmp.unlink()
@@ -348,27 +522,107 @@ def canonical_sha256(payload: dict[str, object]) -> str:
 
 
 def parse_github_remote(remote: str) -> tuple[str, str] | None:
-    if remote.startswith("/") or remote.startswith("file:"):
+    value = remote.strip()
+    if value.startswith("/") or value.casefold().startswith("file:"):
         return None
-    match = re.search(r"github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?$", remote)
-    if not match:
+    url_match = re.fullmatch(
+        r"(?:https?|ssh|git)://(?:[^/@:]+@)?github\.com"
+        r"(?::([0-9]+))?/([^/]+)/([^/]+?)(?:\.git)?/?",
+        value,
+        flags=re.ASCII | re.IGNORECASE,
+    )
+    if url_match:
+        port = url_match.group(1)
+        if port is not None and not 1 <= int(port) <= 65535:
+            return None
+        return url_match.group(2), url_match.group(3)
+    scp_match = re.fullmatch(
+        r"(?:[^@/:]+@)?github\.com:"
+        r"([^/]+)/([^/]+?)(?:\.git)?/?",
+        value,
+        flags=re.ASCII | re.IGNORECASE,
+    )
+    if not scp_match:
         return None
-    return match.group(1), match.group(2)
+    return scp_match.group(1), scp_match.group(2)
+
+
+def github_ssh_remote_explicit_port(remote: str) -> int | None:
+    value = remote.strip()
+    match = re.fullmatch(
+        r"ssh://[^/@:]+@github\.com(?::([0-9]+))?/[^/]+/[^/]+(?:\.git)?/?",
+        value,
+        flags=re.ASCII | re.IGNORECASE,
+    )
+    if match is None or match.group(1) is None:
+        return None
+    port = int(match.group(1))
+    if not 1 <= port <= 65535:
+        return None
+    return port
+
+
+def github_ssh_remote_user(remote: str) -> str | None:
+    value = remote.strip()
+    url_match = re.fullmatch(
+        r"ssh://([^/@:]+)@github\.com(?::[0-9]+)?/[^/]+/[^/]+(?:\.git)?/?",
+        value,
+        flags=re.ASCII | re.IGNORECASE,
+    )
+    if url_match is not None:
+        return url_match.group(1)
+    scp_match = re.fullmatch(
+        r"([^@/:]+)@github\.com:[^/]+/[^/]+(?:\.git)?/?",
+        value,
+        flags=re.ASCII | re.IGNORECASE,
+    )
+    return scp_match.group(1) if scp_match is not None else None
+
+
+def github_remote_uses_authenticated_transport(remote: str) -> bool:
+    value = remote.strip()
+    if value.casefold().startswith("https://"):
+        return parse_github_remote(value) is not None
+    if re.fullmatch(
+        r"ssh://[^/@:]+@github\.com(?::[0-9]+)?/[^/]+/[^/]+(?:\.git)?/?",
+        value,
+        flags=re.ASCII | re.IGNORECASE,
+    ):
+        return parse_github_remote(value) is not None
+    if re.fullmatch(
+        r"[^@/:]+@github\.com:[^/]+/[^/]+(?:\.git)?/?",
+        value,
+        flags=re.ASCII | re.IGNORECASE,
+    ):
+        return parse_github_remote(value) is not None
+    return False
+
+
+def normalized_repository_key(key: str) -> str:
+    return key.casefold()
 
 
 def canonical_repository_key(key: str) -> str:
-    return RETIRED_REPOSITORY_ALIASES.get(key, key)
+    normalized = normalized_repository_key(key)
+    return RETIRED_REPOSITORY_ALIASES.get(normalized, normalized)
 
 
-def is_top_level_git(path: Path) -> bool:
+def is_top_level_git(
+    path: Path,
+    *,
+    env: dict[str, str] | None = None,
+) -> bool:
     cp = run(
         ["git", "-C", str(path), "rev-parse", "--is-inside-work-tree"],
         check=False,
+        env=env,
     )
     if cp.returncode != 0 or cp.stdout.strip() != "true":
         return False
     top = run(
-        ["git", "-C", str(path), "rev-parse", "--show-toplevel"], check=False
+        ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
+        check=False,
+        env=env,
     ).stdout.strip()
     return bool(top) and Path(top).resolve() == path.resolve()
 
@@ -402,22 +656,43 @@ def score_candidate(owner: str, repo: str, path: Path) -> int:
 
 def discover() -> list[RepoEntry]:
     best: dict[str, tuple[int, RepoEntry]] = {}
+    transport_env = _authority_git_env()
     for path in sorted(REPOS_ROOT.iterdir()):
         if not path.is_dir() or path.name in EXCLUDE or path.name.startswith("."):
             continue
-        if not is_top_level_git(path):
+        if not is_top_level_git(path, env=transport_env):
             continue
-        remote = run(
-            ["git", "-C", str(path), "remote", "get-url", "origin"], check=False
-        ).stdout.strip()
+        configured = run(
+            [
+                "git",
+                "-C",
+                str(path),
+                "config",
+                "--local",
+                "--no-includes",
+                "--get-all",
+                "remote.origin.url",
+            ],
+            check=False,
+            env=transport_env,
+        )
+        configured_urls = [
+            line.strip()
+            for line in configured.stdout.splitlines()
+            if line.strip()
+        ]
+        if configured.returncode != 0 or not configured_urls:
+            continue
+        remote = configured_urls[0]
         parsed = parse_github_remote(remote)
         if not parsed:
             continue
         observed_owner, observed_repo = parsed
         observed_key = f"{observed_owner}/{observed_repo}"
-        if observed_key in RETIRED_REPOSITORY_ALIASES:
+        normalized_observed_key = normalized_repository_key(observed_key)
+        if normalized_observed_key in RETIRED_REPOSITORY_ALIASES:
             continue
-        key = canonical_repository_key(observed_key)
+        key = canonical_repository_key(normalized_observed_key)
         if key in EXCLUDED_REPO_KEYS:
             continue
         owner, repo = key.split("/", 1)
@@ -604,7 +879,11 @@ def assert_managed_worktree_identity(path: Path, expected_repo: Path) -> None:
         )
 
 
-def managed_worktree_status(path: Path) -> list[tuple[str, str]]:
+def managed_worktree_status(
+    path: Path,
+    *,
+    env: dict[str, str] | None = None,
+) -> list[tuple[str, str]]:
     raw = run(
         [
             "git",
@@ -615,7 +894,8 @@ def managed_worktree_status(path: Path) -> list[tuple[str, str]]:
             "-z",
             "--untracked-files=all",
             "--ignored=matching",
-        ]
+        ],
+        env=env,
     ).stdout
     rows: list[tuple[str, str]] = []
     for record in raw.split("\0"):
@@ -1791,10 +2071,29 @@ def remove_managed_disposable_artifact(path: Path, worktree: Path) -> None:
     shutil.rmtree(path)
 
 
-def cleanup_managed_disposable_artifacts(path: Path, expected_repo: Path) -> list[str]:
+def cleanup_managed_disposable_artifacts(
+    path: Path,
+    expected_repo: Path,
+    *,
+    env: dict[str, str] | None = None,
+) -> list[str]:
+    if env is None:
+        with tempfile.TemporaryDirectory(
+            prefix="repoground-managed-worktree-gitconfig-",
+            dir="/tmp",
+        ) as raw_config_root:
+            checkout_env = _managed_worktree_git_env(
+                expected_repo,
+                safe_global_config=Path(raw_config_root) / "global.gitconfig",
+            )
+            return cleanup_managed_disposable_artifacts(
+                path,
+                expected_repo,
+                env=checkout_env,
+            )
     assert_managed_worktree_identity(path, expected_repo)
     reconciled = reconcile_managed_build_quarantine(path, expected_repo)
-    status = managed_worktree_status(path)
+    status = managed_worktree_status(path, env=env)
     if not status:
         return [reconciled] if reconciled is not None else []
     roots: set[Path] = set()
@@ -1832,9 +2131,29 @@ def cleanup_managed_disposable_artifacts(path: Path, expected_repo: Path) -> lis
     return removed
 
 
-def assert_managed_worktree_clean(path: Path, expected_repo: Path) -> None:
+def assert_managed_worktree_clean(
+    path: Path,
+    expected_repo: Path,
+    *,
+    env: dict[str, str] | None = None,
+) -> None:
+    if env is None:
+        with tempfile.TemporaryDirectory(
+            prefix="repoground-managed-worktree-gitconfig-",
+            dir="/tmp",
+        ) as raw_config_root:
+            checkout_env = _managed_worktree_git_env(
+                expected_repo,
+                safe_global_config=Path(raw_config_root) / "global.gitconfig",
+            )
+            assert_managed_worktree_clean(
+                path,
+                expected_repo,
+                env=checkout_env,
+            )
+            return
     assert_managed_worktree_identity(path, expected_repo)
-    status = managed_worktree_status(path)
+    status = managed_worktree_status(path, env=env)
     if status:
         raise ManagedWorktreeDirtyError(path, status)
 
@@ -1846,9 +2165,17 @@ def generation_environment(cache_root: Path) -> dict[str, str]:
     temporary = cache_root / "tmp"
     for directory in (pycache, xdg_cache, pip_cache, temporary):
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-    env = os.environ.copy()
+    # Interpreter flags in the parent do not sanitize a child's environment.
+    # Keep Python path/user-site overrides out of the managed generator process.
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("PYTHON")
+        and key.lower() not in _AUTHORITY_LOADER_ENV_NAMES
+    }
     env.update(
         {
+            "PYTHONNOUSERSITE": "1",
             "PYTHONDONTWRITEBYTECODE": "1",
             "PYTHONPYCACHEPREFIX": str(pycache),
             "XDG_CACHE_HOME": str(xdg_cache),
@@ -1865,30 +2192,48 @@ def prepare_managed_worktree(
     expected_repo: Path,
     target: str,
 ) -> None:
-    if path.exists() or path.is_symlink():
-        cleanup_managed_disposable_artifacts(path, expected_repo)
-        assert_managed_worktree_clean(path, expected_repo)
-        assert_managed_worktree_idle(path)
-        run(["git", "-C", str(path), "reset", "--hard", target])
-        assert_managed_worktree_clean(path, expected_repo)
-        return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    run(
-        [
-            "git",
-            "-C",
-            str(expected_repo),
-            "worktree",
-            "add",
-            "--detach",
-            str(path),
-            target,
-        ]
-    )
-    assert_managed_worktree_clean(path, expected_repo)
+    with tempfile.TemporaryDirectory(
+        prefix="repoground-managed-worktree-gitconfig-",
+        dir="/tmp",
+    ) as raw_config_root:
+        env = _managed_worktree_git_env(
+            expected_repo,
+            safe_global_config=Path(raw_config_root) / "global.gitconfig",
+        )
+        if path.exists() or path.is_symlink():
+            cleanup_managed_disposable_artifacts(
+                path,
+                expected_repo,
+                env=env,
+            )
+            assert_managed_worktree_clean(path, expected_repo, env=env)
+            assert_managed_worktree_idle(path)
+            run(
+                ["git", "-C", str(path), "reset", "--hard", target],
+                env=env,
+            )
+            assert_managed_worktree_clean(path, expected_repo, env=env)
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        run(
+            [
+                "git",
+                "-C",
+                str(expected_repo),
+                "worktree",
+                "add",
+                "--detach",
+                str(path),
+                target,
+            ],
+            env=env,
+        )
+        assert_managed_worktree_clean(path, expected_repo, env=env)
 
 
 def generator_inputs_sha(worktree: Path) -> str:
+    git_env = _authority_git_env()
+    git_env["GIT_NO_REPLACE_OBJECTS"] = "1"
     raw = run(
         [
             "git",
@@ -1900,7 +2245,8 @@ def generator_inputs_sha(worktree: Path) -> str:
             "HEAD",
             "--",
             *GENERATOR_INPUT_PATHS,
-        ]
+        ],
+        env=git_env,
     ).stdout
     entries: list[dict[str, str]] = []
     for record in raw.split("\0"):
@@ -1930,17 +2276,129 @@ def generator_inputs_sha(worktree: Path) -> str:
     missing = sorted(required_files - present_paths)
     if missing:
         raise RuntimeError(f"missing required generator inputs: {missing}")
+    # Git status can be clean after a round-tripping smudge/clean filter even
+    # when the executed generator bytes differ from the blobs in this digest.
+    # Source worktrees retain their filter support; generator inputs must match
+    # canonical commit bytes before any unchanged/publication decision.
+    root = worktree.resolve(strict=True)
+    for entry in entries:
+        candidate = root / entry["path"]
+        if (
+            entry["mode"] not in {"100644", "100755"}
+            or candidate.is_symlink()
+            or not candidate.is_file()
+            or candidate.resolve(strict=True) != candidate
+        ):
+            raise RuntimeError(
+                f"generator input is not a canonical regular file: {entry['path']}"
+            )
+    # Bound argv size without invoking one subprocess per input file.
+    for start in range(0, len(entries), 128):
+        batch = entries[start : start + 128]
+        observed = run(
+            [
+                "git", "-C", str(root), "hash-object", "--no-filters", "--",
+                *(entry["path"] for entry in batch),
+            ],
+            env=git_env,
+        ).stdout.splitlines()
+        if len(observed) != len(batch):
+            raise RuntimeError("generator input hash verification is incomplete")
+        for entry, object_id in zip(batch, observed):
+            if object_id != entry["object_id"]:
+                raise RuntimeError(
+                    "materialized generator input differs from committed blob: "
+                    f"{entry['path']}"
+                )
     return canonical_sha256(entries)
 
 
+def _repoground_tool_entry() -> RepoEntry:
+    transport_env = _authority_git_env()
+    configured = run(
+        [
+            "git",
+            "-C",
+            str(REPOGROUND_REPO),
+            "config",
+            "--local",
+            "--no-includes",
+            "--get-all",
+            "remote.origin.url",
+        ],
+        check=False,
+        env=transport_env,
+    )
+    configured_urls = [
+        line.strip() for line in configured.stdout.splitlines() if line.strip()
+    ]
+    if configured.returncode != 0 or not configured_urls:
+        raise RuntimeError("RepoGround generator origin is unavailable")
+    remote = configured_urls[0]
+    parsed_remote = parse_github_remote(remote)
+    if (
+        parsed_remote is None
+        or normalized_repository_key(f"{parsed_remote[0]}/{parsed_remote[1]}")
+        != "heimgewebe/repoground"
+    ):
+        raise RuntimeError("RepoGround generator origin identity mismatch")
+    if not github_remote_uses_authenticated_transport(remote):
+        raise RuntimeError("RepoGround generator origin must use HTTPS or SSH")
+    return RepoEntry(
+        key="heimgewebe/repoground",
+        owner="heimgewebe",
+        repo="repoground",
+        path=REPOGROUND_REPO,
+        remote=remote,
+    )
+
+
+def _managed_runtime_commit_for_publisher() -> str | None:
+    publisher_path = Path(__file__).resolve(strict=True)
+    managed_base = Path.home() / ".local" / "share" / "repoground-runtime"
+    try:
+        managed_base_resolved = managed_base.resolve(strict=True)
+        relative = publisher_path.relative_to(managed_base_resolved)
+    except (FileNotFoundError, ValueError):
+        return None
+    if relative.parts[1:] != ("scripts", "ops", "repoground-publish-fleet"):
+        raise RuntimeError(
+            "managed RepoGround publisher path does not match the release layout"
+        )
+    release = relative.parts[0]
+    if SOURCE_REVISION_RE.fullmatch(release) is None:
+        raise RuntimeError(
+            "managed RepoGround publisher release directory is not a commit"
+        )
+    return release
+
+
+def _repoground_tool_head() -> str:
+    entry = _repoground_tool_entry()
+    managed_release = _managed_runtime_commit_for_publisher()
+    if managed_release is not None:
+        return managed_release
+    _remote_ref, branch, tool_sha = remote_head_for_entry(entry)
+    if branch != "main":
+        raise RuntimeError(
+            f"RepoGround generator origin default branch must be main, got {branch!r}"
+        )
+    return tool_sha
+
+
 def ensure_tool_worktree() -> tuple[str, str]:
-    run(["git", "-C", str(REPOGROUND_REPO), "fetch", "origin", "--prune"])
+    tool_sha = _repoground_tool_head()
     prepare_managed_worktree(
         TOOL_WT,
         expected_repo=REPOGROUND_REPO,
-        target="origin/main",
+        target=tool_sha,
     )
-    tool_sha = run(["git", "-C", str(TOOL_WT), "rev-parse", "HEAD"]).stdout.strip()
+    confirmed = run(
+        ["git", "-C", str(TOOL_WT), "rev-parse", "HEAD"],
+        env=_authority_git_env(),
+    ).stdout.strip()
+    if confirmed != tool_sha:
+        raise RuntimeError("RepoGround generator worktree revision mismatch")
     return tool_sha, generator_inputs_sha(TOOL_WT)
 
 
@@ -1987,7 +2445,13 @@ def parse_advertised_remote_head(
     return advertised_branch, advertised_sha
 
 
-def fetch_remote_tracking_branch(repo_path: Path, branch: str) -> str:
+def fetch_remote_tracking_branch(
+    repo_path: Path,
+    branch: str,
+    *,
+    remote: str = "origin",
+    env: dict[str, str] | None = None,
+) -> str:
     tracking_ref = f"refs/remotes/origin/{branch}"
     run(
         [
@@ -1996,13 +2460,15 @@ def fetch_remote_tracking_branch(repo_path: Path, branch: str) -> str:
             str(repo_path),
             "fetch",
             "--no-tags",
-            "origin",
+            remote,
             f"+refs/heads/{branch}:{tracking_ref}",
-        ]
+        ],
+        env=env,
     )
     parsed = run(
         ["git", "-C", str(repo_path), "rev-parse", "--verify", tracking_ref],
         check=False,
+        env=env,
     )
     revision = parsed.stdout.strip() if parsed.returncode == 0 else ""
     if SOURCE_REVISION_RE.fullmatch(revision) is None:
@@ -2012,9 +2478,15 @@ def fetch_remote_tracking_branch(repo_path: Path, branch: str) -> str:
     return revision
 
 
-def remote_head(repo_path: Path) -> tuple[str, str, str]:
+def remote_head(
+    repo_path: Path,
+    *,
+    remote: str = "origin",
+    env: dict[str, str] | None = None,
+) -> tuple[str, str, str]:
     advertised = run(
-        ["git", "-C", str(repo_path), "ls-remote", "--symref", "origin", "HEAD"]
+        ["git", "-C", str(repo_path), "ls-remote", "--symref", remote, "HEAD"],
+        env=env,
     ).stdout.splitlines()
     advertised_branch, advertised_sha = parse_advertised_remote_head(
         advertised, repo_path
@@ -2025,7 +2497,12 @@ def remote_head(repo_path: Path) -> tuple[str, str, str]:
                 f"remote default branch revision unavailable for {repo_path}: "
                 f"{advertised_branch}"
             )
-        local_sha = fetch_remote_tracking_branch(repo_path, advertised_branch)
+        local_sha = fetch_remote_tracking_branch(
+            repo_path,
+            advertised_branch,
+            remote=remote,
+            env=env,
+        )
         if local_sha != advertised_sha:
             raise RuntimeError(
                 f"remote default branch moved during resolution for {repo_path}: "
@@ -2033,7 +2510,6 @@ def remote_head(repo_path: Path) -> tuple[str, str, str]:
             )
         return f"origin/{advertised_branch}", advertised_branch, local_sha
 
-    run(["git", "-C", str(repo_path), "fetch", "origin", "--prune"])
     head = run(
         [
             "git",
@@ -2044,24 +2520,2117 @@ def remote_head(repo_path: Path) -> tuple[str, str, str]:
             "--short",
         ],
         check=False,
+        env=env,
     ).stdout.strip()
+    candidate_refs: list[str] = []
+    fallback_mismatches: list[str] = []
     for ref in [head, "origin/main", "origin/master"]:
-        if not ref:
+        if not ref or ref in candidate_refs or not ref.startswith("origin/"):
             continue
-        cp = run(["git", "-C", str(repo_path), "rev-parse", ref], check=False)
-        if cp.returncode == 0:
-            revision = cp.stdout.strip()
-            if SOURCE_REVISION_RE.fullmatch(revision) is None:
-                raise RuntimeError(
-                    f"invalid remote default branch revision for {repo_path}: {revision!r}"
-                )
-            if advertised_sha is not None and revision != advertised_sha:
-                raise RuntimeError(
-                    f"remote HEAD disagrees with local default branch for {repo_path}: {ref}"
-                )
-            branch = ref.split("/", 1)[1] if ref.startswith("origin/") else ref
-            return ref, branch, revision
+        candidate_refs.append(ref)
+        branch = ref.split("/", 1)[1]
+        if not is_safe_git_branch_name(branch):
+            continue
+        full_ref = f"refs/heads/{branch}"
+        candidate = run(
+            [
+                "git",
+                "-C",
+                str(repo_path),
+                "ls-remote",
+                "--exit-code",
+                "--refs",
+                "--",
+                remote,
+                full_ref,
+            ],
+            check=False,
+            env=env,
+        )
+        matching: list[str] = []
+        for line in candidate.stdout.splitlines():
+            value, separator, candidate_ref = line.partition("\t")
+            if separator and candidate_ref == full_ref:
+                matching.append(value)
+        if (
+            candidate.returncode != 0
+            or len(matching) != 1
+            or SOURCE_REVISION_RE.fullmatch(matching[0]) is None
+        ):
+            continue
+        candidate_sha = matching[0]
+        if advertised_sha is not None and candidate_sha != advertised_sha:
+            fallback_mismatches.append(ref)
+            continue
+        revision = fetch_remote_tracking_branch(
+            repo_path,
+            branch,
+            remote=remote,
+            env=env,
+        )
+        if revision != candidate_sha:
+            raise RuntimeError(
+                f"remote default branch moved during fallback resolution for "
+                f"{repo_path}: {branch}"
+            )
+        if advertised_sha is not None and revision != advertised_sha:
+            raise RuntimeError(
+                f"remote HEAD moved during fallback resolution for {repo_path}: "
+                f"{branch}"
+            )
+        return ref, branch, revision
+    if advertised_sha is not None and fallback_mismatches:
+        raise RuntimeError(
+            f"remote HEAD disagrees with fallback branches for {repo_path}: "
+            + ", ".join(fallback_mismatches)
+        )
     raise RuntimeError(f"no remote default branch for {repo_path}")
+
+
+_AUTHORITY_GIT_FORBIDDEN_ENV = frozenset(
+    {
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_COMMON_DIR",
+        "GIT_CONFIG_GLOBAL",
+        "GIT_CONFIG_NOSYSTEM",
+        "GIT_CONFIG_PARAMETERS",
+        "GIT_CONFIG_SYSTEM",
+        "GIT_DIR",
+        "GIT_EXEC_PATH",
+        "GIT_INDEX_FILE",
+        "GIT_NAMESPACE",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_PROXY_COMMAND",
+        "GIT_SSH",
+        "GIT_SSH_COMMAND",
+        "GIT_SSL_NO_VERIFY",
+        "GIT_WORK_TREE",
+    }
+)
+_AUTHORITY_GIT_ALLOWED_ORIGIN_CONFIG = frozenset(
+    {"remote.origin.fetch", "remote.origin.pushurl", "remote.origin.url"}
+)
+_FLEET_MEMBER_ALLOWED_ORIGIN_CONFIG = _AUTHORITY_GIT_ALLOWED_ORIGIN_CONFIG | frozenset(
+    {"remote.origin.prune", "remote.origin.prunetags"}
+)
+_AUTHORITY_PROXY_ENV_NAMES = frozenset({"all_proxy", "http_proxy", "https_proxy"})
+_AUTHORITY_TLS_ENV_NAMES = frozenset(
+    {"curl_ca_bundle", "ssl_cert_dir", "ssl_cert_file"}
+)
+_FLEET_MEMBER_TLS_ENV_NAMES = _AUTHORITY_TLS_ENV_NAMES | frozenset(
+    {
+        "git_ssl_cainfo",
+        "git_ssl_capath",
+        "git_ssl_cert",
+        "git_ssl_cert_password_protected",
+        "git_ssl_key",
+    }
+)
+_AUTHORITY_LOADER_ENV_NAMES = frozenset({"ld_library_path", "ld_preload"})
+_AUTHORITY_ASKPASS_ENV_NAMES = frozenset({"ssh_askpass"})
+
+
+def _authority_git_env() -> dict[str, str]:
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("GIT_")
+        and key.lower() not in _AUTHORITY_ASKPASS_ENV_NAMES
+        and key.lower() not in _AUTHORITY_PROXY_ENV_NAMES
+        and key.lower() not in _AUTHORITY_TLS_ENV_NAMES
+        and key.lower() not in _AUTHORITY_LOADER_ENV_NAMES
+    }
+    env.update(
+        {
+            "PATH": "/usr/bin:/bin",
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_CONFIG_SYSTEM": os.devnull,
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_TERMINAL_PROMPT": "0",
+            "GIT_SSH_COMMAND": "/usr/bin/ssh -F /dev/null -o BatchMode=yes",
+            "GIT_SSH_VARIANT": "ssh",
+        }
+    )
+    return env
+
+
+def _credential_config_discovery_env() -> dict[str, str]:
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("GIT_")
+        and key.lower() not in _AUTHORITY_ASKPASS_ENV_NAMES
+        and key.lower() not in _AUTHORITY_LOADER_ENV_NAMES
+    }
+    env["PATH"] = "/usr/bin:/bin"
+    return env
+
+
+_FLEET_CHECKOUT_FILTER_KEY_RE = re.compile(
+    r"filter\.[a-z0-9._@+-]+\.(?:clean|smudge|process|required)",
+    re.ASCII | re.IGNORECASE,
+)
+_FLEET_CHECKOUT_FILTER_MAX_ENTRIES = 128
+_FLEET_CHECKOUT_FILTER_MAX_BYTES = 128 * 1024
+
+
+def _checkout_filter_private_group_write_trusted(metadata: os.stat_result) -> bool:
+    mode = stat.S_IMODE(metadata.st_mode)
+    if mode & stat.S_IWOTH:
+        return False
+    if not mode & stat.S_IWGRP:
+        return True
+    if metadata.st_uid != os.getuid() or metadata.st_gid != os.getgid():
+        return False
+    try:
+        username = pwd.getpwuid(os.getuid()).pw_name
+        group = grp.getgrgid(metadata.st_gid)
+        primary_users = {
+            entry.pw_name
+            for entry in pwd.getpwall()
+            if entry.pw_gid == metadata.st_gid
+        }
+    except (KeyError, OSError):
+        return False
+    explicit_members = set(group.gr_mem)
+    return primary_users <= {username} and explicit_members <= {username}
+
+
+def _assert_trusted_checkout_filter_config_origin(
+    origin: str,
+    *,
+    label: str = "fleet checkout filter config",
+) -> None:
+    if not origin.startswith("file:"):
+        raise RuntimeError(f"{label} origin must be a file")
+    path = Path(origin.removeprefix("file:"))
+    if not path.is_absolute():
+        raise RuntimeError(f"{label} path must be absolute")
+    try:
+        raw_metadata = path.lstat()
+    except OSError as exc:
+        raise RuntimeError(f"{label} path is unavailable") from exc
+    if raw_metadata.st_uid not in {0, os.getuid()}:
+        raise RuntimeError(f"{label} must be user/root-owned")
+    _assert_fleet_member_askpass_ancestors_trusted(path, label=label)
+    try:
+        resolved = path.resolve(strict=True)
+    except OSError as exc:
+        raise RuntimeError(f"{label} path is unavailable") from exc
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    if not nofollow:
+        raise RuntimeError(f"{label} requires O_NOFOLLOW support")
+    try:
+        descriptor = os.open(
+            resolved,
+            os.O_RDONLY | os.O_CLOEXEC | nofollow,
+        )
+    except OSError as exc:
+        raise RuntimeError(f"{label} is unavailable") from exc
+    try:
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_nlink != 1
+            or metadata.st_uid not in {0, os.getuid()}
+        ):
+            raise RuntimeError(
+                f"{label} must be one user/root-owned regular file"
+            )
+        if not _checkout_filter_private_group_write_trusted(metadata):
+            raise RuntimeError(
+                f"{label} must not be world-writable or writable by "
+                "an untrusted group"
+            )
+        _assert_fleet_member_askpass_ancestors_trusted(
+            resolved,
+            label=label,
+        )
+    finally:
+        os.close(descriptor)
+
+
+def _validated_checkout_attributes_file(raw: str) -> str:
+    if not raw or any(char in raw for char in ("\x00", "\n", "\r")):
+        raise RuntimeError("fleet checkout attributes file path is invalid")
+    expanded = os.path.expanduser(raw)
+    path = Path(expanded)
+    if not path.is_absolute():
+        raise RuntimeError(
+            "fleet checkout attributes file path must be absolute after expansion"
+        )
+    _assert_trusted_checkout_filter_config_origin(
+        f"file:{path}",
+        label="fleet checkout attributes file",
+    )
+    try:
+        return str(path.resolve(strict=True))
+    except OSError as exc:
+        raise RuntimeError("fleet checkout attributes file is unavailable") from exc
+
+
+def _global_system_checkout_filter_config(
+    repo_path: Path,
+) -> list[tuple[str, str]]:
+    env = _credential_config_discovery_env()
+    cp = subprocess.run(
+        [
+            "/usr/bin/git",
+            "-C",
+            str(repo_path),
+            "config",
+            "--includes",
+            "--show-scope",
+            "--show-origin",
+            "--null",
+            "--get-regexp",
+            r"^(filter\.|core\.attributesfile$)",
+        ],
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if cp.returncode == 1:
+        return []
+    if cp.returncode != 0:
+        raise RuntimeError(
+            "Git checkout filter configuration is unavailable for "
+            f"{repo_path}: {cp.stderr.strip()}"
+        )
+    if len(cp.stdout.encode("utf-8")) > _FLEET_CHECKOUT_FILTER_MAX_BYTES:
+        raise RuntimeError("Git checkout filter configuration exceeds bounded size")
+
+    fields = cp.stdout.split(chr(0))
+    if fields and fields[-1] == "":
+        fields.pop()
+    if len(fields) % 3:
+        raise RuntimeError("Git checkout filter configuration is malformed")
+
+    entries: list[tuple[str, str]] = []
+    validated_origins: set[str] = set()
+    for scope, origin, record in zip(
+        fields[0::3],
+        fields[1::3],
+        fields[2::3],
+    ):
+        if scope not in {"system", "global"}:
+            continue
+        if origin not in validated_origins:
+            _assert_trusted_checkout_filter_config_origin(origin)
+            validated_origins.add(origin)
+        key, separator, value = record.partition("\n")
+        if not separator:
+            raise RuntimeError("Git checkout filter configuration record is malformed")
+        normalized = key.strip().lower()
+        if normalized == "core.attributesfile":
+            value = _validated_checkout_attributes_file(value)
+        elif _FLEET_CHECKOUT_FILTER_KEY_RE.fullmatch(normalized) is None:
+            raise RuntimeError(
+                "Git checkout filter configuration contains an unsupported key"
+            )
+        entries.append((key, value))
+        if len(entries) > _FLEET_CHECKOUT_FILTER_MAX_ENTRIES:
+            raise RuntimeError(
+                "Git checkout filter configuration entry count is too large"
+            )
+    return entries
+
+
+def _managed_worktree_git_env(
+    repo_path: Path,
+    *,
+    safe_global_config: Path,
+) -> dict[str, str]:
+    env = _authority_git_env()
+    env["PATH"] = _fleet_member_credential_helper_path()
+    entries = _global_system_checkout_filter_config(repo_path)
+    if not entries:
+        return env
+    if not safe_global_config.is_absolute():
+        raise RuntimeError("managed worktree scoped Git config path must be absolute")
+    try:
+        descriptor = os.open(
+            safe_global_config,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC,
+            0o600,
+        )
+    except OSError as exc:
+        raise RuntimeError(
+            "managed worktree scoped Git configuration is unavailable"
+        ) from exc
+    os.close(descriptor)
+
+    writer_env = _authority_git_env()
+    for key, value in entries:
+        cp = subprocess.run(
+            [
+                "/usr/bin/git",
+                "config",
+                "--file",
+                str(safe_global_config),
+                "--add",
+                key,
+                value,
+            ],
+            env=writer_env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if cp.returncode != 0:
+            raise RuntimeError(
+                "managed worktree scoped Git configuration could not be written"
+            )
+    os.chmod(safe_global_config, 0o600)
+    env["GIT_CONFIG_GLOBAL"] = str(safe_global_config)
+    env["GIT_CONFIG_SYSTEM"] = os.devnull
+    env["PATH"] = _fleet_member_credential_helper_path()
+    return env
+
+
+def _fleet_credential_config_key_allowed(key: str) -> bool:
+    normalized = key.strip().lower()
+    if normalized in {
+        "credential.helper",
+        "credential.username",
+        "credential.usehttppath",
+    }:
+        return True
+    scoped = re.fullmatch(
+        r"credential\.https://(?:[^/@:]+@)?github\.com(?::([0-9]+))?"
+        r"(?:/[^ \t\r\n]*)?\.(?:helper|username|usehttppath)",
+        normalized,
+    )
+    if scoped is None:
+        return False
+    port = scoped.group(1)
+    return port is None or 1 <= int(port) <= 65535
+
+
+def _fleet_tls_config_key_allowed(key: str) -> bool:
+    normalized = key.strip().lower()
+    tls_keys = (
+        "pinnedpubkey",
+        "sslcainfo",
+        "sslcapath",
+        "sslcert",
+        "sslcertpasswordprotected",
+        "sslkey",
+    )
+    if normalized in {f"http.{name}" for name in tls_keys}:
+        return True
+    scoped = re.fullmatch(
+        r"http\.https://(?:[^/@:]+@)?github\.com(?::([0-9]+))?"
+        r"(?:/[^ \t\r\n]*)?\.(?:"
+        + "|".join(tls_keys)
+        + r")",
+        normalized,
+    )
+    if scoped is None:
+        return False
+    port = scoped.group(1)
+    return port is None or 1 <= int(port) <= 65535
+
+
+def _fleet_proxy_config_key_allowed(key: str) -> bool:
+    normalized = key.strip().lower()
+    if normalized in {
+        "http.proxy",
+        "http.proxyauthmethod",
+        "http.proxysslcainfo",
+        "http.proxysslcert",
+        "http.proxysslcertpasswordprotected",
+        "http.proxysslkey",
+    }:
+        return True
+    scoped = re.fullmatch(
+        r"http\.https://(?:[^/@:]+@)?github\.com(?::([0-9]+))?"
+        r"(?:/[^ \t\r\n]*)?\."
+        r"(?:proxy|proxyauthmethod|proxysslcainfo|proxysslcert|"
+        r"proxysslcertpasswordprotected|proxysslkey)",
+        normalized,
+    )
+    if scoped is None:
+        return False
+    port = scoped.group(1)
+    return port is None or 1 <= int(port) <= 65535
+
+
+def _fleet_github_extra_header_key_allowed(key: str) -> bool:
+    normalized = key.strip().lower()
+    scoped = re.fullmatch(
+        r"http\.https://(?:[^/@:]+@)?github\.com(?::([0-9]+))?"
+        r"(?:/[^ \t\r\n]*)?\.extraheader",
+        normalized,
+    )
+    if scoped is None:
+        return False
+    port = scoped.group(1)
+    return port is None or 1 <= int(port) <= 65535
+
+
+def _fleet_github_authorization_header_value_allowed(value: str) -> bool:
+    if value == "":
+        return True
+    if any(
+        ord(char) < 0x20 and char != "\t" or ord(char) == 0x7F
+        for char in value
+    ):
+        return False
+    prefix = "authorization:"
+    if value[: len(prefix)].casefold() != prefix:
+        return False
+    return bool(value[len(prefix) :].strip())
+
+
+def _fleet_http_version_config_key_allowed(key: str) -> bool:
+    normalized = key.strip().lower()
+    if normalized == "http.version":
+        return True
+    scoped = re.fullmatch(
+        r"http\.https://(?:[^/@:]+@)?github\.com(?::([0-9]+))?"
+        r"(?:/[^ \t\r\n]*)?\.version",
+        normalized,
+    )
+    if scoped is None:
+        return False
+    port = scoped.group(1)
+    return port is None or 1 <= int(port) <= 65535
+
+
+def _fleet_http_version_value_allowed(value: str) -> bool:
+    return value in {"HTTP/1.1", "HTTP/2"}
+
+
+def _fleet_https_config_key_allowed(key: str) -> bool:
+    return (
+        _fleet_credential_config_key_allowed(key)
+        or _fleet_tls_config_key_allowed(key)
+        or _fleet_proxy_config_key_allowed(key)
+        or _fleet_http_version_config_key_allowed(key)
+    )
+
+
+def _fleet_https_config_entry_allowed(key: str, value: str) -> bool:
+    if _fleet_http_version_config_key_allowed(key):
+        return _fleet_http_version_value_allowed(value)
+    if _fleet_https_config_key_allowed(key):
+        return True
+    return (
+        _fleet_github_extra_header_key_allowed(key)
+        and _fleet_github_authorization_header_value_allowed(value)
+    )
+
+
+def _global_system_github_https_config(
+    repo_path: Path,
+) -> list[tuple[str, str]]:
+    env = _credential_config_discovery_env()
+    cp = subprocess.run(
+        [
+            "/usr/bin/git",
+            "-C",
+            str(repo_path),
+            "config",
+            "--includes",
+            "--show-scope",
+            "--null",
+            "--get-regexp",
+            r"^(credential|http)\.|^core\.askpass$",
+        ],
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if cp.returncode == 1:
+        return []
+    if cp.returncode != 0:
+        raise RuntimeError(
+            "Git credential configuration is unavailable for "
+            f"{repo_path}: {cp.stderr.strip()}"
+        )
+
+    fields = cp.stdout.split("\0")
+    if fields and fields[-1] == "":
+        fields.pop()
+    if len(fields) % 2:
+        raise RuntimeError("Git scoped credential configuration is malformed")
+
+    entries: list[tuple[str, str]] = []
+    for scope, record in zip(fields[0::2], fields[1::2]):
+        if scope not in {"system", "global"}:
+            continue
+        key, separator, value = record.partition("\n")
+        if not separator:
+            raise RuntimeError("Git credential configuration record is malformed")
+        normalized = key.strip().lower()
+        if normalized == "core.askpass":
+            _validated_fleet_member_askpass_path(
+                value,
+                source="global/system core.askPass",
+            )
+            entries.append(("core.askPass", value))
+        elif _fleet_https_config_entry_allowed(key, value):
+            entries.append((key, value))
+    return entries
+
+
+def _fleet_member_credential_helper_path() -> str:
+    paths = ["/usr/bin", "/bin", "/usr/local/bin"]
+    home_raw = os.environ.get("HOME")
+    if home_raw:
+        if os.pathsep in home_raw or any(
+            char in home_raw for char in ("\x00", "\n", "\r")
+        ):
+            raise RuntimeError("fleet member credential HOME is unsafe for PATH")
+        home = Path(home_raw)
+        if not home.is_absolute():
+            raise RuntimeError("fleet member credential HOME must be absolute")
+        paths.append(str(home / ".local" / "bin"))
+    return os.pathsep.join(paths)
+
+
+_FLEET_MEMBER_ASKPASS_SEGMENT_RE = re.compile(r"[A-Za-z0-9._@+,:=-]+")
+
+
+def _assert_fleet_member_askpass_ancestors_trusted(
+    resolved: Path,
+    *,
+    label: str,
+) -> None:
+    trusted_uids = {0, os.getuid()}
+    for parent in resolved.parents:
+        try:
+            metadata = parent.lstat()
+        except OSError as exc:
+            raise RuntimeError(f"{label} parent directory is unavailable") from exc
+        if not stat.S_ISDIR(metadata.st_mode):
+            raise RuntimeError(f"{label} parent path must remain a directory")
+        if metadata.st_uid not in trusted_uids:
+            raise RuntimeError(
+                f"{label} parent directories must be user/root-owned"
+            )
+        mode = stat.S_IMODE(metadata.st_mode)
+        if mode & 0o022 and not metadata.st_mode & stat.S_ISVTX:
+            raise RuntimeError(
+                f"{label} parent directory must not be group/world writable "
+                "without sticky protection"
+            )
+
+
+def _validated_fleet_member_askpass_path(raw: str, *, source: str) -> str:
+    label = f"fleet member {source}"
+    if raw == "":
+        raise RuntimeError(f"{label} path must not be empty")
+    if any(char in raw for char in ("\x00", "\n", "\r", "\t", " ")):
+        raise RuntimeError(f"{label} path contains unsafe characters")
+    path = Path(raw)
+    if not path.is_absolute():
+        raise RuntimeError(f"{label} path must be absolute")
+    if any(
+        part in {"", ".", ".."} or _FLEET_MEMBER_ASKPASS_SEGMENT_RE.fullmatch(part) is None
+        for part in path.parts[1:]
+    ):
+        raise RuntimeError(f"{label} path is invalid")
+    _assert_fleet_member_askpass_ancestors_trusted(path, label=label)
+    try:
+        raw_metadata = path.lstat()
+    except OSError as exc:
+        raise RuntimeError(f"{label} path is unavailable") from exc
+    if not stat.S_ISREG(raw_metadata.st_mode):
+        raise RuntimeError(f"{label} must be a regular file")
+    try:
+        resolved = path.resolve(strict=True)
+    except OSError as exc:
+        raise RuntimeError(f"{label} path is unavailable") from exc
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    if not nofollow:
+        raise RuntimeError(f"{label} requires O_NOFOLLOW support")
+    try:
+        descriptor = os.open(
+            resolved,
+            os.O_RDONLY | os.O_CLOEXEC | nofollow,
+        )
+    except OSError as exc:
+        raise RuntimeError(f"{label} is unavailable") from exc
+    try:
+        metadata = os.fstat(descriptor)
+        mode = stat.S_IMODE(metadata.st_mode)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_nlink != 1
+            or metadata.st_uid not in {0, os.getuid()}
+        ):
+            raise RuntimeError(
+                f"{label} must be one user/root-owned regular file"
+            )
+        if mode & 0o022:
+            raise RuntimeError(
+                f"{label} must not be group/world writable"
+            )
+        if not os.access(resolved, os.X_OK):
+            raise RuntimeError(f"{label} must be executable")
+        _assert_fleet_member_askpass_ancestors_trusted(
+            resolved,
+            label=label,
+        )
+    finally:
+        os.close(descriptor)
+    return str(resolved)
+
+
+def _fleet_member_git_askpass_path() -> str | None:
+    raw = os.environ.get("GIT_ASKPASS")
+    if raw is None or raw == "":
+        return None
+    return _validated_fleet_member_askpass_path(raw, source="GIT_ASKPASS")
+
+
+def _fleet_repo_git_env(
+    repo_path: Path,
+    *,
+    safe_global_config: Path | None = None,
+) -> dict[str, str]:
+    env = _authority_git_env()
+    env["PATH"] = _fleet_member_credential_helper_path()
+    askpass = _fleet_member_git_askpass_path()
+    if askpass is not None:
+        env["GIT_ASKPASS"] = askpass
+    for name, value in os.environ.items():
+        normalized = name.lower()
+        if (
+            normalized in _AUTHORITY_PROXY_ENV_NAMES
+            or normalized in _FLEET_MEMBER_TLS_ENV_NAMES
+        ):
+            env[name] = value
+    entries = _global_system_github_https_config(repo_path)
+    if not entries:
+        return env
+    if safe_global_config is None:
+        raise RuntimeError(
+            "fleet member inherited Git configuration requires a scoped config path"
+        )
+    if not safe_global_config.is_absolute():
+        raise RuntimeError("fleet member scoped Git config path must be absolute")
+    try:
+        descriptor = os.open(
+            safe_global_config,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC,
+            0o600,
+        )
+    except OSError as exc:
+        raise RuntimeError(
+            "fleet member scoped Git configuration is unavailable"
+        ) from exc
+    os.close(descriptor)
+
+    writer_env = _authority_git_env()
+    for key, value in entries:
+        cp = subprocess.run(
+            [
+                "/usr/bin/git",
+                "config",
+                "--file",
+                str(safe_global_config),
+                "--add",
+                key,
+                value,
+            ],
+            env=writer_env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if cp.returncode != 0:
+            raise RuntimeError(
+                "fleet member scoped Git configuration could not be written"
+            )
+    os.chmod(safe_global_config, 0o600)
+    env["GIT_CONFIG_GLOBAL"] = str(safe_global_config)
+    env["GIT_CONFIG_SYSTEM"] = os.devnull
+    return env
+
+
+_FLEET_MEMBER_SSH_CONFIG_MAX_BYTES = 256 * 1024
+_FLEET_MEMBER_SSH_CONFIG_TOTAL_MAX_BYTES = 512 * 1024
+_FLEET_MEMBER_SSH_MAX_CONFIG_FILES = 32
+_FLEET_MEMBER_SSH_MAX_INCLUDE_DEPTH = 8
+_FLEET_MEMBER_SSH_MAX_AUTH_FILES = 8
+_FLEET_MEMBER_SSH_AUTH_KEYS = frozenset(
+    {"certificatefile", "identitiesonly", "identityagent", "identityfile"}
+)
+_FLEET_MEMBER_SSH_ROUTE_KEYS = frozenset({"hostname", "port"})
+
+
+def _read_fleet_member_ssh_config(config: Path) -> str | None:
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    if not nofollow:
+        raise RuntimeError("fleet member SSH configuration requires O_NOFOLLOW support")
+    try:
+        descriptor = os.open(
+            config,
+            os.O_RDONLY | os.O_CLOEXEC | nofollow,
+        )
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise RuntimeError("fleet member SSH configuration is unavailable") from exc
+    try:
+        st = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(st.st_mode)
+            or st.st_nlink != 1
+            or st.st_uid != os.getuid()
+        ):
+            raise RuntimeError(
+                "fleet member SSH configuration must be one user-owned regular file"
+            )
+        if stat.S_IMODE(st.st_mode) & 0o022:
+            raise RuntimeError(
+                "fleet member SSH configuration must not be group/world writable"
+            )
+        if st.st_size > _FLEET_MEMBER_SSH_CONFIG_MAX_BYTES:
+            raise RuntimeError("fleet member SSH configuration exceeds bounded size")
+        chunks: list[bytes] = []
+        remaining = _FLEET_MEMBER_SSH_CONFIG_MAX_BYTES + 1
+        while remaining > 0:
+            chunk = os.read(descriptor, min(64 * 1024, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        payload = b"".join(chunks)
+        if len(payload) > _FLEET_MEMBER_SSH_CONFIG_MAX_BYTES:
+            raise RuntimeError("fleet member SSH configuration exceeds bounded size")
+        try:
+            return payload.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise RuntimeError("fleet member SSH configuration is unreadable") from exc
+    finally:
+        os.close(descriptor)
+
+
+def _fleet_member_ssh_host_patterns_match_github(
+    values: list[str],
+    *,
+    candidate_host: str = "github.com",
+) -> bool:
+    if not values:
+        raise RuntimeError("fleet member SSH Host requires at least one pattern")
+    if not isinstance(candidate_host, str):
+        raise RuntimeError("fleet member SSH host match target is invalid")
+    candidate = candidate_host.casefold()
+    if candidate not in {"github.com", "ssh.github.com"}:
+        raise RuntimeError("fleet member SSH host match target is invalid")
+    matched = False
+    for raw_pattern_list in values:
+        if not raw_pattern_list or any(
+            char in raw_pattern_list for char in ("\x00", "\n", "\r")
+        ):
+            raise RuntimeError("fleet member SSH Host pattern is invalid")
+        for raw_pattern in raw_pattern_list.split(","):
+            if not raw_pattern:
+                raise RuntimeError("fleet member SSH Host pattern is invalid")
+            negated = raw_pattern.startswith("!")
+            pattern = raw_pattern[1:] if negated else raw_pattern
+            if not pattern:
+                raise RuntimeError("fleet member SSH Host pattern is invalid")
+            normalized = pattern.casefold()
+            if re.fullmatch(r"[a-z0-9.*?-]+", normalized) is None:
+                continue
+            if fnmatchcase(candidate, normalized):
+                if negated:
+                    return False
+                matched = True
+    return matched
+
+
+def _fleet_member_ssh_user_patterns_match(
+    values: list[str],
+    remote_user: str,
+) -> bool:
+    if not values or not remote_user:
+        return False
+    matched = False
+    for raw_pattern_list in values:
+        if not raw_pattern_list or any(
+            char in raw_pattern_list for char in ("\x00", "\n", "\r")
+        ):
+            raise RuntimeError("fleet member SSH Match user pattern is invalid")
+        for raw_pattern in raw_pattern_list.split(","):
+            if not raw_pattern:
+                raise RuntimeError("fleet member SSH Match user pattern is invalid")
+            negated = raw_pattern.startswith("!")
+            pattern = raw_pattern[1:] if negated else raw_pattern
+            if not pattern:
+                raise RuntimeError("fleet member SSH Match user pattern is invalid")
+            if re.fullmatch(r"[A-Za-z0-9._*?+-]+", pattern) is None:
+                continue
+            if fnmatchcase(remote_user, pattern):
+                if negated:
+                    return False
+                matched = True
+    return matched
+
+
+def _fleet_member_ssh_match_applies(
+    values: list[str],
+    *,
+    remote_user: str | None,
+    effective_host: str = "github.com",
+) -> bool:
+    if not values:
+        raise RuntimeError("fleet member SSH Match requires criteria")
+    normalized = tuple(value.casefold() for value in values)
+    if normalized == ("all",):
+        return True
+
+    criteria: list[tuple[str, str]] = []
+    index = 0
+    while index < len(values):
+        token = values[index]
+        if "=" in token:
+            criterion, pattern = token.split("=", 1)
+            if not criterion or not pattern:
+                return False
+            criteria.append((criterion.casefold(), pattern))
+            index += 1
+            continue
+        if index + 1 >= len(values):
+            return False
+        criteria.append((token.casefold(), values[index + 1]))
+        index += 2
+
+    active = True
+    for criterion, pattern in criteria:
+        patterns = [pattern]
+        if criterion == "host":
+            active = active and _fleet_member_ssh_host_patterns_match_github(
+                patterns,
+                candidate_host=effective_host,
+            )
+        elif criterion == "originalhost":
+            active = active and _fleet_member_ssh_host_patterns_match_github(
+                patterns,
+                candidate_host="github.com",
+            )
+        elif criterion == "user":
+            if remote_user is None:
+                return False
+            active = active and _fleet_member_ssh_user_patterns_match(
+                patterns,
+                remote_user,
+            )
+        else:
+            return False
+    return active
+
+
+def _fleet_member_ssh_include_paths(home: Path, values: list[str]) -> list[Path]:
+    if not values:
+        raise RuntimeError("fleet member SSH Include requires at least one path")
+    ssh_root = home / ".ssh"
+    try:
+        root_resolved = ssh_root.resolve(strict=True)
+    except OSError as exc:
+        raise RuntimeError("fleet member SSH root is unavailable") from exc
+
+    matches: list[Path] = []
+    for raw_pattern in values:
+        if (
+            not raw_pattern
+            or any(char in raw_pattern for char in ("\x00", "\n", "\r"))
+            or "%" in raw_pattern
+        ):
+            raise RuntimeError("fleet member SSH Include path is invalid")
+        if raw_pattern.startswith("~/"):
+            candidate = home / raw_pattern[2:]
+        elif raw_pattern.startswith("~"):
+            raise RuntimeError("fleet member SSH Include user expansion is unsupported")
+        else:
+            raw_path = Path(raw_pattern)
+            candidate = raw_path if raw_path.is_absolute() else ssh_root / raw_path
+
+        for matched in sorted(glob.glob(str(candidate), recursive=False)):
+            path = Path(matched)
+            try:
+                resolved = path.resolve(strict=True)
+            except OSError as exc:
+                raise RuntimeError("fleet member SSH Include target is unavailable") from exc
+            try:
+                resolved.relative_to(root_resolved)
+            except ValueError as exc:
+                raise RuntimeError(
+                    "fleet member SSH Include target must remain under ~/.ssh"
+                ) from exc
+            matches.append(path)
+    return matches
+
+
+def _fleet_member_ssh_auth_options(
+    *,
+    remote_user: str | None = None,
+) -> dict[str, object]:
+    home_raw = os.environ.get("HOME")
+    if not home_raw:
+        return {}
+    home = Path(home_raw)
+    if not home.is_absolute():
+        raise RuntimeError("fleet member SSH HOME must be absolute")
+    config = home / ".ssh" / "config"
+
+    identity_files: list[str] = []
+    certificate_files: list[str] = []
+    scalar: dict[str, str] = {}
+    config_files = 0
+    total_bytes = 0
+
+    def process_config(
+        path: Path,
+        *,
+        active: bool,
+        depth: int,
+        required: bool,
+    ) -> bool:
+        nonlocal config_files, total_bytes
+        if depth > _FLEET_MEMBER_SSH_MAX_INCLUDE_DEPTH:
+            raise RuntimeError("fleet member SSH Include nesting is too deep")
+        raw = _read_fleet_member_ssh_config(path)
+        if raw is None:
+            if required:
+                raise RuntimeError("fleet member SSH Include target disappeared")
+            return active
+
+        config_files += 1
+        if config_files > _FLEET_MEMBER_SSH_MAX_CONFIG_FILES:
+            raise RuntimeError("fleet member SSH configuration file count is too large")
+        total_bytes += len(raw.encode("utf-8"))
+        if total_bytes > _FLEET_MEMBER_SSH_CONFIG_TOTAL_MAX_BYTES:
+            raise RuntimeError("fleet member SSH configuration aggregate size is too large")
+
+        for raw_line in raw.splitlines():
+            try:
+                tokens = shlex.split(raw_line, comments=True, posix=True)
+            except ValueError as exc:
+                raise RuntimeError("fleet member SSH configuration is malformed") from exc
+            if not tokens:
+                continue
+            first = tokens[0]
+            values = tokens[1:]
+            if "=" in first:
+                first, first_value = first.split("=", 1)
+                values = ([first_value] if first_value else []) + values
+            elif values and values[0] == "=":
+                values = values[1:]
+            key = first.strip().lower()
+
+            if key == "include":
+                if active:
+                    for included in _fleet_member_ssh_include_paths(home, values):
+                        active = process_config(
+                            included,
+                            active=active,
+                            depth=depth + 1,
+                            required=True,
+                        )
+                continue
+            if key == "host":
+                active = _fleet_member_ssh_host_patterns_match_github(values)
+                continue
+            if key == "match":
+                configured_host = scalar.get("hostname")
+                active = _fleet_member_ssh_match_applies(
+                    values,
+                    remote_user=remote_user,
+                    effective_host=(
+                        configured_host
+                        if isinstance(configured_host, str)
+                        else "github.com"
+                    ),
+                )
+                continue
+            if (
+                not active
+                or key
+                not in _FLEET_MEMBER_SSH_AUTH_KEYS | _FLEET_MEMBER_SSH_ROUTE_KEYS
+            ):
+                continue
+            if len(values) != 1 or not values[0] or any(
+                char in values[0] for char in ("\x00", "\n", "\r")
+            ):
+                raise RuntimeError(
+                    f"fleet member SSH authentication option {key} is invalid"
+                )
+            value = values[0]
+            if value.startswith("~/"):
+                value = str(home / value[2:])
+            if key == "identityfile":
+                identity_files.append("none" if value.lower() == "none" else value)
+                if len(identity_files) > _FLEET_MEMBER_SSH_MAX_AUTH_FILES:
+                    raise RuntimeError("fleet member SSH identity file list is too large")
+            elif key == "certificatefile":
+                certificate_files.append("none" if value.lower() == "none" else value)
+                if len(certificate_files) > _FLEET_MEMBER_SSH_MAX_AUTH_FILES:
+                    raise RuntimeError(
+                        "fleet member SSH certificate file list is too large"
+                    )
+            elif key == "identitiesonly":
+                normalized = value.lower()
+                if normalized not in {"yes", "no"}:
+                    raise RuntimeError(
+                        "fleet member SSH IdentitiesOnly must be yes or no"
+                    )
+                scalar.setdefault(key, normalized)
+            elif key == "hostname":
+                normalized = value.casefold()
+                if normalized == "ssh.github.com":
+                    scalar.setdefault(key, normalized)
+            elif key == "port":
+                if value == "443":
+                    scalar.setdefault(key, value)
+            else:
+                scalar.setdefault(key, value)
+        return active
+
+    process_config(config, active=True, depth=0, required=False)
+    return {
+        "identity_files": tuple(identity_files),
+        "certificate_files": tuple(certificate_files),
+        **scalar,
+    }
+
+
+def _fleet_member_ssh_command(
+    *,
+    remote_port: int | None = None,
+    remote_user: str | None = None,
+) -> str:
+    if remote_port is not None and (
+        isinstance(remote_port, bool)
+        or not isinstance(remote_port, int)
+        or not 1 <= remote_port <= 65535
+    ):
+        raise RuntimeError("fleet member SSH remote port is invalid")
+    options = _fleet_member_ssh_auth_options(remote_user=remote_user)
+    argv = [
+        "/usr/bin/ssh",
+        "-F",
+        os.devnull,
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ClearAllForwardings=yes",
+        "-o",
+        "PermitLocalCommand=no",
+    ]
+    configured_port = options.get("port")
+    use_github_alternate_443 = (
+        options.get("hostname") == "ssh.github.com"
+        and (
+            remote_port == 443
+            or (remote_port is None and configured_port == "443")
+        )
+    )
+    if use_github_alternate_443:
+        argv.extend(
+            [
+                "-o",
+                "HostName=ssh.github.com",
+                "-o",
+                "Port=443",
+                "-o",
+                "HostKeyAlias=github.com",
+            ]
+        )
+    for identity in options.get("identity_files", ()):
+        if identity == "none":
+            argv.extend(["-o", "IdentityFile=none"])
+        else:
+            argv.extend(["-i", str(identity)])
+    for certificate in options.get("certificate_files", ()):
+        argv.extend(["-o", f"CertificateFile={certificate}"])
+    identities_only = options.get("identitiesonly")
+    if isinstance(identities_only, str):
+        argv.extend(["-o", f"IdentitiesOnly={identities_only}"])
+    identity_agent = options.get("identityagent")
+    if isinstance(identity_agent, str):
+        argv.extend(["-o", f"IdentityAgent={identity_agent}"])
+    return shlex.join(argv)
+
+
+def _fleet_repo_ssh_env(*, remote: str | None = None) -> dict[str, str]:
+    env = _authority_git_env()
+    remote_port = (
+        github_ssh_remote_explicit_port(remote)
+        if isinstance(remote, str)
+        else None
+    )
+    remote_user = (
+        github_ssh_remote_user(remote)
+        if isinstance(remote, str)
+        else None
+    )
+    env["GIT_SSH_COMMAND"] = _fleet_member_ssh_command(
+        remote_port=remote_port,
+        remote_user=remote_user,
+    )
+    return env
+
+
+def _authority_git_local_config_is_transport_override(key: str) -> bool:
+    normalized = key.strip().lower()
+    if normalized in {
+        "core.askpass",
+        "core.gitproxy",
+        "core.sshcommand",
+        "extensions.worktreeconfig",
+        "ssh.variant",
+    }:
+        return True
+    if normalized.startswith(
+        ("credential.", "http.", "include.", "includeif.", "url.")
+    ):
+        return True
+    if normalized.startswith("remote.origin."):
+        return normalized not in _AUTHORITY_GIT_ALLOWED_ORIGIN_CONFIG
+    return False
+
+
+
+def _fleet_member_local_config_is_transport_override(key: str) -> bool:
+    normalized = key.strip().lower()
+    if normalized == "extensions.worktreeconfig":
+        return False
+    if normalized.startswith("remote.origin."):
+        return normalized not in _FLEET_MEMBER_ALLOWED_ORIGIN_CONFIG
+    if normalized.startswith("credential."):
+        return not _fleet_credential_config_key_allowed(normalized)
+    if normalized.startswith("http."):
+        return not _fleet_https_config_key_allowed(normalized)
+    return _authority_git_local_config_is_transport_override(normalized)
+
+
+_FLEET_GIT_BOOLEAN_VALUES = frozenset(
+    {"", "0", "1", "false", "no", "off", "on", "true", "yes"}
+)
+
+
+def _fleet_git_boolean_value_allowed(value: str) -> bool:
+    return value.casefold() in _FLEET_GIT_BOOLEAN_VALUES
+
+
+def _fleet_member_local_config_entry_is_transport_override(
+    key: str,
+    value: str,
+) -> bool:
+    normalized = key.strip().lower()
+    if normalized == "core.askpass":
+        _validated_fleet_member_askpass_path(value, source="core.askPass")
+        return False
+    if normalized == "remote.origin.tagopt":
+        return value not in {"--no-tags", "--tags"}
+    if normalized == "remote.origin.prunetags":
+        return not _fleet_git_boolean_value_allowed(value)
+    if _fleet_http_version_config_key_allowed(key):
+        return not _fleet_http_version_value_allowed(value)
+    if _fleet_github_extra_header_key_allowed(key):
+        return not _fleet_github_authorization_header_value_allowed(value)
+    return _fleet_member_local_config_is_transport_override(key)
+
+
+def _parse_git_config_list_entries(
+    raw: str,
+    *,
+    label: str,
+) -> list[tuple[str, str]]:
+    records = raw.split("\0")
+    if records and records[-1] == "":
+        records.pop()
+    entries: list[tuple[str, str]] = []
+    for record in records:
+        key, separator, value = record.partition("\n")
+        if not separator or not key.strip():
+            raise RuntimeError(f"{label} Git configuration is malformed")
+        entries.append((key, value))
+    return entries
+
+
+def _assert_authority_git_env_sanitized(
+    env: dict[str, str] | None,
+    *,
+    label: str,
+) -> None:
+    if env is None:
+        raise RuntimeError(f"{label} Git environment must be explicit")
+    expected = {
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_SYSTEM": os.devnull,
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_SSH_COMMAND": "/usr/bin/ssh -F /dev/null -o BatchMode=yes",
+        "GIT_SSH_VARIANT": "ssh",
+    }
+    problems = [
+        f"{name}={env.get(name)!r}"
+        for name, value in expected.items()
+        if env.get(name) != value
+    ]
+    unexpected = sorted(
+        name
+        for name in env
+        if name.startswith("GIT_") and name not in expected
+    )
+    if unexpected:
+        problems.append("unexpected=" + ",".join(unexpected))
+    if problems:
+        raise RuntimeError(
+            f"{label} Git environment is not sanitized: " + "; ".join(problems)
+        )
+
+
+def assert_authority_git_transport_safe(
+    repo_path: Path,
+    *,
+    env: dict[str, str] | None = None,
+) -> None:
+    _assert_authority_git_env_sanitized(
+        env,
+        label="authoritative fleet membership",
+    )
+
+    local_config = run(
+        [
+            "git",
+            "-C",
+            str(repo_path),
+            "config",
+            "--local",
+            "--no-includes",
+            "--null",
+            "--list",
+        ],
+        check=False,
+        env=env,
+    )
+    if local_config.returncode != 0:
+        raise RuntimeError(
+            "authoritative fleet membership repository local Git "
+            "configuration is unavailable"
+        )
+    local_entries = _parse_git_config_list_entries(
+        local_config.stdout,
+        label="authoritative fleet membership repository local",
+    )
+    local_keys = {
+        key.strip().lower()
+        for key, _value in local_entries
+        if key.strip()
+    }
+    unsafe_keys = sorted(
+        {
+            key.strip().lower()
+            for key, _value in local_entries
+            if key.strip().lower() != "extensions.worktreeconfig"
+            and _authority_git_local_config_is_transport_override(key)
+        }
+    )
+    if unsafe_keys:
+        raise RuntimeError(
+            "authoritative fleet membership repository has unsafe local "
+            "Git transport configuration: "
+            + ", ".join(unsafe_keys)
+        )
+
+    if "extensions.worktreeconfig" in local_keys:
+        worktree_flag = run(
+            [
+                "git",
+                "-C",
+                str(repo_path),
+                "config",
+                "--local",
+                "--no-includes",
+                "--bool",
+                "--get",
+                "extensions.worktreeConfig",
+            ],
+            check=False,
+            env=env,
+        )
+        if worktree_flag.returncode != 0:
+            raise RuntimeError(
+                "authoritative fleet membership repository worktree Git "
+                "configuration flag is unavailable"
+            )
+        normalized_flag = worktree_flag.stdout.strip().lower()
+        if normalized_flag not in {"true", "false"}:
+            raise RuntimeError(
+                "authoritative fleet membership repository worktree Git "
+                "configuration flag is invalid"
+            )
+        if normalized_flag == "true":
+            worktree_config = run(
+                [
+                    "git",
+                    "-C",
+                    str(repo_path),
+                    "config",
+                    "--worktree",
+                    "--no-includes",
+                    "--null",
+                    "--list",
+                ],
+                check=False,
+                env=env,
+            )
+            if worktree_config.returncode != 0:
+                raise RuntimeError(
+                    "authoritative fleet membership repository worktree Git "
+                    "configuration is unavailable"
+                )
+            worktree_entries = _parse_git_config_list_entries(
+                worktree_config.stdout,
+                label="authoritative fleet membership repository worktree",
+            )
+            unsafe_worktree_keys = sorted(
+                {
+                    key.strip().lower()
+                    for key, _value in worktree_entries
+                    if _authority_git_local_config_is_transport_override(key)
+                }
+            )
+            if unsafe_worktree_keys:
+                raise RuntimeError(
+                    "authoritative fleet membership repository has unsafe "
+                    "worktree Git transport configuration: "
+                    + ", ".join(unsafe_worktree_keys)
+                )
+
+
+def assert_fleet_member_git_transport_safe(
+    repo_path: Path,
+    *,
+    env: dict[str, str] | None = None,
+) -> None:
+    _assert_authority_git_env_sanitized(
+        env,
+        label="fleet member",
+    )
+
+    local_config = run(
+        [
+            "git",
+            "-C",
+            str(repo_path),
+            "config",
+            "--local",
+            "--no-includes",
+            "--null",
+            "--list",
+        ],
+        check=False,
+        env=env,
+    )
+    if local_config.returncode != 0:
+        raise RuntimeError(
+            "fleet repository local Git configuration is unavailable"
+        )
+    local_entries = _parse_git_config_list_entries(
+        local_config.stdout,
+        label="fleet repository local",
+    )
+    local_keys = {
+        key.strip().lower()
+        for key, _value in local_entries
+        if key.strip()
+    }
+    unsafe_keys = sorted(
+        {
+            key.strip().lower()
+            for key, value in local_entries
+            if _fleet_member_local_config_entry_is_transport_override(key, value)
+        }
+    )
+    if unsafe_keys:
+        raise RuntimeError(
+            "fleet repository has unsafe local Git transport configuration: "
+            + ", ".join(unsafe_keys)
+        )
+
+    if "extensions.worktreeconfig" in local_keys:
+        worktree_flag = run(
+            [
+                "git",
+                "-C",
+                str(repo_path),
+                "config",
+                "--local",
+                "--no-includes",
+                "--bool",
+                "--get",
+                "extensions.worktreeConfig",
+            ],
+            check=False,
+            env=env,
+        )
+        if worktree_flag.returncode != 0:
+            raise RuntimeError(
+                "fleet repository worktree Git configuration flag is unavailable"
+            )
+        if worktree_flag.stdout.strip().lower() == "true":
+            worktree_config = run(
+                [
+                    "git",
+                    "-C",
+                    str(repo_path),
+                    "config",
+                    "--worktree",
+                    "--no-includes",
+                    "--null",
+                    "--list",
+                ],
+                check=False,
+                env=env,
+            )
+            if worktree_config.returncode != 0:
+                raise RuntimeError(
+                    "fleet repository worktree Git configuration is unavailable"
+                )
+            worktree_entries = _parse_git_config_list_entries(
+                worktree_config.stdout,
+                label="fleet repository worktree",
+            )
+            unsafe_worktree_keys = sorted(
+                {
+                    key.strip().lower()
+                    for key, value in worktree_entries
+                    if _fleet_member_local_config_entry_is_transport_override(
+                        key,
+                        value,
+                    )
+                }
+            )
+            if unsafe_worktree_keys:
+                raise RuntimeError(
+                    "fleet repository has unsafe worktree Git transport configuration: "
+                    + ", ".join(unsafe_worktree_keys)
+                )
+
+
+def remote_head_for_entry(entry: RepoEntry) -> tuple[str, str, str]:
+    transport_env = _authority_git_env()
+    assert_fleet_member_git_transport_safe(entry.path, env=transport_env)
+
+    configured = run(
+        [
+            "git",
+            "-C",
+            str(entry.path),
+            "config",
+            "--local",
+            "--no-includes",
+            "--get-all",
+            "remote.origin.url",
+        ],
+        check=False,
+        env=transport_env,
+    )
+    configured_urls = [
+        line.strip() for line in configured.stdout.splitlines() if line.strip()
+    ]
+    if (
+        configured.returncode != 0
+        or not configured_urls
+        or configured_urls[0] != entry.remote
+    ):
+        raise RuntimeError(
+            f"fleet repository origin changed since discovery: {entry.key}"
+        )
+    origin_url = configured_urls[0]
+    parsed_origin = parse_github_remote(origin_url)
+    if (
+        parsed_origin is None
+        or normalized_repository_key(f"{parsed_origin[0]}/{parsed_origin[1]}")
+        != normalized_repository_key(f"{entry.owner}/{entry.repo}")
+    ):
+        raise RuntimeError(
+            f"fleet repository origin identity mismatch: expected {entry.key}"
+        )
+    if not github_remote_uses_authenticated_transport(origin_url):
+        raise RuntimeError(
+            f"fleet repository origin transport must use HTTPS or SSH: {entry.key}"
+        )
+
+    if origin_url.strip().lower().startswith("https://"):
+        with tempfile.TemporaryDirectory(
+            prefix="repoground-fleet-member-gitconfig-",
+            dir="/tmp",
+        ) as raw_config_root:
+            network_env = _fleet_repo_git_env(
+                entry.path,
+                safe_global_config=Path(raw_config_root) / "global.gitconfig",
+            )
+            resolved = remote_head(entry.path, remote=origin_url, env=network_env)
+    else:
+        network_env = _fleet_repo_ssh_env(remote=origin_url)
+        resolved = remote_head(entry.path, remote=origin_url, env=network_env)
+
+    assert_fleet_member_git_transport_safe(entry.path, env=transport_env)
+    configured_after = run(
+        [
+            "git",
+            "-C",
+            str(entry.path),
+            "config",
+            "--local",
+            "--no-includes",
+            "--get-all",
+            "remote.origin.url",
+        ],
+        check=False,
+        env=transport_env,
+    )
+    configured_after_urls = [
+        line.strip()
+        for line in configured_after.stdout.splitlines()
+        if line.strip()
+    ]
+    if (
+        configured_after.returncode != 0
+        or not configured_after_urls
+        or configured_after_urls[0] != origin_url
+    ):
+        raise RuntimeError(
+            f"fleet repository origin changed during resolution: {entry.key}"
+        )
+    return resolved
+
+def _run_with_file_size_limit(
+    argv: list[str],
+    *,
+    env: dict[str, str],
+    max_file_bytes: int,
+) -> subprocess.CompletedProcess[str]:
+    if (
+        isinstance(max_file_bytes, bool)
+        or not isinstance(max_file_bytes, int)
+        or max_file_bytes < 1
+    ):
+        raise RuntimeError("invalid bounded Git fetch file-size limit")
+
+    def set_file_size_limit() -> None:
+        resource.setrlimit(
+            resource.RLIMIT_FSIZE,
+            (max_file_bytes, max_file_bytes),
+        )
+
+    cp = subprocess.run(
+        argv,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        preexec_fn=set_file_size_limit,
+    )
+    if cp.returncode != 0:
+        detail = "\n".join(
+            part.strip() for part in (cp.stdout, cp.stderr) if part.strip()
+        )
+        raise RuntimeError(
+            f"bounded Git fetch failed rc={cp.returncode}: {' '.join(argv)}\n{detail}"
+        )
+    return cp
+
+
+def remote_branch_head(
+    repo_path: Path,
+    branch: str,
+    *,
+    env: dict[str, str] | None = None,
+    depth: int | None = None,
+    filter_spec: str | None = None,
+    fetch_file_size_limit: int | None = None,
+) -> tuple[str, str, str]:
+    if not is_safe_git_branch_name(branch):
+        raise RuntimeError(
+            f"unsafe authoritative fleet membership branch: {branch!r}"
+        )
+    full_ref = f"refs/heads/{branch}"
+
+    def advertised_sha() -> str:
+        advertised = run(
+            [
+                "git",
+                "-C",
+                str(repo_path),
+                "ls-remote",
+                "--exit-code",
+                "--refs",
+                "--",
+                "origin",
+                full_ref,
+            ],
+            env=env,
+        ).stdout.splitlines()
+        matching: list[str] = []
+        for line in advertised:
+            value, separator, advertised_ref = line.partition("\t")
+            if separator and advertised_ref == full_ref:
+                matching.append(value)
+        if (
+            len(matching) != 1
+            or SOURCE_REVISION_RE.fullmatch(matching[0]) is None
+        ):
+            raise RuntimeError(
+                f"authoritative remote branch unavailable for {repo_path}: {branch}"
+            )
+        return matching[0]
+
+    expected_sha = advertised_sha()
+    fetch_argv = [
+        "git",
+        "-C",
+        str(repo_path),
+        "fetch",
+        "--no-tags",
+        "--no-write-fetch-head",
+        "--refmap=",
+    ]
+    if depth is not None:
+        if isinstance(depth, bool) or depth < 1:
+            raise RuntimeError("invalid authoritative remote fetch depth")
+        fetch_argv.append(f"--depth={depth}")
+    if filter_spec is not None:
+        if filter_spec != "blob:none" and re.fullmatch(
+            r"blob:limit=[1-9][0-9]*",
+            filter_spec,
+        ) is None:
+            raise RuntimeError("invalid authoritative remote fetch filter")
+        fetch_argv.append(f"--filter={filter_spec}")
+    fetch_argv.extend(["origin", full_ref])
+    if fetch_file_size_limit is None:
+        run(fetch_argv, env=env)
+    else:
+        if env is None:
+            raise RuntimeError(
+                "bounded authoritative fetch requires an explicit environment"
+            )
+        _run_with_file_size_limit(
+            fetch_argv,
+            env=env,
+            max_file_bytes=fetch_file_size_limit,
+        )
+    if advertised_sha() != expected_sha:
+        raise RuntimeError(
+            f"authoritative remote branch moved during resolution for {repo_path}: "
+            f"{branch}"
+        )
+    fetched = run(
+        [
+            "git",
+            "-C",
+            str(repo_path),
+            "rev-parse",
+            "--verify",
+            f"{expected_sha}^{{commit}}",
+        ],
+        check=False,
+        env=env,
+    )
+    fetched_sha = fetched.stdout.strip() if fetched.returncode == 0 else ""
+    if fetched_sha != expected_sha:
+        raise RuntimeError(
+            f"authoritative remote branch unavailable after fetch for {repo_path}: "
+            f"{branch}"
+        )
+    return full_ref, branch, expected_sha
+
+
+def read_remote_branch_blob_isolated(
+    origin_url: str,
+    branch: str,
+    path: str,
+    *,
+    env: dict[str, str],
+    max_bytes: int,
+) -> tuple[str, str, bytes]:
+    if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes < 1:
+        raise RuntimeError("invalid authoritative blob size bound")
+
+    with tempfile.TemporaryDirectory(
+        prefix="repoground-fleet-authority-",
+        dir="/tmp",
+    ) as raw_root:
+        isolated_repo = Path(raw_root) / "authority.git"
+        run(["git", "init", "--bare", str(isolated_repo)], env=env)
+        run(
+            [
+                "git",
+                "-C",
+                str(isolated_repo),
+                "config",
+                "remote.origin.url",
+                origin_url,
+            ],
+            env=env,
+        )
+        run(
+            [
+                "git",
+                "-C",
+                str(isolated_repo),
+                "config",
+                "remote.origin.promisor",
+                "true",
+            ],
+            env=env,
+        )
+        filter_spec = "blob:none"
+        run(
+            [
+                "git",
+                "-C",
+                str(isolated_repo),
+                "config",
+                "remote.origin.partialclonefilter",
+                filter_spec,
+            ],
+            env=env,
+        )
+        remote_ref, _resolved_branch, source_sha = remote_branch_head(
+            isolated_repo,
+            branch,
+            env=env,
+            depth=1,
+            filter_spec=filter_spec,
+            fetch_file_size_limit=FLEET_AUTHORITY_FETCH_MAX_BYTES,
+        )
+        object_spec = f"{source_sha}:{path}"
+        try:
+            raw_size_result = _run_with_file_size_limit(
+                [
+                    "git",
+                    "--no-replace-objects",
+                    "-C",
+                    str(isolated_repo),
+                    "cat-file",
+                    "-s",
+                    object_spec,
+                ],
+                env=env,
+                max_file_bytes=max_bytes + FLEET_MEMBERSHIP_FETCH_OVERHEAD_BYTES,
+            )
+        except RuntimeError as exc:
+            raise RuntimeError(
+                "fleet membership blob exceeds bounded transfer or is unavailable"
+            ) from exc
+        raw_size = raw_size_result.stdout.strip()
+        try:
+            observed_size = int(raw_size)
+        except ValueError as exc:
+            raise RuntimeError("fleet membership blob size is invalid") from exc
+        if not 0 < observed_size <= max_bytes:
+            raise RuntimeError(
+                f"fleet membership blob exceeds bounded size: {observed_size}"
+            )
+
+        no_lazy_env = dict(env)
+        no_lazy_env["GIT_NO_LAZY_FETCH"] = "1"
+        blob = subprocess.run(
+            [
+                "git",
+                "--no-replace-objects",
+                "-C",
+                str(isolated_repo),
+                "show",
+                object_spec,
+            ],
+            env=no_lazy_env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if blob.returncode != 0:
+            detail = blob.stderr.decode("utf-8", errors="replace")
+            raise RuntimeError(
+                f"fleet membership blob read failed rc={blob.returncode}: {detail}"
+            )
+        encoded = blob.stdout
+        if len(encoded) != observed_size:
+            raise RuntimeError("fleet membership blob size changed during read")
+        return remote_ref, source_sha, encoded
+
+
+def _fleet_membership_entry_key(
+    raw: object,
+    *,
+    require_explicit_fleet: bool = False,
+) -> str | None:
+    owner_explicit = False
+    if isinstance(raw, str):
+        if require_explicit_fleet:
+            return None
+        name = raw
+        owner = "heimgewebe"
+        url = None
+        fleet_enabled = True
+    elif isinstance(raw, dict):
+        unknown_fields = [
+            key
+            for key in raw
+            if not isinstance(key, str) or key not in FLEET_MEMBERSHIP_ENTRY_KEYS
+        ]
+        if unknown_fields:
+            rendered = ", ".join(repr(key) for key in unknown_fields)
+            raise RuntimeError(
+                f"fleet membership entry has unknown fields: {rendered}"
+            )
+        fleet_value = raw.get("fleet")
+        if "fleet" in raw and not isinstance(fleet_value, bool):
+            raise RuntimeError("fleet membership entry fleet must be a boolean")
+        if require_explicit_fleet and fleet_value is not True:
+            return None
+        if fleet_value is False:
+            return None
+        name_value = raw.get("name")
+        repo_value = raw.get("repo")
+        if "name" in raw and (
+            not isinstance(name_value, str) or not name_value.strip()
+        ):
+            raise RuntimeError(
+                "fleet membership entry name must be a non-empty string"
+            )
+        if "repo" in raw and (
+            not isinstance(repo_value, str) or not repo_value.strip()
+        ):
+            raise RuntimeError(
+                "fleet membership entry repo must be a non-empty string"
+            )
+        if (
+            "name" in raw
+            and "repo" in raw
+            and normalized_repository_key(name_value)
+            != normalized_repository_key(repo_value)
+        ):
+            raise RuntimeError(
+                "fleet membership entry name/repo must match when both are present"
+            )
+        name = repo_value if "repo" in raw else name_value
+        owner_explicit = "owner" in raw
+        if owner_explicit:
+            owner = raw["owner"]
+            if not isinstance(owner, str) or not owner.strip():
+                raise RuntimeError(
+                    "fleet membership entry owner must be a non-empty string"
+                )
+        else:
+            owner = "heimgewebe"
+        url = raw.get("url")
+        if "url" in raw and (not isinstance(url, str) or not url.strip()):
+            raise RuntimeError(
+                "fleet membership entry URL must be a non-empty string"
+            )
+        fleet_enabled = True
+    else:
+        raise RuntimeError("fleet membership entries must be strings or objects")
+
+    if not fleet_enabled:
+        return None
+    if isinstance(name, str) and "/" in name:
+        parts = name.split("/")
+        if len(parts) != 2:
+            raise RuntimeError(f"invalid qualified fleet repository: {name!r}")
+        qualified_owner, qualified_name = parts
+        if owner_explicit and owner.casefold() != qualified_owner.casefold():
+            raise RuntimeError(
+                "fleet membership entry owner conflicts with qualified repository"
+            )
+        owner, name = qualified_owner, qualified_name
+
+    if isinstance(url, str) and url:
+        parsed = parse_github_remote(url)
+        if parsed is None:
+            raise RuntimeError(f"invalid fleet membership GitHub URL: {url!r}")
+        if isinstance(name, str) and (
+            normalized_repository_key(f"{parsed[0]}/{parsed[1]}")
+            != normalized_repository_key(f"{owner}/{name}")
+        ):
+            raise RuntimeError(
+                "fleet membership entry URL conflicts with declared repository"
+            )
+        if (
+            name is None
+            and owner_explicit
+            and parsed[0].casefold() != owner.casefold()
+        ):
+            raise RuntimeError(
+                "fleet membership entry URL conflicts with declared owner"
+            )
+        owner, name = parsed
+
+    if not isinstance(owner, str) or not isinstance(name, str):
+        raise RuntimeError("fleet membership entry is missing owner/name")
+    if (
+        re.fullmatch(r"[A-Za-z0-9_.-]{1,100}", owner) is None
+        or re.fullmatch(r"[A-Za-z0-9_.-]{1,160}", name) is None
+    ):
+        raise RuntimeError(f"invalid fleet membership repository: {owner}/{name}")
+    return canonical_repository_key(f"{owner}/{name}")
+
+
+def _fleet_membership_keys(document: object) -> tuple[str, ...]:
+    if not isinstance(document, dict):
+        raise RuntimeError("fleet membership root must be an object")
+    unknown_root_fields = [
+        key
+        for key in document
+        if not isinstance(key, str) or key not in FLEET_MEMBERSHIP_ROOT_KEYS
+    ]
+    if unknown_root_fields:
+        rendered = ", ".join(repr(key) for key in unknown_root_fields)
+        raise RuntimeError(
+            f"fleet membership root has unknown fields: {rendered}"
+        )
+    repositories = document.get("repos")
+    if not isinstance(repositories, list):
+        raise RuntimeError("fleet membership repos must be a list")
+
+    keys: list[str] = []
+    for raw in repositories:
+        key = _fleet_membership_entry_key(raw)
+        if key is not None:
+            keys.append(key)
+
+    static = document.get("static")
+    if "static" in document and not isinstance(static, dict):
+        raise RuntimeError("fleet membership static must be an object")
+    if isinstance(static, dict):
+        unknown_static_fields = [
+            key
+            for key in static
+            if not isinstance(key, str) or key not in FLEET_MEMBERSHIP_STATIC_KEYS
+        ]
+        if unknown_static_fields:
+            rendered = ", ".join(repr(key) for key in unknown_static_fields)
+            raise RuntimeError(
+                f"fleet membership static has unknown fields: {rendered}"
+            )
+        included = static.get("include")
+        if "include" in static and not isinstance(included, list):
+            raise RuntimeError("fleet membership static.include must be a list")
+        for raw in included or []:
+            key = _fleet_membership_entry_key(
+                raw,
+                require_explicit_fleet=True,
+            )
+            if key is not None:
+                keys.append(key)
+
+    seen: set[str] = set()
+    duplicates: set[str] = set()
+    ordered: list[str] = []
+    for key in keys:
+        if key in seen:
+            duplicates.add(key)
+            continue
+        seen.add(key)
+        ordered.append(key)
+    if duplicates:
+        raise RuntimeError(
+            "duplicate fleet membership repositories: "
+            + ", ".join(sorted(duplicates))
+        )
+    if not ordered:
+        raise RuntimeError("authoritative fleet membership is empty")
+    return tuple(ordered)
+
+
+def _load_fleet_membership_yaml(raw: str) -> object:
+    try:
+        return yaml.load(raw, Loader=StrictFleetMembershipLoader)
+    except yaml.YAMLError as exc:
+        raise RuntimeError("fleet membership YAML is invalid") from exc
+
+
+def load_authoritative_fleet_membership() -> FleetMembership:
+    git_env = _authority_git_env()
+    if (
+        not METAREPO_REPO.is_dir()
+        or METAREPO_REPO.is_symlink()
+        or not is_top_level_git(METAREPO_REPO, env=git_env)
+    ):
+        raise RuntimeError(
+            f"authoritative fleet membership repository is unavailable: "
+            f"{METAREPO_REPO}"
+        )
+    assert_authority_git_transport_safe(METAREPO_REPO, env=git_env)
+    origin = run(
+        ["git", "-C", str(METAREPO_REPO), "remote", "get-url", "origin"],
+        check=False,
+        env=git_env,
+    )
+    origin_url = origin.stdout.strip() if origin.returncode == 0 else ""
+    parsed_origin = parse_github_remote(origin_url)
+    if (
+        origin.returncode != 0
+        or parsed_origin is None
+        or normalized_repository_key(f"{parsed_origin[0]}/{parsed_origin[1]}")
+        != "heimgewebe/metarepo"
+    ):
+        raise RuntimeError(
+            "authoritative fleet membership repository origin mismatch: "
+            "expected heimgewebe/metarepo"
+        )
+    if not github_remote_uses_authenticated_transport(origin_url):
+        raise RuntimeError(
+            "authoritative fleet membership repository origin transport "
+            "must use HTTPS or SSH"
+        )
+    remote_ref, source_sha, encoded = read_remote_branch_blob_isolated(
+        FLEET_MEMBERSHIP_REMOTE,
+        FLEET_MEMBERSHIP_REF,
+        FLEET_MEMBERSHIP_PATH,
+        env=git_env,
+        max_bytes=FLEET_MEMBERSHIP_MAX_BYTES,
+    )
+    try:
+        raw = encoded.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise RuntimeError("fleet membership blob is not valid UTF-8") from exc
+    document = _load_fleet_membership_yaml(raw)
+    keys = _fleet_membership_keys(document)
+    return FleetMembership(
+        keys=keys,
+        source_commit=source_sha,
+        source_ref=remote_ref,
+        source_path=FLEET_MEMBERSHIP_PATH,
+        content_sha256=hashlib.sha256(encoded).hexdigest(),
+    )
+
+
+def select_authoritative_fleet_entries(
+    entries: list[RepoEntry],
+    membership: FleetMembership,
+) -> tuple[list[RepoEntry], list[str], int]:
+    member_keys = set(membership.keys)
+    by_key: dict[str, RepoEntry] = {}
+    excluded_count = 0
+    for entry in entries:
+        if entry.key not in member_keys:
+            excluded_count += 1
+            continue
+        if entry.key in by_key:
+            raise RuntimeError(f"ambiguous local fleet member checkout: {entry.key}")
+        by_key[entry.key] = entry
+    selected = [by_key[key] for key in membership.keys if key in by_key]
+    missing = [key for key in membership.keys if key not in by_key]
+    return selected, missing, excluded_count
 
 
 def state_path(entry: RepoEntry, ref_segment: str) -> Path:
@@ -3427,8 +5996,10 @@ def build_refresh_command(
     config: PublicationConfig,
 ) -> list[str]:
     command = [
-        "python3",
+        sys.executable,
         "-B",
+        "-E",
+        "-s",
         "-m",
         "merger.repoground.cli.ground",
         "external-manifest",
@@ -3687,6 +6258,11 @@ def managed_build_retain_mode(
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--inventory", action="store_true")
+    parser.add_argument(
+        "--inventory-allow-missing-local-members",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
     parser.add_argument("--if-changed", action="store_true")
     parser.add_argument("--force", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--force-republish", action="store_true")
@@ -3715,6 +6291,12 @@ def main(argv: list[str]) -> int:
         args.retention = validate_retention(args.retention)
     except ValueError as exc:
         parser.error(str(exc))
+    if args.inventory_allow_missing_local_members and (
+        not args.inventory or args.repo_keys
+    ):
+        parser.error(
+            "--inventory-allow-missing-local-members requires unscoped --inventory"
+        )
     if args.force:
         parser.error(
             "--force is disabled; use targeted --force-republish with --repo and --reason"
@@ -3776,6 +6358,9 @@ def main(argv: list[str]) -> int:
             cleanup_lock.close()
 
     entries = discover()
+    fleet_membership: FleetMembership | None = None
+    missing_fleet_members: list[str] = []
+    excluded_local_nonmember_count = 0
     if args.repo_keys:
         wanted = set(args.repo_keys)
         entries = [entry for entry in entries if entry.key in wanted]
@@ -3789,6 +6374,57 @@ def main(argv: list[str]) -> int:
                 )
             )
             return 2
+
+    if args.inventory:
+        if not args.repo_keys:
+            try:
+                fleet_membership = load_authoritative_fleet_membership()
+                (
+                    entries,
+                    missing_fleet_members,
+                    excluded_local_nonmember_count,
+                ) = select_authoritative_fleet_entries(entries, fleet_membership)
+            except Exception as exc:
+                summary = {
+                    "status": "error",
+                    "phase": "fleet_membership",
+                    "error": str(exc)[:4000],
+                    "details": [],
+                }
+                print(json.dumps(summary, indent=2, sort_keys=True))
+                return 1
+        membership_report = (
+            fleet_membership.receipt()
+            if fleet_membership is not None
+            else {
+                "schema": FLEET_MEMBERSHIP_SCHEMA,
+                "scope": "targeted_repo_selection",
+                "authority_required": False,
+            }
+        )
+        membership_report["missing_local_members"] = missing_fleet_members
+        membership_report["excluded_local_nonmember_count"] = (
+            excluded_local_nonmember_count
+        )
+        print(
+            json.dumps(
+                {
+                    "status": "warn" if missing_fleet_members else "ok",
+                    "count": len(entries) + len(missing_fleet_members),
+                    "membership": membership_report,
+                    "repos": [
+                        {"key": row.key, "path": str(row.path), "remote": row.remote}
+                        for row in entries
+                    ],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        if missing_fleet_members and not args.inventory_allow_missing_local_members:
+            return 1
+        return 0
+
     if args.record_managed_build_retain:
         retain_lock = acquire_lock()
         if retain_lock is None:
@@ -3802,21 +6438,6 @@ def main(argv: list[str]) -> int:
             return managed_build_retain_mode(args, entries)
         finally:
             retain_lock.close()
-    if args.inventory:
-        print(
-            json.dumps(
-                {
-                    "count": len(entries),
-                    "repos": [
-                        {"key": row.key, "path": str(row.path), "remote": row.remote}
-                        for row in entries
-                    ],
-                },
-                indent=2,
-                sort_keys=True,
-            )
-        )
-        return 0
 
     lock = acquire_lock()
     if lock is None:
@@ -3827,11 +6448,43 @@ def main(argv: list[str]) -> int:
     try:
         STATE_ROOT.mkdir(parents=True, exist_ok=True)
         LOG_ROOT.mkdir(parents=True, exist_ok=True)
+        if not args.repo_keys:
+            try:
+                fleet_membership = load_authoritative_fleet_membership()
+                (
+                    entries,
+                    missing_fleet_members,
+                    excluded_local_nonmember_count,
+                ) = select_authoritative_fleet_entries(entries, fleet_membership)
+            except Exception as exc:
+                summary = {
+                    "status": "error",
+                    "phase": "fleet_membership",
+                    "error": str(exc)[:4000],
+                    "details": [],
+                }
+                atomic_write_json(LOG_ROOT / "fleet-last.json", summary)
+                print(json.dumps(summary, indent=2, sort_keys=True))
+                return 1
         entries, scheduling = prioritize_fleet_publication(entries)
         mode = "targeted-force" if args.force_republish else "if-changed"
+        total_count = len(entries) + len(missing_fleet_members)
+        membership_report = (
+            fleet_membership.receipt()
+            if fleet_membership is not None
+            else {
+                "schema": FLEET_MEMBERSHIP_SCHEMA,
+                "scope": "targeted_repo_selection",
+                "authority_required": False,
+            }
+        )
+        membership_report["missing_local_members"] = missing_fleet_members
+        membership_report["excluded_local_nonmember_count"] = (
+            excluded_local_nonmember_count
+        )
         log(
             f"== fleet {mode} {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} "
-            f"entries={len(entries)} limit={args.limit} retention={args.retention} =="
+            f"entries={total_count} limit={args.limit} retention={args.retention} =="
         )
         try:
             tool_sha, generator_sha = ensure_tool_worktree()
@@ -3839,9 +6492,10 @@ def main(argv: list[str]) -> int:
             summary = {
                 "status": "error",
                 "phase": "generator_preflight",
-                "count": len(entries),
-                "failed": len(entries),
+                "count": total_count,
+                "failed": total_count,
                 "error": str(exc)[:4000],
+                "membership": membership_report,
                 "scheduling": scheduling,
                 "details": [],
             }
@@ -3849,14 +6503,23 @@ def main(argv: list[str]) -> int:
             log(f"GENERATOR-PREFLIGHT-FAILED: {exc}")
             print(json.dumps(summary, indent=2, sort_keys=True))
             return 1
-        changed = published = skipped = failed = queued = retained = deferred = 0
+        changed = published = skipped = queued = retained = deferred = 0
+        failed = len(missing_fleet_members)
         prune_failed = 0
-        details: list[dict[str, object]] = []
+        details: list[dict[str, object]] = [
+            {
+                "repo": key,
+                "status": "failed",
+                "error_code": "fleet_member_checkout_missing",
+                "authority": "heimgewebe/metarepo:fleet/repos.yml",
+            }
+            for key in missing_fleet_members
+        ]
         protected: set[Path] = set()
         reconciliation = reconcile_prune_transactions(protected=protected, apply=True)
         for entry in entries:
             try:
-                remote_ref, branch, source_sha = remote_head(entry.path)
+                remote_ref, branch, source_sha = remote_head_for_entry(entry)
                 ref_segment = safe_segment(branch)
                 config = publication_config(entry)
                 registry_repository = publication_repository(entry)
@@ -4035,7 +6698,7 @@ def main(argv: list[str]) -> int:
         summary: dict[str, object] = {
             "status": "warn" if failed or retained or deferred else "ok",
             "mode": mode,
-            "count": len(entries),
+            "count": total_count,
             "changed": changed,
             "published": published,
             "skipped": skipped,
@@ -4047,6 +6710,7 @@ def main(argv: list[str]) -> int:
             "retention": args.retention,
             "tool_sha": tool_sha,
             "generator_inputs_sha": generator_sha,
+            "membership": membership_report,
             "force_reason": args.reason if args.force_republish else None,
             "retention_reconciliation": reconciliation,
             "scheduling": scheduling,
