@@ -752,6 +752,61 @@ def test_navigation_exposure_requires_resolved_bytes_on_one_fresh_ask_call() -> 
     }
 
 
+def test_navigation_exposure_rejects_zero_context_bytes() -> None:
+    taskset = _taskset()
+    request = next(
+        item
+        for item in _planned_requests(taskset)
+        if item["case_id"] == "nav-lenskit-mcp-startup"
+        and item["condition"] == "treatment"
+    )
+    case = _cases(taskset)[request["case_id"]]
+    receipt = _receipt(request, case)
+    evidence = receipt["repoground_evidence"]
+    calls = [dict(item) for item in evidence["calls"]]
+    calls[0]["resolved_range_count"] = 1
+    calls[0]["context_bytes_used"] = 0
+
+    assert _navigation_exposure(evidence, calls) == {
+        "status": "not_exposed",
+        "reason": "ask_context_zero_context_bytes",
+    }
+
+
+def test_navigation_exposure_requires_evidence_on_same_ask_call() -> None:
+    taskset = _taskset()
+    request = next(
+        item
+        for item in _planned_requests(taskset)
+        if item["case_id"] == "nav-lenskit-mcp-startup"
+        and item["condition"] == "treatment"
+    )
+    case = _cases(taskset)[request["case_id"]]
+    receipt = _receipt(request, case)
+    evidence = receipt["repoground_evidence"]
+    first = dict(evidence["calls"][0])
+    first.update(
+        {
+            "freshness_status": "fresh",
+            "resolved_range_count": 1,
+            "context_bytes_used": 0,
+        }
+    )
+    second = dict(first)
+    second.update(
+        {
+            "sequence": 2,
+            "resolved_range_count": 0,
+            "context_bytes_used": 321,
+        }
+    )
+
+    assert _navigation_exposure(evidence, [first, second]) == {
+        "status": "not_exposed",
+        "reason": "ask_context_evidence_split_across_calls",
+    }
+
+
 def test_grounding_exposure_accepts_stale_freshness_signal() -> None:
     taskset = _taskset()
     request = next(
