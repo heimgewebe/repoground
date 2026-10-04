@@ -828,6 +828,10 @@ def _validate_repoground_evidence(
     receipt: Mapping[str, Any],
     transcript_content: bytes | None,
 ) -> list[str]:
+    if request.get("condition") != "treatment":
+        if "repoground_evidence" in receipt:
+            return ["baseline receipt must not contain RepoGround evidence"]
+        return []
     contract = mapping_value(request.get("runner")).get("execution_contract")
     live_contract = str(contract) in _LIVE_RUNNER_CONTRACTS
     expected, transcript_errors = _bound_transcript_evidence(request, transcript_content)
@@ -838,8 +842,6 @@ def _validate_repoground_evidence(
                 "receipt RepoGround evidence is required by bound transcript"
             )
         return errors
-    if request.get("condition") != "treatment":
-        return ["baseline receipt must not contain RepoGround evidence"]
     evidence = receipt.get("repoground_evidence")
     if not isinstance(evidence, Mapping):
         return ["receipt RepoGround evidence must be an object"]

@@ -560,6 +560,34 @@ def test_synthetic_fixtures_can_never_establish_usefulness() -> None:
     assert {item["classification"] for item in result["classes"]} == {"synthetic_only"}
 
 
+def test_live_baseline_without_repoground_binding_remains_valid() -> None:
+    taskset = _taskset()
+    runner = {
+        "execution_contract": "grabowski-claude-code-live-v1",
+        "provider": "anthropic-claude-code",
+        "model": "claude-haiku-4-5-20251001",
+        "sampling": {},
+    }
+    requests = build_run_requests(
+        taskset,
+        runner=runner,
+        manifest_bindings=BINDINGS,
+        repetitions=2,
+    )
+    request = next(
+        item
+        for item in requests
+        if item["case_id"] == "nav-lenskit-mcp-startup"
+        and item["condition"] == "baseline"
+    )
+    case = _cases(taskset)[request["case_id"]]
+    receipt = _receipt(request, case)
+
+    assert request["repobrief"] is None
+    assert "repoground_evidence" not in receipt
+    assert validate_receipt(request, receipt) == []
+
+
 def test_historical_treatment_without_normalized_evidence_is_valid_but_not_exposed() -> None:
     taskset = _taskset()
     request = next(
