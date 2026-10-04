@@ -25,7 +25,11 @@ from merger.repoground.core.agent_benchmark import (
     validate_taskset,
 )
 
-from merger.repoground.core.agent_benchmark_evaluation import _class_result
+from merger.repoground.core.agent_benchmark_evaluation import (
+    _class_result,
+    _grounding_exposure,
+    _navigation_exposure,
+)
 from merger.repoground.core.agent_benchmark_requests import pair_request_errors
 from merger.repoground.core.bounded_artifact_read import MAX_REGISTERED_ARTIFACT_BYTES
 from merger.repoground.core.language_structure_access import load_language_structure_artifact
@@ -576,6 +580,27 @@ def test_historical_treatment_without_normalized_evidence_is_valid_but_not_expos
     }
 
 
+def test_generic_runner_evidence_is_valid_but_not_revision_bound_exposure() -> None:
+    taskset = _taskset()
+    request = next(
+        item
+        for item in _planned_requests(taskset)
+        if item["case_id"] == "nav-lenskit-mcp-startup"
+        and item["condition"] == "treatment"
+    )
+    case = _cases(taskset)[request["case_id"]]
+    receipt = _receipt(request, case)
+
+    assert request["runner"].get("execution_contract") is None
+    assert validate_receipt(request, receipt) == []
+    score = score_receipt(case, "treatment", request, receipt)
+    assert score["valid"] is True
+    assert score["exposure"] == {
+        "status": "not_exposed",
+        "reason": "runner_contract_not_revision_bound",
+    }
+
+
 def test_navigation_exposure_requires_bundle_commit_to_match_target() -> None:
     taskset = _taskset()
     request = next(
@@ -586,10 +611,10 @@ def test_navigation_exposure_requires_bundle_commit_to_match_target() -> None:
     )
     case = _cases(taskset)[request["case_id"]]
     receipt = _receipt(request, case)
-    receipt["repoground_evidence"]["bundle_commit"] = "1" * 40
-    score = score_receipt(case, "treatment", request, receipt)
-    assert score["valid"] is True
-    assert score["exposure"] == {
+    evidence = receipt["repoground_evidence"]
+    evidence["bundle_commit"] = "1" * 40
+    calls = [dict(item) for item in evidence["calls"]]
+    assert _navigation_exposure(evidence, calls) == {
         "status": "not_exposed",
         "reason": "bundle_commit_does_not_match_target",
     }
@@ -605,17 +630,16 @@ def test_navigation_exposure_requires_resolved_bytes_on_one_fresh_ask_call() -> 
     )
     case = _cases(taskset)[request["case_id"]]
     receipt = _receipt(request, case)
-    score = score_receipt(case, "treatment", request, receipt)
-    assert score["exposure"] == {
+    evidence = receipt["repoground_evidence"]
+    calls = [dict(item) for item in evidence["calls"]]
+    assert _navigation_exposure(evidence, calls) == {
         "status": "exposed",
         "reason": "ask_context_resolved_evidence",
     }
 
-    receipt["repoground_evidence"]["calls"][0]["resolved_range_count"] = 0
-    receipt["repoground_evidence"]["calls"][0]["context_bytes_used"] = 0
-    score = score_receipt(case, "treatment", request, receipt)
-    assert score["valid"] is True
-    assert score["exposure"] == {
+    calls[0]["resolved_range_count"] = 0
+    calls[0]["context_bytes_used"] = 0
+    assert _navigation_exposure(evidence, calls) == {
         "status": "not_exposed",
         "reason": "ask_context_no_resolved_ranges",
     }
@@ -631,10 +655,9 @@ def test_grounding_exposure_accepts_stale_freshness_signal() -> None:
     )
     case = _cases(taskset)[request["case_id"]]
     receipt = _receipt(request, case)
-    receipt["repoground_evidence"]["bundle_commit"] = "1" * 40
-    receipt["repoground_evidence"]["calls"][0]["freshness_status"] = "stale"
-    score = score_receipt(case, "treatment", request, receipt)
-    assert score["exposure"] == {
+    calls = [dict(item) for item in receipt["repoground_evidence"]["calls"]]
+    calls[0]["freshness_status"] = "stale"
+    assert _grounding_exposure(calls) == {
         "status": "exposed",
         "reason": "live_freshness_signal",
     }
@@ -1419,11 +1442,11 @@ def test_live_codex_evidence_must_match_bound_transcript(tmp_path: Path) -> None
 def test_exposed_harm_precedes_incomplete_exposure() -> None:
     thresholds = _taskset()["thresholds"]
 
-    def score(*, success: bool, exposure: str) -> dict:
+    def score(*, success: bool, exposure: str, duration_ms: int = 100) -> dict:
         return {
             "success": success,
             "false_confidence": False,
-            "duration_ms": 100,
+            "duration_ms": duration_ms,
             "tool_call_count": 1,
             "input_tokens": 100,
             "output_tokens": 20,
@@ -1436,7 +1459,11 @@ def test_exposed_harm_precedes_incomplete_exposure() -> None:
             {
                 "pair_valid": True,
                 "baseline": score(success=True, exposure="not_applicable"),
-                "treatment": score(success=False, exposure="exposed"),
+                "treatment": score(
+                    success=False,
+                    exposure="exposed",
+                    duration_ms=10,
+                ),
             },
             {
                 "pair_valid": True,
@@ -1450,6 +1477,46 @@ def test_exposed_harm_precedes_incomplete_exposure() -> None:
     assert result["valid_pair_count"] == 2
     assert result["exposed_pair_count"] == 1
     assert result["classification"] == "harmful"
+
+
+def test_exposed_reproduced_efficiency_direction_can_be_useful() -> None:
+    thresholds = _taskset()["thresholds"]
+
+    def score(*, duration_ms: int, exposure: str) -> dict:
+        return {
+            "success": True,
+            "false_confidence": False,
+            "duration_ms": duration_ms,
+            "tool_call_count": 1,
+            "input_tokens": 100,
+            "output_tokens": 20,
+            "tool_bytes": 100,
+            "exposure": {"status": exposure, "reason": "fixture"},
+        }
+
+    result = _class_result(
+        [
+            {
+                "repetition": repetition,
+                "pair_valid": True,
+                "baseline": score(
+                    duration_ms=100,
+                    exposure="not_applicable",
+                ),
+                "treatment": score(
+                    duration_ms=50,
+                    exposure="exposed",
+                ),
+            }
+            for repetition in (1, 2)
+        ],
+        thresholds=thresholds,
+        measurement_scope="real_paired_agent_runs",
+    )
+
+    assert result["valid_pair_count"] == 2
+    assert result["exposed_pair_count"] == 2
+    assert result["classification"] == "useful"
 
 
 def test_real_pair_without_treatment_exposure_is_not_utility_evidence() -> None:
@@ -1483,7 +1550,7 @@ def test_real_pair_without_treatment_exposure_is_not_utility_evidence() -> None:
     assert navigation["classification"] == "insufficient_evidence"
 
 
-def test_real_paired_evaluation_requires_reproduced_direction() -> None:
+def test_real_paired_evaluation_generic_runner_is_insufficient_evidence() -> None:
     taskset, requests, receipts = _requests_and_receipts(treatment_factor=0.5)
     result = evaluate_paired_runs(
         taskset,
@@ -1491,17 +1558,18 @@ def test_real_paired_evaluation_requires_reproduced_direction() -> None:
         receipts,
         measurement_scope="real_paired_agent_runs",
     )
-    assert result["decision"]["status"] == "useful_class"
-    assert result["decision"]["useful_classes"] == [
-        "grounding_freshness",
-        "navigation",
-        "structural",
-    ]
-    assert all(item["classification"] == "useful" for item in result["classes"])
+
+    assert result["decision"]["status"] == "insufficient_evidence"
+    assert result["decision"]["useful_classes"] == []
+    assert all(item["exposed_pair_count"] == 0 for item in result["classes"])
+    assert all(
+        item["classification"] == "insufficient_evidence"
+        for item in result["classes"]
+    )
     assert result["decision"]["default_promoted"] is False
 
 
-def test_quality_regression_blocks_benefit_despite_efficiency_gain() -> None:
+def test_generic_runner_bad_quality_cannot_establish_harm() -> None:
     taskset, requests, receipts = _requests_and_receipts(treatment_factor=0.1)
     cases = _cases(taskset)
     target_ids = {
@@ -1536,8 +1604,9 @@ def test_quality_regression_blocks_benefit_despite_efficiency_gain() -> None:
     navigation = next(
         item for item in result["classes"] if item["category"] == "navigation"
     )
-    assert navigation["classification"] == "harmful"
-    assert result["decision"]["status"] == "harmful"
+    assert navigation["exposed_pair_count"] == 0
+    assert navigation["classification"] == "insufficient_evidence"
+    assert result["decision"]["status"] == "insufficient_evidence"
     assert result["decision"]["default_promoted"] is False
 
 
@@ -2077,6 +2146,12 @@ def test_complete_evaluation_contract_rejects_incomplete_objects(
 
     incomplete = copy.deepcopy(evaluation)
     incomplete["cases"][0]["baseline"].pop("duration_ms")
+    assert validate_evaluation(incomplete)
+    incomplete = copy.deepcopy(evaluation)
+    incomplete["cases"][0]["treatment"].pop("exposure")
+    assert validate_evaluation(incomplete)
+    incomplete = copy.deepcopy(evaluation)
+    incomplete["classes"][0].pop("exposed_pair_count")
     assert validate_evaluation(incomplete)
     incomplete = copy.deepcopy(evaluation)
     incomplete["classes"][0]["efficiency"].pop("duration")

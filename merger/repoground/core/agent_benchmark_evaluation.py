@@ -176,9 +176,16 @@ def _grounding_exposure(calls: Sequence[Mapping[str, Any]]) -> dict[str, str]:
     return {"status": "not_exposed", "reason": "no_valid_grounding_signal"}
 
 
+_REVISION_BOUND_EXPOSURE_CONTRACTS = {
+    "grabowski-claude-code-live-v1",
+    "grabowski-codex-cli-live-v1",
+}
+
+
 def _exposure(
     case: Mapping[str, Any],
     condition: str,
+    request: Mapping[str, Any],
     receipt: Mapping[str, Any],
 ) -> dict[str, str]:
     if condition != "treatment":
@@ -188,6 +195,12 @@ def _exposure(
         return {
             "status": "not_exposed",
             "reason": "normalized_repoground_evidence_missing",
+        }
+    contract = mapping_value(request.get("runner")).get("execution_contract")
+    if contract not in _REVISION_BOUND_EXPOSURE_CONTRACTS:
+        return {
+            "status": "not_exposed",
+            "reason": "runner_contract_not_revision_bound",
         }
     calls = [
         mapping_value(item)
@@ -248,7 +261,7 @@ def score_receipt(
         "input_tokens": int(provider.get("input_tokens") or 0),
         "output_tokens": int(provider.get("output_tokens") or 0),
         "tool_bytes": _tool_bytes(receipt),
-        "exposure": _exposure(case, condition, receipt),
+        "exposure": _exposure(case, condition, request, receipt),
         "invalid_reasons": errors,
     }
 
