@@ -115,6 +115,111 @@ def _validate_tool_calls(
     return errors
 
 
+_REPOGROUND_EVIDENCE_TOOLS = {"ask_context", "grounding_verify", "live_freshness"}
+_FRESHNESS_STATUSES = {"fresh", "stale", "unknown", "not_comparable", "not_applicable"}
+_GROUNDING_STATUSES = {"pass", "fail", "warn", "degraded", "not_applicable"}
+
+
+def _validate_repoground_evidence(
+    request: Mapping[str, Any], receipt: Mapping[str, Any]
+) -> list[str]:
+    evidence = receipt.get("repoground_evidence")
+    if evidence is None:
+        return []
+    if request.get("condition") != "treatment":
+        return ["baseline receipt must not contain RepoGround evidence"]
+    if not isinstance(evidence, Mapping):
+        return ["receipt RepoGround evidence must be an object"]
+    if set(evidence) != {"target_commit", "bundle_commit", "calls"}:
+        return ["receipt RepoGround evidence fields mismatch"]
+
+    errors: list[str] = []
+    target_commit = evidence.get("target_commit")
+    bundle_commit = evidence.get("bundle_commit")
+    expected_commit = mapping_value(request.get("repository")).get("commit")
+    if target_commit != expected_commit:
+        errors.append("receipt RepoGround evidence target_commit does not match request")
+    if (
+        not isinstance(bundle_commit, str)
+        or len(bundle_commit) not in {40, 64}
+        or any(char not in "0123456789abcdef" for char in bundle_commit)
+    ):
+        errors.append("receipt RepoGround evidence bundle_commit is invalid")
+
+    raw_calls = evidence.get("calls")
+    if not isinstance(raw_calls, list):
+        return errors + ["receipt RepoGround evidence calls must be a list"]
+    tool_calls = {
+        mapping_value(call).get("sequence"): mapping_value(call)
+        for call in list_value(receipt.get("tool_calls"))
+    }
+    seen_sequences: set[int] = set()
+    for raw in raw_calls:
+        if not isinstance(raw, Mapping):
+            errors.append("receipt RepoGround evidence call must be an object")
+            continue
+        call = raw
+        if set(call) != {
+            "sequence",
+            "tool",
+            "freshness_status",
+            "resolved_range_count",
+            "context_bytes_used",
+            "grounding_status",
+        }:
+            errors.append("receipt RepoGround evidence call fields mismatch")
+            continue
+        sequence = call.get("sequence")
+        tool = call.get("tool")
+        if (
+            not isinstance(sequence, int)
+            or isinstance(sequence, bool)
+            or sequence < 1
+            or sequence in seen_sequences
+        ):
+            errors.append("receipt RepoGround evidence call sequence is invalid")
+            continue
+        seen_sequences.add(sequence)
+        if tool not in _REPOGROUND_EVIDENCE_TOOLS:
+            errors.append("receipt RepoGround evidence tool is invalid")
+            continue
+        observed = tool_calls.get(sequence)
+        if observed is None or observed.get("name") != tool:
+            errors.append("receipt RepoGround evidence call does not match tool_calls")
+            continue
+        if observed.get("status") != "success":
+            errors.append("receipt RepoGround evidence may reference only successful tool calls")
+            continue
+
+        freshness = call.get("freshness_status")
+        ranges = call.get("resolved_range_count")
+        context_bytes = call.get("context_bytes_used")
+        grounding = call.get("grounding_status")
+        if freshness not in _FRESHNESS_STATUSES:
+            errors.append("receipt RepoGround evidence freshness_status is invalid")
+        if tool == "ask_context":
+            if (
+                not isinstance(ranges, int)
+                or isinstance(ranges, bool)
+                or ranges < 0
+                or not isinstance(context_bytes, int)
+                or isinstance(context_bytes, bool)
+                or context_bytes < 0
+                or grounding is not None
+            ):
+                errors.append("receipt RepoGround ask_context evidence is invalid")
+        elif tool == "live_freshness":
+            if ranges is not None or context_bytes is not None or grounding is not None:
+                errors.append("receipt RepoGround live_freshness evidence is invalid")
+        elif (
+            ranges is not None
+            or context_bytes is not None
+            or grounding not in _GROUNDING_STATUSES
+        ):
+            errors.append("receipt RepoGround grounding_verify evidence is invalid")
+    return errors
+
+
 def _resolve_artifact(path: str, root: Path) -> Path | None:
     candidate = (root / path).resolve()
     try:
@@ -231,6 +336,7 @@ def validate_receipt(
     errors.extend(_validate_timestamps(receipt))
     errors.extend(_validate_duration(request, receipt))
     errors.extend(_validate_tool_calls(request, receipt))
+    errors.extend(_validate_repoground_evidence(request, receipt))
     errors.extend(_validate_transcript(receipt, transcript_root))
     errors.extend(_validate_status(receipt))
     return errors

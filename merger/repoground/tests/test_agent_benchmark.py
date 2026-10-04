@@ -25,6 +25,7 @@ from merger.repoground.core.agent_benchmark import (
     validate_taskset,
 )
 
+from merger.repoground.core.agent_benchmark_evaluation import _class_result
 from merger.repoground.core.agent_benchmark_requests import pair_request_errors
 from merger.repoground.core.bounded_artifact_read import MAX_REGISTERED_ARTIFACT_BYTES
 from merger.repoground.core.language_structure_access import load_language_structure_artifact
@@ -116,8 +117,13 @@ def _receipt(
     }
     if answer_override:
         answer.update(answer_override)
-    tool_name = "read_file" if condition == "baseline" else "ask_context"
-    return {
+    if condition == "baseline":
+        tool_name = "read_file"
+    elif case["category"] == "grounding_freshness":
+        tool_name = "live_freshness"
+    else:
+        tool_name = "ask_context"
+    result = {
         "kind": "repobrief.agent_benchmark_run_receipt",
         "version": "1.0",
         "request_id": request["request_id"],
@@ -156,6 +162,31 @@ def _receipt(
         "error": None,
         "does_not_establish": ["real_agent_usefulness", "default_promotion"],
     }
+    if condition == "treatment":
+        if case["category"] == "grounding_freshness":
+            evidence_call = {
+                "sequence": 1,
+                "tool": "live_freshness",
+                "freshness_status": "fresh",
+                "resolved_range_count": None,
+                "context_bytes_used": None,
+                "grounding_status": None,
+            }
+        else:
+            evidence_call = {
+                "sequence": 1,
+                "tool": "ask_context",
+                "freshness_status": "fresh",
+                "resolved_range_count": 1,
+                "context_bytes_used": max(1, tool_bytes),
+                "grounding_status": None,
+            }
+        result["repoground_evidence"] = {
+            "target_commit": request["repository"]["commit"],
+            "bundle_commit": request["repository"]["commit"],
+            "calls": [evidence_call],
+        }
+    return result
 
 
 def _requests_and_receipts(
@@ -468,6 +499,188 @@ def test_synthetic_fixtures_can_never_establish_usefulness() -> None:
     assert result["decision"]["status"] == "synthetic_only"
     assert result["decision"]["default_promoted"] is False
     assert {item["classification"] for item in result["classes"]} == {"synthetic_only"}
+
+
+def test_historical_treatment_without_normalized_evidence_is_valid_but_not_exposed() -> None:
+    taskset = _taskset()
+    request = next(
+        item
+        for item in _planned_requests(taskset)
+        if item["case_id"] == "nav-lenskit-mcp-startup"
+        and item["condition"] == "treatment"
+    )
+    case = _cases(taskset)[request["case_id"]]
+    receipt = _receipt(request, case)
+    receipt.pop("repoground_evidence")
+    assert validate_receipt(request, receipt) == []
+    score = score_receipt(case, "treatment", request, receipt)
+    assert score["valid"] is True
+    assert score["exposure"] == {
+        "status": "not_exposed",
+        "reason": "normalized_repoground_evidence_missing",
+    }
+
+
+def test_navigation_exposure_requires_bundle_commit_to_match_target() -> None:
+    taskset = _taskset()
+    request = next(
+        item
+        for item in _planned_requests(taskset)
+        if item["case_id"] == "nav-lenskit-mcp-startup"
+        and item["condition"] == "treatment"
+    )
+    case = _cases(taskset)[request["case_id"]]
+    receipt = _receipt(request, case)
+    receipt["repoground_evidence"]["bundle_commit"] = "1" * 40
+    score = score_receipt(case, "treatment", request, receipt)
+    assert score["valid"] is True
+    assert score["exposure"] == {
+        "status": "not_exposed",
+        "reason": "bundle_commit_does_not_match_target",
+    }
+
+
+def test_navigation_exposure_requires_resolved_bytes_on_one_fresh_ask_call() -> None:
+    taskset = _taskset()
+    request = next(
+        item
+        for item in _planned_requests(taskset)
+        if item["case_id"] == "nav-lenskit-mcp-startup"
+        and item["condition"] == "treatment"
+    )
+    case = _cases(taskset)[request["case_id"]]
+    receipt = _receipt(request, case)
+    score = score_receipt(case, "treatment", request, receipt)
+    assert score["exposure"] == {
+        "status": "exposed",
+        "reason": "ask_context_resolved_evidence",
+    }
+
+    receipt["repoground_evidence"]["calls"][0]["resolved_range_count"] = 0
+    receipt["repoground_evidence"]["calls"][0]["context_bytes_used"] = 0
+    score = score_receipt(case, "treatment", request, receipt)
+    assert score["valid"] is True
+    assert score["exposure"] == {
+        "status": "not_exposed",
+        "reason": "ask_context_no_resolved_ranges",
+    }
+
+
+def test_grounding_exposure_accepts_stale_freshness_signal() -> None:
+    taskset = _taskset()
+    request = next(
+        item
+        for item in _planned_requests(taskset)
+        if item["case_id"] == "grounding-head-mismatch"
+        and item["condition"] == "treatment"
+    )
+    case = _cases(taskset)[request["case_id"]]
+    receipt = _receipt(request, case)
+    receipt["repoground_evidence"]["bundle_commit"] = "1" * 40
+    receipt["repoground_evidence"]["calls"][0]["freshness_status"] = "stale"
+    score = score_receipt(case, "treatment", request, receipt)
+    assert score["exposure"] == {
+        "status": "exposed",
+        "reason": "live_freshness_signal",
+    }
+
+
+def test_repoground_evidence_is_bound_to_request_target_and_tool_call() -> None:
+    taskset = _taskset()
+    request = next(
+        item
+        for item in _planned_requests(taskset)
+        if item["case_id"] == "nav-lenskit-mcp-startup"
+        and item["condition"] == "treatment"
+    )
+    case = _cases(taskset)[request["case_id"]]
+    receipt = _receipt(request, case)
+    receipt["repoground_evidence"]["target_commit"] = "0" * 40
+    assert (
+        "receipt RepoGround evidence target_commit does not match request"
+        in validate_receipt(request, receipt)
+    )
+
+    receipt = _receipt(request, case)
+    receipt["repoground_evidence"]["bundle_commit"] = "not-a-commit"
+    assert (
+        "receipt RepoGround evidence bundle_commit is invalid"
+        in validate_receipt(request, receipt)
+    )
+
+    receipt = _receipt(request, case)
+    receipt["repoground_evidence"]["calls"][0]["sequence"] = 2
+    assert (
+        "receipt RepoGround evidence call does not match tool_calls"
+        in validate_receipt(request, receipt)
+    )
+
+
+def test_exposed_harm_precedes_incomplete_exposure() -> None:
+    thresholds = _taskset()["thresholds"]
+
+    def score(*, success: bool, exposure: str) -> dict:
+        return {
+            "success": success,
+            "false_confidence": False,
+            "duration_ms": 100,
+            "tool_call_count": 1,
+            "input_tokens": 100,
+            "output_tokens": 20,
+            "tool_bytes": 100,
+            "exposure": {"status": exposure, "reason": "fixture"},
+        }
+
+    result = _class_result(
+        [
+            {
+                "pair_valid": True,
+                "baseline": score(success=True, exposure="not_applicable"),
+                "treatment": score(success=False, exposure="exposed"),
+            },
+            {
+                "pair_valid": True,
+                "baseline": score(success=True, exposure="not_applicable"),
+                "treatment": score(success=True, exposure="not_exposed"),
+            },
+        ],
+        thresholds=thresholds,
+        measurement_scope="real_paired_agent_runs",
+    )
+    assert result["valid_pair_count"] == 2
+    assert result["exposed_pair_count"] == 1
+    assert result["classification"] == "harmful"
+
+
+def test_real_pair_without_treatment_exposure_is_not_utility_evidence() -> None:
+    taskset = _taskset()
+    requests = [
+        item
+        for item in _planned_requests(taskset)
+        if item["case_id"] == "nav-lenskit-mcp-startup"
+        and item["repetition"] == 1
+    ]
+    case = _cases(taskset)["nav-lenskit-mcp-startup"]
+    receipts = [_receipt(request, case) for request in requests]
+    treatment = next(
+        receipt
+        for receipt, request in zip(receipts, requests, strict=True)
+        if request["condition"] == "treatment"
+    )
+    treatment["repoground_evidence"]["calls"][0]["resolved_range_count"] = 0
+    treatment["repoground_evidence"]["calls"][0]["context_bytes_used"] = 0
+    result = evaluate_paired_runs(
+        taskset,
+        requests,
+        receipts,
+        measurement_scope="real_paired_agent_runs",
+    )
+    navigation = next(
+        item for item in result["classes"] if item["category"] == "navigation"
+    )
+    assert navigation["valid_pair_count"] == 1
+    assert navigation["exposed_pair_count"] == 0
+    assert navigation["classification"] == "insufficient_evidence"
 
 
 def test_real_paired_evaluation_requires_reproduced_direction() -> None:

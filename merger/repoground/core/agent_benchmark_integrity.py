@@ -32,7 +32,12 @@ from merger.repoground.core.agent_benchmark_requests import (
 )
 
 
-def _invalid_score(reason: str) -> dict[str, Any]:
+def _invalid_score(reason: str, *, condition: str | None = None) -> dict[str, Any]:
+    exposure = (
+        {"status": "not_applicable", "reason": "baseline_condition"}
+        if condition == "baseline"
+        else {"status": "not_exposed", "reason": "run_evidence_unavailable"}
+    )
     return {
         "valid": False,
         "success": False,
@@ -46,6 +51,7 @@ def _invalid_score(reason: str) -> dict[str, Any]:
         "input_tokens": 0,
         "output_tokens": 0,
         "tool_bytes": 0,
+        "exposure": exposure,
         "invalid_reasons": [reason],
     }
 
@@ -58,8 +64,8 @@ def _missing_pair(
         "category": category,
         "repetition": repetition,
         "pair_valid": False,
-        "baseline": _invalid_score("missing baseline request"),
-        "treatment": _invalid_score("missing treatment request"),
+        "baseline": _invalid_score("missing baseline request", condition="baseline"),
+        "treatment": _invalid_score("missing treatment request", condition="treatment"),
     }
 
 
