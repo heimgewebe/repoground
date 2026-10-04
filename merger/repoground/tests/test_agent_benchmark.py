@@ -805,28 +805,49 @@ def test_repoground_evidence_is_bound_to_request_target_and_tool_call() -> None:
     ("field", "value"),
     [
         ("resolved_range_count", "not-an-int"),
+        ("resolved_range_count", []),
+        ("resolved_range_count", {}),
+        ("context_bytes_used", "not-an-int"),
         ("context_bytes_used", []),
+        ("context_bytes_used", {}),
     ],
 )
-def test_invalid_exposure_counters_do_not_abort_scoring(field: str, value) -> None:
-    taskset = _taskset()
-    request = next(
+def test_invalid_exposure_counters_do_not_abort_public_evaluation(
+    field: str, value
+) -> None:
+    taskset, requests, receipts = _requests_and_receipts()
+    target_request = next(
         item
-        for item in _planned_requests(taskset)
+        for item in requests
         if item["case_id"] == "nav-lenskit-mcp-startup"
         and item["condition"] == "treatment"
+        and item["repetition"] == 1
     )
-    case = _cases(taskset)[request["case_id"]]
-    receipt = _receipt(request, case)
-    receipt["repoground_evidence"]["calls"][0][field] = value
+    target_receipt = next(
+        item for item in receipts if item["request_id"] == target_request["request_id"]
+    )
+    target_receipt["repoground_evidence"]["calls"][0][field] = value
 
-    score = score_receipt(case, "treatment", request, receipt)
+    result = evaluate_paired_runs(
+        taskset,
+        requests,
+        receipts,
+        measurement_scope="real_paired_agent_runs",
+    )
+    pair = next(
+        item
+        for item in result["cases"]
+        if item["case_id"] == target_request["case_id"]
+        and item["repetition"] == target_request["repetition"]
+    )
+    score = pair["treatment"]
     assert score["valid"] is False
     assert score["exposure"] == {
         "status": "not_exposed",
         "reason": "invalid_receipt",
     }
     assert score["invalid_reasons"]
+    assert result["invalid_run_count"] >= 1
 
 
 def test_explicit_null_repoground_evidence_is_rejected() -> None:
@@ -2265,6 +2286,93 @@ def _component_requests(tmp_path: Path) -> tuple[dict, list[dict], dict[str, dic
         taskset, runner=RUNNER, manifest_bindings=bindings, repetitions=2
     )
     return taskset, requests, bindings
+
+
+def test_live_component_delta_baseline_validates_repoground_transcript(
+    tmp_path: Path,
+) -> None:
+    taskset = _component_taskset()
+    bindings = _component_bindings(tmp_path)
+    runner = {
+        "execution_contract": "grabowski-claude-code-live-v1",
+        "provider": "anthropic-claude-code",
+        "model": "claude-haiku-4-5-20251001",
+        "sampling": {},
+    }
+    requests = build_run_requests(
+        taskset,
+        runner=runner,
+        manifest_bindings=bindings,
+        repetitions=2,
+    )
+    request = next(
+        item
+        for item in requests
+        if item["case_id"] == "nav-lenskit-mcp-startup"
+        and item["condition"] == "baseline"
+    )
+    case = _cases(taskset)[request["case_id"]]
+    receipt = _receipt(request, case)
+    receipt["tool_calls"][0]["name"] = "ask_context"
+    receipt["tool_calls"][0]["output_bytes"] = 1000
+    payload = _ask_context_payload(
+        request["repobrief"]["manifest_sha256"],
+        request["repobrief"]["manifest"],
+    )
+    events = [
+        {
+            "type": "assistant",
+            "message": {
+                "content": [{
+                    "type": "tool_use",
+                    "id": "tool-1",
+                    "name": "mcp__repobrief__ask_context",
+                    "input": {"query": "example"},
+                }]
+            },
+        },
+        {
+            "type": "user",
+            "message": {
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "tool-1",
+                    "content": json.dumps(
+                        {"structuredContent": payload}, sort_keys=True
+                    ),
+                    "is_error": False,
+                }]
+            },
+        },
+    ]
+    _bind_transcript(receipt, tmp_path, "component-baseline.jsonl", events)
+
+    assert "repoground_evidence" not in receipt
+    assert validate_receipt(request, receipt, transcript_root=tmp_path) == []
+    assert score_receipt(
+        case, "baseline", request, receipt, transcript_root=tmp_path
+    )["exposure"] == {
+        "status": "not_applicable",
+        "reason": "baseline_condition",
+    }
+
+    wrong_payload = copy.deepcopy(payload)
+    wrong_payload["context_pack"]["snapshot_ref"]["manifest_sha256"] = "0" * 64
+    wrong_events = copy.deepcopy(events)
+    wrong_events[1]["message"]["content"][0]["content"] = json.dumps(
+        {"structuredContent": wrong_payload}, sort_keys=True
+    )
+    wrong = copy.deepcopy(receipt)
+    _bind_transcript(
+        wrong,
+        tmp_path,
+        "component-baseline-wrong-manifest.jsonl",
+        wrong_events,
+    )
+    assert (
+        "baseline RepoGround tool call is not supported by bound transcript"
+        in validate_receipt(request, wrong, transcript_root=tmp_path)
+    )
 
 
 def test_complete_evaluation_contract_rejects_incomplete_objects(

@@ -823,15 +823,59 @@ def _validate_repoground_calls(
     return errors
 
 
+def _has_successful_repoground_evidence_call(
+    receipt: Mapping[str, Any],
+) -> bool:
+    return any(
+        isinstance(raw_call, Mapping)
+        and raw_call.get("name") in _REPOGROUND_EVIDENCE_TOOLS
+        and raw_call.get("status") == "success"
+        for raw_call in list_value(receipt.get("tool_calls"))
+    )
+
+
+def _validate_baseline_repoground_transcript(
+    request: Mapping[str, Any],
+    receipt: Mapping[str, Any],
+    transcript_content: bytes | None,
+) -> list[str]:
+    if "repoground_evidence" in receipt:
+        return ["baseline receipt must not contain RepoGround evidence"]
+    contract = mapping_value(request.get("runner")).get("execution_contract")
+    if str(contract) not in _LIVE_RUNNER_CONTRACTS:
+        return []
+    if not isinstance(request.get("component_delta"), Mapping):
+        return []
+    if not isinstance(request.get("repobrief"), Mapping):
+        return []
+
+    expected, transcript_errors = _bound_transcript_evidence(
+        request, transcript_content
+    )
+    errors = list(transcript_errors)
+    if expected is None:
+        if (
+            _has_successful_repoground_evidence_call(receipt)
+            and not transcript_errors
+        ):
+            errors.append(
+                "baseline RepoGround tool call is not supported by bound transcript"
+            )
+        return errors
+    errors.extend(_validate_repoground_header(request, expected))
+    errors.extend(_validate_repoground_calls(receipt, expected))
+    return errors
+
+
 def _validate_repoground_evidence(
     request: Mapping[str, Any],
     receipt: Mapping[str, Any],
     transcript_content: bytes | None,
 ) -> list[str]:
     if request.get("condition") != "treatment":
-        if "repoground_evidence" in receipt:
-            return ["baseline receipt must not contain RepoGround evidence"]
-        return []
+        return _validate_baseline_repoground_transcript(
+            request, receipt, transcript_content
+        )
     contract = mapping_value(request.get("runner")).get("execution_contract")
     live_contract = str(contract) in _LIVE_RUNNER_CONTRACTS
     expected, transcript_errors = _bound_transcript_evidence(request, transcript_content)
@@ -840,6 +884,14 @@ def _validate_repoground_evidence(
         if live_contract and expected is not None:
             errors.append(
                 "receipt RepoGround evidence is required by bound transcript"
+            )
+        elif (
+            live_contract
+            and _has_successful_repoground_evidence_call(receipt)
+            and not transcript_errors
+        ):
+            errors.append(
+                "receipt RepoGround tool call is not supported by bound transcript"
             )
         return errors
     evidence = receipt.get("repoground_evidence")
