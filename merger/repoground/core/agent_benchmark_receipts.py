@@ -1,12 +1,14 @@
 """Validate benchmark runner evidence without trusting the runner."""
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from merger.repoground.core.agent_benchmark_common import (
+    AgentBenchmarkError,
     MAX_JSON_BYTES,
     RECEIPT_KIND,
     VERSION,
@@ -15,6 +17,7 @@ from merger.repoground.core.agent_benchmark_common import (
     sha256_bytes,
     sha256_json,
 )
+from merger.repoground.core.agent_benchmark_components import _load_bound_manifest
 
 
 def _validate_identity(
@@ -118,59 +121,503 @@ def _validate_tool_calls(
 _REPOGROUND_EVIDENCE_TOOLS = {"ask_context", "grounding_verify", "live_freshness"}
 _FRESHNESS_STATUSES = {"fresh", "stale", "unknown", "not_comparable", "not_applicable"}
 _GROUNDING_STATUSES = {"pass", "fail", "warn", "degraded", "not_applicable"}
+_REPOGROUND_CALL_FIELDS = {
+    "sequence",
+    "tool",
+    "freshness_status",
+    "resolved_range_count",
+    "context_bytes_used",
+    "grounding_status",
+}
+
+_LIVE_RUNNER_CONTRACTS = {
+    "grabowski-claude-code-live-v1": "claude",
+    "grabowski-codex-cli-live-v1": "codex",
+}
+_CLAUDE_REPOGROUND_TOOLS = {
+    "mcp__repobrief__ask_context": "ask_context",
+    "mcp__repobrief__grounding_verify": "grounding_verify",
+    "mcp__repobrief__live_freshness": "live_freshness",
+}
 
 
-def _validate_repoground_evidence(
-    request: Mapping[str, Any], receipt: Mapping[str, Any]
+def _is_commit(value: Any) -> bool:
+    return bool(
+        isinstance(value, str)
+        and len(value) in {40, 64}
+        and all(char in "0123456789abcdef" for char in value)
+    )
+
+
+def _jsonl_objects(content: bytes) -> tuple[list[Mapping[str, Any]] | None, list[str]]:
+    try:
+        decoded = content.decode("utf-8")
+    except UnicodeDecodeError:
+        return None, ["receipt transcript is not UTF-8 JSONL"]
+    objects: list[Mapping[str, Any]] = []
+    for line in decoded.splitlines():
+        if not line.strip():
+            continue
+        try:
+            value = json.loads(line)
+        except json.JSONDecodeError:
+            return None, ["receipt transcript is not valid JSONL"]
+        if not isinstance(value, Mapping):
+            return None, ["receipt transcript JSONL entry must be an object"]
+        objects.append(value)
+    if not objects:
+        return None, ["receipt transcript JSONL is empty"]
+    return objects, []
+
+
+def _json_mapping(value: Any) -> Mapping[str, Any] | None:
+    decoded = value
+    if isinstance(decoded, str):
+        try:
+            decoded = json.loads(decoded)
+        except json.JSONDecodeError:
+            return None
+    return decoded if isinstance(decoded, Mapping) else None
+
+
+def _structured_payload(value: Any) -> Mapping[str, Any] | None:
+    decoded = _json_mapping(value)
+    if decoded is None:
+        return None
+    nested = decoded.get("structuredContent")
+    if not isinstance(nested, Mapping):
+        nested = decoded.get("structured_content")
+    if isinstance(nested, Mapping):
+        return nested
+    result = decoded.get("result")
+    if isinstance(result, Mapping):
+        nested = result.get("structuredContent")
+        if not isinstance(nested, Mapping):
+            nested = result.get("structured_content")
+        if isinstance(nested, Mapping):
+            return nested
+    if decoded.get("kind") in {
+        "repobrief.mcp.read_only_frontdoor",
+        "repobrief.live_freshness",
+    }:
+        return decoded
+    return None
+
+
+def _decoded_repoground_payload(value: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    content = value.get("content")
+    if isinstance(content, list):
+        candidates = list(content)
+    elif isinstance(content, (str, Mapping)):
+        candidates = [content]
+    else:
+        return None
+    for candidate in candidates:
+        payload_source = (
+            candidate.get("text")
+            if isinstance(candidate, Mapping) and isinstance(candidate.get("text"), str)
+            else candidate
+        )
+        payload = _structured_payload(payload_source)
+        if payload is not None:
+            return payload
+    return None
+
+
+def _snapshot_commit(freshness: Mapping[str, Any]) -> str | None:
+    snapshot = freshness.get("snapshot_provenance")
+    commit = snapshot.get("git_commit") if isinstance(snapshot, Mapping) else None
+    return str(commit) if _is_commit(commit) else None
+
+
+def _live_freshness_evidence(
+    sequence: int, payload: Mapping[str, Any]
+) -> tuple[str, dict[str, Any]] | None:
+    if (
+        payload.get("kind") != "repobrief.live_freshness"
+        or payload.get("version") != "v1"
+        or payload.get("status") not in _FRESHNESS_STATUSES
+    ):
+        return None
+    commit = _snapshot_commit(payload)
+    if commit is None:
+        return None
+    return commit, {
+        "sequence": sequence,
+        "tool": "live_freshness",
+        "freshness_status": payload.get("status"),
+        "resolved_range_count": None,
+        "context_bytes_used": None,
+        "grounding_status": None,
+    }
+
+
+def _frontdoor_freshness(
+    tool: str, payload: Mapping[str, Any]
+) -> tuple[Mapping[str, Any], str] | None:
+    if (
+        payload.get("kind") != "repobrief.mcp.read_only_frontdoor"
+        or payload.get("version") != "v1"
+        or payload.get("tool") != tool
+    ):
+        return None
+    freshness = payload.get("live_freshness")
+    if (
+        not isinstance(freshness, Mapping)
+        or freshness.get("kind") != "repobrief.live_freshness"
+        or freshness.get("version") != "v1"
+        or freshness.get("status") not in _FRESHNESS_STATUSES
+    ):
+        return None
+    commit = _snapshot_commit(freshness)
+    return (freshness, commit) if commit is not None else None
+
+
+def _ask_context_evidence(
+    sequence: int,
+    payload: Mapping[str, Any],
+    freshness: Mapping[str, Any],
+    commit: str,
+) -> tuple[str, dict[str, Any]] | None:
+    if payload.get("status") != "ok":
+        return None
+    pack = payload.get("context_pack")
+    if (
+        not isinstance(pack, Mapping)
+        or pack.get("kind") != "repobrief.ask_context_pack"
+        or pack.get("version") != "1.0"
+    ):
+        return None
+    ranges = pack.get("resolved_ranges")
+    budget = pack.get("budget")
+    context_bytes = budget.get("context_bytes_used") if isinstance(budget, Mapping) else None
+    if (
+        not isinstance(ranges, list)
+        or isinstance(context_bytes, bool)
+        or not isinstance(context_bytes, int)
+        or context_bytes < 0
+    ):
+        return None
+    return commit, {
+        "sequence": sequence,
+        "tool": "ask_context",
+        "freshness_status": freshness.get("status"),
+        "resolved_range_count": len(ranges),
+        "context_bytes_used": context_bytes,
+        "grounding_status": None,
+    }
+
+
+def _grounding_evidence(
+    sequence: int,
+    payload: Mapping[str, Any],
+    freshness: Mapping[str, Any],
+    commit: str,
+) -> tuple[str, dict[str, Any]] | None:
+    verdict = payload.get("verdict")
+    if (
+        not isinstance(verdict, Mapping)
+        or verdict.get("kind") != "repobrief.answer_grounding_verdict"
+        or verdict.get("version") != "1.0"
+        or verdict.get("status") not in _GROUNDING_STATUSES
+    ):
+        return None
+    return commit, {
+        "sequence": sequence,
+        "tool": "grounding_verify",
+        "freshness_status": freshness.get("status"),
+        "resolved_range_count": None,
+        "context_bytes_used": None,
+        "grounding_status": verdict.get("status"),
+    }
+
+
+def _evidence_call_from_payload(
+    tool: str, sequence: int, payload: Mapping[str, Any]
+) -> tuple[str, dict[str, Any]] | None:
+    if tool == "live_freshness":
+        return _live_freshness_evidence(sequence, payload)
+    bound = _frontdoor_freshness(tool, payload)
+    if bound is None:
+        return None
+    freshness, commit = bound
+    if tool == "ask_context":
+        return _ask_context_evidence(sequence, payload, freshness, commit)
+    if tool == "grounding_verify":
+        return _grounding_evidence(sequence, payload, freshness, commit)
+    return None
+
+
+def _evidence_document(
+    request: Mapping[str, Any],
+    calls: list[dict[str, Any]],
+    commits: set[str],
+) -> dict[str, Any] | None:
+    if not calls or len(commits) != 1:
+        return None
+    return {
+        "target_commit": str(mapping_value(request.get("repository")).get("commit", "")),
+        "bundle_commit": next(iter(commits)),
+        "calls": calls,
+    }
+
+
+def _claude_tool_blocks(
+    events: list[Mapping[str, Any]],
+) -> tuple[list[Mapping[str, Any]], dict[str, Mapping[str, Any]]]:
+    uses: list[Mapping[str, Any]] = []
+    results: dict[str, Mapping[str, Any]] = {}
+    for event in events:
+        message = event.get("message")
+        blocks = message.get("content") if isinstance(message, Mapping) else None
+        if not isinstance(blocks, list):
+            continue
+        for raw in blocks:
+            if not isinstance(raw, Mapping):
+                continue
+            if raw.get("type") == "tool_use" and raw.get("name") != "StructuredOutput":
+                uses.append(raw)
+            elif raw.get("type") == "tool_result" and isinstance(
+                raw.get("tool_use_id"), str
+            ):
+                results[str(raw["tool_use_id"])] = raw
+    return uses, results
+
+
+def _claude_transcript_evidence(
+    request: Mapping[str, Any], events: list[Mapping[str, Any]]
+) -> dict[str, Any] | None:
+    uses, results = _claude_tool_blocks(events)
+    evidence_calls: list[dict[str, Any]] = []
+    commits: set[str] = set()
+    for sequence, use in enumerate(uses, start=1):
+        tool = _CLAUDE_REPOGROUND_TOOLS.get(str(use.get("name", "")))
+        if tool is None:
+            continue
+        identifier = use.get("id")
+        result = results.get(str(identifier)) if isinstance(identifier, str) else None
+        if not isinstance(result, Mapping) or result.get("is_error") is True:
+            continue
+        payload = _decoded_repoground_payload(result)
+        normalized = (
+            _evidence_call_from_payload(tool, sequence, payload)
+            if isinstance(payload, Mapping)
+            else None
+        )
+        if normalized is None:
+            continue
+        commit, call = normalized
+        commits.add(commit)
+        evidence_calls.append(call)
+    return _evidence_document(request, evidence_calls, commits)
+
+
+def _codex_transcript_evidence(
+    request: Mapping[str, Any], events: list[Mapping[str, Any]]
+) -> dict[str, Any] | None:
+    sequence = 0
+    evidence_calls: list[dict[str, Any]] = []
+    commits: set[str] = set()
+    for event in events:
+        if event.get("type") != "item.completed":
+            continue
+        item = event.get("item")
+        if not isinstance(item, Mapping):
+            continue
+        item_type = item.get("type")
+        if item_type in {"agent_message", "reasoning", "todo_list"}:
+            continue
+        if item_type not in {"command_execution", "mcp_tool_call"}:
+            continue
+        sequence += 1
+        tool = item.get("tool")
+        if (
+            item_type != "mcp_tool_call"
+            or item.get("server") != "repobrief"
+            or tool not in _REPOGROUND_EVIDENCE_TOOLS
+            or item.get("status") != "completed"
+            or item.get("error") is not None
+        ):
+            continue
+        result = item.get("result")
+        payload = result.get("structured_content") if isinstance(result, Mapping) else None
+        if not isinstance(payload, Mapping):
+            continue
+        normalized = _evidence_call_from_payload(str(tool), sequence, payload)
+        if normalized is None:
+            continue
+        commit, call = normalized
+        commits.add(commit)
+        evidence_calls.append(call)
+    return _evidence_document(request, evidence_calls, commits)
+
+
+def _bound_transcript_evidence(
+    request: Mapping[str, Any], content: bytes | None
+) -> tuple[dict[str, Any] | None, list[str]]:
+    contract = mapping_value(request.get("runner")).get("execution_contract")
+    runner = _LIVE_RUNNER_CONTRACTS.get(str(contract))
+    if runner is None:
+        return None, []
+    if content is None:
+        return None, ["receipt RepoGround evidence requires readable bound transcript"]
+    events, errors = _jsonl_objects(content)
+    if events is None:
+        return None, errors
+    expected = (
+        _claude_transcript_evidence(request, events)
+        if runner == "claude"
+        else _codex_transcript_evidence(request, events)
+    )
+    if expected is None:
+        return None, ["receipt RepoGround evidence is not supported by bound transcript"]
+    return expected, []
+
+
+def _bound_manifest_commit(
+    request: Mapping[str, Any],
+) -> tuple[str | None, list[str]]:
+    runner = mapping_value(request.get("runner"))
+    if not runner.get("execution_contract"):
+        return None, []
+    repository = mapping_value(request.get("repository"))
+    repository_id = repository.get("id")
+    if not isinstance(repository_id, str) or not repository_id:
+        return None, ["receipt RepoGround manifest binding is invalid"]
+    try:
+        _path, manifest = _load_bound_manifest(
+            mapping_value(request.get("repobrief")),
+            repository_id=repository_id,
+            label="benchmark RepoGround manifest",
+        )
+    except AgentBenchmarkError as exc:
+        return None, [f"receipt RepoGround manifest binding is invalid: {exc}"]
+    provenance = manifest.get("snapshot_provenance")
+    repositories = (
+        provenance.get("repositories") if isinstance(provenance, Mapping) else None
+    )
+    if (
+        not isinstance(repositories, list)
+        or len(repositories) != 1
+        or not isinstance(repositories[0], Mapping)
+    ):
+        return None, ["receipt RepoGround manifest provenance is invalid"]
+    commit = repositories[0].get("git_commit")
+    if not _is_commit(commit):
+        return None, ["receipt RepoGround manifest commit is invalid"]
+    return str(commit), []
+
+
+def _validate_ask_context_evidence(
+    call: Mapping[str, Any], observed: Mapping[str, Any]
 ) -> list[str]:
-    evidence = receipt.get("repoground_evidence")
-    if evidence is None:
-        return []
-    if request.get("condition") != "treatment":
-        return ["baseline receipt must not contain RepoGround evidence"]
-    if not isinstance(evidence, Mapping):
-        return ["receipt RepoGround evidence must be an object"]
-    if set(evidence) != {"target_commit", "bundle_commit", "calls"}:
-        return ["receipt RepoGround evidence fields mismatch"]
+    ranges = call.get("resolved_range_count")
+    context_bytes = call.get("context_bytes_used")
+    if (
+        not isinstance(ranges, int)
+        or isinstance(ranges, bool)
+        or ranges < 0
+        or not isinstance(context_bytes, int)
+        or isinstance(context_bytes, bool)
+        or context_bytes < 0
+        or call.get("grounding_status") is not None
+    ):
+        return ["receipt RepoGround ask_context evidence is invalid"]
+    output_bytes = observed.get("output_bytes")
+    if (
+        isinstance(output_bytes, int)
+        and not isinstance(output_bytes, bool)
+        and output_bytes >= 0
+        and context_bytes > output_bytes
+    ):
+        return ["receipt RepoGround ask_context context bytes exceed bound tool output"]
+    return []
 
+
+def _validate_live_freshness_evidence(call: Mapping[str, Any]) -> list[str]:
+    if (
+        call.get("resolved_range_count") is not None
+        or call.get("context_bytes_used") is not None
+        or call.get("grounding_status") is not None
+    ):
+        return ["receipt RepoGround live_freshness evidence is invalid"]
+    return []
+
+
+def _validate_grounding_evidence(call: Mapping[str, Any]) -> list[str]:
+    if (
+        call.get("resolved_range_count") is not None
+        or call.get("context_bytes_used") is not None
+        or call.get("grounding_status") not in _GROUNDING_STATUSES
+    ):
+        return ["receipt RepoGround grounding_verify evidence is invalid"]
+    return []
+
+
+def _validate_repoground_call(
+    call: Mapping[str, Any], observed: Mapping[str, Any] | None
+) -> list[str]:
+    tool = call.get("tool")
+    if tool not in _REPOGROUND_EVIDENCE_TOOLS:
+        return ["receipt RepoGround evidence tool is invalid"]
+    if observed is None or observed.get("name") != tool:
+        return ["receipt RepoGround evidence call does not match tool_calls"]
+    if observed.get("status") != "success":
+        return ["receipt RepoGround evidence may reference only successful tool calls"]
+    errors: list[str] = []
+    if call.get("freshness_status") not in _FRESHNESS_STATUSES:
+        errors.append("receipt RepoGround evidence freshness_status is invalid")
+    if tool == "ask_context":
+        errors.extend(_validate_ask_context_evidence(call, observed))
+    elif tool == "live_freshness":
+        errors.extend(_validate_live_freshness_evidence(call))
+    else:
+        errors.extend(_validate_grounding_evidence(call))
+    return errors
+
+
+def _validate_repoground_header(
+    request: Mapping[str, Any], evidence: Mapping[str, Any]
+) -> list[str]:
     errors: list[str] = []
     target_commit = evidence.get("target_commit")
     bundle_commit = evidence.get("bundle_commit")
     expected_commit = mapping_value(request.get("repository")).get("commit")
     if target_commit != expected_commit:
         errors.append("receipt RepoGround evidence target_commit does not match request")
-    if (
-        not isinstance(bundle_commit, str)
-        or len(bundle_commit) not in {40, 64}
-        or any(char not in "0123456789abcdef" for char in bundle_commit)
-    ):
+    if not _is_commit(bundle_commit):
         errors.append("receipt RepoGround evidence bundle_commit is invalid")
+        return errors
+    bound_commit, manifest_errors = _bound_manifest_commit(request)
+    errors.extend(manifest_errors)
+    if bound_commit is not None and bundle_commit != bound_commit:
+        errors.append(
+            "receipt RepoGround evidence bundle_commit does not match bound manifest"
+        )
+    return errors
 
+
+def _validate_repoground_calls(
+    receipt: Mapping[str, Any], evidence: Mapping[str, Any]
+) -> list[str]:
     raw_calls = evidence.get("calls")
     if not isinstance(raw_calls, list):
-        return errors + ["receipt RepoGround evidence calls must be a list"]
+        return ["receipt RepoGround evidence calls must be a list"]
     tool_calls = {
         mapping_value(call).get("sequence"): mapping_value(call)
         for call in list_value(receipt.get("tool_calls"))
     }
+    errors: list[str] = []
     seen_sequences: set[int] = set()
     for raw in raw_calls:
         if not isinstance(raw, Mapping):
             errors.append("receipt RepoGround evidence call must be an object")
             continue
         call = raw
-        if set(call) != {
-            "sequence",
-            "tool",
-            "freshness_status",
-            "resolved_range_count",
-            "context_bytes_used",
-            "grounding_status",
-        }:
+        if set(call) != _REPOGROUND_CALL_FIELDS:
             errors.append("receipt RepoGround evidence call fields mismatch")
             continue
         sequence = call.get("sequence")
-        tool = call.get("tool")
         if (
             not isinstance(sequence, int)
             or isinstance(sequence, bool)
@@ -180,43 +627,30 @@ def _validate_repoground_evidence(
             errors.append("receipt RepoGround evidence call sequence is invalid")
             continue
         seen_sequences.add(sequence)
-        if tool not in _REPOGROUND_EVIDENCE_TOOLS:
-            errors.append("receipt RepoGround evidence tool is invalid")
-            continue
-        observed = tool_calls.get(sequence)
-        if observed is None or observed.get("name") != tool:
-            errors.append("receipt RepoGround evidence call does not match tool_calls")
-            continue
-        if observed.get("status") != "success":
-            errors.append("receipt RepoGround evidence may reference only successful tool calls")
-            continue
+        errors.extend(_validate_repoground_call(call, tool_calls.get(sequence)))
+    return errors
 
-        freshness = call.get("freshness_status")
-        ranges = call.get("resolved_range_count")
-        context_bytes = call.get("context_bytes_used")
-        grounding = call.get("grounding_status")
-        if freshness not in _FRESHNESS_STATUSES:
-            errors.append("receipt RepoGround evidence freshness_status is invalid")
-        if tool == "ask_context":
-            if (
-                not isinstance(ranges, int)
-                or isinstance(ranges, bool)
-                or ranges < 0
-                or not isinstance(context_bytes, int)
-                or isinstance(context_bytes, bool)
-                or context_bytes < 0
-                or grounding is not None
-            ):
-                errors.append("receipt RepoGround ask_context evidence is invalid")
-        elif tool == "live_freshness":
-            if ranges is not None or context_bytes is not None or grounding is not None:
-                errors.append("receipt RepoGround live_freshness evidence is invalid")
-        elif (
-            ranges is not None
-            or context_bytes is not None
-            or grounding not in _GROUNDING_STATUSES
-        ):
-            errors.append("receipt RepoGround grounding_verify evidence is invalid")
+
+def _validate_repoground_evidence(
+    request: Mapping[str, Any],
+    receipt: Mapping[str, Any],
+    transcript_content: bytes | None,
+) -> list[str]:
+    if "repoground_evidence" not in receipt:
+        return []
+    if request.get("condition") != "treatment":
+        return ["baseline receipt must not contain RepoGround evidence"]
+    evidence = receipt.get("repoground_evidence")
+    if not isinstance(evidence, Mapping):
+        return ["receipt RepoGround evidence must be an object"]
+    if set(evidence) != {"target_commit", "bundle_commit", "calls"}:
+        return ["receipt RepoGround evidence fields mismatch"]
+    errors = _validate_repoground_header(request, evidence)
+    errors.extend(_validate_repoground_calls(receipt, evidence))
+    expected, transcript_errors = _bound_transcript_evidence(request, transcript_content)
+    errors.extend(transcript_errors)
+    if expected is not None and dict(evidence) != expected:
+        errors.append("receipt RepoGround evidence does not match bound transcript")
     return errors
 
 
@@ -264,19 +698,27 @@ def _artifact_transcript(
     return transcript_bytes, []
 
 
-def _validate_transcript(
+def _transcript_content(
     receipt: Mapping[str, Any], transcript_root: str | Path | None
-) -> list[str]:
+) -> tuple[bytes | None, list[str]]:
     transcript = mapping_value(receipt.get("transcript"))
     storage = transcript.get("storage")
     if storage == "inline":
-        content, errors = _inline_transcript(transcript)
-    elif storage == "artifact":
-        content, errors = _artifact_transcript(transcript, transcript_root)
-    else:
-        return ["transcript storage is invalid"]
+        return _inline_transcript(transcript)
+    if storage == "artifact":
+        return _artifact_transcript(transcript, transcript_root)
+    return None, ["transcript storage is invalid"]
+
+
+def _validate_transcript(
+    receipt: Mapping[str, Any],
+    content: bytes | None,
+    errors: list[str],
+) -> list[str]:
+    errors = list(errors)
     if content is None:
         return errors
+    transcript = mapping_value(receipt.get("transcript"))
     if transcript.get("bytes") != len(content):
         errors.append("transcript byte count mismatch")
     if transcript.get("sha256") != sha256_bytes(content):
@@ -330,14 +772,19 @@ def validate_receipt(
 ) -> list[str]:
     """Validate identity, budget, tool policy and transcript evidence."""
 
+    transcript_content, transcript_errors = _transcript_content(
+        receipt, transcript_root
+    )
     errors = _validate_identity(request, receipt)
     errors.extend(_validate_provider(request, receipt))
     errors.extend(_validate_tokens(request, receipt))
     errors.extend(_validate_timestamps(receipt))
     errors.extend(_validate_duration(request, receipt))
     errors.extend(_validate_tool_calls(request, receipt))
-    errors.extend(_validate_repoground_evidence(request, receipt))
-    errors.extend(_validate_transcript(receipt, transcript_root))
+    errors.extend(
+        _validate_repoground_evidence(request, receipt, transcript_content)
+    )
+    errors.extend(_validate_transcript(receipt, transcript_content, transcript_errors))
     errors.extend(_validate_status(receipt))
     return errors
 

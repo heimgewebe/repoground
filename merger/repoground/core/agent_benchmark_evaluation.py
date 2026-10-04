@@ -125,6 +125,57 @@ def _tool_bytes(receipt: Mapping[str, Any]) -> int:
     )
 
 
+def _ask_context_call_is_exposed(call: Mapping[str, Any]) -> bool:
+    return bool(
+        call.get("freshness_status") == "fresh"
+        and int(call.get("resolved_range_count") or 0) > 0
+        and int(call.get("context_bytes_used") or 0) > 0
+    )
+
+
+def _navigation_exposure(
+    evidence: Mapping[str, Any], calls: Sequence[Mapping[str, Any]]
+) -> dict[str, str]:
+    if evidence.get("bundle_commit") != evidence.get("target_commit"):
+        return {
+            "status": "not_exposed",
+            "reason": "bundle_commit_does_not_match_target",
+        }
+    ask_calls = [item for item in calls if item.get("tool") == "ask_context"]
+    if not ask_calls:
+        return {"status": "not_exposed", "reason": "no_successful_ask_context"}
+    if not any(item.get("freshness_status") == "fresh" for item in ask_calls):
+        return {"status": "not_exposed", "reason": "ask_context_target_not_fresh"}
+    if not any(int(item.get("resolved_range_count") or 0) > 0 for item in ask_calls):
+        return {"status": "not_exposed", "reason": "ask_context_no_resolved_ranges"}
+    if not any(int(item.get("context_bytes_used") or 0) > 0 for item in ask_calls):
+        return {"status": "not_exposed", "reason": "ask_context_zero_context_bytes"}
+    if any(_ask_context_call_is_exposed(item) for item in ask_calls):
+        return {"status": "exposed", "reason": "ask_context_resolved_evidence"}
+    return {
+        "status": "not_exposed",
+        "reason": "ask_context_evidence_split_across_calls",
+    }
+
+
+def _grounding_exposure(calls: Sequence[Mapping[str, Any]]) -> dict[str, str]:
+    if any(
+        item.get("tool") == "live_freshness"
+        and item.get("freshness_status")
+        in {"fresh", "stale", "unknown", "not_comparable", "not_applicable"}
+        for item in calls
+    ):
+        return {"status": "exposed", "reason": "live_freshness_signal"}
+    if any(
+        item.get("tool") == "grounding_verify"
+        and item.get("grounding_status")
+        in {"pass", "fail", "warn", "degraded", "not_applicable"}
+        for item in calls
+    ):
+        return {"status": "exposed", "reason": "grounding_verdict_signal"}
+    return {"status": "not_exposed", "reason": "no_valid_grounding_signal"}
+
+
 def _exposure(
     case: Mapping[str, Any],
     condition: str,
@@ -145,58 +196,9 @@ def _exposure(
     ]
     category = str(case.get("category", ""))
     if category in {"navigation", "structural"}:
-        if evidence.get("bundle_commit") != evidence.get("target_commit"):
-            return {
-                "status": "not_exposed",
-                "reason": "bundle_commit_does_not_match_target",
-            }
-        ask_calls = [item for item in calls if item.get("tool") == "ask_context"]
-        if not ask_calls:
-            return {"status": "not_exposed", "reason": "no_successful_ask_context"}
-        if not any(item.get("freshness_status") == "fresh" for item in ask_calls):
-            return {
-                "status": "not_exposed",
-                "reason": "ask_context_target_not_fresh",
-            }
-        if not any(int(item.get("resolved_range_count") or 0) > 0 for item in ask_calls):
-            return {
-                "status": "not_exposed",
-                "reason": "ask_context_no_resolved_ranges",
-            }
-        if not any(int(item.get("context_bytes_used") or 0) > 0 for item in ask_calls):
-            return {
-                "status": "not_exposed",
-                "reason": "ask_context_zero_context_bytes",
-            }
-        if any(
-            item.get("freshness_status") == "fresh"
-            and int(item.get("resolved_range_count") or 0) > 0
-            and int(item.get("context_bytes_used") or 0) > 0
-            for item in ask_calls
-        ):
-            return {"status": "exposed", "reason": "ask_context_resolved_evidence"}
-        return {
-            "status": "not_exposed",
-            "reason": "ask_context_evidence_split_across_calls",
-        }
-
+        return _navigation_exposure(evidence, calls)
     if category == "grounding_freshness":
-        if any(
-            item.get("tool") == "live_freshness"
-            and item.get("freshness_status")
-            in {"fresh", "stale", "unknown", "not_comparable", "not_applicable"}
-            for item in calls
-        ):
-            return {"status": "exposed", "reason": "live_freshness_signal"}
-        if any(
-            item.get("tool") == "grounding_verify"
-            and item.get("grounding_status")
-            in {"pass", "fail", "warn", "degraded", "not_applicable"}
-            for item in calls
-        ):
-            return {"status": "exposed", "reason": "grounding_verdict_signal"}
-        return {"status": "not_exposed", "reason": "no_valid_grounding_signal"}
-
+        return _grounding_exposure(calls)
     return {"status": "not_exposed", "reason": "unsupported_task_category"}
 
 

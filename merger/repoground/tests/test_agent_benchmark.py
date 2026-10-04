@@ -178,7 +178,7 @@ def _receipt(
                 "tool": "ask_context",
                 "freshness_status": "fresh",
                 "resolved_range_count": 1,
-                "context_bytes_used": max(1, tool_bytes),
+                "context_bytes_used": max(1, tool_bytes - tool_bytes // 2),
                 "grounding_status": None,
             }
         result["repoground_evidence"] = {
@@ -327,6 +327,26 @@ def test_claude_code_live_contract_is_bound_into_requests() -> None:
     Draft7Validator(_schema("request")).validate(requests[0])
 
 
+def test_codex_cli_live_contract_is_bound_into_requests() -> None:
+    runner = {
+        "execution_contract": "grabowski-codex-cli-live-v1",
+        "provider": "openai-codex-cli",
+        "model": "gpt-6-astra",
+        "sampling": {"reasoning_effort": "medium"},
+    }
+
+    requests = build_run_requests(
+        _taskset(),
+        runner=runner,
+        manifest_bindings=BINDINGS,
+        repetitions=2,
+    )
+
+    assert requests
+    assert all(request["runner"] == runner for request in requests)
+    Draft7Validator(_schema("request")).validate(requests[0])
+
+
 @pytest.mark.parametrize(
     ("runner", "expected"),
     [
@@ -372,6 +392,41 @@ def test_claude_code_live_contract_is_bound_into_requests() -> None:
                 "sampling": [],
             },
             "requires an explicit empty sampling object",
+        ),
+        (
+            {
+                "execution_contract": "grabowski-codex-cli-live-v1",
+                "provider": "fixture-provider",
+                "model": "gpt-6-astra",
+                "sampling": {"reasoning_effort": "medium"},
+            },
+            "requires provider openai-codex-cli",
+        ),
+        (
+            {
+                "execution_contract": "grabowski-codex-cli-live-v1",
+                "provider": "openai-codex-cli",
+                "model": "gpt-5",
+                "sampling": {"reasoning_effort": "medium"},
+            },
+            "requires model gpt-6-astra",
+        ),
+        (
+            {
+                "execution_contract": "grabowski-codex-cli-live-v1",
+                "provider": "openai-codex-cli",
+                "model": "gpt-6-astra",
+                "sampling": {},
+            },
+            "requires sampling",
+        ),
+        (
+            {
+                "provider": "openai-codex-cli",
+                "model": "gpt-6-astra",
+                "sampling": {"reasoning_effort": "medium"},
+            },
+            "requires runner contract grabowski-codex-cli-live-v1",
         ),
         (
             {
@@ -613,6 +668,341 @@ def test_repoground_evidence_is_bound_to_request_target_and_tool_call() -> None:
     assert (
         "receipt RepoGround evidence call does not match tool_calls"
         in validate_receipt(request, receipt)
+    )
+
+
+def test_explicit_null_repoground_evidence_is_rejected() -> None:
+    taskset = _taskset()
+    treatment = next(
+        item
+        for item in _planned_requests(taskset)
+        if item["case_id"] == "nav-lenskit-mcp-startup"
+        and item["condition"] == "treatment"
+    )
+    treatment_receipt = _receipt(
+        treatment, _cases(taskset)[treatment["case_id"]]
+    )
+    treatment_receipt["repoground_evidence"] = None
+    assert (
+        "receipt RepoGround evidence must be an object"
+        in validate_receipt(treatment, treatment_receipt)
+    )
+
+    baseline = next(
+        item
+        for item in _planned_requests(taskset)
+        if item["case_id"] == "nav-lenskit-mcp-startup"
+        and item["condition"] == "baseline"
+    )
+    baseline_receipt = _receipt(baseline, _cases(taskset)[baseline["case_id"]])
+    baseline_receipt["repoground_evidence"] = None
+    assert (
+        "baseline receipt must not contain RepoGround evidence"
+        in validate_receipt(baseline, baseline_receipt)
+    )
+
+
+def test_ask_context_evidence_cannot_exceed_bound_tool_output() -> None:
+    taskset = _taskset()
+    request = next(
+        item
+        for item in _planned_requests(taskset)
+        if item["case_id"] == "nav-lenskit-mcp-startup"
+        and item["condition"] == "treatment"
+    )
+    receipt = _receipt(request, _cases(taskset)[request["case_id"]])
+    receipt["tool_calls"][0]["output_bytes"] = 0
+    assert (
+        "receipt RepoGround ask_context context bytes exceed bound tool output"
+        in validate_receipt(request, receipt)
+    )
+
+
+def test_live_grounding_evidence_bundle_commit_must_match_bound_manifest(
+    tmp_path: Path,
+) -> None:
+    taskset = _taskset()
+    request = next(
+        item
+        for item in _planned_requests(taskset)
+        if item["case_id"] == "grounding-head-mismatch"
+        and item["condition"] == "treatment"
+    )
+    case = _cases(taskset)[request["case_id"]]
+    receipt = _receipt(request, case)
+    stale_commit = "1" * 40
+    manifest = {
+        "kind": "repoground.bundle.manifest",
+        "version": "2.0",
+        "snapshot_provenance": {
+            "repositories": [{"git_commit": stale_commit}],
+        },
+    }
+    manifest_raw = json.dumps(
+        manifest, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    manifest_path = tmp_path / "grounding.bundle.manifest.json"
+    manifest_path.write_bytes(manifest_raw)
+    request["repobrief"]["manifest"] = str(manifest_path)
+    request["repobrief"]["manifest_sha256"] = sha256_bytes(manifest_raw)
+    request["runner"] = {
+        "execution_contract": "grabowski-claude-code-live-v1",
+        "provider": "anthropic-claude-code",
+        "model": "claude-haiku-4-5-20251001",
+        "sampling": {},
+    }
+    receipt["provider"].update(
+        {
+            "name": "anthropic-claude-code",
+            "model": "claude-haiku-4-5-20251001",
+            "sampling": {},
+        }
+    )
+    receipt["request_sha256"] = sha256_json(request)
+    receipt["repoground_evidence"]["bundle_commit"] = stale_commit
+    receipt["repoground_evidence"]["calls"][0]["freshness_status"] = "stale"
+    payload = {
+        "kind": "repobrief.live_freshness",
+        "version": "v1",
+        "status": "stale",
+        "snapshot_provenance": {"git_commit": stale_commit},
+    }
+    _bind_transcript(
+        receipt,
+        tmp_path,
+        "grounding-live-freshness.jsonl",
+        [
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [{
+                        "type": "tool_use",
+                        "id": "tool-1",
+                        "name": "mcp__repobrief__live_freshness",
+                        "input": {},
+                    }]
+                },
+            },
+            {
+                "type": "user",
+                "message": {
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": "tool-1",
+                        "content": json.dumps(
+                            {"structuredContent": payload}, sort_keys=True
+                        ),
+                        "is_error": False,
+                    }]
+                },
+            },
+        ],
+    )
+    receipt["tool_calls"][0]["output_bytes"] = 1000
+
+    assert validate_receipt(request, receipt, transcript_root=tmp_path) == []
+    assert score_receipt(
+        case, "treatment", request, receipt, transcript_root=tmp_path
+    )["exposure"] == {
+        "status": "exposed",
+        "reason": "live_freshness_signal",
+    }
+
+    receipt["repoground_evidence"]["bundle_commit"] = "2" * 40
+    assert (
+        "receipt RepoGround evidence bundle_commit does not match bound manifest"
+        in validate_receipt(request, receipt, transcript_root=tmp_path)
+    )
+
+
+def _bind_live_manifest(
+    request: dict,
+    receipt: dict,
+    tmp_path: Path,
+    *,
+    execution_contract: str,
+    provider: str,
+    model: str,
+    sampling: dict,
+    bundle_commit: str,
+) -> None:
+    manifest = {
+        "kind": "repoground.bundle.manifest",
+        "version": "2.0",
+        "snapshot_provenance": {
+            "repositories": [{"git_commit": bundle_commit}],
+        },
+    }
+    raw = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    path = tmp_path / f"{execution_contract}.bundle.manifest.json"
+    path.write_bytes(raw)
+    request["repobrief"]["manifest"] = str(path)
+    request["repobrief"]["manifest_sha256"] = sha256_bytes(raw)
+    request["runner"] = {
+        "execution_contract": execution_contract,
+        "provider": provider,
+        "model": model,
+        "sampling": sampling,
+    }
+    receipt["provider"].update(
+        {"name": provider, "model": model, "sampling": sampling}
+    )
+    receipt["request_sha256"] = sha256_json(request)
+    receipt["repoground_evidence"]["bundle_commit"] = bundle_commit
+
+
+def _ask_context_payload(commit: str) -> dict:
+    return {
+        "kind": "repobrief.mcp.read_only_frontdoor",
+        "version": "v1",
+        "tool": "ask_context",
+        "status": "ok",
+        "context_pack": {
+            "kind": "repobrief.ask_context_pack",
+            "version": "1.0",
+            "resolved_ranges": [{"path": "src/example.py"}],
+            "budget": {"context_bytes_used": 321},
+        },
+        "live_freshness": {
+            "kind": "repobrief.live_freshness",
+            "version": "v1",
+            "status": "fresh",
+            "snapshot_provenance": {"git_commit": commit},
+        },
+    }
+
+
+def _bind_transcript(receipt: dict, tmp_path: Path, name: str, events: list[dict]) -> None:
+    raw = b"".join(
+        json.dumps(event, sort_keys=True).encode("utf-8") + b"\n"
+        for event in events
+    )
+    path = tmp_path / name
+    path.write_bytes(raw)
+    receipt["transcript"] = {
+        "storage": "artifact",
+        "sha256": sha256_bytes(raw),
+        "bytes": len(raw),
+        "inline": None,
+        "artifact": name,
+    }
+
+
+def test_live_claude_evidence_must_match_bound_transcript(tmp_path: Path) -> None:
+    taskset = _taskset()
+    request = next(
+        item
+        for item in _planned_requests(taskset)
+        if item["case_id"] == "nav-lenskit-mcp-startup"
+        and item["condition"] == "treatment"
+    )
+    case = _cases(taskset)[request["case_id"]]
+    receipt = _receipt(request, case)
+    commit = request["repository"]["commit"]
+    _bind_live_manifest(
+        request,
+        receipt,
+        tmp_path,
+        execution_contract="grabowski-claude-code-live-v1",
+        provider="anthropic-claude-code",
+        model="claude-haiku-4-5-20251001",
+        sampling={},
+        bundle_commit=commit,
+    )
+    payload = _ask_context_payload(commit)
+    events = [
+        {
+            "type": "assistant",
+            "message": {
+                "content": [{
+                    "type": "tool_use",
+                    "id": "tool-1",
+                    "name": "mcp__repobrief__ask_context",
+                    "input": {"query": "example"},
+                }]
+            },
+        },
+        {
+            "type": "user",
+            "message": {
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "tool-1",
+                    "content": json.dumps(
+                        {"structuredContent": payload}, sort_keys=True
+                    ),
+                    "is_error": False,
+                }]
+            },
+        },
+    ]
+    _bind_transcript(receipt, tmp_path, "claude.jsonl", events)
+    receipt["tool_calls"][0]["output_bytes"] = 1000
+    receipt["repoground_evidence"]["calls"][0].update(
+        {
+            "freshness_status": "fresh",
+            "resolved_range_count": 1,
+            "context_bytes_used": 321,
+        }
+    )
+    assert validate_receipt(request, receipt, transcript_root=tmp_path) == []
+
+    receipt["repoground_evidence"]["calls"][0]["resolved_range_count"] = 999
+    assert (
+        "receipt RepoGround evidence does not match bound transcript"
+        in validate_receipt(request, receipt, transcript_root=tmp_path)
+    )
+
+
+def test_live_codex_evidence_must_match_bound_transcript(tmp_path: Path) -> None:
+    taskset = _taskset()
+    request = next(
+        item
+        for item in _planned_requests(taskset)
+        if item["case_id"] == "nav-lenskit-mcp-startup"
+        and item["condition"] == "treatment"
+    )
+    case = _cases(taskset)[request["case_id"]]
+    receipt = _receipt(request, case)
+    commit = request["repository"]["commit"]
+    _bind_live_manifest(
+        request,
+        receipt,
+        tmp_path,
+        execution_contract="grabowski-codex-cli-live-v1",
+        provider="openai-codex-cli",
+        model="gpt-6-astra",
+        sampling={"reasoning_effort": "medium"},
+        bundle_commit=commit,
+    )
+    payload = _ask_context_payload(commit)
+    events = [{
+        "type": "item.completed",
+        "item": {
+            "type": "mcp_tool_call",
+            "server": "repobrief",
+            "tool": "ask_context",
+            "arguments": {"query": "example"},
+            "result": {"structured_content": payload},
+            "error": None,
+            "status": "completed",
+        },
+    }]
+    _bind_transcript(receipt, tmp_path, "codex.jsonl", events)
+    receipt["tool_calls"][0]["output_bytes"] = 1000
+    receipt["repoground_evidence"]["calls"][0].update(
+        {
+            "freshness_status": "fresh",
+            "resolved_range_count": 1,
+            "context_bytes_used": 321,
+        }
+    )
+    assert validate_receipt(request, receipt, transcript_root=tmp_path) == []
+
+    receipt["repoground_evidence"]["calls"][0]["freshness_status"] = "stale"
+    assert (
+        "receipt RepoGround evidence does not match bound transcript"
+        in validate_receipt(request, receipt, transcript_root=tmp_path)
     )
 
 
