@@ -14,6 +14,7 @@ from merger.repoground.core.agent_benchmark_common import (
     comparison_mode,
     list_value,
     mapping_value,
+    runner_configuration_errors,
     sha256_json,
 )
 from merger.repoground.core.agent_benchmark_policy import BENCHMARK_REPETITIONS
@@ -172,6 +173,9 @@ def validate_request(
         errors.append("request taskset_id does not match taskset")
     if request.get("taskset_sha256") != sha256_json(taskset):
         errors.append("request taskset_sha256 does not match taskset")
+    errors.extend(
+        runner_configuration_errors(mapping_value(request.get("runner")))
+    )
     cases = _case_map(taskset)
     case_entry = cases.get(str(request.get("case_id", "")))
     if case_entry is None:

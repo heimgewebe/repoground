@@ -18,6 +18,8 @@ from merger.repoground.core.agent_benchmark_common import (
     list_value,
     mapping_value,
     require_valid_taskset,
+    REVISION_BOUND_EXPOSURE_CONTRACTS,
+    runner_configuration_errors,
     sha256_json,
 )
 from merger.repoground.core.agent_benchmark_receipts import validate_receipt
@@ -176,12 +178,6 @@ def _grounding_exposure(calls: Sequence[Mapping[str, Any]]) -> dict[str, str]:
     return {"status": "not_exposed", "reason": "no_valid_grounding_signal"}
 
 
-_REVISION_BOUND_EXPOSURE_CONTRACTS = {
-    "grabowski-claude-code-live-v1",
-    "grabowski-codex-cli-live-v1",
-}
-
-
 def _exposure(
     case: Mapping[str, Any],
     condition: str,
@@ -196,8 +192,14 @@ def _exposure(
             "status": "not_exposed",
             "reason": "normalized_repoground_evidence_missing",
         }
-    contract = mapping_value(request.get("runner")).get("execution_contract")
-    if contract not in _REVISION_BOUND_EXPOSURE_CONTRACTS:
+    runner = mapping_value(request.get("runner"))
+    if runner_configuration_errors(runner):
+        return {
+            "status": "not_exposed",
+            "reason": "runner_configuration_invalid",
+        }
+    contract = runner.get("execution_contract")
+    if contract not in REVISION_BOUND_EXPOSURE_CONTRACTS:
         return {
             "status": "not_exposed",
             "reason": "runner_contract_not_revision_bound",
@@ -261,7 +263,15 @@ def score_receipt(
         "input_tokens": int(provider.get("input_tokens") or 0),
         "output_tokens": int(provider.get("output_tokens") or 0),
         "tool_bytes": _tool_bytes(receipt),
-        "exposure": _exposure(case, condition, request, receipt),
+        "exposure": (
+            _exposure(case, condition, request, receipt)
+            if valid
+            else (
+                {"status": "not_applicable", "reason": "baseline_condition"}
+                if condition == "baseline"
+                else {"status": "not_exposed", "reason": "invalid_receipt"}
+            )
+        ),
         "invalid_reasons": errors,
     }
 

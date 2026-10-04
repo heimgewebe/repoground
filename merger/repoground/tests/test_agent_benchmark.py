@@ -27,10 +27,14 @@ from merger.repoground.core.agent_benchmark import (
 
 from merger.repoground.core.agent_benchmark_evaluation import (
     _class_result,
+    _exposure,
     _grounding_exposure,
     _navigation_exposure,
 )
-from merger.repoground.core.agent_benchmark_requests import pair_request_errors
+from merger.repoground.core.agent_benchmark_requests import (
+    pair_request_errors,
+    validate_request,
+)
 from merger.repoground.core.bounded_artifact_read import MAX_REGISTERED_ARTIFACT_BYTES
 from merger.repoground.core.language_structure_access import load_language_structure_artifact
 
@@ -375,6 +379,15 @@ def test_codex_cli_live_contract_is_bound_into_requests() -> None:
             {
                 "execution_contract": "grabowski-claude-code-live-v1",
                 "provider": "anthropic-claude-code",
+                "model": "wrong-claude-model",
+                "sampling": {},
+            },
+            "requires model claude-haiku-4-5-20251001",
+        ),
+        (
+            {
+                "execution_contract": "grabowski-claude-code-live-v1",
+                "provider": "anthropic-claude-code",
                 "model": "claude-haiku-4-5-20251001",
                 "sampling": {"temperature": 0},
             },
@@ -453,6 +466,48 @@ def test_runner_contract_rejects_non_executable_configuration(
             manifest_bindings=BINDINGS,
             repetitions=2,
         )
+
+
+@pytest.mark.parametrize(
+    ("runner", "expected"),
+    [
+        (
+            {
+                "execution_contract": "grabowski-claude-code-live-v1",
+                "provider": "fixture-provider",
+                "model": "claude-haiku-4-5-20251001",
+                "sampling": {},
+            },
+            "requires provider anthropic-claude-code",
+        ),
+        (
+            {
+                "execution_contract": "grabowski-claude-code-live-v1",
+                "provider": "anthropic-claude-code",
+                "model": "wrong-claude-model",
+                "sampling": {},
+            },
+            "requires model claude-haiku-4-5-20251001",
+        ),
+        (
+            {
+                "execution_contract": "grabowski-codex-cli-live-v1",
+                "provider": "openai-codex-cli",
+                "model": "gpt-6-astra",
+                "sampling": {},
+            },
+            "requires sampling",
+        ),
+    ],
+)
+def test_validate_request_rejects_forged_live_runner_identity(
+    runner: dict, expected: str
+) -> None:
+    taskset = _taskset()
+    request = copy.deepcopy(_planned_requests(taskset)[0])
+    request["runner"] = runner
+
+    assert any(expected in error for error in validate_request(taskset, request))
 
 
 def test_pair_plan_requires_treatment_manifest_binding() -> None:
@@ -608,6 +663,30 @@ def test_historical_treatment_without_normalized_evidence_is_valid_but_not_expos
     }
 
 
+def test_exposure_rejects_forged_live_runner_identity() -> None:
+    taskset = _taskset()
+    request = next(
+        item
+        for item in _planned_requests(taskset)
+        if item["case_id"] == "nav-lenskit-mcp-startup"
+        and item["condition"] == "treatment"
+    )
+    case = _cases(taskset)[request["case_id"]]
+    receipt = _receipt(request, case)
+    request = copy.deepcopy(request)
+    request["runner"] = {
+        "execution_contract": "grabowski-claude-code-live-v1",
+        "provider": "fixture-provider",
+        "model": "fixture-model",
+        "sampling": {},
+    }
+
+    assert _exposure(case, "treatment", request, receipt) == {
+        "status": "not_exposed",
+        "reason": "runner_configuration_invalid",
+    }
+
+
 def test_generic_runner_evidence_is_valid_but_not_revision_bound_exposure() -> None:
     taskset = _taskset()
     request = next(
@@ -720,6 +799,34 @@ def test_repoground_evidence_is_bound_to_request_target_and_tool_call() -> None:
         "receipt RepoGround evidence call does not match tool_calls"
         in validate_receipt(request, receipt)
     )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("resolved_range_count", "not-an-int"),
+        ("context_bytes_used", []),
+    ],
+)
+def test_invalid_exposure_counters_do_not_abort_scoring(field: str, value) -> None:
+    taskset = _taskset()
+    request = next(
+        item
+        for item in _planned_requests(taskset)
+        if item["case_id"] == "nav-lenskit-mcp-startup"
+        and item["condition"] == "treatment"
+    )
+    case = _cases(taskset)[request["case_id"]]
+    receipt = _receipt(request, case)
+    receipt["repoground_evidence"]["calls"][0][field] = value
+
+    score = score_receipt(case, "treatment", request, receipt)
+    assert score["valid"] is False
+    assert score["exposure"] == {
+        "status": "not_exposed",
+        "reason": "invalid_receipt",
+    }
+    assert score["invalid_reasons"]
 
 
 def test_explicit_null_repoground_evidence_is_rejected() -> None:
