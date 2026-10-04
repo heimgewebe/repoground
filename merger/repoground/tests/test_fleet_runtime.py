@@ -7107,6 +7107,21 @@ def test_fleet_membership_keys_reject_conflicting_identity_fields(
         module._fleet_membership_keys({"repos": [entry]})
 
 
+def test_fleet_membership_keys_accept_case_insensitive_identity_fields() -> None:
+    module = load_publisher()
+    assert module._fleet_membership_keys(
+        {
+            "repos": [
+                {
+                    "name": "HeimGewebe/RepoGround",
+                    "repo": "heimgewebe/repoground",
+                    "owner": "heimgewebe",
+                }
+            ]
+        }
+    ) == ("heimgewebe/repoground",)
+
+
 def test_fleet_membership_keys_accept_url_only_identity() -> None:
     module = load_publisher()
     assert module._fleet_membership_keys(
@@ -7625,6 +7640,44 @@ def test_review_tag_policy_reaches_member_resolution(
     monkeypatch.setattr(module, "remote_head", observe)
     assert module.remote_head_for_entry(entry) == ("origin/main", "main", sha)
     git(repo, "config", f"--{scope}", "remote.origin.tagOpt", "invalid-policy")
+    with pytest.raises(RuntimeError, match="unsafe.*configuration"):
+        module.remote_head_for_entry(entry)
+
+
+@pytest.mark.parametrize(
+    "policy",
+    ["", "0", "1", "false", "no", "off", "on", "true", "yes", "TRUE", "False"],
+)
+@pytest.mark.parametrize("scope", ["local", "worktree"])
+def test_review_prune_tags_policy_reaches_member_resolution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, policy: str, scope: str
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path, "member-prune-tags-policy")
+    remote = "https://github.com/heimgewebe/member.git"
+    git(repo, "remote", "add", "origin", remote)
+    if scope == "worktree":
+        git(repo, "config", "extensions.worktreeConfig", "true")
+    git(repo, "config", f"--{scope}", "remote.origin.pruneTags", policy)
+    entry = module.RepoEntry("heimgewebe/member", "heimgewebe", "member", repo, remote)
+    monkeypatch.setattr(module, "_global_system_github_https_config", lambda _: [])
+
+    def observe(repo_path: Path, *, remote: str, env: dict[str, str]):
+        assert repo_path == repo
+        assert remote == entry.remote
+        result = subprocess.run(
+            ["git", "-C", str(repo), "config", "--get", "remote.origin.pruneTags"],
+            env=env,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        assert result.stdout.rstrip("\n") == policy
+        return "origin/main", "main", sha
+
+    monkeypatch.setattr(module, "remote_head", observe)
+    assert module.remote_head_for_entry(entry) == ("origin/main", "main", sha)
+    git(repo, "config", f"--{scope}", "remote.origin.pruneTags", "invalid-policy")
     with pytest.raises(RuntimeError, match="unsafe.*configuration"):
         module.remote_head_for_entry(entry)
 

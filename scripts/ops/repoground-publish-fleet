@@ -2611,7 +2611,7 @@ _AUTHORITY_GIT_ALLOWED_ORIGIN_CONFIG = frozenset(
     {"remote.origin.fetch", "remote.origin.pushurl", "remote.origin.url"}
 )
 _FLEET_MEMBER_ALLOWED_ORIGIN_CONFIG = _AUTHORITY_GIT_ALLOWED_ORIGIN_CONFIG | frozenset(
-    {"remote.origin.prune"}
+    {"remote.origin.prune", "remote.origin.prunetags"}
 )
 _AUTHORITY_PROXY_ENV_NAMES = frozenset({"all_proxy", "http_proxy", "https_proxy"})
 _AUTHORITY_TLS_ENV_NAMES = frozenset(
@@ -3716,6 +3716,15 @@ def _fleet_member_local_config_is_transport_override(key: str) -> bool:
     return _authority_git_local_config_is_transport_override(normalized)
 
 
+_FLEET_GIT_BOOLEAN_VALUES = frozenset(
+    {"", "0", "1", "false", "no", "off", "on", "true", "yes"}
+)
+
+
+def _fleet_git_boolean_value_allowed(value: str) -> bool:
+    return value.casefold() in _FLEET_GIT_BOOLEAN_VALUES
+
+
 def _fleet_member_local_config_entry_is_transport_override(
     key: str,
     value: str,
@@ -3726,6 +3735,8 @@ def _fleet_member_local_config_entry_is_transport_override(
         return False
     if normalized == "remote.origin.tagopt":
         return value not in {"--no-tags", "--tags"}
+    if normalized == "remote.origin.prunetags":
+        return not _fleet_git_boolean_value_allowed(value)
     if _fleet_http_version_config_key_allowed(key):
         return not _fleet_http_version_value_allowed(value)
     if _fleet_github_extra_header_key_allowed(key):
@@ -4401,7 +4412,12 @@ def _fleet_membership_entry_key(
             raise RuntimeError(
                 "fleet membership entry repo must be a non-empty string"
             )
-        if "name" in raw and "repo" in raw and name_value != repo_value:
+        if (
+            "name" in raw
+            and "repo" in raw
+            and normalized_repository_key(name_value)
+            != normalized_repository_key(repo_value)
+        ):
             raise RuntimeError(
                 "fleet membership entry name/repo must match when both are present"
             )
@@ -4431,7 +4447,7 @@ def _fleet_membership_entry_key(
         if len(parts) != 2:
             raise RuntimeError(f"invalid qualified fleet repository: {name!r}")
         qualified_owner, qualified_name = parts
-        if owner_explicit and owner != qualified_owner:
+        if owner_explicit and owner.casefold() != qualified_owner.casefold():
             raise RuntimeError(
                 "fleet membership entry owner conflicts with qualified repository"
             )
