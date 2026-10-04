@@ -905,6 +905,57 @@ def test_invalid_exposure_counters_do_not_abort_public_evaluation(
     assert result["invalid_run_count"] >= 1
 
 
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        (("duration_ms",), "not-an-int"),
+        (("provider", "input_tokens"), "not-an-int"),
+        (("provider", "output_tokens"), []),
+        (("tool_calls", 0, "input_bytes"), "not-an-int"),
+        (("tool_calls", 0, "output_bytes"), {}),
+    ],
+)
+def test_invalid_numeric_receipt_fields_do_not_abort_public_evaluation(
+    path: tuple, value
+) -> None:
+    taskset, requests, receipts = _requests_and_receipts()
+    target_request = next(
+        item
+        for item in requests
+        if item["case_id"] == "nav-lenskit-mcp-startup"
+        and item["condition"] == "treatment"
+        and item["repetition"] == 1
+    )
+    target_receipt = next(
+        item for item in receipts if item["request_id"] == target_request["request_id"]
+    )
+    current = target_receipt
+    for key in path[:-1]:
+        current = current[key]
+    current[path[-1]] = value
+
+    result = evaluate_paired_runs(
+        taskset,
+        requests,
+        receipts,
+        measurement_scope="real_paired_agent_runs",
+    )
+    pair = next(
+        item
+        for item in result["cases"]
+        if item["case_id"] == target_request["case_id"]
+        and item["repetition"] == target_request["repetition"]
+    )
+    score = pair["treatment"]
+    assert score["valid"] is False
+    assert score["exposure"] == {
+        "status": "not_exposed",
+        "reason": "invalid_receipt",
+    }
+    assert score["invalid_reasons"]
+    assert result["invalid_run_count"] >= 1
+
+
 def test_explicit_null_repoground_evidence_is_rejected() -> None:
     taskset = _taskset()
     treatment = next(

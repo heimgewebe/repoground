@@ -119,10 +119,14 @@ def _false_confidence(expectation: Mapping[str, Any], answer: Mapping[str, Any])
     )
 
 
+def _safe_metric_int(value: Any) -> int:
+    return value if isinstance(value, int) and value >= 0 else 0
+
+
 def _tool_bytes(receipt: Mapping[str, Any]) -> int:
     return sum(
-        int(mapping_value(call).get("input_bytes") or 0)
-        + int(mapping_value(call).get("output_bytes") or 0)
+        _safe_metric_int(mapping_value(call).get("input_bytes"))
+        + _safe_metric_int(mapping_value(call).get("output_bytes"))
         for call in list_value(receipt.get("tool_calls"))
     )
 
@@ -258,10 +262,10 @@ def score_receipt(
         "false_hit_count": false_hit_count,
         "citation_match_rate": citation_match_rate,
         "false_confidence": false_confidence,
-        "duration_ms": int(receipt.get("duration_ms") or 0),
+        "duration_ms": _safe_metric_int(receipt.get("duration_ms")),
         "tool_call_count": len(calls),
-        "input_tokens": int(provider.get("input_tokens") or 0),
-        "output_tokens": int(provider.get("output_tokens") or 0),
+        "input_tokens": _safe_metric_int(provider.get("input_tokens")),
+        "output_tokens": _safe_metric_int(provider.get("output_tokens")),
         "tool_bytes": _tool_bytes(receipt),
         "exposure": (
             _exposure(case, condition, request, receipt)
