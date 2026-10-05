@@ -387,14 +387,16 @@ def _ask_context_evidence(
 ) -> tuple[str, dict[str, Any]] | None:
     if not _frontdoor_header_matches("ask_context", payload):
         return None
+    live_freshness = payload.get("live_freshness")
+    live_commit = _frontdoor_live_freshness_commit(
+        payload,
+        fallback_commit=fallback_commit,
+        expected_manifest_path=expected_manifest_path,
+    )
     if (
         payload.get("status") != "ok"
-        or _frontdoor_live_freshness_commit(
-            payload,
-            fallback_commit=fallback_commit,
-            expected_manifest_path=expected_manifest_path,
-        )
-        is None
+        or not isinstance(live_freshness, Mapping)
+        or live_commit is None
     ):
         return None
     pack = payload.get("context_pack")
@@ -411,7 +413,9 @@ def _ask_context_evidence(
     )
     if bound is None:
         return None
-    freshness, commit = bound
+    _pack_freshness, commit = bound
+    if commit != live_commit:
+        return None
     ranges = pack.get("resolved_ranges")
     budget = pack.get("budget")
     context_bytes = budget.get("context_bytes_used") if isinstance(budget, Mapping) else None
@@ -430,7 +434,7 @@ def _ask_context_evidence(
     return commit, {
         "sequence": sequence,
         "tool": "ask_context",
-        "freshness_status": freshness.get("status"),
+        "freshness_status": live_freshness.get("status"),
         "resolved_range_count": resolved_range_count,
         "context_bytes_used": context_bytes,
         "grounding_status": None,

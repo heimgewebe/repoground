@@ -1179,6 +1179,37 @@ def _unknown_live_freshness(manifest_path: str) -> dict:
     }
 
 
+def _fresh_live_freshness(manifest_path: str) -> dict:
+    manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+    repositories = manifest["snapshot_provenance"]["repositories"]
+    commit = repositories[0]["git_commit"]
+    provenance = {
+        "provenance_status": "present",
+        "git_commit": commit,
+        "git_dirty": False,
+    }
+    return {
+        "kind": "repobrief.live_freshness",
+        "version": "v1",
+        "status": "fresh",
+        "reason": "git_head_matches_and_working_tree_is_clean",
+        "bundle_manifest": manifest_path,
+        "repo_root": "/tmp/repo",
+        "snapshot_provenance": provenance,
+        "current_provenance": provenance,
+        "read_only_git_probe": True,
+        "implicit_refresh": False,
+        "does_not_establish": [
+            "freshness_against_remote",
+            "remote_branch_state",
+            "pull_request_diff_current",
+            "runtime_correctness",
+            "repo_understood",
+            "merge_readiness",
+        ],
+    }
+
+
 def _resource_read_result(
     manifest_path: str,
     *,
@@ -1223,7 +1254,7 @@ def _ask_context_payload(manifest_sha256: str, manifest_path: str) -> dict:
             "resolved_ranges": [{"path": "src/example.py", "status": "resolved"}],
             "budget": {"context_bytes_used": 321},
         },
-        "live_freshness": _not_comparable_live_freshness(manifest_path),
+        "live_freshness": _fresh_live_freshness(manifest_path),
     }
 
 
@@ -1721,6 +1752,134 @@ def test_live_ask_context_counts_only_semantically_resolved_ranges(
     )["exposure"] == {
         "status": "not_exposed",
         "reason": "ask_context_no_resolved_ranges",
+    }
+
+
+def test_live_ask_context_uses_same_call_live_freshness_for_exposure(
+    tmp_path: Path,
+) -> None:
+    from merger.repoground.core import mcp_tools
+    from merger.repoground.core.live_freshness import evaluate_live_freshness
+    from merger.repoground.tests.test_ask_context_cli import _complete_basic_bundle
+
+    taskset = _taskset()
+    request = next(
+        item
+        for item in _planned_requests(taskset)
+        if item["case_id"] == "nav-lenskit-mcp-startup"
+        and item["condition"] == "treatment"
+    )
+    case = _cases(taskset)[request["case_id"]]
+    receipt = _receipt(request, case)
+    commit = request["repository"]["commit"]
+    _bind_live_manifest(
+        request,
+        receipt,
+        tmp_path,
+        execution_contract="grabowski-claude-code-live-v1",
+        provider="anthropic-claude-code",
+        model="claude-haiku-4-5-20251001",
+        sampling={},
+        bundle_commit=commit,
+    )
+
+    bundle_root = tmp_path / "producer"
+    bundle_root.mkdir()
+    bundle = _complete_basic_bundle(bundle_root)
+    manifest_path = bundle["manifest"]
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    repo_root = tmp_path.resolve()
+    manifest["created_at"] = "2026-10-05T04:00:00Z"
+    manifest["snapshot_provenance"] = {
+        "repositories": [
+            {
+                "name": repo_root.name,
+                "repo_root": str(repo_root),
+                "provenance_status": "present",
+                "git_commit": commit,
+                "git_dirty": False,
+            }
+        ]
+    }
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    manifest_raw = manifest_path.read_bytes()
+    request["repobrief"]["manifest"] = str(manifest_path)
+    request["repobrief"]["manifest_sha256"] = sha256_bytes(manifest_raw)
+    receipt["request_sha256"] = sha256_json(request)
+    receipt["repoground_evidence"]["bundle_commit"] = commit
+
+    payload = mcp_tools.ask_context(
+        bundle_manifest=manifest_path,
+        query="hello",
+        task_profile="basic_repo_question",
+    )
+    assert payload["context_pack"]["freshness"]["status"] == "not_comparable"
+
+    current = {
+        "name": repo_root.name,
+        "repo_root": str(repo_root),
+        "git_commit": commit,
+        "git_dirty": False,
+        "git_branch": "feature",
+        "provenance_status": "present",
+        "freshness_basis": "git_commit_and_working_tree",
+    }
+    payload["live_freshness"] = evaluate_live_freshness(
+        manifest_path,
+        repo_root=repo_root,
+        probe=lambda _root: current,
+    )
+    assert payload["live_freshness"]["status"] == "fresh"
+
+    events = [
+        {
+            "type": "assistant",
+            "message": {
+                "content": [{
+                    "type": "tool_use",
+                    "id": "tool-1",
+                    "name": "mcp__repobrief__ask_context",
+                    "input": {"query": "hello"},
+                }]
+            },
+        },
+        {
+            "type": "user",
+            "message": {
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "tool-1",
+                    "content": json.dumps(
+                        {"structuredContent": payload}, sort_keys=True
+                    ),
+                    "is_error": False,
+                }]
+            },
+        },
+    ]
+    _bind_transcript(receipt, tmp_path, "claude-production-ask-context.jsonl", events)
+    receipt["tool_calls"][0]["output_bytes"] = 1000
+    resolved_count = sum(
+        item.get("status") == "resolved"
+        for item in payload["context_pack"]["resolved_ranges"]
+        if isinstance(item, dict)
+    )
+    receipt["repoground_evidence"]["calls"][0].update(
+        {
+            "freshness_status": "fresh",
+            "resolved_range_count": resolved_count,
+            "context_bytes_used": payload["context_pack"]["budget"][
+                "context_bytes_used"
+            ],
+        }
+    )
+
+    assert validate_receipt(request, receipt, transcript_root=tmp_path) == []
+    assert score_receipt(
+        case, "treatment", request, receipt, transcript_root=tmp_path
+    )["exposure"] == {
+        "status": "exposed",
+        "reason": "ask_context_resolved_evidence",
     }
 
 
