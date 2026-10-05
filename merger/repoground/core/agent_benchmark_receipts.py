@@ -656,10 +656,11 @@ def _claude_transcript_evidence(
     fallback_commit: str | None,
     expected_manifest_path: str | None,
     expected_manifest_sha256: str | None,
-) -> dict[str, Any] | None:
+) -> tuple[dict[str, Any] | None, list[str]]:
     uses, results = _claude_tool_blocks(events)
     evidence_calls: list[dict[str, Any]] = []
     commits: set[str] = set()
+    errors: list[str] = []
     for sequence, use in enumerate(uses, start=1):
         concrete = str(use.get("name", ""))
         tool = _CLAUDE_REPOGROUND_TOOLS.get(concrete)
@@ -670,6 +671,7 @@ def _claude_transcript_evidence(
         result = results.get(str(identifier)) if isinstance(identifier, str) else None
         if not isinstance(result, Mapping) or result.get("is_error") is True:
             continue
+        normalized_tool = "repobrief_resource_read" if is_resource_read else str(tool)
         if is_resource_read:
             arguments = use.get("input")
             expected_uri = (
@@ -697,11 +699,15 @@ def _claude_transcript_evidence(
                 else None
             )
         if normalized is None:
+            errors.append(
+                "bound transcript successful RepoGround call could not be normalized: "
+                f"sequence {sequence} ({normalized_tool})"
+            )
             continue
         commit, call = normalized
         commits.add(commit)
         evidence_calls.append(call)
-    return _evidence_document(request, evidence_calls, commits)
+    return _evidence_document(request, evidence_calls, commits), errors
 
 
 def _codex_resource_read_evidence(
@@ -768,6 +774,25 @@ def _codex_item_evidence(
     )
 
 
+def _codex_successful_repoground_item(item: Mapping[str, Any]) -> bool:
+    return bool(
+        item.get("type") == "mcp_tool_call"
+        and item.get("server") in _REPOGROUND_MCP_SERVER_ALIASES
+        and item.get("tool") in _REPOGROUND_EVIDENCE_TOOLS
+        and item.get("status") == "completed"
+        and item.get("error") is None
+    )
+
+
+def _codex_explicit_non_evidence_item(item: Mapping[str, Any]) -> bool:
+    arguments = item.get("arguments")
+    return bool(
+        item.get("tool") == "repobrief_resource_read"
+        and isinstance(arguments, Mapping)
+        and arguments.get("action") == "list"
+    )
+
+
 def _codex_transcript_evidence(
     request: Mapping[str, Any],
     events: list[Mapping[str, Any]],
@@ -775,10 +800,11 @@ def _codex_transcript_evidence(
     fallback_commit: str | None,
     expected_manifest_path: str | None,
     expected_manifest_sha256: str | None,
-) -> dict[str, Any] | None:
+) -> tuple[dict[str, Any] | None, list[str]]:
     sequence = 0
     evidence_calls: list[dict[str, Any]] = []
     commits: set[str] = set()
+    errors: list[str] = []
     for event in events:
         if event.get("type") != "item.completed":
             continue
@@ -791,6 +817,10 @@ def _codex_transcript_evidence(
         if item_type not in {"command_execution", "mcp_tool_call"}:
             continue
         sequence += 1
+        successful_repoground = _codex_successful_repoground_item(item)
+        explicit_non_evidence = (
+            successful_repoground and _codex_explicit_non_evidence_item(item)
+        )
         normalized = _codex_item_evidence(
             item,
             sequence,
@@ -799,11 +829,16 @@ def _codex_transcript_evidence(
             expected_manifest_sha256=expected_manifest_sha256,
         )
         if normalized is None:
+            if successful_repoground and not explicit_non_evidence:
+                errors.append(
+                    "bound transcript successful RepoGround call could not be normalized: "
+                    f"sequence {sequence} ({item.get('tool')})"
+                )
             continue
         commit, call = normalized
         commits.add(commit)
         evidence_calls.append(call)
-    return _evidence_document(request, evidence_calls, commits)
+    return _evidence_document(request, evidence_calls, commits), errors
 
 
 def _bound_transcript_evidence(
@@ -824,24 +859,23 @@ def _bound_transcript_evidence(
     events, errors = _jsonl_objects(content)
     if events is None:
         return None, errors
-    expected = (
-        _claude_transcript_evidence(
+    if runner == "claude":
+        expected, parser_errors = _claude_transcript_evidence(
             request,
             events,
             fallback_commit=fallback_commit,
             expected_manifest_path=expected_manifest_path,
             expected_manifest_sha256=expected_manifest_sha256,
         )
-        if runner == "claude"
-        else _codex_transcript_evidence(
+    else:
+        expected, parser_errors = _codex_transcript_evidence(
             request,
             events,
             fallback_commit=fallback_commit,
             expected_manifest_path=expected_manifest_path,
             expected_manifest_sha256=expected_manifest_sha256,
         )
-    )
-    return expected, []
+    return expected, parser_errors
 
 
 def _bound_manifest_commit(

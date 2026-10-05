@@ -1274,6 +1274,223 @@ def _bind_transcript(receipt: dict, tmp_path: Path, name: str, events: list[dict
     }
 
 
+def _ask_context_transcript_events(
+    runner_kind: str,
+    payloads: list[dict],
+    *,
+    failed_sequences: set[int] | None = None,
+) -> list[dict]:
+    failed_sequences = failed_sequences or set()
+    if runner_kind == "claude":
+        uses = [
+            {
+                "type": "tool_use",
+                "id": f"tool-{sequence}",
+                "name": "mcp__repobrief__ask_context",
+                "input": {"query": f"example-{sequence}"},
+            }
+            for sequence, _payload in enumerate(payloads, start=1)
+        ]
+        results = [
+            {
+                "type": "tool_result",
+                "tool_use_id": f"tool-{sequence}",
+                "content": json.dumps(
+                    {"structuredContent": payload}, sort_keys=True
+                ),
+                "is_error": sequence in failed_sequences,
+            }
+            for sequence, payload in enumerate(payloads, start=1)
+        ]
+        return [
+            {"type": "assistant", "message": {"content": uses}},
+            {"type": "user", "message": {"content": results}},
+        ]
+    return [
+        {
+            "type": "item.completed",
+            "item": {
+                "type": "mcp_tool_call",
+                "server": "repobrief",
+                "tool": "ask_context",
+                "arguments": {"query": f"example-{sequence}"},
+                "result": {"structured_content": payload},
+                "error": (
+                    {"message": "simulated failure"}
+                    if sequence in failed_sequences
+                    else None
+                ),
+                "status": (
+                    "failed" if sequence in failed_sequences else "completed"
+                ),
+            },
+        }
+        for sequence, payload in enumerate(payloads, start=1)
+    ]
+
+
+@pytest.mark.parametrize("runner_kind", ["claude", "codex"])
+@pytest.mark.parametrize("defect", ["wrong_manifest", "missing_live_freshness"])
+def test_live_successful_unnormalizable_repoground_call_fails_closed(
+    tmp_path: Path, runner_kind: str, defect: str
+) -> None:
+    taskset = _taskset()
+    request = next(
+        item
+        for item in _planned_requests(taskset)
+        if item["case_id"] == "nav-lenskit-mcp-startup"
+        and item["condition"] == "treatment"
+    )
+    case = _cases(taskset)[request["case_id"]]
+    receipt = _receipt(request, case)
+    commit = request["repository"]["commit"]
+    if runner_kind == "claude":
+        _bind_live_manifest(
+            request,
+            receipt,
+            tmp_path,
+            execution_contract="grabowski-claude-code-live-v1",
+            provider="anthropic-claude-code",
+            model="claude-haiku-4-5-20251001",
+            sampling={},
+            bundle_commit=commit,
+        )
+    else:
+        _bind_live_manifest(
+            request,
+            receipt,
+            tmp_path,
+            execution_contract="grabowski-codex-cli-live-v1",
+            provider="openai-codex-cli",
+            model="gpt-6-astra",
+            sampling={"reasoning_effort": "medium"},
+            bundle_commit=commit,
+        )
+    good = _ask_context_payload(
+        request["repobrief"]["manifest_sha256"],
+        request["repobrief"]["manifest"],
+    )
+    bad = copy.deepcopy(good)
+    if defect == "wrong_manifest":
+        bad["context_pack"]["snapshot_ref"]["manifest_sha256"] = "0" * 64
+    else:
+        bad.pop("live_freshness")
+
+    events = _ask_context_transcript_events(runner_kind, [good, bad])
+    _bind_transcript(
+        receipt,
+        tmp_path,
+        f"{runner_kind}-{defect}-mixed-success.jsonl",
+        events,
+    )
+    receipt["tool_calls"][0]["output_bytes"] = 1000
+    receipt["tool_calls"].append(
+        {
+            "sequence": 2,
+            "name": "ask_context",
+            "status": "success",
+            "duration_ms": 10,
+            "input_bytes": 10,
+            "output_bytes": 1000,
+        }
+    )
+    receipt["repoground_evidence"]["calls"][0].update(
+        {
+            "freshness_status": "fresh",
+            "resolved_range_count": 1,
+            "context_bytes_used": 321,
+        }
+    )
+
+    errors = validate_receipt(request, receipt, transcript_root=tmp_path)
+    assert any(
+        "successful RepoGround call could not be normalized: sequence 2"
+        in error
+        for error in errors
+    )
+    score = score_receipt(
+        case, "treatment", request, receipt, transcript_root=tmp_path
+    )
+    assert score["valid"] is False
+    assert score["exposure"] == {
+        "status": "not_exposed",
+        "reason": "invalid_receipt",
+    }
+
+
+@pytest.mark.parametrize("runner_kind", ["claude", "codex"])
+def test_live_explicitly_failed_repoground_call_may_remain_unnormalized(
+    tmp_path: Path, runner_kind: str
+) -> None:
+    taskset = _taskset()
+    request = next(
+        item
+        for item in _planned_requests(taskset)
+        if item["case_id"] == "nav-lenskit-mcp-startup"
+        and item["condition"] == "treatment"
+    )
+    case = _cases(taskset)[request["case_id"]]
+    receipt = _receipt(request, case)
+    commit = request["repository"]["commit"]
+    if runner_kind == "claude":
+        _bind_live_manifest(
+            request,
+            receipt,
+            tmp_path,
+            execution_contract="grabowski-claude-code-live-v1",
+            provider="anthropic-claude-code",
+            model="claude-haiku-4-5-20251001",
+            sampling={},
+            bundle_commit=commit,
+        )
+    else:
+        _bind_live_manifest(
+            request,
+            receipt,
+            tmp_path,
+            execution_contract="grabowski-codex-cli-live-v1",
+            provider="openai-codex-cli",
+            model="gpt-6-astra",
+            sampling={"reasoning_effort": "medium"},
+            bundle_commit=commit,
+        )
+    good = _ask_context_payload(
+        request["repobrief"]["manifest_sha256"],
+        request["repobrief"]["manifest"],
+    )
+    failed = copy.deepcopy(good)
+    failed.pop("live_freshness")
+    events = _ask_context_transcript_events(
+        runner_kind, [good, failed], failed_sequences={2}
+    )
+    _bind_transcript(
+        receipt,
+        tmp_path,
+        f"{runner_kind}-explicit-failure.jsonl",
+        events,
+    )
+    receipt["tool_calls"][0]["output_bytes"] = 1000
+    receipt["tool_calls"].append(
+        {
+            "sequence": 2,
+            "name": "ask_context",
+            "status": "failed",
+            "duration_ms": 10,
+            "input_bytes": 10,
+            "output_bytes": 0,
+        }
+    )
+    receipt["repoground_evidence"]["calls"][0].update(
+        {
+            "freshness_status": "fresh",
+            "resolved_range_count": 1,
+            "context_bytes_used": 321,
+        }
+    )
+
+    assert validate_receipt(request, receipt, transcript_root=tmp_path) == []
+
+
 @pytest.mark.parametrize("runner_kind", ["claude", "codex"])
 def test_live_resource_read_is_revision_bound_exposure(
     tmp_path: Path, runner_kind: str
@@ -1621,9 +1838,10 @@ def test_live_claude_evidence_must_match_bound_transcript(tmp_path: Path) -> Non
         "claude-missing-frontdoor-freshness.jsonl",
         missing_freshness_events,
     )
-    assert (
-        "receipt RepoGround evidence is not supported by bound transcript"
-        in validate_receipt(request, missing_freshness, transcript_root=tmp_path)
+    assert any(
+        "successful RepoGround call could not be normalized: sequence 1"
+        in error
+        for error in validate_receipt(request, missing_freshness, transcript_root=tmp_path)
     )
 
     wrong_live_payload = copy.deepcopy(payload)
@@ -1641,9 +1859,10 @@ def test_live_claude_evidence_must_match_bound_transcript(tmp_path: Path) -> Non
         "claude-wrong-live-manifest.jsonl",
         wrong_live_events,
     )
-    assert (
-        "receipt RepoGround evidence is not supported by bound transcript"
-        in validate_receipt(request, wrong_live, transcript_root=tmp_path)
+    assert any(
+        "successful RepoGround call could not be normalized: sequence 1"
+        in error
+        for error in validate_receipt(request, wrong_live, transcript_root=tmp_path)
     )
 
     wrong_payload = _ask_context_payload(
@@ -1661,9 +1880,10 @@ def test_live_claude_evidence_must_match_bound_transcript(tmp_path: Path) -> Non
         "claude-wrong-manifest.jsonl",
         wrong_events,
     )
-    assert (
-        "receipt RepoGround evidence is not supported by bound transcript"
-        in validate_receipt(request, wrong_manifest, transcript_root=tmp_path)
+    assert any(
+        "successful RepoGround call could not be normalized: sequence 1"
+        in error
+        for error in validate_receipt(request, wrong_manifest, transcript_root=tmp_path)
     )
 
     missing = json.loads(json.dumps(receipt))
@@ -2039,9 +2259,10 @@ def test_live_freshness_unknown_probe_failure_uses_bound_manifest_commit(
         "claude-unknown-freshness-invalid-shape.jsonl",
         wrong_events,
     )
-    assert (
-        "receipt RepoGround evidence is not supported by bound transcript"
-        in validate_receipt(request, invalid, transcript_root=tmp_path)
+    assert any(
+        "successful RepoGround call could not be normalized: sequence 1"
+        in error
+        for error in validate_receipt(request, invalid, transcript_root=tmp_path)
     )
 
 
@@ -2115,9 +2336,10 @@ def test_live_freshness_fresh_requires_snapshot_provenance(
         }
     )
 
-    assert (
-        "receipt RepoGround evidence is not supported by bound transcript"
-        in validate_receipt(request, receipt, transcript_root=tmp_path)
+    assert any(
+        "successful RepoGround call could not be normalized: sequence 1"
+        in error
+        for error in validate_receipt(request, receipt, transcript_root=tmp_path)
     )
 
 
@@ -2961,6 +3183,66 @@ def _component_requests(tmp_path: Path) -> tuple[dict, list[dict], dict[str, dic
     return taskset, requests, bindings
 
 
+def test_live_component_delta_baseline_rejects_successful_unnormalizable_call(
+    tmp_path: Path,
+) -> None:
+    taskset = _component_taskset()
+    bindings = _component_bindings(tmp_path)
+    runner = {
+        "execution_contract": "grabowski-claude-code-live-v1",
+        "provider": "anthropic-claude-code",
+        "model": "claude-haiku-4-5-20251001",
+        "sampling": {},
+    }
+    requests = build_run_requests(
+        taskset,
+        runner=runner,
+        manifest_bindings=bindings,
+        repetitions=2,
+    )
+    request = next(
+        item
+        for item in requests
+        if item["case_id"] == "nav-lenskit-mcp-startup"
+        and item["condition"] == "baseline"
+    )
+    case = _cases(taskset)[request["case_id"]]
+    receipt = _receipt(request, case)
+    receipt["tool_calls"][0].update(
+        {"name": "ask_context", "output_bytes": 1000}
+    )
+    receipt["tool_calls"].append(
+        {
+            "sequence": 2,
+            "name": "ask_context",
+            "status": "success",
+            "duration_ms": 10,
+            "input_bytes": 10,
+            "output_bytes": 1000,
+        }
+    )
+    good = _ask_context_payload(
+        request["repobrief"]["manifest_sha256"],
+        request["repobrief"]["manifest"],
+    )
+    bad = copy.deepcopy(good)
+    bad.pop("live_freshness")
+    events = _ask_context_transcript_events("claude", [good, bad])
+    _bind_transcript(
+        receipt,
+        tmp_path,
+        "component-baseline-mixed-success.jsonl",
+        events,
+    )
+
+    errors = validate_receipt(request, receipt, transcript_root=tmp_path)
+    assert any(
+        "successful RepoGround call could not be normalized: sequence 2"
+        in error
+        for error in errors
+    )
+
+
 def test_live_component_delta_baseline_validates_repoground_transcript(
     tmp_path: Path,
 ) -> None:
@@ -3042,9 +3324,10 @@ def test_live_component_delta_baseline_validates_repoground_transcript(
         "component-baseline-wrong-manifest.jsonl",
         wrong_events,
     )
-    assert (
-        "baseline RepoGround tool call is not supported by bound transcript"
-        in validate_receipt(request, wrong, transcript_root=tmp_path)
+    assert any(
+        "successful RepoGround call could not be normalized: sequence 1"
+        in error
+        for error in validate_receipt(request, wrong, transcript_root=tmp_path)
     )
 
 
