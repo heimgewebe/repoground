@@ -96,7 +96,7 @@
             ],
             "properties": {
               "sequence": {"type": "integer", "minimum": 1},
-              "tool": {"enum": ["ask_context", "grounding_verify", "live_freshness"]},
+              "tool": {"enum": ["ask_context", "grounding_verify", "live_freshness", "repobrief_resource_read"]},
               "freshness_status": {"enum": ["fresh", "stale", "unknown", "not_comparable", "not_applicable"]},
               "resolved_range_count": {"type": ["integer", "null"], "minimum": 0},
               "context_bytes_used": {"type": ["integer", "null"], "minimum": 0},

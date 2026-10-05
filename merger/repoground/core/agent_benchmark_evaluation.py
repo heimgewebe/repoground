@@ -139,6 +139,13 @@ def _ask_context_call_is_exposed(call: Mapping[str, Any]) -> bool:
     )
 
 
+def _resource_read_call_is_exposed(call: Mapping[str, Any]) -> bool:
+    return bool(
+        call.get("tool") == "repobrief_resource_read"
+        and int(call.get("context_bytes_used") or 0) > 0
+    )
+
+
 def _navigation_exposure(
     evidence: Mapping[str, Any], calls: Sequence[Mapping[str, Any]]
 ) -> dict[str, str]:
@@ -147,6 +154,8 @@ def _navigation_exposure(
             "status": "not_exposed",
             "reason": "bundle_commit_does_not_match_target",
         }
+    if any(_resource_read_call_is_exposed(item) for item in calls):
+        return {"status": "exposed", "reason": "resource_read_bound_content"}
     ask_calls = [item for item in calls if item.get("tool") == "ask_context"]
     if not ask_calls:
         return {"status": "not_exposed", "reason": "no_successful_ask_context"}
@@ -165,6 +174,8 @@ def _navigation_exposure(
 
 
 def _grounding_exposure(calls: Sequence[Mapping[str, Any]]) -> dict[str, str]:
+    if any(_resource_read_call_is_exposed(item) for item in calls):
+        return {"status": "exposed", "reason": "resource_read_bound_content"}
     if any(
         item.get("tool") == "live_freshness"
         and item.get("freshness_status")

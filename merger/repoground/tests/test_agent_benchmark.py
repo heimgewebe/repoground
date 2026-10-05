@@ -1158,6 +1158,53 @@ def _not_comparable_live_freshness(manifest_path: str) -> dict:
     }
 
 
+def _unknown_live_freshness(manifest_path: str) -> dict:
+    return {
+        "kind": "repobrief.live_freshness",
+        "version": "v1",
+        "status": "unknown",
+        "reason": "simulated freshness probe failure",
+        "bundle_manifest": manifest_path,
+        "repo_root": "/tmp/repo",
+        "read_only_git_probe": True,
+        "implicit_refresh": False,
+        "does_not_establish": [
+            "freshness_against_remote",
+            "remote_branch_state",
+            "pull_request_diff_current",
+            "runtime_correctness",
+            "repo_understood",
+            "merge_readiness",
+        ],
+    }
+
+
+def _resource_read_result(
+    manifest_path: str,
+    *,
+    uri: str = "repoground://snapshot/demo/canonical",
+    content: str = "# Demo\n",
+) -> dict:
+    return {
+        "contents": [
+            {
+                "uri": uri,
+                "mimeType": "text/markdown",
+                "text": content,
+            }
+        ],
+        "_meta": {
+            "repoground": {
+                "status": "available",
+                "snapshotContext": {"freshness": {"status": "fresh"}},
+                "liveFreshness": _not_comparable_live_freshness(manifest_path),
+                "implicitRefresh": False,
+                "identity": {"canonical_prefix": "repoground://snapshot/"},
+            }
+        },
+    }
+
+
 def _ask_context_payload(manifest_sha256: str, manifest_path: str) -> dict:
     return {
         "kind": "repobrief.mcp.read_only_frontdoor",
@@ -1193,6 +1240,180 @@ def _bind_transcript(receipt: dict, tmp_path: Path, name: str, events: list[dict
         "bytes": len(raw),
         "inline": None,
         "artifact": name,
+    }
+
+
+@pytest.mark.parametrize("runner_kind", ["claude", "codex"])
+def test_live_resource_read_is_revision_bound_exposure(
+    tmp_path: Path, runner_kind: str
+) -> None:
+    taskset = _taskset()
+    request = next(
+        item
+        for item in _planned_requests(taskset)
+        if item["case_id"] == "nav-lenskit-mcp-startup"
+        and item["condition"] == "treatment"
+    )
+    case = _cases(taskset)[request["case_id"]]
+    receipt = _receipt(request, case)
+    commit = request["repository"]["commit"]
+    if runner_kind == "claude":
+        _bind_live_manifest(
+            request,
+            receipt,
+            tmp_path,
+            execution_contract="grabowski-claude-code-live-v1",
+            provider="anthropic-claude-code",
+            model="claude-haiku-4-5-20251001",
+            sampling={},
+            bundle_commit=commit,
+        )
+    else:
+        _bind_live_manifest(
+            request,
+            receipt,
+            tmp_path,
+            execution_contract="grabowski-codex-cli-live-v1",
+            provider="openai-codex-cli",
+            model="gpt-6-astra",
+            sampling={"reasoning_effort": "medium"},
+            bundle_commit=commit,
+        )
+    uri = "repoground://snapshot/demo/canonical"
+    resource = _resource_read_result(
+        request["repobrief"]["manifest"],
+        uri=uri,
+        content="# Demo\n",
+    )
+    if runner_kind == "claude":
+        events = [
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [{
+                        "type": "tool_use",
+                        "id": "tool-1",
+                        "name": "ReadMcpResource",
+                        "input": {"uri": uri},
+                    }]
+                },
+            },
+            {
+                "type": "user",
+                "message": {
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": "tool-1",
+                        "content": json.dumps(resource, sort_keys=True),
+                        "is_error": False,
+                    }]
+                },
+            },
+        ]
+    else:
+        events = [{
+            "type": "item.completed",
+            "item": {
+                "type": "mcp_tool_call",
+                "server": "repobrief",
+                "tool": "repobrief_resource_read",
+                "arguments": {"action": "read", "uri": uri},
+                "result": {
+                    "content": [{
+                        "type": "text",
+                        "text": json.dumps(resource, sort_keys=True),
+                    }]
+                },
+                "error": None,
+                "status": "completed",
+            },
+        }]
+    _bind_transcript(
+        receipt,
+        tmp_path,
+        f"{runner_kind}-resource-read.jsonl",
+        events,
+    )
+    receipt["tool_calls"][0].update(
+        {
+            "name": "repobrief_resource_read",
+            "output_bytes": 1000,
+        }
+    )
+    receipt["repoground_evidence"]["calls"][0].update(
+        {
+            "tool": "repobrief_resource_read",
+            "freshness_status": "not_comparable",
+            "resolved_range_count": None,
+            "context_bytes_used": len("# Demo\n".encode("utf-8")),
+            "grounding_status": None,
+        }
+    )
+
+    assert validate_receipt(request, receipt, transcript_root=tmp_path) == []
+    assert score_receipt(
+        case, "treatment", request, receipt, transcript_root=tmp_path
+    )["exposure"] == {
+        "status": "exposed",
+        "reason": "resource_read_bound_content",
+    }
+
+    missing = copy.deepcopy(receipt)
+    missing.pop("repoground_evidence")
+    assert (
+        "receipt RepoGround evidence is required by bound transcript"
+        in validate_receipt(request, missing, transcript_root=tmp_path)
+    )
+
+
+def test_resource_list_alone_does_not_count_as_exposure(tmp_path: Path) -> None:
+    taskset = _taskset()
+    request = next(
+        item
+        for item in _planned_requests(taskset)
+        if item["case_id"] == "nav-lenskit-mcp-startup"
+        and item["condition"] == "treatment"
+    )
+    case = _cases(taskset)[request["case_id"]]
+    receipt = _receipt(request, case)
+    commit = request["repository"]["commit"]
+    _bind_live_manifest(
+        request,
+        receipt,
+        tmp_path,
+        execution_contract="grabowski-codex-cli-live-v1",
+        provider="openai-codex-cli",
+        model="gpt-6-astra",
+        sampling={"reasoning_effort": "medium"},
+        bundle_commit=commit,
+    )
+    receipt.pop("repoground_evidence")
+    receipt["tool_calls"][0]["name"] = "repobrief_resource_read"
+    events = [{
+        "type": "item.completed",
+        "item": {
+            "type": "mcp_tool_call",
+            "server": "repobrief",
+            "tool": "repobrief_resource_read",
+            "arguments": {"action": "list"},
+            "result": {
+                "content": [{
+                    "type": "text",
+                    "text": json.dumps({"resources": []}, sort_keys=True),
+                }]
+            },
+            "error": None,
+            "status": "completed",
+        },
+    }]
+    _bind_transcript(receipt, tmp_path, "resource-list.jsonl", events)
+
+    assert validate_receipt(request, receipt, transcript_root=tmp_path) == []
+    assert score_receipt(
+        case, "treatment", request, receipt, transcript_root=tmp_path
+    )["exposure"] == {
+        "status": "not_exposed",
+        "reason": "normalized_repoground_evidence_missing",
     }
 
 
@@ -1574,6 +1795,95 @@ def test_live_freshness_not_comparable_uses_bound_manifest_commit(
         "status": "exposed",
         "reason": "live_freshness_signal",
     }
+
+
+def test_live_freshness_unknown_probe_failure_uses_bound_manifest_commit(
+    tmp_path: Path,
+) -> None:
+    taskset = _taskset()
+    request = next(
+        item
+        for item in _planned_requests(taskset)
+        if item["case_id"] == "grounding-head-mismatch"
+        and item["condition"] == "treatment"
+    )
+    case = _cases(taskset)[request["case_id"]]
+    receipt = _receipt(request, case)
+    commit = request["repository"]["commit"]
+    _bind_live_manifest(
+        request,
+        receipt,
+        tmp_path,
+        execution_contract="grabowski-claude-code-live-v1",
+        provider="anthropic-claude-code",
+        model="claude-haiku-4-5-20251001",
+        sampling={},
+        bundle_commit=commit,
+    )
+    payload = _unknown_live_freshness(request["repobrief"]["manifest"])
+    events = [
+        {
+            "type": "assistant",
+            "message": {
+                "content": [{
+                    "type": "tool_use",
+                    "id": "tool-1",
+                    "name": "mcp__repobrief__live_freshness",
+                    "input": {},
+                }]
+            },
+        },
+        {
+            "type": "user",
+            "message": {
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "tool-1",
+                    "content": json.dumps(
+                        {"structuredContent": payload}, sort_keys=True
+                    ),
+                    "is_error": False,
+                }]
+            },
+        },
+    ]
+    _bind_transcript(receipt, tmp_path, "claude-unknown-freshness.jsonl", events)
+    receipt["tool_calls"][0]["output_bytes"] = 1000
+    receipt["repoground_evidence"]["bundle_commit"] = commit
+    receipt["repoground_evidence"]["calls"][0].update(
+        {
+            "freshness_status": "unknown",
+            "resolved_range_count": None,
+            "context_bytes_used": None,
+            "grounding_status": None,
+        }
+    )
+
+    assert validate_receipt(request, receipt, transcript_root=tmp_path) == []
+    assert score_receipt(
+        case, "treatment", request, receipt, transcript_root=tmp_path
+    )["exposure"] == {
+        "status": "exposed",
+        "reason": "live_freshness_signal",
+    }
+
+    wrong_probe = copy.deepcopy(payload)
+    wrong_probe["read_only_git_probe"] = False
+    wrong_events = copy.deepcopy(events)
+    wrong_events[1]["message"]["content"][0]["content"] = json.dumps(
+        {"structuredContent": wrong_probe}, sort_keys=True
+    )
+    invalid = copy.deepcopy(receipt)
+    _bind_transcript(
+        invalid,
+        tmp_path,
+        "claude-unknown-freshness-invalid-shape.jsonl",
+        wrong_events,
+    )
+    assert (
+        "receipt RepoGround evidence is not supported by bound transcript"
+        in validate_receipt(request, invalid, transcript_root=tmp_path)
+    )
 
 
 def test_live_freshness_fresh_requires_snapshot_provenance(

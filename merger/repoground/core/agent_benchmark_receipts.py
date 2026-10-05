@@ -118,7 +118,10 @@ def _validate_tool_calls(
     return errors
 
 
-_REPOGROUND_EVIDENCE_TOOLS = {"ask_context", "grounding_verify", "live_freshness"}
+_REPOGROUND_MCP_EVIDENCE_TOOLS = {"ask_context", "grounding_verify", "live_freshness"}
+_REPOGROUND_EVIDENCE_TOOLS = _REPOGROUND_MCP_EVIDENCE_TOOLS | {
+    "repobrief_resource_read"
+}
 _FRESHNESS_STATUSES = {"fresh", "stale", "unknown", "not_comparable", "not_applicable"}
 _GROUNDING_STATUSES = {"pass", "fail", "warn", "degraded", "not_applicable"}
 _REPOGROUND_CALL_FIELDS = {
@@ -138,8 +141,9 @@ _REPOGROUND_MCP_SERVER_ALIASES = {"repobrief", "repoground"}
 _CLAUDE_REPOGROUND_TOOLS = {
     f"mcp__{server}__{tool}": tool
     for server in _REPOGROUND_MCP_SERVER_ALIASES
-    for tool in _REPOGROUND_EVIDENCE_TOOLS
+    for tool in _REPOGROUND_MCP_EVIDENCE_TOOLS
 }
+_CLAUDE_RESOURCE_READ_TOOLS = {"ReadMcpResource", "ReadMcpResourceTool"}
 
 
 def _is_commit(value: Any) -> bool:
@@ -225,6 +229,35 @@ def _decoded_repoground_payload(value: Mapping[str, Any]) -> Mapping[str, Any] |
     return None
 
 
+def _decoded_resource_read_result(
+    value: Mapping[str, Any],
+) -> Mapping[str, Any] | None:
+    if "contents" in value and "_meta" in value:
+        return value
+    content = value.get("content")
+    if isinstance(content, list):
+        candidates = list(content)
+    elif isinstance(content, (str, Mapping)):
+        candidates = [content]
+    else:
+        return None
+    for candidate in candidates:
+        payload_source = (
+            candidate.get("text")
+            if isinstance(candidate, Mapping)
+            and isinstance(candidate.get("text"), str)
+            else candidate
+        )
+        decoded = _json_mapping(payload_source)
+        if (
+            isinstance(decoded, Mapping)
+            and "contents" in decoded
+            and "_meta" in decoded
+        ):
+            return decoded
+    return None
+
+
 def _live_snapshot_commit(
     freshness: Mapping[str, Any],
     *,
@@ -250,6 +283,19 @@ def _live_snapshot_commit(
         and freshness.get("reason") == "repo_root_not_configured"
         and freshness.get("repo_root") is None
         and freshness.get("read_only_git_probe") is False
+        and freshness.get("implicit_refresh") is False
+        and snapshot is None
+        and _is_commit(fallback_commit)
+    ):
+        return str(fallback_commit)
+    if (
+        freshness.get("status") == "unknown"
+        and isinstance(freshness.get("reason"), str)
+        and bool(freshness.get("reason"))
+        and isinstance(freshness.get("repo_root"), str)
+        and bool(freshness.get("repo_root"))
+        and freshness.get("read_only_git_probe") is True
+        and freshness.get("implicit_refresh") is False
         and snapshot is None
         and _is_commit(fallback_commit)
     ):
@@ -466,6 +512,68 @@ def _grounding_evidence(
     }
 
 
+def _resource_read_evidence(
+    sequence: int,
+    result: Mapping[str, Any],
+    *,
+    expected_uri: str | None,
+    fallback_commit: str | None,
+    expected_manifest_path: str | None,
+) -> tuple[str, dict[str, Any]] | None:
+    decoded = _decoded_resource_read_result(result)
+    if decoded is None:
+        return None
+    contents = decoded.get("contents")
+    meta = decoded.get("_meta")
+    if (
+        not isinstance(expected_uri, str)
+        or not expected_uri
+        or not isinstance(contents, list)
+        or len(contents) != 1
+        or not isinstance(contents[0], Mapping)
+        or contents[0].get("uri") != expected_uri
+        or not isinstance(meta, Mapping)
+    ):
+        return None
+    item = contents[0]
+    text = item.get("text")
+    mime_type = item.get("mimeType")
+    repoground = meta.get("repoground")
+    if (
+        not isinstance(text, str)
+        or not text
+        or not isinstance(mime_type, str)
+        or not mime_type
+        or not isinstance(repoground, Mapping)
+        or repoground.get("status") != "available"
+        or repoground.get("implicitRefresh") is not False
+        or not isinstance(repoground.get("snapshotContext"), Mapping)
+        or not isinstance(repoground.get("identity"), Mapping)
+    ):
+        return None
+    freshness = repoground.get("liveFreshness")
+    if not isinstance(freshness, Mapping):
+        return None
+    commit = _live_snapshot_commit(
+        freshness,
+        fallback_commit=fallback_commit,
+        expected_manifest_path=expected_manifest_path,
+    )
+    if commit is None:
+        return None
+    content_bytes = len(text.encode("utf-8"))
+    if content_bytes <= 0:
+        return None
+    return commit, {
+        "sequence": sequence,
+        "tool": "repobrief_resource_read",
+        "freshness_status": freshness.get("status"),
+        "resolved_range_count": None,
+        "context_bytes_used": content_bytes,
+        "grounding_status": None,
+    }
+
+
 def _evidence_call_from_payload(
     tool: str,
     sequence: int,
@@ -549,32 +657,111 @@ def _claude_transcript_evidence(
     evidence_calls: list[dict[str, Any]] = []
     commits: set[str] = set()
     for sequence, use in enumerate(uses, start=1):
-        tool = _CLAUDE_REPOGROUND_TOOLS.get(str(use.get("name", "")))
-        if tool is None:
+        concrete = str(use.get("name", ""))
+        tool = _CLAUDE_REPOGROUND_TOOLS.get(concrete)
+        is_resource_read = concrete in _CLAUDE_RESOURCE_READ_TOOLS
+        if tool is None and not is_resource_read:
             continue
         identifier = use.get("id")
         result = results.get(str(identifier)) if isinstance(identifier, str) else None
         if not isinstance(result, Mapping) or result.get("is_error") is True:
             continue
-        payload = _decoded_repoground_payload(result)
-        normalized = (
-            _evidence_call_from_payload(
-                tool,
+        if is_resource_read:
+            arguments = use.get("input")
+            expected_uri = (
+                arguments.get("uri") if isinstance(arguments, Mapping) else None
+            )
+            normalized = _resource_read_evidence(
                 sequence,
-                payload,
+                result,
+                expected_uri=expected_uri,
                 fallback_commit=fallback_commit,
                 expected_manifest_path=expected_manifest_path,
-                expected_manifest_sha256=expected_manifest_sha256,
             )
-            if isinstance(payload, Mapping)
-            else None
-        )
+        else:
+            payload = _decoded_repoground_payload(result)
+            normalized = (
+                _evidence_call_from_payload(
+                    str(tool),
+                    sequence,
+                    payload,
+                    fallback_commit=fallback_commit,
+                    expected_manifest_path=expected_manifest_path,
+                    expected_manifest_sha256=expected_manifest_sha256,
+                )
+                if isinstance(payload, Mapping)
+                else None
+            )
         if normalized is None:
             continue
         commit, call = normalized
         commits.add(commit)
         evidence_calls.append(call)
     return _evidence_document(request, evidence_calls, commits)
+
+
+def _codex_resource_read_evidence(
+    item: Mapping[str, Any],
+    sequence: int,
+    result: Mapping[str, Any],
+    *,
+    fallback_commit: str | None,
+    expected_manifest_path: str | None,
+) -> tuple[str, dict[str, Any]] | None:
+    arguments = item.get("arguments")
+    if (
+        not isinstance(arguments, Mapping)
+        or arguments.get("action") != "read"
+    ):
+        return None
+    return _resource_read_evidence(
+        sequence,
+        result,
+        expected_uri=arguments.get("uri"),
+        fallback_commit=fallback_commit,
+        expected_manifest_path=expected_manifest_path,
+    )
+
+
+def _codex_item_evidence(
+    item: Mapping[str, Any],
+    sequence: int,
+    *,
+    fallback_commit: str | None,
+    expected_manifest_path: str | None,
+    expected_manifest_sha256: str | None,
+) -> tuple[str, dict[str, Any]] | None:
+    tool = item.get("tool")
+    if (
+        item.get("type") != "mcp_tool_call"
+        or item.get("server") not in _REPOGROUND_MCP_SERVER_ALIASES
+        or tool not in _REPOGROUND_EVIDENCE_TOOLS
+        or item.get("status") != "completed"
+        or item.get("error") is not None
+    ):
+        return None
+    result = item.get("result")
+    if not isinstance(result, Mapping):
+        return None
+    if tool == "repobrief_resource_read":
+        return _codex_resource_read_evidence(
+            item,
+            sequence,
+            result,
+            fallback_commit=fallback_commit,
+            expected_manifest_path=expected_manifest_path,
+        )
+    payload = result.get("structured_content")
+    if not isinstance(payload, Mapping):
+        return None
+    return _evidence_call_from_payload(
+        str(tool),
+        sequence,
+        payload,
+        fallback_commit=fallback_commit,
+        expected_manifest_path=expected_manifest_path,
+        expected_manifest_sha256=expected_manifest_sha256,
+    )
 
 
 def _codex_transcript_evidence(
@@ -600,23 +787,9 @@ def _codex_transcript_evidence(
         if item_type not in {"command_execution", "mcp_tool_call"}:
             continue
         sequence += 1
-        tool = item.get("tool")
-        if (
-            item_type != "mcp_tool_call"
-            or item.get("server") not in _REPOGROUND_MCP_SERVER_ALIASES
-            or tool not in _REPOGROUND_EVIDENCE_TOOLS
-            or item.get("status") != "completed"
-            or item.get("error") is not None
-        ):
-            continue
-        result = item.get("result")
-        payload = result.get("structured_content") if isinstance(result, Mapping) else None
-        if not isinstance(payload, Mapping):
-            continue
-        normalized = _evidence_call_from_payload(
-            str(tool),
+        normalized = _codex_item_evidence(
+            item,
             sequence,
-            payload,
             fallback_commit=fallback_commit,
             expected_manifest_path=expected_manifest_path,
             expected_manifest_sha256=expected_manifest_sha256,
@@ -747,6 +920,31 @@ def _validate_grounding_evidence(call: Mapping[str, Any]) -> list[str]:
     return []
 
 
+def _validate_resource_read_evidence(
+    call: Mapping[str, Any], observed: Mapping[str, Any]
+) -> list[str]:
+    context_bytes = call.get("context_bytes_used")
+    if (
+        call.get("resolved_range_count") is not None
+        or not isinstance(context_bytes, int)
+        or isinstance(context_bytes, bool)
+        or context_bytes <= 0
+        or call.get("grounding_status") is not None
+    ):
+        return ["receipt RepoGround resource-read evidence is invalid"]
+    output_bytes = observed.get("output_bytes")
+    if (
+        isinstance(output_bytes, int)
+        and not isinstance(output_bytes, bool)
+        and output_bytes >= 0
+        and context_bytes > output_bytes
+    ):
+        return [
+            "receipt RepoGround resource-read content bytes exceed bound tool output"
+        ]
+    return []
+
+
 def _validate_repoground_call(
     call: Mapping[str, Any], observed: Mapping[str, Any] | None
 ) -> list[str]:
@@ -764,6 +962,8 @@ def _validate_repoground_call(
         errors.extend(_validate_ask_context_evidence(call, observed))
     elif tool == "live_freshness":
         errors.extend(_validate_live_freshness_evidence(call))
+    elif tool == "repobrief_resource_read":
+        errors.extend(_validate_resource_read_evidence(call, observed))
     else:
         errors.extend(_validate_grounding_evidence(call))
     return errors
@@ -829,7 +1029,7 @@ def _has_successful_repoground_evidence_call(
 ) -> bool:
     return any(
         isinstance(raw_call, Mapping)
-        and raw_call.get("name") in _REPOGROUND_EVIDENCE_TOOLS
+        and raw_call.get("name") in _REPOGROUND_MCP_EVIDENCE_TOOLS
         and raw_call.get("status") == "success"
         for raw_call in list_value(receipt.get("tool_calls"))
     )
