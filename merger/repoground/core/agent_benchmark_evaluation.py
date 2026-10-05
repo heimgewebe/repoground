@@ -18,6 +18,8 @@ from merger.repoground.core.agent_benchmark_common import (
     list_value,
     mapping_value,
     require_valid_taskset,
+    REVISION_BOUND_EXPOSURE_CONTRACTS,
+    runner_configuration_errors,
     sha256_json,
 )
 from merger.repoground.core.agent_benchmark_receipts import validate_receipt
@@ -117,12 +119,123 @@ def _false_confidence(expectation: Mapping[str, Any], answer: Mapping[str, Any])
     )
 
 
+def _safe_metric_int(value: Any) -> int:
+    return value if isinstance(value, int) and value >= 0 else 0
+
+
 def _tool_bytes(receipt: Mapping[str, Any]) -> int:
     return sum(
-        int(mapping_value(call).get("input_bytes") or 0)
-        + int(mapping_value(call).get("output_bytes") or 0)
+        _safe_metric_int(mapping_value(call).get("input_bytes"))
+        + _safe_metric_int(mapping_value(call).get("output_bytes"))
         for call in list_value(receipt.get("tool_calls"))
     )
+
+
+def _ask_context_call_is_exposed(call: Mapping[str, Any]) -> bool:
+    return bool(
+        call.get("freshness_status") == "fresh"
+        and int(call.get("resolved_range_count") or 0) > 0
+        and int(call.get("context_bytes_used") or 0) > 0
+    )
+
+
+def _resource_read_call_is_exposed(call: Mapping[str, Any]) -> bool:
+    return bool(
+        call.get("tool") == "repobrief_resource_read"
+        and int(call.get("context_bytes_used") or 0) > 0
+    )
+
+
+def _navigation_exposure(
+    evidence: Mapping[str, Any], calls: Sequence[Mapping[str, Any]]
+) -> dict[str, str]:
+    if evidence.get("bundle_commit") != evidence.get("target_commit"):
+        return {
+            "status": "not_exposed",
+            "reason": "bundle_commit_does_not_match_target",
+        }
+    if any(_resource_read_call_is_exposed(item) for item in calls):
+        return {"status": "exposed", "reason": "resource_read_bound_content"}
+    ask_calls = [item for item in calls if item.get("tool") == "ask_context"]
+    if not ask_calls:
+        return {"status": "not_exposed", "reason": "no_successful_ask_context"}
+    if not any(item.get("freshness_status") == "fresh" for item in ask_calls):
+        return {"status": "not_exposed", "reason": "ask_context_target_not_fresh"}
+    if not any(int(item.get("resolved_range_count") or 0) > 0 for item in ask_calls):
+        return {"status": "not_exposed", "reason": "ask_context_no_resolved_ranges"}
+    if not any(int(item.get("context_bytes_used") or 0) > 0 for item in ask_calls):
+        return {"status": "not_exposed", "reason": "ask_context_zero_context_bytes"}
+    if any(_ask_context_call_is_exposed(item) for item in ask_calls):
+        return {"status": "exposed", "reason": "ask_context_resolved_evidence"}
+    return {
+        "status": "not_exposed",
+        "reason": "ask_context_evidence_split_across_calls",
+    }
+
+
+def _grounding_exposure(calls: Sequence[Mapping[str, Any]]) -> dict[str, str]:
+    if any(_resource_read_call_is_exposed(item) for item in calls):
+        return {"status": "exposed", "reason": "resource_read_bound_content"}
+    if any(
+        item.get("tool") == "live_freshness"
+        and item.get("freshness_status")
+        in {"fresh", "stale", "unknown", "not_comparable", "not_applicable"}
+        for item in calls
+    ):
+        return {"status": "exposed", "reason": "live_freshness_signal"}
+    if any(
+        item.get("tool") == "grounding_verify"
+        and item.get("grounding_status")
+        in {"pass", "fail", "warn", "degraded", "not_applicable"}
+        for item in calls
+    ):
+        return {"status": "exposed", "reason": "grounding_verdict_signal"}
+    return {"status": "not_exposed", "reason": "no_valid_grounding_signal"}
+
+
+def _exposure(
+    case: Mapping[str, Any],
+    condition: str,
+    request: Mapping[str, Any],
+    receipt: Mapping[str, Any],
+) -> dict[str, str]:
+    if condition != "treatment":
+        return {"status": "not_applicable", "reason": "baseline_condition"}
+    evidence = receipt.get("repoground_evidence")
+    if not isinstance(evidence, Mapping):
+        return {
+            "status": "not_exposed",
+            "reason": "normalized_repoground_evidence_missing",
+        }
+    runner = mapping_value(request.get("runner"))
+    if runner_configuration_errors(runner):
+        return {
+            "status": "not_exposed",
+            "reason": "runner_configuration_invalid",
+        }
+    contract = runner.get("execution_contract")
+    if contract not in REVISION_BOUND_EXPOSURE_CONTRACTS:
+        return {
+            "status": "not_exposed",
+            "reason": "runner_contract_not_revision_bound",
+        }
+    calls = [
+        mapping_value(item)
+        for item in list_value(evidence.get("calls"))
+        if isinstance(item, Mapping)
+    ]
+    category = str(case.get("category", ""))
+    if category in {"navigation", "structural"}:
+        return _navigation_exposure(evidence, calls)
+    if category == "grounding_freshness":
+        return _grounding_exposure(calls)
+    return {"status": "not_exposed", "reason": "unsupported_task_category"}
+
+
+def _empty_exposure(condition: str | None) -> dict[str, str]:
+    if condition == "baseline":
+        return {"status": "not_applicable", "reason": "baseline_condition"}
+    return {"status": "not_exposed", "reason": "run_evidence_unavailable"}
 
 
 def score_receipt(
@@ -160,16 +273,25 @@ def score_receipt(
         "false_hit_count": false_hit_count,
         "citation_match_rate": citation_match_rate,
         "false_confidence": false_confidence,
-        "duration_ms": int(receipt.get("duration_ms") or 0),
+        "duration_ms": _safe_metric_int(receipt.get("duration_ms")),
         "tool_call_count": len(calls),
-        "input_tokens": int(provider.get("input_tokens") or 0),
-        "output_tokens": int(provider.get("output_tokens") or 0),
+        "input_tokens": _safe_metric_int(provider.get("input_tokens")),
+        "output_tokens": _safe_metric_int(provider.get("output_tokens")),
         "tool_bytes": _tool_bytes(receipt),
+        "exposure": (
+            _exposure(case, condition, request, receipt)
+            if valid
+            else (
+                {"status": "not_applicable", "reason": "baseline_condition"}
+                if condition == "baseline"
+                else {"status": "not_exposed", "reason": "invalid_receipt"}
+            )
+        ),
         "invalid_reasons": errors,
     }
 
 
-def _invalid_score(reason: str) -> dict[str, Any]:
+def _invalid_score(reason: str, *, condition: str | None = None) -> dict[str, Any]:
     return {
         "valid": False,
         "success": False,
@@ -183,6 +305,7 @@ def _invalid_score(reason: str) -> dict[str, Any]:
         "input_tokens": 0,
         "output_tokens": 0,
         "tool_bytes": 0,
+        "exposure": _empty_exposure(condition),
         "invalid_reasons": [reason],
     }
 
@@ -225,16 +348,19 @@ def _score_condition(
     transcript_root: str | Path | None,
 ) -> tuple[Mapping[str, Any], dict[str, Any]]:
     if len(candidates) != 1:
-        return {}, _invalid_score(f"expected one {condition} request, got {len(candidates)}")
+        return {}, _invalid_score(
+            f"expected one {condition} request, got {len(candidates)}",
+            condition=condition,
+        )
     request = candidates[0]
     request_id = str(request.get("request_id", ""))
     if request_id in duplicate_request_ids:
-        return request, _invalid_score("duplicate request_id")
+        return request, _invalid_score("duplicate request_id", condition=condition)
     if request_id in duplicate_receipt_ids:
-        return request, _invalid_score("duplicate receipt request_id")
+        return request, _invalid_score("duplicate receipt request_id", condition=condition)
     receipt = receipts.get(request_id)
     if receipt is None:
-        return request, _invalid_score("missing receipt")
+        return request, _invalid_score("missing receipt", condition=condition)
     return request, score_receipt(
         case,
         condition,
@@ -469,8 +595,19 @@ def _class_result(
     measurement_scope: str,
 ) -> dict[str, Any]:
     valid_pairs = [pair for pair in pairs if pair.get("pair_valid") is True]
-    baseline = [mapping_value(pair["baseline"]) for pair in valid_pairs]
-    treatment = [mapping_value(pair["treatment"]) for pair in valid_pairs]
+    exposed_pairs = [
+        pair
+        for pair in valid_pairs
+        if mapping_value(mapping_value(pair.get("treatment")).get("exposure")).get(
+            "status"
+        )
+        == "exposed"
+    ]
+    measurement_pairs = (
+        valid_pairs if measurement_scope == "synthetic_contract_fixture" else exposed_pairs
+    )
+    baseline = [mapping_value(pair["baseline"]) for pair in measurement_pairs]
+    treatment = [mapping_value(pair["treatment"]) for pair in measurement_pairs]
     quality = _quality_metrics(baseline, treatment)
     baseline_success, treatment_success, success_delta = quality[:3]
     baseline_false, treatment_false, false_delta = quality[3:]
@@ -479,8 +616,10 @@ def _class_result(
         classification = "synthetic_only"
     elif not valid_pairs or len(valid_pairs) != len(pairs):
         classification = "insufficient_evidence"
-    elif _is_harmful(success_delta, false_delta, thresholds):
+    elif exposed_pairs and _is_harmful(success_delta, false_delta, thresholds):
         classification = "harmful"
+    elif len(exposed_pairs) != len(valid_pairs):
+        classification = "insufficient_evidence"
     elif _is_useful(
         valid_pairs,
         success_delta=success_delta,
@@ -492,6 +631,7 @@ def _class_result(
         classification = "neutral"
     return {
         "valid_pair_count": len(valid_pairs),
+        "exposed_pair_count": len(exposed_pairs),
         "baseline_success_rate": baseline_success,
         "treatment_success_rate": treatment_success,
         "success_rate_delta": success_delta,
@@ -538,7 +678,10 @@ def _decision(
         reason = "at least one task class crossed a quality or safety regression threshold"
     elif "insufficient_evidence" in classifications.values():
         status = "insufficient_evidence"
-        reason = "one or more task classes lack complete valid paired evidence"
+        reason = (
+            "one or more task classes lack complete valid paired evidence "
+            "or treatment exposure"
+        )
     elif useful:
         status = "useful_class"
         reason = "at least one class met a reproducible benefit threshold without regression"

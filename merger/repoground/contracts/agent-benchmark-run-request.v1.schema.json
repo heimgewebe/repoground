@@ -86,7 +86,7 @@
         "sampling": {"type": "object"},
         "execution_contract": {
           "type": "string",
-          "enum": ["grabowski-claude-code-live-v1"]
+          "enum": ["grabowski-claude-code-live-v1", "grabowski-codex-cli-live-v1"]
         }
       }
     },

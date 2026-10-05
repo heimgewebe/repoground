@@ -74,6 +74,38 @@
         }
       }
     },
+    "repoground_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target_commit", "bundle_commit", "calls"],
+      "properties": {
+        "target_commit": {"type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"},
+        "bundle_commit": {"type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"},
+        "calls": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "sequence",
+              "tool",
+              "freshness_status",
+              "resolved_range_count",
+              "context_bytes_used",
+              "grounding_status"
+            ],
+            "properties": {
+              "sequence": {"type": "integer", "minimum": 1},
+              "tool": {"enum": ["ask_context", "grounding_verify", "live_freshness", "repobrief_resource_read"]},
+              "freshness_status": {"enum": ["fresh", "stale", "unknown", "not_comparable", "not_applicable"]},
+              "resolved_range_count": {"type": ["integer", "null"], "minimum": 0},
+              "context_bytes_used": {"type": ["integer", "null"], "minimum": 0},
+              "grounding_status": {"enum": ["pass", "fail", "warn", "degraded", "not_applicable", null]}
+            }
+          }
+        }
+      }
+    },
     "answer": {
       "type": "object",
       "additionalProperties": false,

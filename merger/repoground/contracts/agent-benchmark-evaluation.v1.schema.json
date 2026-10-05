@@ -96,6 +96,7 @@
         "required": [
           "category",
           "valid_pair_count",
+          "exposed_pair_count",
           "baseline_success_rate",
           "treatment_success_rate",
           "success_rate_delta",
@@ -108,6 +109,7 @@
         "properties": {
           "category": {"enum": ["navigation", "structural", "grounding_freshness"]},
           "valid_pair_count": {"type": "integer", "minimum": 0},
+          "exposed_pair_count": {"type": "integer", "minimum": 0},
           "baseline_success_rate": {"type": "number", "minimum": 0, "maximum": 1},
           "treatment_success_rate": {"type": "number", "minimum": 0, "maximum": 1},
           "success_rate_delta": {"type": "number", "minimum": -1, "maximum": 1},
@@ -190,6 +192,7 @@
         "input_tokens",
         "output_tokens",
         "tool_bytes",
+        "exposure",
         "invalid_reasons"
       ],
       "properties": {
@@ -205,6 +208,15 @@
         "input_tokens": {"type": "integer", "minimum": 0},
         "output_tokens": {"type": "integer", "minimum": 0},
         "tool_bytes": {"type": "integer", "minimum": 0},
+        "exposure": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "reason"],
+          "properties": {
+            "status": {"enum": ["exposed", "not_exposed", "not_applicable"]},
+            "reason": {"type": "string", "minLength": 1}
+          }
+        },
         "invalid_reasons": {"type": "array", "items": {"type": "string"}}
       }
     },

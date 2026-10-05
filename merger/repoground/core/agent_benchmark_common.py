@@ -44,8 +44,138 @@ REPOBRIEF_TOOLS = {
 }
 
 
+CLAUDE_CODE_LIVE_CONTRACT = "grabowski-claude-code-live-v1"
+CLAUDE_CODE_PROVIDER = "anthropic-claude-code"
+CLAUDE_CODE_MODEL = "claude-haiku-4-5-20251001"
+CODEX_CLI_LIVE_CONTRACT = "grabowski-codex-cli-live-v1"
+CODEX_CLI_PROVIDER = "openai-codex-cli"
+CODEX_CLI_MODEL = "gpt-6-astra"
+CODEX_CLI_SAMPLING = {"reasoning_effort": "medium"}
+REVISION_BOUND_EXPOSURE_CONTRACTS = frozenset(
+    {CLAUDE_CODE_LIVE_CONTRACT, CODEX_CLI_LIVE_CONTRACT}
+)
+
+
 class AgentBenchmarkError(ValueError):
     """A benchmark contract or evidence boundary was violated."""
+
+
+def _claude_runner_configuration_errors(
+    *,
+    execution_contract: Any,
+    provider: str,
+    model: str,
+    sampling_value: Any,
+    sampling: Mapping[str, Any],
+) -> list[str]:
+    if execution_contract != CLAUDE_CODE_LIVE_CONTRACT:
+        if provider == CLAUDE_CODE_PROVIDER and (
+            not isinstance(sampling_value, Mapping) or sampling
+        ):
+            return [
+                "provider anthropic-claude-code requires an explicit empty "
+                "sampling object"
+            ]
+        return []
+    if provider != CLAUDE_CODE_PROVIDER:
+        return [
+            f"runner contract {CLAUDE_CODE_LIVE_CONTRACT} requires provider "
+            f"{CLAUDE_CODE_PROVIDER}"
+        ]
+    if model != CLAUDE_CODE_MODEL:
+        return [
+            f"runner contract {CLAUDE_CODE_LIVE_CONTRACT} requires model "
+            f"{CLAUDE_CODE_MODEL}"
+        ]
+    if not isinstance(sampling_value, Mapping) or sampling:
+        return [
+            "provider anthropic-claude-code requires an explicit empty "
+            "sampling object"
+        ]
+    return []
+
+
+def _codex_runner_configuration_errors(
+    *,
+    execution_contract: Any,
+    provider: str,
+    model: str,
+    sampling_value: Any,
+    sampling: Mapping[str, Any],
+) -> list[str]:
+    if execution_contract != CODEX_CLI_LIVE_CONTRACT and provider != CODEX_CLI_PROVIDER:
+        return []
+    if execution_contract != CODEX_CLI_LIVE_CONTRACT:
+        return [
+            f"provider {CODEX_CLI_PROVIDER} requires runner contract "
+            f"{CODEX_CLI_LIVE_CONTRACT}"
+        ]
+    if provider != CODEX_CLI_PROVIDER:
+        return [
+            f"runner contract {CODEX_CLI_LIVE_CONTRACT} requires provider "
+            f"{CODEX_CLI_PROVIDER}"
+        ]
+    if model != CODEX_CLI_MODEL:
+        return [
+            f"runner contract {CODEX_CLI_LIVE_CONTRACT} requires model "
+            f"{CODEX_CLI_MODEL}"
+        ]
+    if (
+        not isinstance(sampling_value, Mapping)
+        or dict(sampling) != CODEX_CLI_SAMPLING
+    ):
+        return [
+            f"runner contract {CODEX_CLI_LIVE_CONTRACT} requires sampling "
+            '{"reasoning_effort":"medium"}'
+        ]
+    return []
+
+
+def runner_configuration_errors(runner: Mapping[str, Any]) -> list[str]:
+    """Validate executable runner identity without trusting a planner path."""
+
+    provider = runner.get("provider")
+    model = runner.get("model")
+    if not isinstance(provider, str) or not provider:
+        return ["runner provider and model are required"]
+    if not isinstance(model, str) or not model:
+        return ["runner provider and model are required"]
+
+    sampling_value = runner.get("sampling")
+    sampling = mapping_value(sampling_value)
+    execution_contract = runner.get("execution_contract")
+    if (
+        execution_contract is not None
+        and execution_contract not in REVISION_BOUND_EXPOSURE_CONTRACTS
+    ):
+        return [f"unsupported runner execution contract: {execution_contract}"]
+    if provider == "anthropic":
+        return [
+            "ambiguous provider anthropic is not executable; "
+            "use anthropic-claude-code"
+        ]
+    errors = _claude_runner_configuration_errors(
+        execution_contract=execution_contract,
+        provider=provider,
+        model=model,
+        sampling_value=sampling_value,
+        sampling=sampling,
+    )
+    if errors:
+        return errors
+    return _codex_runner_configuration_errors(
+        execution_contract=execution_contract,
+        provider=provider,
+        model=model,
+        sampling_value=sampling_value,
+        sampling=sampling,
+    )
+
+
+def require_valid_runner_configuration(runner: Mapping[str, Any]) -> None:
+    errors = runner_configuration_errors(runner)
+    if errors:
+        raise AgentBenchmarkError("; ".join(errors))
 
 
 def canonical_json(value: Any) -> str:
@@ -327,6 +457,13 @@ def require_valid_taskset(taskset: Mapping[str, Any]) -> None:
 __all__ = [
     "AgentBenchmarkError",
     "CATEGORIES",
+    "CLAUDE_CODE_LIVE_CONTRACT",
+    "CLAUDE_CODE_MODEL",
+    "CLAUDE_CODE_PROVIDER",
+    "CODEX_CLI_LIVE_CONTRACT",
+    "CODEX_CLI_MODEL",
+    "CODEX_CLI_PROVIDER",
+    "CODEX_CLI_SAMPLING",
     "COMPONENT_DELTA_MODE",
     "CONDITIONS",
     "DOES_NOT_ESTABLISH",
@@ -346,7 +483,10 @@ __all__ = [
     "list_value",
     "load_json",
     "mapping_value",
+    "require_valid_runner_configuration",
     "require_valid_taskset",
+    "REVISION_BOUND_EXPOSURE_CONTRACTS",
+    "runner_configuration_errors",
     "sha256_bytes",
     "sha256_json",
     "validate_taskset",
