@@ -193,6 +193,12 @@ def validate_request(
     errors.extend(_validate_repository(repository, request))
     if request.get("prompt") != case.get("prompt"):
         errors.append("request prompt does not match frozen case")
+    expected_setup = case.get("setup")
+    if "setup" in request:
+        if request["setup"] != expected_setup:
+            errors.append("request setup does not match frozen case")
+    elif expected_setup != {"working_tree": "clean"}:
+        errors.append("request setup missing for non-clean frozen case")
     condition = request.get("condition")
     if condition in CONDITIONS:
         errors.extend(
@@ -274,6 +280,8 @@ def pair_request_errors(
     for field in ("pair_id", "case_id", "repetition", "taskset_id", "taskset_sha256"):
         if first.get(field) != second.get(field):
             errors.append(f"paired requests disagree on {field}")
+    if ("setup" in first) != ("setup" in second) or first.get("setup") != second.get("setup"):
+        errors.append("paired requests disagree on setup")
     if mapping_value(first.get("runner")) != mapping_value(second.get("runner")):
         errors.append("paired requests use different runner configuration")
     if {first.get("condition"), second.get("condition")} != set(CONDITIONS):
