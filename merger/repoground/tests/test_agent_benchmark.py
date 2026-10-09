@@ -304,6 +304,88 @@ def test_pair_plan_is_deterministic_balanced_and_isolated() -> None:
     assert orders[2] == {"baseline": 12, "treatment": 12}
 
 
+def test_frozen_case_setup_reaches_both_paired_requests() -> None:
+    taskset = _taskset()
+    cases = _cases(taskset)
+    requests = _planned_requests(taskset)
+    for request in requests:
+        assert request["setup"] == cases[request["case_id"]]["setup"]
+        assert validate_request(taskset, request) == []
+        Draft7Validator(_schema("request")).validate(request)
+    g2 = [r for r in requests if r["case_id"] == "grounding-dirty-working-tree"]
+    assert len(g2) == 4
+    assert all(r["setup"] == {"working_tree": "dirty", "fixture": "dirty-checkout"} for r in g2)
+
+
+def test_dirty_setup_is_required_and_cannot_be_forged() -> None:
+    taskset = _taskset()
+    g2 = next(r for r in _planned_requests(taskset) if r["case_id"] == "grounding-dirty-working-tree")
+    missing = copy.deepcopy(g2)
+    del missing["setup"]
+    assert "request setup missing for non-clean frozen case" in validate_request(taskset, missing)
+    forged = copy.deepcopy(g2)
+    forged["setup"] = {"working_tree": "clean"}
+    assert "request setup does not match frozen case" in validate_request(taskset, forged)
+    malformed = copy.deepcopy(g2)
+    malformed["setup"] = {"working_tree": "dirty", "fixture": "evil", "unknown": True}
+    assert "request setup does not match frozen case" in validate_request(taskset, malformed)
+    assert not Draft7Validator(_schema("request")).is_valid(malformed)
+
+
+def test_pair_setup_mismatch_is_rejected_and_historical_clean_remains_valid() -> None:
+    taskset = _taskset()
+    requests = _planned_requests(taskset)
+    g2 = [r for r in requests if r["case_id"] == "grounding-dirty-working-tree" and r["repetition"] == 1]
+    assert pair_request_errors(taskset, g2) == []
+    divergent = copy.deepcopy(g2)
+    divergent[0].pop("setup")
+    assert "paired requests disagree on setup" in pair_request_errors(taskset, divergent)
+    # The frozen taskset also has clean scenarios with an explicit fixture.
+    # Historical requests predate setup propagation; accepting them must not
+    # silently waive setup for any dirty/non-clean scenario.
+    for case_id in (
+        "nav-grabowski-runtime-entrypoint",
+        "grounding-clean-freshness",
+        "grounding-valid-boundary-citation",
+    ):
+        clean_pair = [
+            copy.deepcopy(r)
+            for r in requests
+            if r["case_id"] == case_id and r["repetition"] == 1
+        ]
+        assert len(clean_pair) == 2
+        for request in clean_pair:
+            assert request["setup"]["working_tree"] == "clean"
+            request.pop("setup")
+            assert validate_request(taskset, request) == []
+            Draft7Validator(_schema("request")).validate(request)
+        assert pair_request_errors(taskset, clean_pair) == []
+
+
+def test_pair_rejects_equal_missing_or_forged_nonclean_setup() -> None:
+    taskset = _taskset()
+    requests = _planned_requests(taskset)
+    original = [
+        r for r in requests
+        if r["case_id"] == "grounding-dirty-working-tree" and r["repetition"] == 1
+    ]
+    assert pair_request_errors(taskset, original) == []
+    both_missing = copy.deepcopy(original)
+    for request in both_missing:
+        del request["setup"]
+    assert pair_request_errors(taskset, both_missing) == [
+        "request setup missing for non-clean frozen case",
+        "request setup missing for non-clean frozen case",
+    ]
+    both_forged = copy.deepcopy(original)
+    for request in both_forged:
+        request["setup"] = {"working_tree": "clean"}
+    assert pair_request_errors(taskset, both_forged) == [
+        "request setup does not match frozen case",
+        "request setup does not match frozen case",
+    ]
+
+
 def test_pair_plan_rejects_non_frozen_repetition_count() -> None:
     taskset = _taskset()
     with pytest.raises(AgentBenchmarkError, match="requires exactly 2 repetitions"):

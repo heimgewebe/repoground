@@ -232,6 +232,7 @@ def _build_request(
         "session_id": session_id,
         "workspace_id": workspace_id,
         "prompt": str(case["prompt"]),
+        "setup": dict(mapping_value(case["setup"])),
         "allowed_tools": list(mapping_value(taskset["tool_policy"])[condition]),
         "budgets": dict(mapping_value(taskset["budgets"])),
         "runner": {

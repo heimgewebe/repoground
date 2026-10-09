@@ -161,6 +161,20 @@ def _validate_component_delta(
     return errors
 
 
+def _validate_case_setup(
+    case: Mapping[str, Any], request: Mapping[str, Any]
+) -> list[str]:
+    """Enforce the frozen scenario while accepting historical clean requests."""
+
+    expected = case.get("setup")
+    if "setup" in request:
+        if request["setup"] != expected:
+            return ["request setup does not match frozen case"]
+    elif mapping_value(expected).get("working_tree") != "clean":
+        return ["request setup missing for non-clean frozen case"]
+    return []
+
+
 def validate_request(
     taskset: Mapping[str, Any], request: Mapping[str, Any]
 ) -> list[str]:
@@ -193,6 +207,7 @@ def validate_request(
     errors.extend(_validate_repository(repository, request))
     if request.get("prompt") != case.get("prompt"):
         errors.append("request prompt does not match frozen case")
+    errors.extend(_validate_case_setup(case, request))
     condition = request.get("condition")
     if condition in CONDITIONS:
         errors.extend(
@@ -274,6 +289,14 @@ def pair_request_errors(
     for field in ("pair_id", "case_id", "repetition", "taskset_id", "taskset_sha256"):
         if first.get(field) != second.get(field):
             errors.append(f"paired requests disagree on {field}")
+    if ("setup" in first) != ("setup" in second) or first.get("setup") != second.get("setup"):
+        errors.append("paired requests disagree on setup")
+    case_entry = _case_map(taskset).get(str(first.get("case_id", "")))
+    if case_entry is None:
+        errors.append("paired requests reference unknown frozen case")
+    else:
+        for request in requests:
+            errors.extend(_validate_case_setup(case_entry[1], request))
     if mapping_value(first.get("runner")) != mapping_value(second.get("runner")):
         errors.append("paired requests use different runner configuration")
     if {first.get("condition"), second.get("condition")} != set(CONDITIONS):
