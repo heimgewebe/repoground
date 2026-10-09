@@ -291,6 +291,12 @@ def pair_request_errors(
             errors.append(f"paired requests disagree on {field}")
     if ("setup" in first) != ("setup" in second) or first.get("setup") != second.get("setup"):
         errors.append("paired requests disagree on setup")
+    case_entry = _case_map(taskset).get(str(first.get("case_id", "")))
+    if case_entry is None:
+        errors.append("paired requests reference unknown frozen case")
+    else:
+        for request in requests:
+            errors.extend(_validate_case_setup(case_entry[1], request))
     if mapping_value(first.get("runner")) != mapping_value(second.get("runner")):
         errors.append("paired requests use different runner configuration")
     if {first.get("condition"), second.get("condition")} != set(CONDITIONS):

@@ -362,6 +362,30 @@ def test_pair_setup_mismatch_is_rejected_and_historical_clean_remains_valid() ->
         assert pair_request_errors(taskset, clean_pair) == []
 
 
+def test_pair_rejects_equal_missing_or_forged_nonclean_setup() -> None:
+    taskset = _taskset()
+    requests = _planned_requests(taskset)
+    original = [
+        r for r in requests
+        if r["case_id"] == "grounding-dirty-working-tree" and r["repetition"] == 1
+    ]
+    assert pair_request_errors(taskset, original) == []
+    both_missing = copy.deepcopy(original)
+    for request in both_missing:
+        del request["setup"]
+    assert pair_request_errors(taskset, both_missing) == [
+        "request setup missing for non-clean frozen case",
+        "request setup missing for non-clean frozen case",
+    ]
+    both_forged = copy.deepcopy(original)
+    for request in both_forged:
+        request["setup"] = {"working_tree": "clean"}
+    assert pair_request_errors(taskset, both_forged) == [
+        "request setup does not match frozen case",
+        "request setup does not match frozen case",
+    ]
+
+
 def test_pair_plan_rejects_non_frozen_repetition_count() -> None:
     taskset = _taskset()
     with pytest.raises(AgentBenchmarkError, match="requires exactly 2 repetitions"):
