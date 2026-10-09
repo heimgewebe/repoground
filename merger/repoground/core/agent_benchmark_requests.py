@@ -170,7 +170,7 @@ def _validate_case_setup(
     if "setup" in request:
         if request["setup"] != expected:
             return ["request setup does not match frozen case"]
-    elif expected != {"working_tree": "clean"}:
+    elif mapping_value(expected).get("working_tree") != "clean":
         return ["request setup missing for non-clean frozen case"]
     return []
 

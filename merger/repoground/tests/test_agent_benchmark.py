@@ -340,10 +340,26 @@ def test_pair_setup_mismatch_is_rejected_and_historical_clean_remains_valid() ->
     divergent = copy.deepcopy(g2)
     divergent[0].pop("setup")
     assert "paired requests disagree on setup" in pair_request_errors(taskset, divergent)
-    clean = next(r for r in requests if r["case_id"] == "nav-grabowski-runtime-entrypoint")
-    clean.pop("setup")
-    assert validate_request(taskset, clean) == []
-    Draft7Validator(_schema("request")).validate(clean)
+    # The frozen taskset also has clean scenarios with an explicit fixture.
+    # Historical requests predate setup propagation; accepting them must not
+    # silently waive setup for any dirty/non-clean scenario.
+    for case_id in (
+        "nav-grabowski-runtime-entrypoint",
+        "grounding-clean-freshness",
+        "grounding-valid-boundary-citation",
+    ):
+        clean_pair = [
+            copy.deepcopy(r)
+            for r in requests
+            if r["case_id"] == case_id and r["repetition"] == 1
+        ]
+        assert len(clean_pair) == 2
+        for request in clean_pair:
+            assert request["setup"]["working_tree"] == "clean"
+            request.pop("setup")
+            assert validate_request(taskset, request) == []
+            Draft7Validator(_schema("request")).validate(request)
+        assert pair_request_errors(taskset, clean_pair) == []
 
 
 def test_pair_plan_rejects_non_frozen_repetition_count() -> None:
