@@ -362,6 +362,34 @@ def test_pair_setup_mismatch_is_rejected_and_historical_clean_remains_valid() ->
         assert pair_request_errors(taskset, clean_pair) == []
 
 
+def test_mixed_historical_clean_pair_matches_frozen_setup() -> None:
+    """An omitted legacy clean setup and the explicit frozen clean setup agree."""
+    taskset = _taskset()
+    requests = _planned_requests(taskset)
+    for case_id in (
+        "nav-grabowski-runtime-entrypoint",
+        "grounding-clean-freshness",
+        "grounding-valid-boundary-citation",
+    ):
+        original = [
+            r for r in requests
+            if r["case_id"] == case_id and r["repetition"] == 1
+        ]
+        assert len(original) == 2
+        for omitted in (0, 1):
+            pair = copy.deepcopy(original)
+            pair[omitted].pop("setup")
+            assert all(validate_request(taskset, r) == [] for r in pair)
+            assert pair_request_errors(taskset, pair) == []
+
+        forged = copy.deepcopy(original)
+        forged[0].pop("setup")
+        forged[1]["setup"] = {"working_tree": "clean", "fixture": "forged"}
+        assert "request setup does not match frozen case" in pair_request_errors(
+            taskset, forged
+        )
+
+
 def test_pair_rejects_equal_missing_or_forged_nonclean_setup() -> None:
     taskset = _taskset()
     requests = _planned_requests(taskset)
