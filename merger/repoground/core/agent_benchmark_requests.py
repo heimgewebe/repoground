@@ -276,6 +276,21 @@ def _component_delta_pair_errors(
     return errors
 
 
+def _pair_setups_match(
+    first: Mapping[str, Any],
+    second: Mapping[str, Any],
+    frozen_setup: Any,
+) -> bool:
+    """Omitted setup means the exact frozen clean scenario, never a dirty one."""
+
+    if mapping_value(frozen_setup).get("working_tree") == "clean":
+        return first.get("setup", frozen_setup) == second.get("setup", frozen_setup)
+    return (
+        ("setup" in first) == ("setup" in second)
+        and first.get("setup") == second.get("setup")
+    )
+
+
 def pair_request_errors(
     taskset: Mapping[str, Any],
     requests: Sequence[Mapping[str, Any]],
@@ -289,9 +304,10 @@ def pair_request_errors(
     for field in ("pair_id", "case_id", "repetition", "taskset_id", "taskset_sha256"):
         if first.get(field) != second.get(field):
             errors.append(f"paired requests disagree on {field}")
-    if ("setup" in first) != ("setup" in second) or first.get("setup") != second.get("setup"):
-        errors.append("paired requests disagree on setup")
     case_entry = _case_map(taskset).get(str(first.get("case_id", "")))
+    frozen_setup = case_entry[1].get("setup") if case_entry is not None else None
+    if not _pair_setups_match(first, second, frozen_setup):
+        errors.append("paired requests disagree on setup")
     if case_entry is None:
         errors.append("paired requests reference unknown frozen case")
     else:
