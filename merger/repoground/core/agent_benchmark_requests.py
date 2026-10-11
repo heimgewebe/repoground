@@ -276,6 +276,21 @@ def _component_delta_pair_errors(
     return errors
 
 
+def _pair_setups_match(
+    first: Mapping[str, Any],
+    second: Mapping[str, Any],
+    frozen_setup: Any,
+) -> bool:
+    """Omitted setup means the exact frozen clean scenario, never a dirty one."""
+
+    if mapping_value(frozen_setup).get("working_tree") == "clean":
+        return first.get("setup", frozen_setup) == second.get("setup", frozen_setup)
+    return (
+        ("setup" in first) == ("setup" in second)
+        and first.get("setup") == second.get("setup")
+    )
+
+
 def pair_request_errors(
     taskset: Mapping[str, Any],
     requests: Sequence[Mapping[str, Any]],
@@ -291,12 +306,7 @@ def pair_request_errors(
             errors.append(f"paired requests disagree on {field}")
     case_entry = _case_map(taskset).get(str(first.get("case_id", "")))
     frozen_setup = case_entry[1].get("setup") if case_entry is not None else None
-    # Historical omission means the exact frozen clean scenario, including
-    # its fixture; all non-clean scenarios still require explicit pair parity.
-    if mapping_value(frozen_setup).get("working_tree") == "clean":
-        if first.get("setup", frozen_setup) != second.get("setup", frozen_setup):
-            errors.append("paired requests disagree on setup")
-    elif ("setup" in first) != ("setup" in second) or first.get("setup") != second.get("setup"):
+    if not _pair_setups_match(first, second, frozen_setup):
         errors.append("paired requests disagree on setup")
     if case_entry is None:
         errors.append("paired requests reference unknown frozen case")
