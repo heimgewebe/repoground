@@ -170,6 +170,30 @@ RETIRED_REPOSITORY_ALIASES = {
 }
 SOURCE_REVISION_RE = re.compile(r"^[0-9a-f]{40}$")
 SOURCE_RECOVERY_SCHEMA = "repoground.managed-source-recovery.v1"
+
+# A reviewed source-custody pin, not a rootbroker scan/restore authorization.
+# Generic fleet GC must not silently discard this exact historical source
+# after temporary build leases expire. Change only via protected source review.
+# Source SHA bindings: Grabowski #1546, RepoGround #1343.
+HISTORICAL_SOURCE_PINS: dict[
+    tuple[str, str], dict[str, dict[str, str]]
+] = {
+    ("heimgewebe/heim-pc", "main"): {
+        "d6d4b3c4337d8bd51758d10d83975c9d61fd18d7": {
+            "scripts/nixos_critical_user_data_inventory.py":
+                "5f3b9aa1e2ad49da932ac699023f7f020e562d1d6ec0584a8c9dafb6ffaef572",
+            "scripts/nixos_critical_data_inventory.py":
+                "f71996ac1b3722a0785465e9504c2cfd23878d1b85597ddaff7a5bebf0a49d84",
+            "nixos/production/critical-user-data-contract-v1.json":
+                "d979b42a8a030ca37b5a3c57ac192c81324d72bf3ac292adbda427eeec2c8097",
+            "nixos/production/critical-user-home-data-contract-v1.json":
+                "385cf944e6a28c94a4593eeb1e6e5c87141cb26a4dc8a6cc96b783e21a623347",
+            "nixos/production/recovery-contract-v1.json":
+                "fcd9856f9038652469605b97818bb6904bf34bb54843b4e322e797dc3533a5b6",
+        }
+    }
+}
+
 _UNSAFE_GIT_BRANCH_TOKENS = (" ", "\t", "\n", "..", "~", "^", ":", "?", "*", "[", "\\", "@{")
 
 
@@ -2646,6 +2670,7 @@ def _authority_git_env() -> dict[str, str]:
             "GIT_CONFIG_GLOBAL": os.devnull,
             "GIT_CONFIG_SYSTEM": os.devnull,
             "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_NO_REPLACE_OBJECTS": "1",
             "GIT_TERMINAL_PROMPT": "0",
             "GIT_SSH_COMMAND": "/usr/bin/ssh -F /dev/null -o BatchMode=yes",
             "GIT_SSH_VARIANT": "ssh",
@@ -4943,6 +4968,192 @@ def ensure_source_worktree(entry: RepoEntry, ref_segment: str, sha: str) -> Path
     return replacement
 
 
+def _verify_historical_pinned_source(
+    source: Path, repository: Path, expected_head: str, file_digests: dict[str, str]
+) -> None:
+    """Bind the reviewed Git tree and source payloads through no-follow names.
+
+    This proves a bounded observation, not permanent file immutability,
+    an authorized Rootbroker inventory, or independent recovery readiness.
+    """
+    if (
+        SOURCE_ROOT.is_symlink()
+        or source.is_symlink()
+        or not source.is_dir()
+        or not SOURCE_REVISION_RE.fullmatch(expected_head)
+        or not isinstance(file_digests, dict)
+        or not file_digests
+    ):
+        raise RuntimeError("historical pinned source directory or binding is unsafe")
+    # The managed Git environment must reject refs/replace during checkout,
+    # status, tree evaluation and exact-head comparison.
+    assert_managed_worktree_clean(source, repository)
+    identity = run(["git", "-C", str(source), "rev-parse", "HEAD"], check=False)
+    if identity.returncode != 0 or identity.stdout.strip() != expected_head:
+        raise RuntimeError("historical pinned source revision drifted")
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    directory = getattr(os, "O_DIRECTORY", 0)
+    if not nofollow or not directory:
+        raise RuntimeError("historical pinned source requires no-follow directory IO")
+    dir_flags = os.O_RDONLY | os.O_CLOEXEC | nofollow | directory
+    file_flags = os.O_RDONLY | os.O_CLOEXEC | nofollow
+
+    for relative, expected_digest in sorted(file_digests.items()):
+        if (
+            not isinstance(relative, str)
+            or not relative
+            or not isinstance(expected_digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", expected_digest) is None
+        ):
+            raise RuntimeError("historical pinned source digest binding is unsafe")
+        path = Path(relative)
+        parts = path.parts
+        if (
+            path.is_absolute()
+            or not parts
+            or any(part in {"", ".", ".."} for part in parts)
+            or chr(92) in relative
+        ):
+            raise RuntimeError("historical pinned source path is unsafe")
+        # A file descriptor's two fstat calls cannot attest the pathname.
+        # Open all parents without symlinks and rewalk from the source root
+        # after the digest to catch parent or final-name substitution.
+        parent_fd = os.open(source, dir_flags)
+        identities = []
+        try:
+            original_root = os.fstat(parent_fd)
+            identities.append((original_root.st_dev, original_root.st_ino))
+            for component in parts[:-1]:
+                child_fd = os.open(component, dir_flags, dir_fd=parent_fd)
+                child_stat = os.fstat(child_fd)
+                os.close(parent_fd)
+                parent_fd = child_fd
+                identities.append((child_stat.st_dev, child_stat.st_ino))
+            try:
+                file_fd = os.open(parts[-1], file_flags, dir_fd=parent_fd)
+            except OSError as exc:
+                raise RuntimeError("historical pinned source symlink or path is unsafe") from exc
+            try:
+                before = os.fstat(file_fd)
+                if (
+                    not stat.S_ISREG(before.st_mode)
+                    or before.st_nlink != 1
+                    or not 0 < before.st_size <= 512 * 1024
+                ):
+                    raise RuntimeError("historical pinned source payload is unsafe")
+                data = bytearray()
+                while len(data) <= 512 * 1024:
+                    chunk = os.read(file_fd, 64 * 1024)
+                    if not chunk:
+                        break
+                    data.extend(chunk)
+                after = os.fstat(file_fd)
+                def fingerprint(value: os.stat_result) -> tuple[int, ...]:
+                    return (
+                        value.st_dev, value.st_ino, value.st_mode,
+                        value.st_nlink, value.st_size, value.st_mtime_ns,
+                        value.st_ctime_ns,
+                    )
+                if len(data) > 512 * 1024 or fingerprint(before) != fingerprint(after):
+                    raise RuntimeError("historical pinned source pathname or payload changed during read")
+                if hashlib.sha256(data).hexdigest() != expected_digest:
+                    raise RuntimeError("historical pinned source payload digest mismatch")
+                final_name = os.stat(
+                    parts[-1], dir_fd=parent_fd, follow_symlinks=False
+                )
+                if fingerprint(final_name) != fingerprint(after):
+                    raise RuntimeError("historical pinned source pathname changed during read")
+
+                rebound_fd = os.open(source, dir_flags)
+                try:
+                    rebound_root = os.fstat(rebound_fd)
+                    if (rebound_root.st_dev, rebound_root.st_ino) != identities[0]:
+                        raise RuntimeError("historical pinned source root changed during read")
+                    for index, component in enumerate(parts[:-1], start=1):
+                        child_fd = os.open(component, dir_flags, dir_fd=rebound_fd)
+                        os.close(rebound_fd)
+                        rebound_fd = child_fd
+                        child_stat = os.fstat(rebound_fd)
+                        if (child_stat.st_dev, child_stat.st_ino) != identities[index]:
+                            raise RuntimeError("historical pinned source parent changed during read")
+                    rebound_name = os.stat(
+                        parts[-1], dir_fd=rebound_fd, follow_symlinks=False
+                    )
+                    if fingerprint(rebound_name) != fingerprint(after):
+                        raise RuntimeError("historical pinned source pathname changed during read")
+                finally:
+                    os.close(rebound_fd)
+            finally:
+                os.close(file_fd)
+        finally:
+            os.close(parent_fd)
+
+
+def ensure_historical_source_pins(entry: RepoEntry, ref_segment: str) -> list[Path]:
+    """Admit only reviewed source OIDs before exposing the fixed consumer path."""
+    pins = HISTORICAL_SOURCE_PINS.get((entry.key, ref_segment), {})
+    preserved: list[Path] = []
+    for sha, digests in sorted(pins.items()):
+        if not SOURCE_REVISION_RE.fullmatch(sha):
+            raise RuntimeError("historical pinned source revision is invalid")
+        expected_path = revision_source_worktree_path(entry, ref_segment, sha)
+        if expected_path.exists() or expected_path.is_symlink():
+            # A contaminated fixed path may not be overwritten or reset.
+            _verify_historical_pinned_source(
+                expected_path, entry.path, sha, digests
+            )
+            preserved.append(expected_path)
+            continue
+
+        # The previous implementation created directly at the root helper's
+        # fixed path BEFORE checking its content. A failure there exposed
+        # unvalidated bytes. Stage under a unique non-consumer managed path.
+        staged = revision_source_worktree_path(
+            entry, ref_segment, sha, recovery_id=uuid.uuid4().hex[:12]
+        )
+        if staged.exists() or staged.is_symlink():
+            raise RuntimeError("historical source staging identity already exists")
+        prepare_managed_worktree(staged, expected_repo=entry.path, target=sha)
+        try:
+            _verify_historical_pinned_source(staged, entry.path, sha, digests)
+        except (RuntimeError, OSError) as validation_error:
+            # A failed pre-publication stage never reaches the fixed path.
+            # Remove ONLY this newly created, verified clean and idle linked
+            # worktree, without force; otherwise retain it for owner recovery.
+            try:
+                assert_managed_worktree_clean(staged, entry.path)
+                assert_managed_worktree_idle(staged)
+                run(
+                    ["git", "-C", str(entry.path), "worktree", "remove", str(staged)],
+                    env=_authority_git_env(),
+                )
+            except (RuntimeError, OSError) as cleanup_error:
+                raise RuntimeError(
+                    "historical pinned source staging requires owner cleanup"
+                ) from cleanup_error
+            raise validation_error
+        if expected_path.exists() or expected_path.is_symlink():
+            raise RuntimeError("historical pinned source destination appeared during staging")
+
+        # Native same-filesystem Git move preserves linked worktree bookkeeping
+        # while publishing only the complete, previously verified checkout.
+        # Never rename a dirty checkout manually, force it, or delete a
+        # failed staging path without a separately verified cleanup decision.
+        with tempfile.TemporaryDirectory(
+            prefix="repoground-historical-pin-promote-", dir="/tmp"
+        ) as raw_config_root:
+            env = _managed_worktree_git_env(
+                entry.path, safe_global_config=Path(raw_config_root) / "global.gitconfig"
+            )
+            run(
+                ["git", "-C", str(entry.path), "worktree", "move", str(staged), str(expected_path)],
+                env=env,
+            )
+        _verify_historical_pinned_source(expected_path, entry.path, sha, digests)
+        preserved.append(expected_path)
+    return preserved
+
+
 def prune_obsolete_revision_source_worktrees(
     entry: RepoEntry, ref_segment: str, current: Path
 ) -> dict[str, object]:
@@ -4952,8 +5163,24 @@ def prune_obsolete_revision_source_worktrees(
     preserved: list[dict[str, str]] = []
     if not SOURCE_ROOT.is_dir():
         return {"removed": removed, "preserved": preserved}
+    # Preflight all available reviewed source pins before any GC mutation.
+    # Ordinary published-main selection is never authority to delete a pin.
+    pins = HISTORICAL_SOURCE_PINS.get((entry.key, ref_segment), {})
+    protected_pins: set[Path] = set()
+    for sha, digests in sorted(pins.items()):
+        historical = revision_source_worktree_path(entry, ref_segment, sha)
+        if not historical.exists() and not historical.is_symlink():
+            raise RuntimeError("historical pinned source missing; refusing GC")
+        _verify_historical_pinned_source(historical, entry.path, sha, digests)
+        protected_pins.add(historical)
     for candidate in sorted(SOURCE_ROOT.iterdir()):
         if candidate == current or not candidate.name.startswith(prefix):
+            continue
+        if candidate in protected_pins:
+            preserved.append({
+                "path": str(candidate),
+                "reason": "reviewed_historical_source_pin",
+            })
             continue
         if not is_revision_source_worktree(entry, ref_segment, candidate):
             preserved.append(
@@ -6535,6 +6762,10 @@ def main(argv: list[str]) -> int:
                 should_publish = (
                     args.force_republish or previous_fingerprint != fingerprint
                 )
+                # Also run on the no-change fast path; successful current
+                # publication must not be required for historical source
+                # availability. No Rootbroker/inventory action is implied.
+                ensure_historical_source_pins(entry, ref_segment)
                 if not should_publish:
                     skipped += 1
                     write_state(
