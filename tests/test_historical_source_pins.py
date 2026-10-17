@@ -75,6 +75,7 @@ def test_historical_pin_detects_byte_mismatch_without_any_mutation(tmp_path, pub
     (source / "data/contract.json").write_bytes(b"altered")
     checker = publisher["_verify_historical_pinned_source"]
     with mock.patch.dict(checker.__globals__, {
+        "SOURCE_ROOT": tmp_path,
         "run": mock.Mock(return_value=SimpleNamespace(
             returncode=0, stdout=HISTORICAL_HEAD + "\n", stderr=""
         )),
@@ -94,6 +95,7 @@ def test_historical_pin_rejects_symlinked_payload(tmp_path, publisher):
     (source / "data/contract.json").symlink_to(outside)
     checker = publisher["_verify_historical_pinned_source"]
     with mock.patch.dict(checker.__globals__, {
+        "SOURCE_ROOT": tmp_path,
         "run": mock.Mock(return_value=SimpleNamespace(
             returncode=0, stdout=HISTORICAL_HEAD + "\n", stderr=""
         )),
@@ -144,7 +146,7 @@ def test_managed_historical_source_is_exactly_materialized_and_reverified(tmp_pa
     }):
         assert ensure(entry, "main") == [fixed]
     assert calls[0][0] == "prepare"
-    assert [action for action, _ in calls] == ["prepare", "verify", "move", "verify"]
+    assert [action for action, _ in calls] == ["prepare", "verify", "verify", "move", "verify"]
     assert fixed.is_dir()
 
 
@@ -239,6 +241,13 @@ def test_exact_payload_verification_accepts_only_same_head_and_bytes(tmp_path, p
                     "data/contract.json": sha256(b"approved").hexdigest()
                 })
 
+
+def test_replacement_protection_is_scoped_to_source_identity(publisher):
+    # General Fleet Git transport has an audited no-extra-GIT_* contract.
+    assert "GIT_NO_REPLACE_OBJECTS" not in publisher["_authority_git_env"]()
+    assert publisher["_pinned_source_git_env"]()["GIT_NO_REPLACE_OBJECTS"] == "1"
+
+
 def test_historical_git_no_replace_env_protects_actual_tree(tmp_path, publisher):
     """Real disposable Git: replacement refs must not change a pinned worktree."""
     import os
@@ -269,7 +278,7 @@ def test_historical_git_no_replace_env_protects_actual_tree(tmp_path, publisher)
     unsafe = tmp_path / "replaced"
     safe = tmp_path / "original"
     unsafe_env = {key: value for key, value in os.environ.items() if key != "GIT_NO_REPLACE_OBJECTS"}
-    trusted_env = publisher["_authority_git_env"]()
+    trusted_env = publisher["_pinned_source_git_env"]()
     git("worktree", "add", "--detach", "-q", str(unsafe), commit_a, env=unsafe_env)
     git("worktree", "add", "--detach", "-q", str(safe), commit_a, env=trusted_env)
     assert git("rev-parse", "HEAD", working=unsafe, env=unsafe_env) == commit_a
@@ -397,3 +406,138 @@ def test_actual_git_staged_source_publishes_exact_commit_and_is_idempotent(tmp_p
     assert not git(fixed, "status", "--porcelain")
     assert (fixed / "non_pinned.txt").read_text() == "trusted historical source\n"
     assert not list(root.glob(f"*{head}--recovery-*"))
+
+def test_historical_pin_rejects_cross_root_swap_between_two_approved_files(
+    tmp_path, publisher
+):
+    """Approved files from two separate trees must never combine as one pin."""
+    root = tmp_path / "sources"
+    root.mkdir()
+    source = root / "original"
+    replacement = tmp_path / "replacement"
+    for directory in (source, replacement):
+        (directory / "data").mkdir(parents=True)
+    (source / "data/a").write_bytes(b"approved-a")
+    (source / "data/b").write_bytes(b"poisoned-b")
+    (replacement / "data/a").write_bytes(b"poisoned-a")
+    (replacement / "data/b").write_bytes(b"approved-b")
+    checker = publisher["_verify_historical_pinned_source"]
+    read = checker.__globals__["os"].read
+    swapped = {"done": False}
+
+    def swap_roots_after_first_file(fd, size):
+        chunk = read(fd, size)
+        if chunk and not swapped["done"]:
+            source.rename(tmp_path / "retained-original")
+            replacement.rename(source)
+            swapped["done"] = True
+        return chunk
+
+    with mock.patch.dict(checker.__globals__, {
+        "SOURCE_ROOT": root,
+        "run": mock.Mock(return_value=SimpleNamespace(
+            returncode=0, stdout=HISTORICAL_HEAD + "\n", stderr=""
+        )),
+        "assert_managed_worktree_clean": mock.Mock(),
+    }), mock.patch.object(
+        checker.__globals__["os"], "read", side_effect=swap_roots_after_first_file
+    ):
+        with pytest.raises(RuntimeError, match="root changed|digest mismatch"):
+            checker(source, _entry(tmp_path).path, HISTORICAL_HEAD, {
+                "data/a": sha256(b"approved-a").hexdigest(),
+                "data/b": sha256(b"approved-b").hexdigest(),
+            })
+    assert swapped["done"] is True
+
+
+def test_postmove_invalid_pin_is_quarantined_and_fixed_path_removed(
+    tmp_path, publisher
+):
+    """A failed final verifier must retract only the just-promoted inode."""
+    entry = _entry(tmp_path)
+    root = tmp_path / "source-root"
+    root.mkdir()
+    expected = root / f"heimgewebe__heim-pc__main--{HISTORICAL_HEAD}"
+    ensure = publisher["ensure_historical_source_pins"]
+    recorded = {"stage": None, "moves": [], "checks": []}
+    recovery = mock.Mock()
+
+    def prepare(path, *, expected_repo, target):
+        assert expected_repo == entry.path and target == HISTORICAL_HEAD
+        path.mkdir()
+        recorded["stage"] = path
+
+    def verify(path, _repository, _sha, _digests):
+        recorded["checks"].append(path)
+        if path == expected:
+            raise RuntimeError("historical pinned source payload digest mismatch")
+
+    def run(argv, **kwargs):
+        assert argv[-3] == "move"
+        source, target = Path(argv[-2]), Path(argv[-1])
+        assert source.is_dir() and not target.exists()
+        source.rename(target)
+        recorded["moves"].append((source, target))
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    with mock.patch.dict(ensure.__globals__, {
+        "SOURCE_ROOT": root,
+        "HISTORICAL_SOURCE_PINS": {
+            ("heimgewebe/heim-pc", "main"): {
+                HISTORICAL_HEAD: {"one": "a" * 64}
+            }
+        },
+        "prepare_managed_worktree": prepare,
+        "_verify_historical_pinned_source": verify,
+        "_managed_worktree_git_env": lambda *a, **kw: {
+            "GIT_NO_REPLACE_OBJECTS": "1"
+        },
+        "run": run,
+        "record_source_recovery": recovery,
+    }):
+        with pytest.raises(RuntimeError, match="postmove verification refused"):
+            ensure(entry, "main")
+    assert not expected.exists()
+    assert recorded["stage"].is_dir()
+    assert len(recorded["moves"]) == 2
+    assert recorded["moves"][0][1] == expected
+    assert recorded["moves"][1] == (expected, recorded["stage"])
+    recovery.assert_called_once()
+
+
+def test_prune_never_removes_inflight_historical_pin_recovery_stage(
+    tmp_path, publisher
+):
+    """A pinned staging source must survive a concurrent ordinary fleet GC."""
+    entry = _entry(tmp_path)
+    root = tmp_path / "source-root"
+    root.mkdir()
+    fixed = root / f"heimgewebe__heim-pc__main--{HISTORICAL_HEAD}"
+    stage = root / (
+        f"heimgewebe__heim-pc__main--{HISTORICAL_HEAD}"
+        "--recovery-123456789abc"
+    )
+    for path in (fixed, stage):
+        path.mkdir()
+    current = root / ("heimgewebe__heim-pc__main--" + "c" * 40)
+    current.mkdir()
+    removed = []
+    def fake_run(argv, **kwargs):
+        removed.append(Path(argv[-1]))
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+    prune = publisher["prune_obsolete_revision_source_worktrees"]
+    with mock.patch.dict(prune.__globals__, {
+        "SOURCE_ROOT": root,
+        "HISTORICAL_SOURCE_PINS": {
+            ("heimgewebe/heim-pc", "main"): {HISTORICAL_HEAD: {"f": "e" * 64}}
+        },
+        "_verify_historical_pinned_source": mock.Mock(),
+        "run": fake_run,
+    }):
+        report = prune(entry, "main", current)
+    assert stage not in removed
+    assert stage.is_dir()
+    assert {
+        "path": str(stage),
+        "reason": "reviewed_historical_source_stage_requires_owner_closeout",
+    } in report["preserved"]
