@@ -133,11 +133,10 @@ def test_managed_historical_source_is_exactly_materialized_and_reverified(tmp_pa
         assert repository == entry.path and sha == HISTORICAL_HEAD
         calls.append(("verify", path))
     def run(argv, **kwargs):
-        assert argv[-3] == "move"
-        staged, destination = Path(argv[-2]), Path(argv[-1])
-        assert destination == fixed and ("verify", staged) in calls
-        staged.rename(destination)
-        calls.append(("move", destination))
+        assert argv[-2] == "repair"
+        destination = Path(argv[-1])
+        assert destination == fixed and fixed.is_dir()
+        calls.append(("repair", destination))
         return SimpleNamespace(returncode=0, stdout="", stderr="")
     with mock.patch.dict(ensure.__globals__, {
         "SOURCE_ROOT": source_root,
@@ -154,7 +153,7 @@ def test_managed_historical_source_is_exactly_materialized_and_reverified(tmp_pa
     }):
         assert ensure(entry, "main") == [fixed]
     assert calls[0][0] == "prepare"
-    assert [action for action, _ in calls] == ["prepare", "verify", "verify", "move", "verify"]
+    assert [action for action, _ in calls] == ["prepare", "verify", "verify", "repair", "verify"]
     assert fixed.is_dir()
 
 
@@ -473,7 +472,7 @@ def test_postmove_invalid_pin_is_quarantined_and_fixed_path_removed(
     root.mkdir()
     expected = root / f"heimgewebe__heim-pc__main--{HISTORICAL_HEAD}"
     ensure = publisher["ensure_historical_source_pins"]
-    recorded = {"stage": None, "moves": [], "checks": []}
+    recorded = {"stage": None, "repairs": [], "checks": []}
     recovery = mock.Mock()
 
     def prepare(path, *, expected_repo, target):
@@ -487,11 +486,10 @@ def test_postmove_invalid_pin_is_quarantined_and_fixed_path_removed(
             raise RuntimeError("historical pinned source payload digest mismatch")
 
     def run(argv, **kwargs):
-        assert argv[-3] == "move"
-        source, target = Path(argv[-2]), Path(argv[-1])
-        assert source.is_dir() and not target.exists()
-        source.rename(target)
-        recorded["moves"].append((source, target))
+        assert argv[-2] == "repair"
+        target = Path(argv[-1])
+        assert target.is_dir()
+        recorded["repairs"].append(target)
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     with mock.patch.dict(ensure.__globals__, {
@@ -514,9 +512,7 @@ def test_postmove_invalid_pin_is_quarantined_and_fixed_path_removed(
             ensure(entry, "main")
     assert not expected.exists()
     assert recorded["stage"].is_dir()
-    assert len(recorded["moves"]) == 2
-    assert recorded["moves"][0][1] == expected
-    assert recorded["moves"][1] == (expected, recorded["stage"])
+    assert recorded["repairs"] == [expected, recorded["stage"]]
     recovery.assert_called_once()
 
 
@@ -652,7 +648,7 @@ def test_postmove_invalid_pin_with_raced_staging_name_is_still_quarantined(
     root.mkdir()
     fixed = root / f"heimgewebe__heim-pc__main--{HISTORICAL_HEAD}"
     ensure = publisher["ensure_historical_source_pins"]
-    state = {"stage": None, "moves": [], "recovery": None}
+    state = {"stage": None, "repairs": [], "recovery": None}
 
     def prepare(path, **_kwargs):
         path.mkdir()
@@ -662,14 +658,13 @@ def test_postmove_invalid_pin_with_raced_staging_name_is_still_quarantined(
         if path == fixed:
             raise RuntimeError("invalid source after promotion")
 
-    def move(argv, **_kwargs):
-        assert argv[-3] == "move"
-        origin, target = Path(argv[-2]), Path(argv[-1])
-        assert origin.is_dir() and not target.exists()
-        origin.rename(target)
-        state["moves"].append((origin, target))
+    def repair(argv, **_kwargs):
+        assert argv[-2] == "repair"
+        target = Path(argv[-1])
+        assert target.is_dir()
+        state["repairs"].append(target)
         if target == fixed:
-            # Simulate a leftover/raced staging directory after Git reports success.
+            # Simulate a raced new staging directory after atomic promotion.
             state["stage"].mkdir()
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
@@ -689,18 +684,18 @@ def test_postmove_invalid_pin_with_raced_staging_name_is_still_quarantined(
             "GIT_NO_REPLACE_OBJECTS": "1"
         },
         "assert_managed_worktree_identity": mock.Mock(),
-        "run": move,
+        "run": repair,
         "record_source_recovery": recovery,
     }):
         with pytest.raises(RuntimeError, match="postmove verification refused"):
             ensure(entry, "main")
     assert not fixed.exists()
     assert state["stage"].is_dir()
-    assert len(state["moves"]) == 2
-    assert state["moves"][1][0] == fixed
-    assert state["moves"][1][1] != state["stage"]
-    assert state["moves"][1][1].is_dir()
-    assert state["recovery"]["replacement"] == state["moves"][1][1]
+    assert len(state["repairs"]) == 2
+    assert state["repairs"][0] == fixed
+    assert state["repairs"][1] != state["stage"]
+    assert state["repairs"][1].is_dir()
+    assert state["recovery"]["replacement"] == state["repairs"][1]
 
 
 def test_historical_pinned_tree_detects_extra_file_planted_after_object_read(
@@ -985,20 +980,19 @@ def test_failed_git_promotion_after_rename_retracts_exact_worktree(
     root.mkdir()
     fixed = root / f"heimgewebe__heim-pc__main--{HISTORICAL_HEAD}"
     ensure = publisher["ensure_historical_source_pins"]
-    state = {"moves": [], "stage": None}
+    state = {"repairs": [], "stage": None}
 
     def prepare(path, **_kwargs):
         path.mkdir()
         state["stage"] = path
 
-    def move_then_fail(argv, **_kwargs):
-        assert argv[-3] == "move"
-        source, dest = Path(argv[-2]), Path(argv[-1])
-        assert source.is_dir() and not dest.exists()
-        source.rename(dest)
-        state["moves"].append((source, dest))
+    def repair_then_fail(argv, **_kwargs):
+        assert argv[-2] == "repair"
+        dest = Path(argv[-1])
+        assert dest.is_dir()
+        state["repairs"].append(dest)
         if dest == fixed:
-            raise RuntimeError("git returned nonzero after physical rename")
+            raise RuntimeError("git repair returned nonzero after atomic rename")
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     with mock.patch.dict(ensure.__globals__, {
@@ -1014,14 +1008,13 @@ def test_failed_git_promotion_after_rename_retracts_exact_worktree(
             "GIT_NO_REPLACE_OBJECTS": "1"
         },
         "assert_managed_worktree_identity": mock.Mock(),
-        "run": move_then_fail,
+        "run": repair_then_fail,
         "record_source_recovery": mock.Mock(),
     }):
-        with pytest.raises(RuntimeError, match="postmove verification refused"):
+        with pytest.raises(RuntimeError, match="staging retained for owner cleanup"):
             ensure(entry, "main")
     assert not fixed.exists()
-    assert len(state["moves"]) == 2
-    assert state["moves"][1] == (fixed, state["stage"])
+    assert state["repairs"] == [fixed, state["stage"]]
     assert state["stage"].is_dir()
 
 
@@ -1042,11 +1035,10 @@ def test_postmove_raced_symlink_is_retracted_without_unlinking_target(
     def prepare(path, **_kwargs):
         path.mkdir()
 
-    def move_with_raced_symlink(argv, **_kwargs):
-        assert argv[-3] == "move"
-        stage, destination = Path(argv[-2]), Path(argv[-1])
-        assert destination == fixed and stage.is_dir() and not fixed.exists()
-        stage.rename(fixed)
+    def repair_with_raced_symlink(argv, **_kwargs):
+        assert argv[-2] == "repair"
+        destination = Path(argv[-1])
+        assert destination == fixed and fixed.is_dir()
         fixed.rename(displaced)
         fixed.symlink_to(outside, target_is_directory=True)
         return SimpleNamespace(returncode=0, stdout="", stderr="")
@@ -1063,7 +1055,7 @@ def test_postmove_raced_symlink_is_retracted_without_unlinking_target(
         "_managed_worktree_git_env": lambda *_a, **_kw: {
             "GIT_NO_REPLACE_OBJECTS": "1"
         },
-        "run": move_with_raced_symlink,
+        "run": repair_with_raced_symlink,
     }):
         with pytest.raises(RuntimeError, match="consumer symlink retracted"):
             ensure(entry, "main")
@@ -1350,3 +1342,107 @@ def test_historical_symlink_collision_exhaustion_preserves_all_bytes(
     assert all((d / "rejected-symlink").read_bytes() == b"foreign"
                for d in dirs)
     assert (outside / "important").read_bytes() == b"unmodified"
+
+
+def _p1_test_source_context(tmp_path):
+    """Construct one real disposable Git history and historical pin identity."""
+    import subprocess
+
+    entry = _entry(tmp_path)
+    entry.path.mkdir()
+
+    def git(*args):
+        completed = subprocess.run(
+            ["/usr/bin/git", "-C", str(entry.path), *args],
+            capture_output=True, text=True, timeout=20,
+        )
+        assert completed.returncode == 0, (
+            args, completed.stdout, completed.stderr
+        )
+        return completed.stdout.strip()
+
+    git("init", "-q")
+    git("config", "user.name", "historical-p1-negative-test")
+    git("config", "user.email", "historical-p1@example.invalid")
+    (entry.path / "scanner.py").write_bytes(b"reviewed code\n")
+    git("add", ".")
+    git("commit", "-qm", "reviewed historical tree")
+    head = git("rev-parse", "HEAD")
+    tree = git("rev-parse", "HEAD^{tree}")
+    root = tmp_path / "pin-root"
+    root.mkdir()
+    fixed = root / f"heimgewebe__heim-pc__main--{head}"
+    constants = {
+        "SOURCE_ROOT": root,
+        "STATE_ROOT": tmp_path / "private-state",
+        "HISTORICAL_SOURCE_PINS": {
+            (entry.key, "main"): {
+                head: {"scanner.py": sha256(b"reviewed code\n").hexdigest()}
+            }
+        },
+        "HISTORICAL_SOURCE_PIN_TREES": {head: tree},
+    }
+    return entry, root, fixed, head, constants, git
+
+
+@pytest.mark.parametrize("hook_source", ["default", "repo_local_config"])
+def test_historical_source_staging_never_executes_repo_local_post_checkout_hook(
+    tmp_path, publisher, hook_source,
+):
+    """Git worktree add must not execute an unreviewed hook before byte checks."""
+    entry, root, fixed, _, constants, git = _p1_test_source_context(tmp_path)
+    marker = tmp_path / "untrusted-hook-executed"
+    hook_directory = (
+        entry.path / ".git" / "hooks"
+        if hook_source == "default"
+        else tmp_path / "repo-local-custom-hooks"
+    )
+    hook_directory.mkdir(parents=True, exist_ok=True)
+    hook = hook_directory / "post-checkout"
+    hook.write_text(
+        "#!/bin/sh\nprintf HOOK_FIRED > '" + str(marker) + "'\n",
+        encoding="utf-8",
+    )
+    hook.chmod(0o700)
+    if hook_source == "repo_local_config":
+        git("config", "--local", "core.hooksPath", str(hook_directory))
+
+    ensure = publisher["ensure_historical_source_pins"]
+    with mock.patch.dict(ensure.__globals__, constants):
+        assert ensure(entry, "main") == [fixed]
+    assert not marker.exists(), "publisher executed untrusted Git post-checkout"
+    assert (fixed / "scanner.py").read_bytes() == b"reviewed code\n"
+
+
+def test_historical_promotion_refuses_raced_existing_directory_without_nesting(
+    tmp_path, publisher,
+):
+    """An occupied final name can never become a parent for a Git worktree."""
+    entry, root, fixed, head, constants, _ = _p1_test_source_context(tmp_path)
+    ensure = publisher["ensure_historical_source_pins"]
+    original = publisher["_rename_historical_noreplace"]
+    state = {"collision_injected": False}
+    foreign = b"must not be overwritten or used as a worktree parent"
+
+    def race_at_atomic_move(from_fd, from_name, to_fd, to_name):
+        if to_name == fixed.name and not state["collision_injected"]:
+            fixed.mkdir()
+            (fixed / "foreign.txt").write_bytes(foreign)
+            state["collision_injected"] = True
+        return original(from_fd, from_name, to_fd, to_name)
+
+    with mock.patch.dict(ensure.__globals__, {
+        **constants,
+        "_rename_historical_noreplace": race_at_atomic_move,
+    }):
+        with pytest.raises(RuntimeError):
+            ensure(entry, "main")
+
+    assert state["collision_injected"], "atomic promotion path not exercised"
+    assert (fixed / "foreign.txt").read_bytes() == foreign
+    stages = list(root.glob(f"heimgewebe__heim-pc__main--{head}--recovery-*"))
+    assert len(stages) == 1
+    assert (stages[0] / "scanner.py").read_bytes() == b"reviewed code\n"
+    assert not (fixed / stages[0].name).exists(), (
+        "Git worktree was nested into a raced foreign destination"
+    )

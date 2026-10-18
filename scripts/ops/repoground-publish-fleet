@@ -2240,7 +2240,8 @@ def prepare_managed_worktree(
             assert_managed_worktree_clean(path, expected_repo, env=env)
             assert_managed_worktree_idle(path)
             run(
-                ["git", "-C", str(path), "reset", "--hard", target],
+                ["git", "-c", "core.hooksPath=/dev/null",
+                 "-C", str(path), "reset", "--hard", target],
                 env=env,
             )
             assert_managed_worktree_clean(path, expected_repo, env=env)
@@ -2249,6 +2250,7 @@ def prepare_managed_worktree(
         run(
             [
                 "git",
+                "-c", "core.hooksPath=/dev/null",
                 "-C",
                 str(expected_repo),
                 "worktree",
@@ -5517,6 +5519,124 @@ def _rename_historical_noreplace(
         raise OSError(error, os.strerror(error))
 
 
+
+
+def _move_historical_worktree_noreplace(
+    entry: RepoEntry,
+    original: Path,
+    destination: Path,
+    expected_identity: tuple[int, int],
+    *,
+    restore_on_repair_failure: bool,
+) -> None:
+    """Relocate a linked worktree without Git nesting into raced destinations.
+
+    Git worktree move treats an existing destination directory as a *parent*.
+    Do a kernel-enforced, descriptor-relative no-replace rename instead, then
+    reconcile the linked worktree's Gitdir backlink using Git worktree repair.
+    """
+    if (
+        original == destination
+        or original.parent != SOURCE_ROOT
+        or destination.parent != SOURCE_ROOT
+        or SOURCE_ROOT.is_symlink()
+    ):
+        raise RuntimeError("historical worktree relocation scope is unsafe")
+    directory_flags = os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY | os.O_NOFOLLOW
+    root_fd = os.open(SOURCE_ROOT, directory_flags)
+
+    def path_identity(name: str) -> tuple[int, int]:
+        metadata = os.stat(name, dir_fd=root_fd, follow_symlinks=False)
+        if not stat.S_ISDIR(metadata.st_mode):
+            raise RuntimeError("historical relocation source is not a directory")
+        return metadata.st_dev, metadata.st_ino
+
+    def root_still_bound() -> None:
+        opened = os.fstat(root_fd)
+        current = SOURCE_ROOT.lstat()
+        if (
+            not stat.S_ISDIR(current.st_mode)
+            or (current.st_dev, current.st_ino)
+            != (opened.st_dev, opened.st_ino)
+        ):
+            raise RuntimeError("historical relocation root directory changed")
+
+    def repair(path: Path) -> None:
+        with tempfile.TemporaryDirectory(
+            prefix="repoground-historical-worktree-repair-", dir="/tmp"
+        ) as config_root:
+            env = _managed_worktree_git_env(
+                entry.path,
+                safe_global_config=Path(config_root) / "global.gitconfig",
+            )
+            run(
+                [
+                    "git", "-c", "core.hooksPath=/dev/null",
+                    "-C", str(entry.path), "worktree", "repair", str(path),
+                ],
+                env=env,
+            )
+
+    try:
+        root_still_bound()
+        if path_identity(original.name) != expected_identity:
+            raise RuntimeError("historical relocation source inode changed")
+        _rename_historical_noreplace(
+            root_fd, original.name, root_fd, destination.name
+        )
+        if path_identity(destination.name) != expected_identity:
+            raise RuntimeError("historical relocation moved a foreign inode")
+        root_still_bound()
+        try:
+            repair(destination)
+            if (
+                path_identity(destination.name) != expected_identity
+                or original.exists()
+                or original.is_symlink()
+            ):
+                raise RuntimeError("historical relocation post-repair identity drifted")
+            root_still_bound()
+        except (RuntimeError, OSError) as error:
+            if not restore_on_repair_failure:
+                raise RuntimeError(
+                    "historical quarantine Git repair requires owner reconciliation"
+                ) from error
+            # Rollback only our inode; never replace a raced stage or
+            # a foreign destination. Any ambiguity remains owner-blocked.
+            try:
+                if (
+                    path_identity(destination.name) != expected_identity
+                    or original.exists()
+                    or original.is_symlink()
+                ):
+                    raise RuntimeError(
+                        "historical relocation rollback identity unavailable"
+                    )
+                _rename_historical_noreplace(
+                    root_fd, destination.name, root_fd, original.name
+                )
+                if (
+                    path_identity(original.name) != expected_identity
+                    or destination.exists()
+                    or destination.is_symlink()
+                ):
+                    raise RuntimeError(
+                        "historical relocation rollback pathname drifted"
+                    )
+                repair(original)
+                root_still_bound()
+            except (RuntimeError, OSError) as rollback_error:
+                raise RuntimeError(
+                    "historical relocation rollback outcome unknown; "
+                    "owner reconciliation required"
+                ) from rollback_error
+            raise RuntimeError(
+                "historical relocation repair failed; original stage restored"
+            ) from error
+    finally:
+        os.close(root_fd)
+
+
 def _quarantine_failed_historical_consumer_path(
     *,
     entry: RepoEntry,
@@ -5662,29 +5782,9 @@ def _quarantine_failed_historical_consumer_path(
         or re.fullmatch(r"[0-9a-f]{12}", recovery_id) is None
     ):
         raise RuntimeError("historical consumer recovery destination unavailable")
-    with tempfile.TemporaryDirectory(
-        prefix="repoground-historical-pin-quarantine-", dir="/tmp"
-    ) as raw_config_root:
-        env = _managed_worktree_git_env(
-            entry.path,
-            safe_global_config=Path(raw_config_root) / "global.gitconfig",
-        )
-        try:
-            run(
-                ["git", "-C", str(entry.path), "worktree", "move",
-                 str(fixed), str(recovery)],
-                env=env,
-            )
-        except RuntimeError:
-            # A Git operation can return an error AFTER its rename. Reconcile
-            # physical identity; do not repeat the move under ambiguity.
-            if (
-                fixed.exists() or fixed.is_symlink()
-                or _historical_stage_identity(recovery) != identity
-            ):
-                raise RuntimeError(
-                    "historical consumer quarantine outcome unknown; owner reconciliation required"
-                ) from None
+    _move_historical_worktree_noreplace(
+        entry, fixed, recovery, identity, restore_on_repair_failure=False
+    )
     if (
         fixed.exists() or fixed.is_symlink()
         or _historical_stage_identity(recovery) != identity
@@ -5760,18 +5860,10 @@ def ensure_historical_source_pins(entry: RepoEntry, ref_segment: str) -> list[Pa
             if expected_path.exists() or expected_path.is_symlink():
                 raise RuntimeError("historical pinned source destination appeared before move")
 
-            with tempfile.TemporaryDirectory(
-                prefix="repoground-historical-pin-promote-", dir="/tmp"
-            ) as raw_config_root:
-                env = _managed_worktree_git_env(
-                    entry.path,
-                    safe_global_config=Path(raw_config_root) / "global.gitconfig",
-                )
-                run(
-                    ["git", "-C", str(entry.path), "worktree",
-                     "move", str(staged), str(expected_path)],
-                    env=env,
-                )
+            _move_historical_worktree_noreplace(
+                entry, staged, expected_path, stage_identity,
+                restore_on_repair_failure=True,
+            )
             moved = True
             if _historical_stage_identity(expected_path) != stage_identity:
                 raise RuntimeError("historical pinned source post-move identity changed")
