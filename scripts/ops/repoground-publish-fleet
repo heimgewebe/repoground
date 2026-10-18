@@ -10,6 +10,7 @@ The publisher is fail-closed around generation identity:
 from __future__ import annotations
 
 import argparse
+import ctypes
 import fcntl
 import glob
 import grp
@@ -5489,6 +5490,33 @@ def _historical_stage_identity(path: Path) -> tuple[int, int]:
 
 
 
+def _rename_historical_noreplace(
+    source_dir_fd: int, source_name: str,
+    recovery_dir_fd: int, recovery_name: str,
+) -> None:
+    """Use Linux renameat2(RENAME_NOREPLACE); never overwrite owner data.
+
+    Both names are relative to already-open no-follow directory descriptors.
+    No unlink fallback is safe for a raced, untrusted consumer pathname.
+    """
+    libc = ctypes.CDLL(None, use_errno=True)
+    renameat2 = getattr(libc, "renameat2", None)
+    if renameat2 is None:
+        raise RuntimeError("historical safe quarantine requires renameat2")
+    renameat2.argtypes = (
+        ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p,
+        ctypes.c_uint,
+    )
+    renameat2.restype = ctypes.c_int
+    if renameat2(
+        source_dir_fd, os.fsencode(source_name),
+        recovery_dir_fd, os.fsencode(recovery_name),
+        1,  # RENAME_NOREPLACE; kernel refuses an occupied recovery name.
+    ) != 0:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error))
+
+
 def _quarantine_failed_historical_consumer_path(
     *,
     entry: RepoEntry,
@@ -5503,10 +5531,15 @@ def _quarantine_failed_historical_consumer_path(
     """Retract a rejected managed source without deleting its tracked bytes.
 
     A foreign directory is never moved merely because its name collides. A
-    symlink exposes a target on ordinary open(), so remove only that link
-    itself by no-follow unlinkat; never traverse or delete the target.
+    symlink exposes a target on ordinary open(), so quarantine its entry
+    by no-overwrite rename, not by unlinking the raceable consumer name.
     """
     if fixed.is_symlink():
+        # Never unlink the inspected pathname: a concurrent writer can swap
+        # the symlink for an unrelated regular file between stat and unlink.
+        # Atomically move one name into a newly reserved owner-only recovery
+        # directory without replacing an existing destination, then prove
+        # which inode was moved. Preserve even a raced foreign replacement.
         directory = os.open(
             fixed.parent, os.O_RDONLY | os.O_CLOEXEC
             | os.O_DIRECTORY | os.O_NOFOLLOW,
@@ -5517,12 +5550,57 @@ def _quarantine_failed_historical_consumer_path(
             )
             if not stat.S_ISLNK(observed.st_mode):
                 raise RuntimeError("historical consumer link identity changed")
-            os.unlink(fixed.name, dir_fd=directory)
+            recovery_id = uuid.uuid4().hex[:12]
+            recovery = revision_source_worktree_path(
+                entry, ref_segment, sha, recovery_id=recovery_id
+            )
+            if recovery.parent != fixed.parent or recovery == fixed:
+                raise RuntimeError("historical consumer symlink recovery scope changed")
+            # mkdir is create-only. The retained directory is recognized
+            # by the historical-pin GC preservation rule.
+            os.mkdir(recovery.name, mode=0o700, dir_fd=directory)
+            quarantine = os.open(
+                recovery.name,
+                os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY | os.O_NOFOLLOW,
+                dir_fd=directory,
+            )
             try:
-                os.stat(fixed.name, dir_fd=directory, follow_symlinks=False)
-            except FileNotFoundError:
-                return None
-            raise RuntimeError("historical consumer symlink removal unconfirmed")
+                _rename_historical_noreplace(
+                    directory, fixed.name, quarantine, "rejected-symlink"
+                )
+                moved = os.stat(
+                    "rejected-symlink", dir_fd=quarantine, follow_symlinks=False
+                )
+                if (
+                    not stat.S_ISLNK(moved.st_mode)
+                    or (moved.st_dev, moved.st_ino)
+                    != (observed.st_dev, observed.st_ino)
+                ):
+                    raise RuntimeError(
+                        "historical consumer link swap quarantined; owner reconciliation required"
+                    )
+                try:
+                    os.stat(fixed.name, dir_fd=directory, follow_symlinks=False)
+                except FileNotFoundError:
+                    pass
+                else:
+                    raise RuntimeError(
+                        "historical consumer name reappeared; owner reconciliation required"
+                    )
+            finally:
+                os.close(quarantine)
+            record_source_recovery(
+                entry=entry, ref_segment=ref_segment, sha=sha,
+                preserved=fixed, replacement=recovery,
+                reason={
+                    "kind": "historical_pin_untrusted_symlink_quarantined",
+                    "failure_type": failure_type,
+                    "observed_symlink_device": observed.st_dev,
+                    "observed_symlink_inode": observed.st_ino,
+                },
+                recovery_id=recovery_id,
+            )
+            return recovery
         finally:
             os.close(directory)
 

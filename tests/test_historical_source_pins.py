@@ -1179,3 +1179,79 @@ def test_pinned_verifier_rejects_foreign_gitfile_before_any_git_command(
         )
         with pytest.raises(RuntimeError, match="foreign Gitdir"):
             check(fixed, entry.path, head, digests)
+
+
+def test_historical_symlink_quarantine_never_unlinks_raced_foreign_file(
+    tmp_path, publisher
+):
+    """A replacement regular file is retained and cannot be mistaken for a link."""
+    entry = _entry(tmp_path)
+    root = tmp_path / "source-root"
+    root.mkdir()
+    outside = tmp_path / "protected"
+    outside.mkdir()
+    (outside / "important").write_bytes(b"unchanged")
+    fixed = root / f"heimgewebe__heim-pc__main--{HISTORICAL_HEAD}"
+    fixed.symlink_to(outside, target_is_directory=True)
+
+    recovery = publisher["_quarantine_failed_historical_consumer_path"]
+    real_move = publisher["_rename_historical_noreplace"]
+    old_link = tmp_path / "saved-original-link"
+    foreign = b"valuable foreign file; never unlink or overwrite"
+
+    def swap_between_no_follow_stat_and_move(src_fd, src, dst_fd, dst):
+        # This is the same race as the exact-head Codex P1. It runs at
+        # the syscall boundary, not before the source preflight.
+        assert src == fixed.name and dst == "rejected-symlink"
+        fixed.rename(old_link)
+        fixed.write_bytes(foreign)
+        return real_move(src_fd, src, dst_fd, dst)
+
+    with mock.patch.dict(recovery.__globals__, {
+        "SOURCE_ROOT": root,
+        "_rename_historical_noreplace": swap_between_no_follow_stat_and_move,
+    }):
+        with pytest.raises(RuntimeError, match="owner reconciliation required"):
+            recovery(
+                entry=entry, ref_segment="main", sha=HISTORICAL_HEAD,
+                fixed=fixed, failure_type="RuntimeError",
+            )
+
+    quarantines = list(root.glob(f"*{HISTORICAL_HEAD}--recovery-*"))
+    assert len(quarantines) == 1
+    assert (quarantines[0] / "rejected-symlink").read_bytes() == foreign
+    assert not fixed.exists() and not fixed.is_symlink()
+    assert old_link.is_symlink()
+    assert old_link.resolve() == outside
+    assert (outside / "important").read_bytes() == b"unchanged"
+
+
+def test_historical_symlink_recovery_does_not_overwrite_occupied_target(
+    tmp_path, publisher
+):
+    """Kernel-enforced no-replace must leave both entries intact on collision."""
+    import os
+
+    source_root = tmp_path / "source-root"
+    source_root.mkdir()
+    source = source_root / "unsafe-link"
+    source.symlink_to(tmp_path / "unrelated")
+    recovery = source_root / "recovery"
+    recovery.mkdir()
+    occupied = recovery / "rejected-symlink"
+    occupied.write_bytes(b"unrelated owner data")
+
+    open_directory = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    source_fd = os.open(source_root, open_directory)
+    recovery_fd = os.open(recovery, open_directory)
+    try:
+        with pytest.raises(OSError):
+            publisher["_rename_historical_noreplace"](
+                source_fd, source.name, recovery_fd, occupied.name
+            )
+    finally:
+        os.close(recovery_fd)
+        os.close(source_fd)
+
+    assert source.is_symlink()
+    assert occupied.read_bytes() == b"unrelated owner data"
