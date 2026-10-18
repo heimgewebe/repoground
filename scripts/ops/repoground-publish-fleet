@@ -3497,7 +3497,6 @@ def _fleet_member_ssh_include_paths(home: Path, values: list[str]) -> list[Path]
         else:
             raw_path = Path(raw_pattern)
             candidate = raw_path if raw_path.is_absolute() else ssh_root / raw_path
-
         for matched in sorted(glob.glob(str(candidate), recursive=False)):
             path = Path(matched)
             try:
@@ -4985,95 +4984,28 @@ def ensure_source_worktree(entry: RepoEntry, ref_segment: str, sha: str) -> Path
 
 
 
-def _verify_historical_pinned_git_tree(root_fd: int, expected_head: str) -> str:
-    """Prove every tracked raw byte is exactly from one no-replace HEAD tree.
+def _verify_historical_pinned_git_tree(
+    root_fd: int, expected_head: str, repository: Path, source: Path
+) -> str:
+    """Verify a full historical checkout without executing untrusted Git status.
 
-    An ordinary Git status is not enough: assume-unchanged and skip-worktree
-    hide edited tracked files. Run Git against the *open* source inode, and
-    compare the entire stage-0 index and raw file bytes with HEAD's tree.
-    This is a bounded observation, not filesystem immutability.
+    The source's .git gitfile is a *claimed* identity, not a Git authority.
+    Read it with O_NOFOLLOW from the pinned root inode, verify the exact
+    registered linked-worktree metadata, and resolve objects only through the
+    publisher's canonical repository. Git never selects its Gitdir/config from
+    the untrusted source pathname. Check every tracked byte and enumerate ALL
+    names via that same root fd, including a final post-hash traversal.
+    This is a bounded observation, not post-return filesystem immutability.
     """
-    env = _pinned_source_git_env()
+    if re.fullmatch(r"[0-9a-f]{40}", expected_head) is None:
+        raise RuntimeError("historical source commit identity invalid")
     root_alias = f"/proc/self/fd/{root_fd}"
-
-    def read_git(*arguments: str) -> bytes:
-        try:
-            result = subprocess.run(
-                [
-                    "/usr/bin/git", "-c", "core.fsmonitor=false",
-                    "-c", "core.pager=cat", "-C", root_alias, *arguments,
-                ],
-                pass_fds=(root_fd,),
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=30,
-                check=False,
-            )
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            raise RuntimeError("historical pinned Git tree read unavailable") from exc
-        if result.returncode or len(result.stdout) > 2 * 1024 * 1024:
-            raise RuntimeError("historical pinned Git tree read rejected")
-        return result.stdout
-
-    head = read_git("rev-parse", "--verify", "HEAD").strip()
-    tree = read_git("rev-parse", "--verify", "HEAD^{tree}").strip()
-    commit = read_git("cat-file", "-p", expected_head)
-    if (
-        head != expected_head.encode("ascii")
-        or re.fullmatch(rb"[0-9a-f]{40}", tree) is None
-        or commit.split(b"\n", 1)[0] != b"tree " + tree
-        or (
-            expected_head in HISTORICAL_SOURCE_PIN_TREES
-            and tree.decode("ascii") != HISTORICAL_SOURCE_PIN_TREES[expected_head]
-        )
-    ):
-        raise RuntimeError("historical pinned Git commit or tree identity drifted")
-    if read_git("status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching"):
-        raise RuntimeError("historical pinned Git source has untracked or altered paths")
-    tree_records = read_git("ls-tree", "-rz", "--full-tree", "HEAD").split(b"\0")
-    index_records = read_git("ls-files", "--stage", "-z").split(b"\0")
-    flag_records = read_git("ls-files", "-v", "-z").split(b"\0")
-    expected: dict[bytes, tuple[bytes, bytes]] = {}
-    stage: dict[bytes, tuple[bytes, bytes]] = {}
-    flags: dict[bytes, bytes] = {}
-    for record in filter(None, tree_records):
-        metadata, sep, name = record.partition(b"\t")
-        fields = metadata.split(b" ")
-        if not sep or len(fields) != 3 or fields[1] != b"blob":
-            raise RuntimeError("historical pinned Git tree contains unsupported entries")
-        mode, _, oid = fields
-        if mode not in {b"100644", b"100755"} or re.fullmatch(rb"[0-9a-f]{40}", oid) is None:
-            raise RuntimeError("historical pinned Git tree has unsupported file type")
-        parts = name.split(b"/")
-        if (
-            name in expected or name.startswith(b"/")
-            or any(component in {b"", b".", b".."} for component in parts)
-        ):
-            raise RuntimeError("historical pinned Git tree has unsafe paths")
-        expected[name] = mode, oid
-    for record in filter(None, index_records):
-        metadata, sep, name = record.partition(b"\t")
-        fields = metadata.split(b" ")
-        if not sep or len(fields) != 3 or fields[2] != b"0" or name in stage:
-            raise RuntimeError("historical pinned Git index has unsafe stages")
-        stage[name] = fields[0], fields[1]
-    for record in filter(None, flag_records):
-        if len(record) < 3 or record[1:2] != b" " or record[2:] in flags:
-            raise RuntimeError("historical pinned Git index flags are malformed")
-        flags[record[2:]] = record[:1]
-    if (
-        not expected or len(expected) > 2048
-        or stage != expected
-        or set(flags) != set(expected)
-        or any(flag != b"H" for flag in flags.values())
-    ):
-        raise RuntimeError("historical pinned Git index flags, stages or tree drifted")
+    root_info = os.fstat(root_fd)
+    if not stat.S_ISDIR(root_info.st_mode):
+        raise RuntimeError("historical source root fd is not a directory")
 
     dir_flags = os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY | os.O_NOFOLLOW
     file_flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW
-    verified: list[tuple[tuple[bytes, ...], tuple[int, ...]]] = []
-    total_bytes = 0
 
     def fingerprint(info: os.stat_result) -> tuple[int, ...]:
         return (
@@ -5081,73 +5013,296 @@ def _verify_historical_pinned_git_tree(root_fd: int, expected_head: str) -> str:
             info.st_size, info.st_mtime_ns, info.st_ctime_ns,
         )
 
-    def parent_dir(parts: tuple[bytes, ...]) -> int:
-        fd = os.dup(root_fd)
+    def read_regular(directory_fd: int, leaf: str, limit: int) -> tuple[bytes, tuple[int, ...]]:
+        fd = os.open(leaf, file_flags, dir_fd=directory_fd)
         try:
-            for component in parts[:-1]:
-                next_fd = os.open(component, dir_flags, dir_fd=fd)
-                os.close(fd)
-                fd = next_fd
-            return fd
-        except BaseException:
+            first = os.fstat(fd)
+            if (
+                not stat.S_ISREG(first.st_mode) or first.st_nlink != 1
+                or not 0 < first.st_size <= limit
+            ):
+                raise RuntimeError("historical Git metadata file has unsafe identity")
+            data = bytearray()
+            while len(data) <= limit:
+                chunk = os.read(fd, min(4096, limit + 1 - len(data)))
+                if not chunk:
+                    break
+                data.extend(chunk)
+            last = os.fstat(fd)
+            if len(data) != first.st_size or fingerprint(first) != fingerprint(last):
+                raise RuntimeError("historical Git metadata file changed during read")
+            current = os.stat(leaf, dir_fd=directory_fd, follow_symlinks=False)
+            if fingerprint(current) != fingerprint(last):
+                raise RuntimeError("historical Git metadata pathname changed during read")
+            return bytes(data), fingerprint(last)
+        finally:
             os.close(fd)
-            raise
 
+    # Source worktrees are never allowed to name an arbitrary Gitdir. The
+    # canonical repository is owned by the fleet publisher, not by the
+    # checked-out historical revision or a source-controlled .git pointer.
+    common = repository / ".git"
+    if (
+        not repository.is_absolute() or repository.is_symlink()
+        or common.is_symlink() or not common.is_dir()
+        or common.resolve(strict=True) != common
+    ):
+        raise RuntimeError("historical source canonical Git object store unsafe")
+    gitfile, gitfile_identity = read_regular(root_fd, ".git", 4096)
     try:
-        for name, (mode, expected_oid) in sorted(expected.items()):
-            parts = tuple(name.split(b"/"))
-            directory_fd = parent_dir(parts)
+        gitfile_line = gitfile.decode("ascii").removesuffix("\n")
+    except UnicodeDecodeError as exc:
+        raise RuntimeError("historical source gitfile encoding unsafe") from exc
+    if not gitfile_line.startswith("gitdir: "):
+        raise RuntimeError("historical source gitfile is not a linked worktree")
+    gitdir = Path(gitfile_line[8:])
+    if (
+        not gitdir.is_absolute()
+        or gitdir.parent != common / "worktrees"
+        or re.fullmatch(r"[A-Za-z0-9_.-]{1,200}", gitdir.name) is None
+        or gitdir.is_symlink() or not gitdir.is_dir()
+        or gitdir.resolve(strict=True) != gitdir
+    ):
+        raise RuntimeError("historical source gitfile targets foreign Gitdir")
+    gitdir_fd = os.open(gitdir, dir_flags)
+    try:
+        gitdir_identity = fingerprint(os.fstat(gitdir_fd))
+        head_data, head_identity = read_regular(gitdir_fd, "HEAD", 128)
+        link_data, backlink_identity = read_regular(gitdir_fd, "gitdir", 4096)
+        commondir_data, commondir_identity = read_regular(gitdir_fd, "commondir", 128)
+        if (
+            head_data != (expected_head + "\n").encode("ascii")
+            or link_data != (str(source / ".git") + "\n").encode("utf-8")
+            or commondir_data.strip() != b"../.."
+        ):
+            raise RuntimeError("historical linked worktree metadata changed")
+
+        index_fd = os.open("index", file_flags, dir_fd=gitdir_fd)
+        try:
+            index_first = os.fstat(index_fd)
+            if not stat.S_ISREG(index_first.st_mode) or index_first.st_nlink != 1:
+                raise RuntimeError("historical source Git index identity unsafe")
+            index_identity = fingerprint(index_first)
+        finally:
+            os.close(index_fd)
+
+        env = _pinned_source_git_env()
+        env["GIT_INDEX_FILE"] = str(gitdir / "index")
+        env["GIT_OPTIONAL_LOCKS"] = "0"
+
+        def read_git(*arguments: str) -> bytes:
+            # No status, checkout, diff or worktree commands here: those may
+            # run repo-local filters/fsmonitor/hooks before bytes are checked.
+            if not arguments or arguments[0] not in {"cat-file", "rev-parse", "ls-tree", "ls-files"}:
+                raise RuntimeError("historical verifier attempted executable Git action")
             try:
-                file_fd = os.open(parts[-1], file_flags, dir_fd=directory_fd)
+                result = subprocess.run(
+                    [
+                        "/usr/bin/git",
+                        "-c", "core.fsmonitor=false",
+                        "-c", "core.useBuiltinFSMonitor=false",
+                        "-c", "core.untrackedCache=false",
+                        "-c", "core.hooksPath=/dev/null",
+                        "-c", "gc.auto=0",
+                        "-c", "core.pager=cat",
+                        f"--git-dir={common}", f"--work-tree={root_alias}",
+                        *arguments,
+                    ],
+                    pass_fds=(root_fd,), env=env,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    timeout=30, check=False,
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                raise RuntimeError("historical verified Git object read unavailable") from exc
+            if result.returncode or len(result.stdout) > 2 * 1024 * 1024:
+                raise RuntimeError("historical verified Git object read rejected")
+            return result.stdout
+
+        tree = read_git("rev-parse", "--verify", expected_head + "^{tree}").strip()
+        commit = read_git("cat-file", "-p", expected_head)
+        if (
+            re.fullmatch(rb"[0-9a-f]{40}", tree) is None
+            or commit.split(b"\n", 1)[0] != b"tree " + tree
+            or (
+                expected_head in HISTORICAL_SOURCE_PIN_TREES
+                and tree.decode("ascii") != HISTORICAL_SOURCE_PIN_TREES[expected_head]
+            )
+        ):
+            raise RuntimeError("historical pinned Git commit or tree identity drifted")
+
+        tree_records = read_git("ls-tree", "-rz", "--full-tree", expected_head).split(b"\0")
+        index_records = read_git("ls-files", "--stage", "-z").split(b"\0")
+        flag_records = read_git("ls-files", "-v", "-z").split(b"\0")
+        expected: dict[bytes, tuple[bytes, bytes]] = {}
+        stage: dict[bytes, tuple[bytes, bytes]] = {}
+        flags: dict[bytes, bytes] = {}
+        for record in filter(None, tree_records):
+            metadata, sep, name = record.partition(b"\t")
+            fields = metadata.split(b" ")
+            if not sep or len(fields) != 3 or fields[1] != b"blob":
+                raise RuntimeError("historical pinned Git tree has unsupported entries")
+            mode, _, oid = fields
+            if mode not in {b"100644", b"100755"} or re.fullmatch(rb"[0-9a-f]{40}", oid) is None:
+                raise RuntimeError("historical pinned Git tree has unsupported file type")
+            parts = name.split(b"/")
+            if (
+                name in expected or name.startswith(b"/")
+                or any(component in {b"", b".", b".."} for component in parts)
+            ):
+                raise RuntimeError("historical pinned Git tree has unsafe paths")
+            expected[name] = mode, oid
+        for record in filter(None, index_records):
+            metadata, sep, name = record.partition(b"\t")
+            fields = metadata.split(b" ")
+            if not sep or len(fields) != 3 or fields[2] != b"0" or name in stage:
+                raise RuntimeError("historical pinned Git index has unsafe stages")
+            stage[name] = fields[0], fields[1]
+        for record in filter(None, flag_records):
+            if len(record) < 3 or record[1:2] != b" " or record[2:] in flags:
+                raise RuntimeError("historical pinned Git index flags malformed")
+            flags[record[2:]] = record[:1]
+        if (
+            not expected or len(expected) > 2048
+            or stage != expected or set(flags) != set(expected)
+            or any(flag != b"H" for flag in flags.values())
+        ):
+            raise RuntimeError("historical Git source index/stage/flags drifted")
+
+        expected_directories: set[bytes] = set()
+        for filename in expected:
+            components = filename.split(b"/")
+            for i in range(1, len(components)):
+                expected_directories.add(b"/".join(components[:i]))
+
+        def enumerate_root() -> None:
+            # Traversal is rooted at the same opened inode, not source by name.
+            # Empty directories and ignored/untracked files are not permitted.
+            todo = [(os.dup(root_fd), b"")]
+            observed_files: set[bytes] = set()
+            observed_directories: set[bytes] = set()
+            total_entries = 0
+            try:
+                while todo:
+                    fd, prefix = todo.pop()
+                    try:
+                        with os.scandir(fd) as iterator:
+                            names = [os.fsencode(item.name) for item in iterator]
+                        for name in names:
+                            total_entries += 1
+                            if total_entries > 4096 or name in {b"", b".", b".."}:
+                                raise RuntimeError("historical root directory exceeds bounded inventory")
+                            relative = prefix + name
+                            info = os.stat(name, dir_fd=fd, follow_symlinks=False)
+                            if not prefix and name == b".git":
+                                if fingerprint(info) != gitfile_identity:
+                                    raise RuntimeError("historical root gitfile changed")
+                            elif stat.S_ISDIR(info.st_mode):
+                                if relative not in expected_directories:
+                                    raise RuntimeError("historical root has unexpected directory")
+                                child = os.open(name, dir_flags, dir_fd=fd)
+                                if (os.fstat(child).st_dev, os.fstat(child).st_ino) != (
+                                    info.st_dev, info.st_ino
+                                ):
+                                    os.close(child)
+                                    raise RuntimeError("historical root directory swapped")
+                                observed_directories.add(relative)
+                                todo.append((child, relative + b"/"))
+                            elif stat.S_ISREG(info.st_mode):
+                                if relative not in expected or info.st_nlink != 1:
+                                    raise RuntimeError("historical root has unexpected file")
+                                observed_files.add(relative)
+                            else:
+                                raise RuntimeError("historical root symlink or special file unsafe")
+                    finally:
+                        os.close(fd)
+                if observed_files != set(expected) or observed_directories != expected_directories:
+                    raise RuntimeError("historical root file/directory set drifted")
+            finally:
+                for fd, _ in todo:
+                    os.close(fd)
+
+        def parent_dir(parts: tuple[bytes, ...]) -> int:
+            fd = os.dup(root_fd)
+            try:
+                for component in parts[:-1]:
+                    next_fd = os.open(component, dir_flags, dir_fd=fd)
+                    os.close(fd)
+                    fd = next_fd
+                return fd
+            except BaseException:
+                os.close(fd)
+                raise
+
+        verified: list[tuple[tuple[bytes, ...], tuple[int, ...]]] = []
+        total_bytes = 0
+        try:
+            enumerate_root()
+            for name, (mode, expected_oid) in sorted(expected.items()):
+                parts = tuple(name.split(b"/"))
+                parent_fd = parent_dir(parts)
                 try:
-                    before = os.fstat(file_fd)
-                    if (
-                        not stat.S_ISREG(before.st_mode) or before.st_nlink != 1
-                        or before.st_size < 0 or before.st_size > 1024 * 1024
-                        or ((before.st_mode & 0o111) != 0) != (mode == b"100755")
-                    ):
-                        raise RuntimeError("historical pinned Git file mode or identity unsafe")
-                    digest = hashlib.sha1()
-                    digest.update(b"blob " + str(before.st_size).encode("ascii") + b"\0")
-                    size = 0
-                    while size <= before.st_size:
-                        chunk = os.read(file_fd, 64 * 1024)
-                        if not chunk:
-                            break
-                        digest.update(chunk)
-                        size += len(chunk)
-                    after = os.fstat(file_fd)
-                    current = os.stat(parts[-1], dir_fd=directory_fd, follow_symlinks=False)
-                    if (
-                        size != before.st_size or fingerprint(before) != fingerprint(after)
-                        or fingerprint(current) != fingerprint(after)
-                        or digest.hexdigest().encode("ascii") != expected_oid
-                    ):
-                        raise RuntimeError("historical pinned Git tracked file bytes drifted")
-                    verified.append((parts, fingerprint(after)))
-                    total_bytes += size
-                    if total_bytes > 32 * 1024 * 1024:
-                        raise RuntimeError("historical pinned Git tree exceeds byte budget")
+                    file_fd = os.open(parts[-1], file_flags, dir_fd=parent_fd)
+                    try:
+                        before = os.fstat(file_fd)
+                        if (
+                            not stat.S_ISREG(before.st_mode) or before.st_nlink != 1
+                            or before.st_size < 0 or before.st_size > 1024 * 1024
+                            or ((before.st_mode & 0o111) != 0) != (mode == b"100755")
+                        ):
+                            raise RuntimeError("historical pinned Git file mode or identity unsafe")
+                        digest = hashlib.sha1()
+                        digest.update(b"blob " + str(before.st_size).encode("ascii") + b"\0")
+                        size = 0
+                        while size <= before.st_size:
+                            chunk = os.read(file_fd, 64 * 1024)
+                            if not chunk:
+                                break
+                            digest.update(chunk)
+                            size += len(chunk)
+                        after = os.fstat(file_fd)
+                        current = os.stat(parts[-1], dir_fd=parent_fd, follow_symlinks=False)
+                        if (
+                            size != before.st_size or fingerprint(before) != fingerprint(after)
+                            or fingerprint(current) != fingerprint(after)
+                            or digest.hexdigest().encode("ascii") != expected_oid
+                        ):
+                            raise RuntimeError("historical pinned Git tracked file bytes drifted")
+                        verified.append((parts, fingerprint(after)))
+                        total_bytes += size
+                        if total_bytes > 32 * 1024 * 1024:
+                            raise RuntimeError("historical pinned Git tree exceeds byte budget")
+                    finally:
+                        os.close(file_fd)
                 finally:
-                    os.close(file_fd)
-            finally:
-                os.close(directory_fd)
-        # Rewalk from the same root, not fresh source pathnames, so an earlier
-        # file cannot be replaced while later ones are hashed.
-        for parts, original in verified:
-            directory_fd = parent_dir(parts)
-            try:
-                if fingerprint(os.stat(
-                    parts[-1], dir_fd=directory_fd, follow_symlinks=False
-                )) != original:
-                    raise RuntimeError("historical pinned Git final pathname drifted")
-            finally:
-                os.close(directory_fd)
-    except OSError as exc:
-        raise RuntimeError("historical pinned Git tree has unsafe filesystem path") from exc
-    if read_git("rev-parse", "--verify", "HEAD^{tree}").strip() != tree:
-        raise RuntimeError("historical pinned Git tree changed during verification")
-    return tree.decode("ascii")
+                    os.close(parent_fd)
+            for parts, original in verified:
+                parent_fd = parent_dir(parts)
+                try:
+                    if fingerprint(os.stat(
+                        parts[-1], dir_fd=parent_fd, follow_symlinks=False
+                    )) != original:
+                        raise RuntimeError("historical pinned Git final pathname drifted")
+                finally:
+                    os.close(parent_fd)
+            enumerate_root()
+            if (
+                read_regular(root_fd, ".git", 4096) != (gitfile, gitfile_identity)
+                or read_regular(gitdir_fd, "HEAD", 128) != (head_data, head_identity)
+                or read_regular(gitdir_fd, "gitdir", 4096) != (link_data, backlink_identity)
+                or read_regular(gitdir_fd, "commondir", 128) != (
+                    commondir_data, commondir_identity
+                )
+                or fingerprint(os.fstat(gitdir_fd)) != gitdir_identity
+                or fingerprint(os.stat("index", dir_fd=gitdir_fd, follow_symlinks=False))
+                != index_identity
+                or read_git("rev-parse", "--verify", expected_head + "^{tree}").strip() != tree
+            ):
+                raise RuntimeError("historical linked source identity changed during verification")
+        except OSError as exc:
+            raise RuntimeError("historical source fd tree read unavailable") from exc
+        return tree.decode("ascii")
+    finally:
+        os.close(gitdir_fd)
 
 
 def _verify_historical_pinned_source(
@@ -5218,12 +5373,11 @@ def _verify_historical_pinned_source(
                 raise RuntimeError("historical pinned source root changed during verification")
 
         rebind_root()
-        git_env = _pinned_source_git_env()
-        assert_managed_worktree_clean(source, repository, env=git_env)
-        rebind_root()
-        # Bound Git reads and all committed file bytes to the SAME open inode,
-        # not a path which may be renamed and substituted between subprocesses.
-        tree_oid = _verify_historical_pinned_git_tree(root_fd, expected_head)
+        # Do not execute git status here: worktree .git/config and clean
+        # filters are untrusted until the exact source/Gitdir is proven.
+        tree_oid = _verify_historical_pinned_git_tree(
+            root_fd, expected_head, repository, source
+        )
         rebind_root()
 
         # Keep the root fd open for the ENTIRE five-file verification. Capture
@@ -5291,9 +5445,9 @@ def _verify_historical_pinned_source(
             finally:
                 os.close(parent_fd)
         rebind_root()
-        assert_managed_worktree_clean(source, repository, env=git_env)
-        rebind_root()
-        if _verify_historical_pinned_git_tree(root_fd, expected_head) != tree_oid:
+        if _verify_historical_pinned_git_tree(
+            root_fd, expected_head, repository, source
+        ) != tree_oid:
             raise RuntimeError("historical pinned source final Git identity changed")
         rebind_root()
     except OSError as exc:
@@ -5544,26 +5698,21 @@ def ensure_historical_source_pins(entry: RepoEntry, ref_segment: str) -> list[Pa
                     "worktree quarantined"
                 ) from failure
 
-            # Prepublication errors may only remove an exact, clean and idle
-            # newly created stage; otherwise leave it for owner recovery.
+            # Never recursively remove a rejected stage by a pathname that
+            # another UID/process can swap after its inode check. Preserve
+            # tracked and untracked bytes for explicit owner reconciliation;
+            # the fixed privileged-consumer name was never published here.
             if staged_visible:
-                if stage_identity is None or _historical_stage_identity(staged) != stage_identity:
+                if (
+                    stage_identity is None
+                    or _historical_stage_identity(staged) != stage_identity
+                ):
                     raise RuntimeError(
                         "historical pinned source incomplete stage requires owner cleanup"
                     ) from failure
-                try:
-                    assert_managed_worktree_clean(staged, entry.path)
-                    assert_managed_worktree_idle(staged)
-                    run(
-                        ["git", "-C", str(entry.path), "worktree", "remove", str(staged)],
-                        env=_pinned_source_git_env(),
-                    )
-                    if staged.exists() or staged.is_symlink():
-                        raise RuntimeError("historical pinned source staging removal unconfirmed")
-                except (RuntimeError, OSError) as cleanup_error:
-                    raise RuntimeError(
-                        "historical pinned source staging requires owner cleanup"
-                    ) from cleanup_error
+                raise RuntimeError(
+                    "historical pinned source staging retained for owner cleanup"
+                ) from failure
             raise
         if moved:
             preserved.append(expected_path)

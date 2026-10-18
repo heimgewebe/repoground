@@ -294,24 +294,21 @@ def test_historical_git_no_replace_env_protects_actual_tree(tmp_path, publisher)
     assert (safe / "other.txt").read_bytes() == b"source-A\n"
 
 
-def test_historical_pin_failed_stage_is_removed_only_when_clean(tmp_path, publisher):
-    """Rejected source never appears at the fixed consumer path."""
+def test_historical_pin_failed_stage_is_retained_for_owner_cleanup(tmp_path, publisher):
+    """A rejected stage must never be deleted by a raceable git remove pathname."""
     entry = _entry(tmp_path)
     root = tmp_path / "source-root"
     root.mkdir()
     fixed = root / f"heimgewebe__heim-pc__main--{HISTORICAL_HEAD}"
     ensure = publisher["ensure_historical_source_pins"]
-    removed = []
+    created = []
+
     def prepare(path, *, expected_repo, target):
         assert path != fixed and target == HISTORICAL_HEAD
         path.mkdir()
-    def run(argv, **kwargs):
-        assert argv[-2] == "remove"
-        path = Path(argv[-1])
-        assert path != fixed
-        path.rmdir()
-        removed.append(path)
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
+        (path / "valuable-untracked.txt").write_bytes(b"preserve even on failure")
+        created.append(path)
+
     with mock.patch.dict(ensure.__globals__, {
         "SOURCE_ROOT": root,
         "HISTORICAL_SOURCE_PINS": {
@@ -322,16 +319,17 @@ def test_historical_pin_failed_stage_is_removed_only_when_clean(tmp_path, publis
             side_effect=RuntimeError("historical pinned source payload digest mismatch")
         ),
         "assert_managed_worktree_clean": mock.Mock(),
-        "_verify_historical_pinned_git_tree": mock.Mock(return_value="f" * 40),
         "assert_managed_worktree_idle": mock.Mock(),
-        "run": run,
+        "run": mock.Mock(side_effect=AssertionError("never recursively remove a rejected stage")),
     }):
-        with pytest.raises(RuntimeError, match="digest mismatch"):
+        with pytest.raises(RuntimeError, match="staging retained for owner cleanup"):
             ensure(entry, "main")
     assert not fixed.exists()
-    assert len(removed) == 1
-    assert not removed[0].exists()
-
+    assert len(created) == 1
+    assert created[0].is_dir()
+    assert (created[0] / "valuable-untracked.txt").read_bytes() == (
+        b"preserve even on failure"
+    )
 
 def test_pinned_source_detects_name_replacement_after_fd_hash(tmp_path, publisher):
     """Second path lookup must detect a swapped file, not just validate the old fd."""
@@ -694,6 +692,81 @@ def test_postmove_invalid_pin_with_raced_staging_name_is_still_quarantined(
     assert state["recovery"]["replacement"] == state["moves"][1][1]
 
 
+def test_historical_pinned_tree_detects_extra_file_planted_after_object_read(
+    tmp_path, publisher
+):
+    """Raw fd enumeration denies untracked imports added after a trusted Git tree read."""
+    import os
+    import subprocess
+
+    entry = _entry(tmp_path)
+    entry.path.mkdir()
+
+    def git(path, *args):
+        result = subprocess.run(
+            ["git", "-C", str(path), *args],
+            capture_output=True, text=True, timeout=20,
+        )
+        assert result.returncode == 0, (args, result.stdout, result.stderr)
+        return result.stdout.strip()
+
+    git(entry.path, "init", "-q")
+    git(entry.path, "config", "user.name", "source-identity-test")
+    git(entry.path, "config", "user.email", "source-identity@example.invalid")
+    (entry.path / "data").mkdir()
+    (entry.path / "data/approved").write_bytes(b"approved")
+    (entry.path / "safe.py").write_bytes(b"safe\\n")
+    git(entry.path, "add", ".")
+    git(entry.path, "commit", "-qm", "fixed historical source")
+    head = git(entry.path, "rev-parse", "HEAD")
+    root = tmp_path / "pinned-source"
+    root.mkdir()
+    fixed = root / f"heimgewebe__heim-pc__main--{head}"
+    ensure = publisher["ensure_historical_source_pins"]
+    check_tree = publisher["_verify_historical_pinned_git_tree"]
+    digests = {"data/approved": sha256(b"approved").hexdigest()}
+    planted = {"value": False}
+    real_run = subprocess.run
+    injected_name = "untracked-import.py"
+    injected_bytes = b"malicious-import\\n"
+
+    def inject_after_tree_read(args, **kwargs):
+        result = real_run(args, **kwargs)
+        if (
+            not planted["value"]
+            and "ls-tree" in args
+            and result.returncode == 0
+        ):
+            (fixed / injected_name).write_bytes(injected_bytes)
+            planted["value"] = True
+        return result
+
+    with mock.patch.dict(ensure.__globals__, {
+        "SOURCE_ROOT": root,
+        "HISTORICAL_SOURCE_PINS": {
+            ("heimgewebe/heim-pc", "main"): {head: digests}
+        },
+    }):
+        assert ensure(entry, "main") == [fixed]
+        fd = os.open(fixed, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            with mock.patch.object(
+                check_tree.__globals__["subprocess"], "run",
+                side_effect=inject_after_tree_read,
+            ):
+                with pytest.raises(RuntimeError, match="unexpected file"):
+                    check_tree(fd, head, entry.path, fixed)
+        finally:
+            os.close(fd)
+        assert planted["value"]
+        with pytest.raises(RuntimeError, match="invalid; consumer name retracted"):
+            ensure(entry, "main")
+    assert not fixed.exists()
+    retained = list(root.glob(f"*{head}--recovery-*"))
+    assert len(retained) == 1
+    assert (retained[0] / injected_name).read_bytes() == injected_bytes
+
+
 def test_historical_tree_reference_matches_reviewed_commit(publisher):
     """The historical tree OID is an independent constant, not HEAD's text."""
     assert publisher["HISTORICAL_SOURCE_PIN_TREES"] == {
@@ -868,3 +941,106 @@ def test_postmove_raced_symlink_is_retracted_without_unlinking_target(
     assert not fixed.exists() and not fixed.is_symlink()
     assert displaced.is_dir()
     assert (outside / "important").read_bytes() == b"keep"
+
+def test_pinned_verifier_does_not_execute_untrusted_local_clean_filter(
+    tmp_path, publisher
+):
+    """Modified tracked bytes are rejected without letting git status run filters."""
+    import os
+    import subprocess
+    import time
+
+    entry = _entry(tmp_path)
+    entry.path.mkdir()
+
+    def git(path, *args):
+        result = subprocess.run(
+            ["/usr/bin/git", "-C", str(path), *args],
+            capture_output=True, text=True, timeout=20,
+        )
+        assert result.returncode == 0, (args, result.stdout, result.stderr)
+        return result.stdout.strip()
+
+    git(entry.path, "init", "-q")
+    git(entry.path, "config", "user.name", "historical-pin-test")
+    git(entry.path, "config", "user.email", "historical-pin@example.invalid")
+    (entry.path / "data").mkdir()
+    (entry.path / "data/approved").write_bytes(b"approved")
+    (entry.path / ".gitattributes").write_text(
+        "non_pinned.py filter=attacker\n", encoding="utf-8"
+    )
+    (entry.path / "non_pinned.py").write_bytes(b"safe\n")
+    git(entry.path, "add", ".")
+    git(entry.path, "commit", "-qm", "bound commit")
+    head = git(entry.path, "rev-parse", "HEAD")
+    source_root = tmp_path / "source-root"
+    source_root.mkdir()
+    fixed = source_root / f"heimgewebe__heim-pc__main--{head}"
+    digests = {"data/approved": sha256(b"approved").hexdigest()}
+    ensure = publisher["ensure_historical_source_pins"]
+    check = publisher["_verify_historical_pinned_source"]
+    with mock.patch.dict(ensure.__globals__, {
+        "SOURCE_ROOT": source_root,
+        "HISTORICAL_SOURCE_PINS": {
+            ("heimgewebe/heim-pc", "main"): {head: digests}
+        },
+    }):
+        assert ensure(entry, "main") == [fixed]
+        marker = tmp_path / "filter-executed"
+        git(entry.path, "config", "filter.attacker.clean",
+            f"/usr/bin/sh -c 'printf ran >> {marker}; cat'")
+        # Force Git's status dirty-content comparison.  The on-disk
+        # modification preserves the byte count but changes content.
+        target = fixed / "non_pinned.py"
+        target.write_bytes(b"evil\n")
+        future = time.time_ns() + 1_000_000_000
+        os.utime(target, ns=(future, future))
+        with pytest.raises(RuntimeError, match="tracked file bytes drifted"):
+            check(fixed, entry.path, head, digests)
+        assert not marker.exists(), "verifier executed repository-local clean filter"
+
+
+def test_pinned_verifier_rejects_foreign_gitfile_before_any_git_command(
+    tmp_path, publisher
+):
+    """A source Gitfile cannot redirect identity to an unrelated Gitdir."""
+    import subprocess
+
+    entry = _entry(tmp_path)
+    entry.path.mkdir()
+
+    def git(path, *args):
+        result = subprocess.run(
+            ["/usr/bin/git", "-C", str(path), *args],
+            capture_output=True, text=True, timeout=20,
+        )
+        assert result.returncode == 0, (args, result.stdout, result.stderr)
+        return result.stdout.strip()
+
+    git(entry.path, "init", "-q")
+    git(entry.path, "config", "user.name", "historical-pin-test")
+    git(entry.path, "config", "user.email", "historical-pin@example.invalid")
+    (entry.path / "data").mkdir()
+    (entry.path / "data/approved").write_bytes(b"approved")
+    git(entry.path, "add", ".")
+    git(entry.path, "commit", "-qm", "bound commit")
+    head = git(entry.path, "rev-parse", "HEAD")
+    source_root = tmp_path / "source-root"
+    source_root.mkdir()
+    fixed = source_root / f"heimgewebe__heim-pc__main--{head}"
+    digests = {"data/approved": sha256(b"approved").hexdigest()}
+    ensure = publisher["ensure_historical_source_pins"]
+    check = publisher["_verify_historical_pinned_source"]
+    with mock.patch.dict(ensure.__globals__, {
+        "SOURCE_ROOT": source_root,
+        "HISTORICAL_SOURCE_PINS": {
+            ("heimgewebe/heim-pc", "main"): {head: digests}
+        },
+    }):
+        assert ensure(entry, "main") == [fixed]
+        (fixed / ".git").write_text(
+            "gitdir: " + str(tmp_path / "attacker-gitdir") + "\n",
+            encoding="ascii",
+        )
+        with pytest.raises(RuntimeError, match="foreign Gitdir"):
+            check(fixed, entry.path, head, digests)
