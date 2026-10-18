@@ -58,6 +58,7 @@ def test_pin_is_not_removed_while_unpinned_worktree_can_be_pruned(tmp_path, publ
         "HISTORICAL_SOURCE_PINS": {("heimgewebe/heim-pc", "main"): {HISTORICAL_HEAD: {}}},
         "_verify_historical_pinned_source": mock.Mock(return_value=None),
         "assert_managed_worktree_clean": mock.Mock(),
+        "_verify_historical_pinned_git_tree": mock.Mock(return_value="f" * 40),
         "assert_managed_worktree_idle": mock.Mock(),
         "managed_build_lease_evidence": mock.Mock(return_value={"active_leases": []}),
         "run": fake_run,
@@ -80,6 +81,7 @@ def test_historical_pin_detects_byte_mismatch_without_any_mutation(tmp_path, pub
             returncode=0, stdout=HISTORICAL_HEAD + "\n", stderr=""
         )),
         "assert_managed_worktree_clean": mock.Mock(),
+        "_verify_historical_pinned_git_tree": mock.Mock(return_value="f" * 40),
     }):
         with pytest.raises(RuntimeError, match="digest"):
             checker(source, _entry(tmp_path).path, HISTORICAL_HEAD, {
@@ -100,6 +102,7 @@ def test_historical_pin_rejects_symlinked_payload(tmp_path, publisher):
             returncode=0, stdout=HISTORICAL_HEAD + "\n", stderr=""
         )),
         "assert_managed_worktree_clean": mock.Mock(),
+        "_verify_historical_pinned_git_tree": mock.Mock(return_value="f" * 40),
     }):
         with pytest.raises(RuntimeError, match="symlink|unsafe"):
             checker(source, _entry(tmp_path).path, HISTORICAL_HEAD, {
@@ -183,9 +186,10 @@ def test_dirty_existing_historical_pin_is_denied_before_recovery_create(tmp_path
         "_verify_historical_pinned_source": mock.Mock(side_effect=RuntimeError("historical pinned source payload digest mismatch")),
         "ensure_source_worktree": materialize,
     }):
-        with pytest.raises(RuntimeError, match="digest"):
+        with pytest.raises(RuntimeError, match="requires owner reconciliation"):
             ensure(entry, "main")
     materialize.assert_not_called()
+    assert pinned.is_dir()  # Do not move any unregistered foreign directory.
 
 
 def test_historical_recovery_alias_cannot_claim_fixed_consumer_path(tmp_path, publisher):
@@ -227,14 +231,15 @@ def test_exact_payload_verification_accepts_only_same_head_and_bytes(tmp_path, p
             returncode=0, stdout=HISTORICAL_HEAD + "\n", stderr=""
         )),
         "assert_managed_worktree_clean": mock.Mock(),
+        "_verify_historical_pinned_git_tree": mock.Mock(return_value="f" * 40),
     }):
         checker(source, _entry(tmp_path).path, HISTORICAL_HEAD, {
             "data/contract.json": sha256(b"approved").hexdigest()
         })
         with mock.patch.dict(checker.__globals__, {
-            "run": mock.Mock(return_value=SimpleNamespace(
-                returncode=0, stdout="a" * 40 + "\n", stderr=""
-            )),
+            "_verify_historical_pinned_git_tree": mock.Mock(
+                side_effect=RuntimeError("historical pinned source revision drifted")
+            ),
         }):
             with pytest.raises(RuntimeError, match="revision drifted"):
                 checker(source, _entry(tmp_path).path, HISTORICAL_HEAD, {
@@ -317,6 +322,7 @@ def test_historical_pin_failed_stage_is_removed_only_when_clean(tmp_path, publis
             side_effect=RuntimeError("historical pinned source payload digest mismatch")
         ),
         "assert_managed_worktree_clean": mock.Mock(),
+        "_verify_historical_pinned_git_tree": mock.Mock(return_value="f" * 40),
         "assert_managed_worktree_idle": mock.Mock(),
         "run": run,
     }):
@@ -350,6 +356,7 @@ def test_pinned_source_detects_name_replacement_after_fd_hash(tmp_path, publishe
             returncode=0, stdout=HISTORICAL_HEAD + "\n", stderr=""
         )),
         "assert_managed_worktree_clean": mock.Mock(),
+        "_verify_historical_pinned_git_tree": mock.Mock(return_value="f" * 40),
     }), mock.patch.object(checker.__globals__["os"], "read", side_effect=swap_after_read):
         with pytest.raises(RuntimeError, match="(pathname|changed|unsafe)"):
             checker(source, _entry(tmp_path).path, HISTORICAL_HEAD, {
@@ -439,6 +446,7 @@ def test_historical_pin_rejects_cross_root_swap_between_two_approved_files(
             returncode=0, stdout=HISTORICAL_HEAD + "\n", stderr=""
         )),
         "assert_managed_worktree_clean": mock.Mock(),
+        "_verify_historical_pinned_git_tree": mock.Mock(return_value="f" * 40),
     }), mock.patch.object(
         checker.__globals__["os"], "read", side_effect=swap_roots_after_first_file
     ):
@@ -494,6 +502,7 @@ def test_postmove_invalid_pin_is_quarantined_and_fixed_path_removed(
         },
         "run": run,
         "record_source_recovery": recovery,
+        "assert_managed_worktree_identity": mock.Mock(),
     }):
         with pytest.raises(RuntimeError, match="postmove verification refused"):
             ensure(entry, "main")
@@ -541,3 +550,321 @@ def test_prune_never_removes_inflight_historical_pin_recovery_stage(
         "path": str(stage),
         "reason": "reviewed_historical_source_stage_requires_owner_closeout",
     } in report["preserved"]
+
+
+@pytest.mark.parametrize("index_flag", ["--assume-unchanged", "--skip-worktree"])
+def test_historical_pin_rejects_hidden_index_flag_and_quarantines_owned_source(
+    tmp_path, publisher, index_flag
+):
+    """Even an apparently clean worktree may contain poisoned unpinned bytes."""
+    import subprocess
+
+    entry = _entry(tmp_path)
+    entry.path.mkdir()
+
+    def git(path, *args):
+        result = subprocess.run(
+            ["git", "-C", str(path), *args],
+            capture_output=True, text=True, timeout=20,
+        )
+        assert result.returncode == 0, (args, result.stdout, result.stderr)
+        return result.stdout.strip()
+
+    git(entry.path, "init", "-q")
+    git(entry.path, "config", "user.name", "source-custody-test")
+    git(entry.path, "config", "user.email", "source-custody-test@example.invalid")
+    (entry.path / "data").mkdir()
+    (entry.path / "data/approved").write_bytes(b"approved")
+    (entry.path / "non_pinned.py").write_bytes(b"safe\n")
+    git(entry.path, "add", ".")
+    git(entry.path, "commit", "-qm", "reviewed")
+    head = git(entry.path, "rev-parse", "HEAD")
+    source_root = tmp_path / "source-root"
+    source_root.mkdir()
+    fixed = source_root / f"heimgewebe__heim-pc__main--{head}"
+    digests = {"data/approved": sha256(b"approved").hexdigest()}
+    ensure = publisher["ensure_historical_source_pins"]
+    recovery = mock.Mock()
+    with mock.patch.dict(ensure.__globals__, {
+        "SOURCE_ROOT": source_root,
+        "HISTORICAL_SOURCE_PINS": {
+            ("heimgewebe/heim-pc", "main"): {head: digests}
+        },
+        "record_source_recovery": recovery,
+    }):
+        assert ensure(entry, "main") == [fixed]
+        git(fixed, "update-index", index_flag, "--", "non_pinned.py")
+        (fixed / "non_pinned.py").write_bytes(b"poisoned\n")
+        assert git(fixed, "status", "--porcelain") == ""  # Reproduce P1.
+        with pytest.raises(RuntimeError, match="invalid; consumer name retracted"):
+            ensure(entry, "main")
+    assert not fixed.exists()
+    quarantines = list(source_root.glob(f"*{head}--recovery-*"))
+    assert len(quarantines) == 1
+    assert (quarantines[0] / "non_pinned.py").read_bytes() == b"poisoned\n"
+    recovery.assert_called_once()
+
+
+def test_invalid_consumer_symlink_is_unlinked_without_following_target(
+    tmp_path, publisher
+):
+    entry = _entry(tmp_path)
+    root = tmp_path / "source-root"
+    root.mkdir()
+    outside = tmp_path / "unrelated"
+    outside.mkdir()
+    (outside / "important").write_bytes(b"unchanged")
+    fixed = root / f"heimgewebe__heim-pc__main--{HISTORICAL_HEAD}"
+    fixed.symlink_to(outside, target_is_directory=True)
+    ensure = publisher["ensure_historical_source_pins"]
+    with mock.patch.dict(ensure.__globals__, {
+        "SOURCE_ROOT": root,
+        "HISTORICAL_SOURCE_PINS": {
+            ("heimgewebe/heim-pc", "main"): {
+                HISTORICAL_HEAD: {"data/approved": "c" * 64}
+            }
+        },
+        "prepare_managed_worktree": mock.Mock(
+            side_effect=AssertionError("never adopt a poisoned fixed name")
+        ),
+    }):
+        with pytest.raises(RuntimeError, match="consumer name retracted"):
+            ensure(entry, "main")
+    assert not fixed.exists() and not fixed.is_symlink()
+    assert (outside / "important").read_bytes() == b"unchanged"
+
+
+def test_postmove_invalid_pin_with_raced_staging_name_is_still_quarantined(
+    tmp_path, publisher
+):
+    """A leftover stage cannot defeat retraction of the promoted inode."""
+    entry = _entry(tmp_path)
+    root = tmp_path / "source-root"
+    root.mkdir()
+    fixed = root / f"heimgewebe__heim-pc__main--{HISTORICAL_HEAD}"
+    ensure = publisher["ensure_historical_source_pins"]
+    state = {"stage": None, "moves": [], "recovery": None}
+
+    def prepare(path, **_kwargs):
+        path.mkdir()
+        state["stage"] = path
+
+    def verify(path, *_args):
+        if path == fixed:
+            raise RuntimeError("invalid source after promotion")
+
+    def move(argv, **_kwargs):
+        assert argv[-3] == "move"
+        origin, target = Path(argv[-2]), Path(argv[-1])
+        assert origin.is_dir() and not target.exists()
+        origin.rename(target)
+        state["moves"].append((origin, target))
+        if target == fixed:
+            # Simulate a leftover/raced staging directory after Git reports success.
+            state["stage"].mkdir()
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    def recovery(**kwargs):
+        state["recovery"] = kwargs
+
+    with mock.patch.dict(ensure.__globals__, {
+        "SOURCE_ROOT": root,
+        "HISTORICAL_SOURCE_PINS": {
+            ("heimgewebe/heim-pc", "main"): {
+                HISTORICAL_HEAD: {"one": "a" * 64}
+            }
+        },
+        "prepare_managed_worktree": prepare,
+        "_verify_historical_pinned_source": verify,
+        "_managed_worktree_git_env": lambda *_args, **_kw: {
+            "GIT_NO_REPLACE_OBJECTS": "1"
+        },
+        "assert_managed_worktree_identity": mock.Mock(),
+        "run": move,
+        "record_source_recovery": recovery,
+    }):
+        with pytest.raises(RuntimeError, match="postmove verification refused"):
+            ensure(entry, "main")
+    assert not fixed.exists()
+    assert state["stage"].is_dir()
+    assert len(state["moves"]) == 2
+    assert state["moves"][1][0] == fixed
+    assert state["moves"][1][1] != state["stage"]
+    assert state["moves"][1][1].is_dir()
+    assert state["recovery"]["replacement"] == state["moves"][1][1]
+
+
+def test_historical_tree_reference_matches_reviewed_commit(publisher):
+    """The historical tree OID is an independent constant, not HEAD's text."""
+    assert publisher["HISTORICAL_SOURCE_PIN_TREES"] == {
+        HISTORICAL_HEAD: "fe2c5afd07ad36fe66759a37fe53a703bd38947b"
+    }
+
+
+def test_historical_commit_sha256_pins_against_public_upstream_git(tmp_path, publisher):
+    """CI must prove all five production bytes from the *actual* Git object.
+
+    This intentionally fails closed if the public HTTPS source is unavailable;
+    contract literals and synthetic Git fixtures alone are not provenance.
+    There are no writes outside pytest's disposable object database.
+    """
+    import os
+    import subprocess
+
+    repository = tmp_path / "historical-source-odb"
+    environment = {
+        "HOME": str(tmp_path),
+        "PATH": "/usr/bin:/bin",
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_NO_REPLACE_OBJECTS": "1",
+        "GIT_TERMINAL_PROMPT": "0",
+    }
+
+    def git(*arguments, timeout=30):
+        result = subprocess.run(
+            ["/usr/bin/git", *arguments],
+            env=environment, capture_output=True, timeout=timeout,
+            check=False,
+        )
+        assert result.returncode == 0, (
+            arguments, result.stderr[-1024:].decode("utf-8", errors="replace")
+        )
+        return result.stdout
+
+    git("init", "-q", str(repository))
+    git(
+        "-C", str(repository), "fetch", "--no-tags", "--depth=1",
+        "https://github.com/heimgewebe/heim-pc.git", HISTORICAL_HEAD,
+        timeout=90,
+    )
+    assert git("-C", str(repository), "rev-parse", "FETCH_HEAD").strip() == (
+        HISTORICAL_HEAD.encode("ascii")
+    )
+    assert git(
+        "-C", str(repository), "rev-parse", "FETCH_HEAD^{tree}"
+    ).strip().decode("ascii") == publisher["HISTORICAL_SOURCE_PIN_TREES"][HISTORICAL_HEAD]
+    digests = publisher["HISTORICAL_SOURCE_PINS"][("heimgewebe/heim-pc", "main")][HISTORICAL_HEAD]
+    assert len(digests) == 5
+    for relative, expected in sorted(digests.items()):
+        actual_bytes = git("-C", str(repository), "show", f"FETCH_HEAD:{relative}")
+        assert sha256(actual_bytes).hexdigest() == expected, relative
+
+
+def test_historical_pinned_payload_rejects_hardlink_before_digest(
+    tmp_path, publisher
+):
+    source = tmp_path / "source"
+    payload = source / "data" / "approved"
+    payload.parent.mkdir(parents=True)
+    payload.write_bytes(b"approved")
+    other_link = tmp_path / "shared-payload"
+    import os
+    os.link(payload, other_link)
+    checker = publisher["_verify_historical_pinned_source"]
+    with mock.patch.dict(checker.__globals__, {
+        "SOURCE_ROOT": tmp_path,
+        "assert_managed_worktree_clean": mock.Mock(),
+        "_verify_historical_pinned_git_tree": mock.Mock(return_value="f" * 40),
+    }):
+        with pytest.raises(RuntimeError, match="payload is unsafe"):
+            checker(source, _entry(tmp_path).path, HISTORICAL_HEAD, {
+                "data/approved": sha256(b"approved").hexdigest()
+            })
+    assert other_link.read_bytes() == b"approved"
+
+
+def test_failed_git_promotion_after_rename_retracts_exact_worktree(
+    tmp_path, publisher
+):
+    """Git may exit nonzero after a successful physical rename; never retry."""
+    entry = _entry(tmp_path)
+    root = tmp_path / "source-root"
+    root.mkdir()
+    fixed = root / f"heimgewebe__heim-pc__main--{HISTORICAL_HEAD}"
+    ensure = publisher["ensure_historical_source_pins"]
+    state = {"moves": [], "stage": None}
+
+    def prepare(path, **_kwargs):
+        path.mkdir()
+        state["stage"] = path
+
+    def move_then_fail(argv, **_kwargs):
+        assert argv[-3] == "move"
+        source, dest = Path(argv[-2]), Path(argv[-1])
+        assert source.is_dir() and not dest.exists()
+        source.rename(dest)
+        state["moves"].append((source, dest))
+        if dest == fixed:
+            raise RuntimeError("git returned nonzero after physical rename")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    with mock.patch.dict(ensure.__globals__, {
+        "SOURCE_ROOT": root,
+        "HISTORICAL_SOURCE_PINS": {
+            ("heimgewebe/heim-pc", "main"): {
+                HISTORICAL_HEAD: {"one": "a" * 64}
+            }
+        },
+        "prepare_managed_worktree": prepare,
+        "_verify_historical_pinned_source": mock.Mock(),
+        "_managed_worktree_git_env": lambda *_a, **_kw: {
+            "GIT_NO_REPLACE_OBJECTS": "1"
+        },
+        "assert_managed_worktree_identity": mock.Mock(),
+        "run": move_then_fail,
+        "record_source_recovery": mock.Mock(),
+    }):
+        with pytest.raises(RuntimeError, match="postmove verification refused"):
+            ensure(entry, "main")
+    assert not fixed.exists()
+    assert len(state["moves"]) == 2
+    assert state["moves"][1] == (fixed, state["stage"])
+    assert state["stage"].is_dir()
+
+
+def test_postmove_raced_symlink_is_retracted_without_unlinking_target(
+    tmp_path, publisher
+):
+    """A swap immediately after Git promotion cannot expose a symlink."""
+    entry = _entry(tmp_path)
+    root = tmp_path / "source-root"
+    root.mkdir()
+    fixed = root / f"heimgewebe__heim-pc__main--{HISTORICAL_HEAD}"
+    outside = tmp_path / "unrelated"
+    outside.mkdir()
+    (outside / "important").write_bytes(b"keep")
+    displaced = tmp_path / "displaced-managed-stage"
+    ensure = publisher["ensure_historical_source_pins"]
+
+    def prepare(path, **_kwargs):
+        path.mkdir()
+
+    def move_with_raced_symlink(argv, **_kwargs):
+        assert argv[-3] == "move"
+        stage, destination = Path(argv[-2]), Path(argv[-1])
+        assert destination == fixed and stage.is_dir() and not fixed.exists()
+        stage.rename(fixed)
+        fixed.rename(displaced)
+        fixed.symlink_to(outside, target_is_directory=True)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    with mock.patch.dict(ensure.__globals__, {
+        "SOURCE_ROOT": root,
+        "HISTORICAL_SOURCE_PINS": {
+            ("heimgewebe/heim-pc", "main"): {
+                HISTORICAL_HEAD: {"one": "a" * 64}
+            }
+        },
+        "prepare_managed_worktree": prepare,
+        "_verify_historical_pinned_source": mock.Mock(),
+        "_managed_worktree_git_env": lambda *_a, **_kw: {
+            "GIT_NO_REPLACE_OBJECTS": "1"
+        },
+        "run": move_with_raced_symlink,
+    }):
+        with pytest.raises(RuntimeError, match="consumer symlink retracted"):
+            ensure(entry, "main")
+    assert not fixed.exists() and not fixed.is_symlink()
+    assert displaced.is_dir()
+    assert (outside / "important").read_bytes() == b"keep"
