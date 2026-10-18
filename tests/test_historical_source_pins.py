@@ -19,8 +19,13 @@ HISTORICAL_HEAD = "d6d4b3c4337d8bd51758d10d83975c9d61fd18d7"
 
 
 @pytest.fixture
-def publisher():
-    return runpy.run_path(str(PUBLISHER))
+def publisher(tmp_path):
+    namespace = runpy.run_path(str(PUBLISHER))
+    # Test receipts must never escape pytest's disposable state root.
+    namespace["ensure_historical_source_pins"].__globals__["STATE_ROOT"] = (
+        tmp_path / "private-publisher-state"
+    )
+    return namespace
 
 
 def _entry(tmp_path):
@@ -401,6 +406,9 @@ def test_actual_git_staged_source_publishes_exact_commit_and_is_idempotent(tmp_p
     with mock.patch.dict(ensure.__globals__, {
         "SOURCE_ROOT": root,
         "HISTORICAL_SOURCE_PINS": {("heimgewebe/heim-pc", "main"): {head: approved}},
+        "HISTORICAL_SOURCE_PIN_TREES": {
+            head: git(entry.path, "rev-parse", "HEAD^{tree}")
+        },
     }):
         first = ensure(entry, "main")
         second = ensure(entry, "main")
@@ -588,6 +596,9 @@ def test_historical_pin_rejects_hidden_index_flag_and_quarantines_owned_source(
         "HISTORICAL_SOURCE_PINS": {
             ("heimgewebe/heim-pc", "main"): {head: digests}
         },
+        "HISTORICAL_SOURCE_PIN_TREES": {
+            head: git(entry.path, "rev-parse", "HEAD^{tree}")
+        },
         "record_source_recovery": recovery,
     }):
         assert ensure(entry, "main") == [fixed]
@@ -746,6 +757,9 @@ def test_historical_pinned_tree_detects_extra_file_planted_after_object_read(
         "HISTORICAL_SOURCE_PINS": {
             ("heimgewebe/heim-pc", "main"): {head: digests}
         },
+        "HISTORICAL_SOURCE_PIN_TREES": {
+            head: git(entry.path, "rev-parse", "HEAD^{tree}")
+        },
     }):
         assert ensure(entry, "main") == [fixed]
         fd = os.open(fixed, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -765,6 +779,121 @@ def test_historical_pinned_tree_detects_extra_file_planted_after_object_read(
     retained = list(root.glob(f"*{head}--recovery-*"))
     assert len(retained) == 1
     assert (retained[0] / injected_name).read_bytes() == injected_bytes
+
+
+@pytest.fixture
+def disposable_verified_git_tree(tmp_path, publisher):
+    """Real linked worktree with a scoped, independent synthetic tree pin."""
+    import subprocess
+
+    entry = _entry(tmp_path)
+    entry.path.mkdir()
+
+    def git(path, *args):
+        result = subprocess.run(
+            ["/usr/bin/git", "-C", str(path), *args],
+            capture_output=True, text=True, timeout=20,
+        )
+        assert result.returncode == 0, (args, result.stdout, result.stderr)
+        return result.stdout.strip()
+
+    git(entry.path, "init", "-q")
+    git(entry.path, "config", "user.name", "historical-tree-security-test")
+    git(entry.path, "config", "user.email", "historical-tree@example.invalid")
+    (entry.path / "safe.py").write_bytes(b"safe\n")
+    git(entry.path, "add", ".")
+    git(entry.path, "commit", "-qm", "approved tree")
+    head = git(entry.path, "rev-parse", "HEAD")
+    tree = git(entry.path, "rev-parse", "HEAD^{tree}")
+    source_root = tmp_path / "source-root"
+    source_root.mkdir()
+    fixed = source_root / f"heimgewebe__heim-pc__main--{head}"
+    ensure = publisher["ensure_historical_source_pins"]
+    with mock.patch.dict(ensure.__globals__, {
+        "SOURCE_ROOT": source_root,
+        "HISTORICAL_SOURCE_PINS": {
+            ("heimgewebe/heim-pc", "main"): {
+                head: {"safe.py": sha256(b"safe\n").hexdigest()}
+            }
+        },
+        "HISTORICAL_SOURCE_PIN_TREES": {head: tree},
+    }):
+        assert ensure(entry, "main") == [fixed]
+        yield SimpleNamespace(
+            entry=entry, fixed=fixed, head=head,
+            checker=publisher["_verify_historical_pinned_git_tree"],
+        )
+
+
+def test_historical_tree_requires_independently_pinned_oid(
+    disposable_verified_git_tree,
+):
+    import os
+
+    item = disposable_verified_git_tree
+    fd = os.open(item.fixed, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        with mock.patch.dict(
+            item.checker.__globals__, {"HISTORICAL_SOURCE_PIN_TREES": {}}
+        ):
+            with pytest.raises(RuntimeError, match="commit or tree identity drifted"):
+                item.checker(fd, item.head, item.entry.path, item.fixed)
+    finally:
+        os.close(fd)
+
+
+@pytest.mark.parametrize("altered_mode", [0o4644, 0o2644, 0o1644])
+def test_historical_tree_rejects_special_permission_bits(
+    disposable_verified_git_tree, altered_mode,
+):
+    import os
+
+    item = disposable_verified_git_tree
+    os.chmod(item.fixed / "safe.py", altered_mode)
+    fd = os.open(item.fixed, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        with pytest.raises(RuntimeError, match="file mode or identity unsafe"):
+            item.checker(fd, item.head, item.entry.path, item.fixed)
+    finally:
+        os.close(fd)
+
+
+def test_historical_tree_final_walk_rebinds_hashed_tracked_inodes(
+    tmp_path, disposable_verified_git_tree,
+):
+    """Replace a tracked path after the hash/re-stat, before the last fd walk."""
+    import os
+    import subprocess
+
+    item = disposable_verified_git_tree
+    real_run = subprocess.run
+    observed = {"trees": 0, "swapped": False}
+
+    def swap_after_final_object_check(argv, **kwargs):
+        result = real_run(argv, **kwargs)
+        if (
+            "rev-parse" in argv
+            and f"{item.head}^{{tree}}" in argv
+            and result.returncode == 0
+        ):
+            observed["trees"] += 1
+            if observed["trees"] == 2:
+                (item.fixed / "safe.py").rename(tmp_path / "retained-safe.py")
+                (item.fixed / "safe.py").write_bytes(b"evil\n")
+                observed["swapped"] = True
+        return result
+
+    fd = os.open(item.fixed, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        with mock.patch.object(
+            item.checker.__globals__["subprocess"], "run",
+            side_effect=swap_after_final_object_check,
+        ):
+            with pytest.raises(RuntimeError, match="tracked file identity drifted"):
+                item.checker(fd, item.head, item.entry.path, item.fixed)
+    finally:
+        os.close(fd)
+    assert observed == {"trees": 2, "swapped": True}
 
 
 def test_historical_tree_reference_matches_reviewed_commit(publisher):
@@ -984,6 +1113,9 @@ def test_pinned_verifier_does_not_execute_untrusted_local_clean_filter(
         "HISTORICAL_SOURCE_PINS": {
             ("heimgewebe/heim-pc", "main"): {head: digests}
         },
+        "HISTORICAL_SOURCE_PIN_TREES": {
+            head: git(entry.path, "rev-parse", "HEAD^{tree}")
+        },
     }):
         assert ensure(entry, "main") == [fixed]
         marker = tmp_path / "filter-executed"
@@ -1035,6 +1167,9 @@ def test_pinned_verifier_rejects_foreign_gitfile_before_any_git_command(
         "SOURCE_ROOT": source_root,
         "HISTORICAL_SOURCE_PINS": {
             ("heimgewebe/heim-pc", "main"): {head: digests}
+        },
+        "HISTORICAL_SOURCE_PIN_TREES": {
+            head: git(entry.path, "rev-parse", "HEAD^{tree}")
         },
     }):
         assert ensure(entry, "main") == [fixed]

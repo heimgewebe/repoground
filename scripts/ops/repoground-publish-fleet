@@ -5123,10 +5123,7 @@ def _verify_historical_pinned_git_tree(
         if (
             re.fullmatch(rb"[0-9a-f]{40}", tree) is None
             or commit.split(b"\n", 1)[0] != b"tree " + tree
-            or (
-                expected_head in HISTORICAL_SOURCE_PIN_TREES
-                and tree.decode("ascii") != HISTORICAL_SOURCE_PIN_TREES[expected_head]
-            )
+            or HISTORICAL_SOURCE_PIN_TREES.get(expected_head) != tree.decode("ascii")
         ):
             raise RuntimeError("historical pinned Git commit or tree identity drifted")
 
@@ -5174,7 +5171,9 @@ def _verify_historical_pinned_git_tree(
             for i in range(1, len(components)):
                 expected_directories.add(b"/".join(components[:i]))
 
-        def enumerate_root() -> None:
+        def enumerate_root(
+            expected_fingerprints: dict[bytes, tuple[int, ...]] | None = None,
+        ) -> None:
             # Traversal is rooted at the same opened inode, not source by name.
             # Empty directories and ignored/untracked files are not permitted.
             todo = [(os.dup(root_fd), b"")]
@@ -5210,6 +5209,13 @@ def _verify_historical_pinned_git_tree(
                             elif stat.S_ISREG(info.st_mode):
                                 if relative not in expected or info.st_nlink != 1:
                                     raise RuntimeError("historical root has unexpected file")
+                                if (
+                                    expected_fingerprints is not None
+                                    and fingerprint(info) != expected_fingerprints[relative]
+                                ):
+                                    raise RuntimeError(
+                                        "historical root tracked file identity drifted"
+                                    )
                                 observed_files.add(relative)
                             else:
                                 raise RuntimeError("historical root symlink or special file unsafe")
@@ -5247,7 +5253,16 @@ def _verify_historical_pinned_git_tree(
                         if (
                             not stat.S_ISREG(before.st_mode) or before.st_nlink != 1
                             or before.st_size < 0 or before.st_size > 1024 * 1024
-                            or ((before.st_mode & 0o111) != 0) != (mode == b"100755")
+                            # Git records only the executable bit, not a checkout's
+                            # stricter umask. Reject privilege/write additions,
+                            # while permitting regular 0600/0700 materialization.
+                            or (stat.S_IMODE(before.st_mode) & 0o7000) != 0
+                            or (stat.S_IMODE(before.st_mode) & 0o022) != 0
+                            or (before.st_mode & 0o400) == 0
+                            or (
+                                ((before.st_mode & 0o111) != 0)
+                                != (mode == b"100755")
+                            )
                         ):
                             raise RuntimeError("historical pinned Git file mode or identity unsafe")
                         digest = hashlib.sha1()
@@ -5284,7 +5299,6 @@ def _verify_historical_pinned_git_tree(
                         raise RuntimeError("historical pinned Git final pathname drifted")
                 finally:
                     os.close(parent_fd)
-            enumerate_root()
             if (
                 read_regular(root_fd, ".git", 4096) != (gitfile, gitfile_identity)
                 or read_regular(gitdir_fd, "HEAD", 128) != (head_data, head_identity)
@@ -5298,6 +5312,11 @@ def _verify_historical_pinned_git_tree(
                 or read_git("rev-parse", "--verify", expected_head + "^{tree}").strip() != tree
             ):
                 raise RuntimeError("historical linked source identity changed during verification")
+            # Last pathname observation rebinds *all* tracked bytes to
+            # the inode/size/mode/time tuple hashed above, after Git metadata.
+            enumerate_root({
+                b"/".join(parts): original for parts, original in verified
+            })
         except OSError as exc:
             raise RuntimeError("historical source fd tree read unavailable") from exc
         return tree.decode("ascii")
@@ -5410,6 +5429,8 @@ def _verify_historical_pinned_source(
                     if (
                         not stat.S_ISREG(before.st_mode)
                         or before.st_nlink != 1
+                        or (stat.S_IMODE(before.st_mode) & 0o7000) != 0
+                        or (stat.S_IMODE(before.st_mode) & 0o022) != 0
                         or not 0 < before.st_size <= 512 * 1024
                     ):
                         raise RuntimeError("historical pinned source payload is unsafe")
