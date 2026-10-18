@@ -1499,3 +1499,175 @@ def test_historical_relocation_refuses_sibling_gitdir_substitution_before_mutati
     assert backlink.read_bytes() == original, "foreign Gitdir backlink changed"
     assert (sibling / "scanner.py").read_bytes() == b"reviewed code\n"
     assert not fixed.exists(), "failed pin was published"
+def test_historical_fd_stage_never_redirects_index_to_raced_sibling(tmp_path, publisher):
+    """P1 RED: staged pathname substitution cannot select sibling Git metadata."""
+    import os
+
+    entry, root, fixed, head, constants, git = _p1_test_source_context(tmp_path)
+    (entry.path / "scanner.py").write_bytes(b"foreign sibling bytes\n")
+    git("add", "scanner.py")
+    git("commit", "-qm", "sibling revision")
+    sibling = tmp_path / "registered-sibling"
+    git("worktree", "add", "--detach", str(sibling), "HEAD")
+    sibling_gitdir = Path(
+        (sibling / ".git").read_text(encoding="ascii")
+        .removeprefix("gitdir: ").strip()
+    )
+    sibling_index = sibling_gitdir / "index"
+    untouched_index = sibling_index.read_bytes()
+    untouched_payload = (sibling / "scanner.py").read_bytes()
+    parked = tmp_path / "owner-retained-original-stage"
+    observed = []
+    actual_open = os.open
+    prefix = f"heimgewebe__heim-pc__main--{head}--recovery-"
+
+    def stage_name_swap_before_fd_open(name, *args, **kwargs):
+        if (
+            isinstance(name, str) and name.startswith(prefix)
+            and kwargs.get("dir_fd") is not None and not observed
+        ):
+            staged = root / name
+            assert staged.is_dir(), "stage must have been created by mkdirat"
+            staged.rename(parked)
+            staged.mkdir()
+            (staged / ".git").write_text(
+                "gitdir: " + str(sibling_gitdir) + "\n", encoding="ascii"
+            )
+            observed.append(staged)
+        return actual_open(name, *args, **kwargs)
+
+    with mock.patch.dict(publisher["ensure_historical_source_pins"].__globals__, constants):
+        with mock.patch.object(os, "open", stage_name_swap_before_fd_open):
+            with pytest.raises(RuntimeError):
+                publisher["ensure_historical_source_pins"](entry, "main")
+
+    assert observed, "staged directory fd-open swap not exercised"
+    assert parked.is_dir(), "original stage must never be deleted"
+    assert sibling_index.read_bytes() == untouched_index, (
+        "historical staging wrote into a foreign registered sibling Git index"
+    )
+    assert (sibling / "scanner.py").read_bytes() == untouched_payload
+    assert not fixed.exists(), "rejected stage must not be published"
+
+
+def test_historical_source_root_swap_cannot_redirect_staging_to_foreign_directory(
+    tmp_path, publisher,
+):
+    """P1 RED: no byte of staged work may be written through an intermediate symlink."""
+    import os
+
+    entry, root, fixed, head, constants, _git = _p1_test_source_context(tmp_path)
+    foreign = tmp_path / "foreign-valuable-directory"
+    foreign.mkdir()
+    (foreign / "preserved").write_bytes(b"foreign bytes remain unchanged")
+    parked = tmp_path / "retained-original-source-root"
+    observed = []
+    original_mkdir = os.mkdir
+    prefix = f"heimgewebe__heim-pc__main--{head}--recovery-"
+
+    def root_swap_before_mkdirat(name, *args, **kwargs):
+        if (
+            isinstance(name, str) and name.startswith(prefix)
+            and kwargs.get("dir_fd") is not None and not observed
+        ):
+            root.rename(parked)
+            root.symlink_to(foreign, target_is_directory=True)
+            observed.append(True)
+        return original_mkdir(name, *args, **kwargs)
+
+    try:
+        with mock.patch.dict(publisher["ensure_historical_source_pins"].__globals__, constants):
+            with mock.patch.object(os, "mkdir", root_swap_before_mkdirat):
+                with pytest.raises(RuntimeError):
+                    publisher["ensure_historical_source_pins"](entry, "main")
+    finally:
+        if root.is_symlink():
+            root.unlink()
+        if parked.is_dir():
+            parked.rename(root)
+
+    assert observed, "SOURCE_ROOT swap not exercised before mkdirat"
+    assert sorted(item.name for item in foreign.iterdir()) == ["preserved"], (
+        "source staging created a foreign directory or mutated foreign bytes"
+    )
+    assert (foreign / "preserved").read_bytes() == b"foreign bytes remain unchanged"
+    assert not fixed.exists(), "a failed root identity check must not publish"
+
+
+
+def test_historical_backlink_exchange_preserves_foreign_race_bytes(tmp_path, publisher):
+    """P1 RED: an interposed foreign Gitdir leaf must never be deleted."""
+    import os
+
+    entry, root, fixed, head, constants, _ = _p1_test_source_context(tmp_path)
+    ensure = publisher["ensure_historical_source_pins"]
+    with mock.patch.dict(ensure.__globals__, constants):
+        assert ensure(entry, "main") == [fixed]
+    admin = Path((fixed / ".git").read_text(encoding="ascii").split("gitdir: ")[1].strip())
+    baseline = (admin / "gitdir").read_bytes()
+    relocated = root / (fixed.name + "--recovery-abcdef012345")
+    foreign_bytes = b"foreign owner bytes that must never be unlinked"
+    captured = []
+    original_exchange = publisher["_exchange_historical_backlink"]
+    mover = publisher["_move_historical_worktree_noreplace"]
+
+    def foreign_replace_before_exchange(dirfd, staged, published):
+        if not captured:
+            assert published == "gitdir"
+            os.rename("gitdir", "known-original-backlink", src_dir_fd=dirfd, dst_dir_fd=dirfd)
+            with open(admin / "gitdir", "xb") as output:
+                output.write(foreign_bytes)
+            captured.append(True)
+        return original_exchange(dirfd, staged, published)
+
+    with mock.patch.dict(mover.__globals__, {
+        **constants,
+        "_exchange_historical_backlink": foreign_replace_before_exchange,
+    }):
+        with pytest.raises(RuntimeError, match="restored|owner reconciliation"):
+            mover(entry, fixed, relocated, (fixed.stat().st_dev, fixed.stat().st_ino),
+                  restore_on_repair_failure=True)
+    assert captured, "foreign replacement race not exercised"
+    assert fixed.is_dir() and not relocated.exists()
+    assert (admin / "gitdir").read_bytes() == baseline
+    assert (admin / "known-original-backlink").read_bytes() == baseline
+    retained = list(admin.glob(".repoground-gitdir-previous-*"))
+    assert any(path.read_bytes() == foreign_bytes for path in retained), (
+        "atomic backlink swap destroyed the foreign replacement inode"
+    )
+
+
+def test_historical_backlink_post_exchange_fsync_error_restores_stage(tmp_path, publisher):
+    """P2 RED: an error after the swap cannot hide committed backlink change."""
+    import errno
+    import os
+
+    entry, root, fixed, head, constants, _ = _p1_test_source_context(tmp_path)
+    ensure = publisher["ensure_historical_source_pins"]
+    with mock.patch.dict(ensure.__globals__, constants):
+        assert ensure(entry, "main") == [fixed]
+    admin = Path((fixed / ".git").read_text(encoding="ascii").split("gitdir: ")[1].strip())
+    baseline = (admin / "gitdir").read_bytes()
+    admin_identity = (admin.stat().st_dev, admin.stat().st_ino)
+    recovery = root / (fixed.name + "--recovery-fedcba987654")
+    actual_fsync = os.fsync
+    did_fail = []
+    mover = publisher["_move_historical_worktree_noreplace"]
+
+    def deny_first_post_exchange_directory_fsync(fd):
+        obj = os.fstat(fd)
+        if (obj.st_dev, obj.st_ino) == admin_identity and not did_fail:
+            did_fail.append(True)
+            raise OSError(errno.EIO, "injected fsync-after-atomic-swap failure")
+        return actual_fsync(fd)
+
+    with mock.patch.dict(mover.__globals__, constants):
+        with mock.patch.object(os, "fsync", deny_first_post_exchange_directory_fsync):
+            with pytest.raises(RuntimeError, match="original stage restored"):
+                mover(entry, fixed, recovery, (fixed.stat().st_dev, fixed.stat().st_ino),
+                      restore_on_repair_failure=True)
+    assert did_fail, "post-exchange failure boundary not exercised"
+    assert fixed.is_dir() and not recovery.exists()
+    assert (admin / "gitdir").read_bytes() == baseline, (
+        "successful swap went unrecorded and rollback left a stale backlink"
+    )

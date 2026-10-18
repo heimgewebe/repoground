@@ -5525,21 +5525,28 @@ def _rename_historical_noreplace(
 def prepare_historical_source_worktree(
     path: Path, *, expected_repo: Path, target: str
 ) -> None:
-    """Materialize pinned raw Git blobs without checkout filters or callbacks.
+    """Materialize approved Git blobs/index under pre-opened, no-follow inodes.
 
-    In Git 2.34 checkout-index has no --no-filters option. A no-checkout
-    linked worktree plus read-tree supplies only the Git index; each regular
-    blob is written using no-follow directory descriptors. The historical
-    complete-tree verifier still determines whether the result is trusted.
+    Never run checkout callbacks or a pathname-selected Git index mutation.
+    A linked worktree is registered with only descriptor-relative O_EXCL
+    metadata under already opened parent inodes; its canonical Git index v2
+    is likewise created without Git callbacks. Ambiguity retains the stage.
     """
+    import struct
+
     if (
-        path.parent != SOURCE_ROOT or SOURCE_ROOT.is_symlink()
+        path.parent != SOURCE_ROOT or path == SOURCE_ROOT
+        or SOURCE_ROOT.is_symlink()
         or path.exists() or path.is_symlink()
         or not SOURCE_REVISION_RE.fullmatch(target)
         or target not in HISTORICAL_SOURCE_PIN_TREES
+        or not expected_repo.is_absolute()
+        or expected_repo.is_symlink()
     ):
         raise RuntimeError("historical source staging scope is unsafe")
-    SOURCE_ROOT.mkdir(parents=True, exist_ok=True)
+    dir_flags = os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY | os.O_NOFOLLOW
+    read_flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW
+    create_flags = os.O_WRONLY | os.O_CLOEXEC | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
     env = _pinned_source_git_env()
     env.update({
         "GIT_NO_REPLACE_OBJECTS": "1",
@@ -5547,61 +5554,182 @@ def prepare_historical_source_worktree(
         "GIT_OPTIONAL_LOCKS": "0",
     })
 
-    def safe_git(cwd: Path, *args: str) -> bytes:
+    def regular_bytes(parent_fd: int, name: str, bound: int = 4096) -> bytes:
+        descriptor = os.open(name, read_flags, dir_fd=parent_fd)
         try:
-            result = subprocess.run(
-                [
-                    "/usr/bin/git",
-                    "-c", "core.hooksPath=/dev/null",
-                    "-c", "core.fsmonitor=false",
-                    "-c", "core.useBuiltinFSMonitor=false",
-                    "-c", "core.untrackedCache=false",
-                    "-c", "gc.auto=0",
-                    "-C", str(cwd), *args,
-                ],
-                env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                timeout=30, check=False,
-            )
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            raise RuntimeError("historical source safe Git operation unavailable") from exc
-        if result.returncode:
-            raise RuntimeError("historical source safe Git operation failed")
-        return result.stdout
+            before = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(before.st_mode) or before.st_nlink != 1
+                or before.st_size <= 0 or before.st_size > bound
+            ):
+                raise RuntimeError("historical staging Git metadata is unsafe")
+            data = bytearray()
+            while len(data) <= bound:
+                chunk = os.read(descriptor, min(4096, bound + 1 - len(data)))
+                if not chunk:
+                    break
+                data.extend(chunk)
+            after = os.fstat(descriptor)
+            current = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+            if (
+                len(data) != before.st_size
+                or (before.st_dev, before.st_ino, before.st_mtime_ns, before.st_ctime_ns)
+                != (after.st_dev, after.st_ino, after.st_mtime_ns, after.st_ctime_ns)
+                or (current.st_dev, current.st_ino) != (after.st_dev, after.st_ino)
+            ):
+                raise RuntimeError("historical staging Git metadata identity changed")
+            return bytes(data)
+        finally:
+            os.close(descriptor)
 
-    # --no-checkout avoids smudge/clean filtering. Hooks and FSMonitor are
-    # explicitly suppressed for add and index preparation, before trust.
-    safe_git(expected_repo, "worktree", "add", "--no-checkout", "--detach",
-             str(path), target)
-    safe_git(path, "read-tree", target)
-    tree = safe_git(expected_repo, "rev-parse", "--verify", target + "^{tree}").strip()
-    if tree != HISTORICAL_SOURCE_PIN_TREES[target].encode("ascii"):
-        raise RuntimeError("historical source pinned tree identity changed")
-    raw = safe_git(expected_repo, "ls-tree", "-rz", "--full-tree", target)
-    if len(raw) > 2 * 1024 * 1024:
-        raise RuntimeError("historical source tree listing exceeded bound")
-    records = [part for part in raw.split(b"\0") if part]
-    if not records or len(records) > 2048:
-        raise RuntimeError("historical source tree entry count unsafe")
-    entries: dict[bytes, tuple[bytes, bytes]] = {}
-    for record in records:
-        meta, sep, name = record.partition(b"\t")
-        fields = meta.split(b" ")
-        if (
-            not sep or len(fields) != 3 or fields[1] != b"blob"
-            or fields[0] not in {b"100644", b"100755"}
-            or re.fullmatch(rb"[0-9a-f]{40}", fields[2]) is None
-            or name.startswith(b"/") or name in entries
-            or any(x in {b"", b".", b"..", b".git"} for x in name.split(b"/"))
-        ):
-            raise RuntimeError("historical source has unsupported Git entry")
-        entries[name] = fields[0], fields[2]
-    dir_flags = os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY | os.O_NOFOLLOW
-    file_flags = os.O_WRONLY | os.O_CLOEXEC | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
-    root_fd = os.open(path, dir_flags)
-    total_bytes = 0
+    def write_all(fd: int, data: bytes) -> None:
+        view = memoryview(data)
+        while view:
+            written = os.write(fd, view)
+            if written <= 0:
+                raise RuntimeError("historical staging write incomplete")
+            view = view[written:]
+
+    parent_fd = os.open(SOURCE_ROOT.parent, dir_flags)
+    root_fd = None
+    stage_fd = None
+    repo_git_fd = None
+    worktrees_fd = None
+    gitdir_fd = None
     try:
+        root_fd = os.open(SOURCE_ROOT.name, dir_flags, dir_fd=parent_fd)
+        repo_git_fd = os.open(expected_repo / ".git", dir_flags)
+
+        def root_still_bound() -> None:
+            parent = SOURCE_ROOT.parent.lstat()
+            current = os.stat(SOURCE_ROOT.name, dir_fd=parent_fd, follow_symlinks=False)
+            parent_open = os.fstat(parent_fd)
+            root_open = os.fstat(root_fd)
+            if (
+                not stat.S_ISDIR(parent.st_mode)
+                or not stat.S_ISDIR(current.st_mode)
+                or (parent.st_dev, parent.st_ino) != (parent_open.st_dev, parent_open.st_ino)
+                or (current.st_dev, current.st_ino) != (root_open.st_dev, root_open.st_ino)
+            ):
+                raise RuntimeError("historical source root inode changed")
+
+        def stage_still_bound() -> None:
+            root_still_bound()
+            current = os.stat(path.name, dir_fd=root_fd, follow_symlinks=False)
+            opened = os.fstat(stage_fd)
+            if (
+                not stat.S_ISDIR(current.st_mode)
+                or (current.st_dev, current.st_ino) != (opened.st_dev, opened.st_ino)
+            ):
+                raise RuntimeError("historical staged worktree inode changed")
+
+        def safe_git(*args: str) -> bytes:
+            if not args or args[0] not in {"rev-parse", "ls-tree", "cat-file"}:
+                raise RuntimeError("historical staging denied mutating Git command")
+            try:
+                result = subprocess.run(
+                    [
+                        "/usr/bin/git",
+                        "-c", "core.hooksPath=/dev/null",
+                        "-c", "core.fsmonitor=false",
+                        "-c", "core.useBuiltinFSMonitor=false",
+                        "-c", "core.untrackedCache=false",
+                        "-c", "gc.auto=0",
+                        f"--git-dir=/proc/self/fd/{repo_git_fd}", *args,
+                    ],
+                    pass_fds=(repo_git_fd,), env=env,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    timeout=30, check=False,
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                raise RuntimeError("historical source safe Git operation unavailable") from exc
+            if result.returncode:
+                raise RuntimeError("historical source safe Git operation failed")
+            return result.stdout
+
+        root_still_bound()
+        try:
+            os.mkdir("worktrees", mode=0o700, dir_fd=repo_git_fd)
+        except FileExistsError:
+            pass
+        worktrees_fd = os.open("worktrees", dir_flags, dir_fd=repo_git_fd)
+
+        # Register the ordinary Git linked-worktree layout with O_EXCL files
+        # under held parent fds. No 'git worktree add' or 'git read-tree'
+        # may follow a name or execute a local callback before trust checks.
+        os.mkdir(path.name, mode=0o700, dir_fd=root_fd)
+        stage_fd = os.open(path.name, dir_flags, dir_fd=root_fd)
+        stage_still_bound()
+        with os.scandir(stage_fd) as scan:
+            if next(scan, None) is not None:
+                raise RuntimeError("historical staging directory is not empty")
+        os.mkdir(path.name, mode=0o700, dir_fd=worktrees_fd)
+        gitdir_fd = os.open(path.name, dir_flags, dir_fd=worktrees_fd)
+        gitdir = expected_repo / ".git" / "worktrees" / path.name
+
+        def create_metadata(parent: int, name: str, payload: bytes) -> None:
+            descriptor = os.open(name, create_flags, 0o600, dir_fd=parent)
+            try:
+                write_all(descriptor, payload)
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+
+        create_metadata(gitdir_fd, "commondir", b"../..\n")
+        create_metadata(gitdir_fd, "HEAD", (target + "\n").encode("ascii"))
+        create_metadata(
+            gitdir_fd, "gitdir", (str(path / ".git") + "\n").encode("utf-8")
+        )
+        create_metadata(
+            stage_fd, ".git", ("gitdir: " + str(gitdir) + "\n").encode("utf-8")
+        )
+        stage_still_bound()
+        current_gitdir = os.stat(path.name, dir_fd=worktrees_fd, follow_symlinks=False)
+        opened_gitdir = os.fstat(gitdir_fd)
+        if (current_gitdir.st_dev, current_gitdir.st_ino) != (
+            opened_gitdir.st_dev, opened_gitdir.st_ino
+        ):
+            raise RuntimeError("historical staging Gitdir inode changed")
+        gitfile = regular_bytes(stage_fd, ".git")
+        if (
+            gitfile != ("gitdir: " + str(gitdir) + "\n").encode("utf-8")
+            or regular_bytes(gitdir_fd, "gitdir")
+            != (str(path / ".git") + "\n").encode("utf-8")
+            or regular_bytes(gitdir_fd, "HEAD", 128) != (target + "\n").encode("ascii")
+            or regular_bytes(gitdir_fd, "commondir", 128).strip() != b"../.."
+        ):
+            raise RuntimeError("historical staging linked Gitdir metadata drifted")
+
+        tree = safe_git("rev-parse", "--verify", target + "^{tree}").strip()
+        if tree != HISTORICAL_SOURCE_PIN_TREES[target].encode("ascii"):
+            raise RuntimeError("historical source pinned tree identity changed")
+        raw = safe_git("ls-tree", "-rz", "--full-tree", target)
+        if len(raw) > 2 * 1024 * 1024:
+            raise RuntimeError("historical source tree listing exceeded bound")
+        records = [part for part in raw.split(b"\0") if part]
+        if not records or len(records) > 2048:
+            raise RuntimeError("historical source tree entry count unsafe")
+        entries: dict[bytes, tuple[bytes, bytes]] = {}
+        for record in records:
+            metadata, sep, name = record.partition(b"\t")
+            fields = metadata.split(b" ")
+            if (
+                not sep or len(fields) != 3 or fields[1] != b"blob"
+                or fields[0] not in {b"100644", b"100755"}
+                or re.fullmatch(rb"[0-9a-f]{40}", fields[2]) is None
+                or name.startswith(b"/") or name in entries
+                or any(x in {b"", b".", b"..", b".git"} for x in name.split(b"/"))
+            ):
+                raise RuntimeError("historical source has unsupported Git entry")
+            entries[name] = fields[0], fields[2]
+
+        # Format v2 is Git's fixed binary DIRC index, SHA-1 OIDs, stage=0.
+        # Direct O_EXCL creation in the captured Gitdir prevents any
+        # untrusted Git command from selecting or replacing sibling indexes.
+        index_bytes = bytearray(b"DIRC" + struct.pack("!II", 2, len(entries)))
+        total_bytes = 0
         for name, (mode, oid) in sorted(entries.items()):
-            blob = safe_git(expected_repo, "cat-file", "blob", oid.decode("ascii"))
+            blob = safe_git("cat-file", "blob", oid.decode("ascii"))
             total_bytes += len(blob)
             if len(blob) > 1024 * 1024 or total_bytes > 32 * 1024 * 1024:
                 raise RuntimeError("historical source blob size exceeded bound")
@@ -5610,7 +5738,8 @@ def prepare_historical_source_worktree(
             ).hexdigest().encode("ascii")
             if object_id != oid:
                 raise RuntimeError("historical source object bytes changed")
-            directory_fd = os.dup(root_fd)
+
+            directory_fd = os.dup(stage_fd)
             try:
                 parts = name.split(b"/")
                 for component in parts[:-1]:
@@ -5621,23 +5750,71 @@ def prepare_historical_source_worktree(
                     next_fd = os.open(component, dir_flags, dir_fd=directory_fd)
                     os.close(directory_fd)
                     directory_fd = next_fd
-                out_fd = os.open(parts[-1], file_flags, 0o600, dir_fd=directory_fd)
+                out_fd = os.open(parts[-1], create_flags, 0o600, dir_fd=directory_fd)
                 try:
-                    view = memoryview(blob)
-                    while view:
-                        written = os.write(out_fd, view)
-                        if written <= 0:
-                            raise RuntimeError("historical source blob write incomplete")
-                        view = view[written:]
+                    write_all(out_fd, blob)
                     os.fchmod(out_fd, 0o700 if mode == b"100755" else 0o600)
                     os.fsync(out_fd)
                 finally:
                     os.close(out_fd)
             finally:
                 os.close(directory_fd)
-    finally:
-        os.close(root_fd)
 
+            # Git permits zero stat cache fields; its verifier rehashes
+            # materialized files and checks canonical committed blob OIDs.
+            stat_cache = (0, 0, 0, 0, 0, 0, int(mode, 8), 0, 0, len(blob))
+            item = bytearray(struct.pack("!10I", *stat_cache))
+            item.extend(bytes.fromhex(oid.decode("ascii")))
+            item.extend(struct.pack("!H", min(len(name), 0xFFF)))
+            item.extend(name)
+            item.append(0)
+            while len(item) % 8:
+                item.append(0)
+            index_bytes.extend(item)
+        if len(index_bytes) > 2 * 1024 * 1024:
+            raise RuntimeError("historical source index exceeds bound")
+        index_bytes.extend(hashlib.sha1(index_bytes).digest())
+        descriptor = os.open("index", create_flags, 0o600, dir_fd=gitdir_fd)
+        try:
+            write_all(descriptor, index_bytes)
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        os.fsync(stage_fd)
+        os.fsync(gitdir_fd)
+        stage_still_bound()
+        if (
+            regular_bytes(stage_fd, ".git") != gitfile
+            or regular_bytes(gitdir_fd, "gitdir")
+            != (str(path / ".git") + "\n").encode("utf-8")
+        ):
+            raise RuntimeError("historical staging Git metadata drifted")
+    finally:
+        for descriptor in (gitdir_fd, worktrees_fd, repo_git_fd, stage_fd, root_fd, parent_fd):
+            if descriptor is not None:
+                os.close(descriptor)
+
+
+
+def _exchange_historical_backlink(
+    directory_fd: int, staged_name: str, published_name: str
+) -> None:
+    """Swap two names without destroying either inode (Linux RENAME_EXCHANGE)."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    renameat2 = getattr(libc, "renameat2", None)
+    if renameat2 is None:
+        raise RuntimeError("historical backlink requires kernel atomic exchange")
+    renameat2.argtypes = (
+        ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint,
+    )
+    renameat2.restype = ctypes.c_int
+    if renameat2(
+        directory_fd, os.fsencode(staged_name),
+        directory_fd, os.fsencode(published_name),
+        2,  # RENAME_EXCHANGE; both occupied entries remain present.
+    ) != 0:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error))
 
 
 def _move_historical_worktree_noreplace(
@@ -5718,12 +5895,27 @@ def _move_historical_worktree_noreplace(
 
     def write_backlink(gitdir: Path, identity: tuple[int, int],
                        previous: bytes, replacement: bytes) -> None:
+        nonlocal backlink
         assert_gitdir_bound(gitdir, identity)
         if read_regular(gitdir_fd, "gitdir") != previous:
             raise RuntimeError("historical relocation original backlink changed")
-        temporary = ".repoground-gitdir-" + uuid.uuid4().hex
+        original_fd = os.open("gitdir", file_flags, dir_fd=gitdir_fd)
+        try:
+            original_stat = os.fstat(original_fd)
+            named = os.stat("gitdir", dir_fd=gitdir_fd, follow_symlinks=False)
+            if (
+                not stat.S_ISREG(original_stat.st_mode)
+                or original_stat.st_nlink != 1
+                or (original_stat.st_dev, original_stat.st_ino)
+                != (named.st_dev, named.st_ino)
+            ):
+                raise RuntimeError("historical relocation backlink original inode unsafe")
+            previous_identity = (original_stat.st_dev, original_stat.st_ino)
+        finally:
+            os.close(original_fd)
+        retained = ".repoground-gitdir-previous-" + uuid.uuid4().hex
         fd = os.open(
-            temporary,
+            retained,
             os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW,
             0o600, dir_fd=gitdir_fd,
         )
@@ -5734,27 +5926,40 @@ def _move_historical_worktree_noreplace(
                 if written <= 0:
                     raise RuntimeError("historical relocation backlink write incomplete")
                 view = view[written:]
+            staged_stat = os.fstat(fd)
+            replacement_identity = (staged_stat.st_dev, staged_stat.st_ino)
             os.fsync(fd)
         finally:
             os.close(fd)
-        try:
-            if read_regular(gitdir_fd, "gitdir") != previous:
-                raise RuntimeError("historical relocation backlink raced")
-            assert_gitdir_bound(gitdir, identity)
-            # Atomic replacement is scoped to the preopened, verified Gitdir.
-            # The destination is never obtained from destination/.git.
-            os.replace(
-                temporary, "gitdir", src_dir_fd=gitdir_fd, dst_dir_fd=gitdir_fd
-            )
-            os.fsync(gitdir_fd)
-        finally:
-            try:
-                os.unlink(temporary, dir_fd=gitdir_fd)
-            except FileNotFoundError:
-                pass
-        if read_regular(gitdir_fd, "gitdir") != replacement:
-            raise RuntimeError("historical relocation backlink postwrite drifted")
+        # Do NOT use check-then-os.replace: a same-UID racer can exchange the
+        # 'gitdir' leaf after the check; replace would silently DELETE that
+        # foreign file. Atomic exchange retains both old and new inodes.
+        if read_regular(gitdir_fd, "gitdir") != previous:
+            raise RuntimeError("historical relocation backlink raced before exchange")
         assert_gitdir_bound(gitdir, identity)
+        _exchange_historical_backlink(gitdir_fd, retained, "gitdir")
+        # The effect has happened even if any subsequent fsync/readback fails.
+        # Update outer rollback state before attempting durability checks.
+        backlink = replacement
+        new_stat = os.stat("gitdir", dir_fd=gitdir_fd, follow_symlinks=False)
+        preserved_stat = os.stat(retained, dir_fd=gitdir_fd, follow_symlinks=False)
+        if (
+            (new_stat.st_dev, new_stat.st_ino) != replacement_identity
+            or (preserved_stat.st_dev, preserved_stat.st_ino) != previous_identity
+            or read_regular(gitdir_fd, "gitdir") != replacement
+            or read_regular(gitdir_fd, retained) != previous
+        ):
+            # A raced foreign file remains at 'retained' (not unlinked).
+            # The caller must fail closed and owner-reconcile all names.
+            raise RuntimeError(
+                "historical relocation exchanged backlink raced; "
+                "both entries retained for owner reconciliation"
+            )
+        # Preserve the exact original backlink in this private, randomly
+        # named Gitdir entry. No pathname unlink of a raced foreign inode.
+        os.fsync(gitdir_fd)
+        assert_gitdir_bound(gitdir, identity)
+
 
     try:
         root_still_bound()
