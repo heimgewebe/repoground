@@ -5849,16 +5849,27 @@ def prepare_historical_source_worktree(
 
         root_still_bound()
         repo_still_bound()
-        try:
-            os.mkdir("worktrees", mode=0o700, dir_fd=repo_git_fd)
-        except FileExistsError:
-            pass
-        worktrees_snapshot = os.stat(
-            "worktrees", dir_fd=repo_git_fd, follow_symlinks=False
-        )
-        if not stat.S_ISDIR(worktrees_snapshot.st_mode):
-            raise RuntimeError("historical worktrees is not a directory")
+        # The canonical linked-worktree registry must already exist: mkdirat
+        # followed by an inode snapshot can adopt an attacker-exchanged empty
+        # directory. Bind the pre-existing registry before any Git metadata
+        # write, then compare its directory entry through the held .git fd.
+        # Initial Git registry provisioning is deliberately outside the
+        # historical-source security boundary.
+        # Capture the pre-existing registry dentry inode through the held .git
+        # descriptor *before* opening its pathname. A same-UID exchange during
+        # the scan-to-open boundary is rejected without planting Git metadata.
+        with os.scandir(repo_git_fd) as scan:
+            registry = [item for item in scan if item.name == "worktrees"]
+        if len(registry) != 1 or not registry[0].is_dir(follow_symlinks=False):
+            raise RuntimeError("historical canonical worktrees registry not provisioned")
+        expected_registry_ino = registry[0].inode()
         worktrees_fd = os.open("worktrees", dir_flags, dir_fd=repo_git_fd)
+        worktrees_snapshot = os.fstat(worktrees_fd)
+        if (
+            worktrees_snapshot.st_dev != os.fstat(repo_git_fd).st_dev
+            or worktrees_snapshot.st_ino != expected_registry_ino
+        ):
+            raise RuntimeError("historical worktrees registry exchanged before binding")
         repo_still_bound()
 
         # Register the ordinary Git linked-worktree layout with O_EXCL files
@@ -5961,26 +5972,44 @@ def prepare_historical_source_worktree(
             if object_id != oid:
                 raise RuntimeError("historical source object bytes changed")
 
-            directory_fd = os.dup(stage_fd)
+            # Persist nested Git tree dentries bottom-up. fsync(stage_fd)
+            # alone does not persist newly created files under scripts/... .
+            directory_fds = [os.dup(stage_fd)]
             try:
                 parts = name.split(b"/")
                 for component in parts[:-1]:
+                    parent = directory_fds[-1]
                     try:
-                        os.mkdir(component, mode=0o700, dir_fd=directory_fd)
+                        os.mkdir(component, mode=0o700, dir_fd=parent)
                     except FileExistsError:
                         pass
-                    next_fd = os.open(component, dir_flags, dir_fd=directory_fd)
-                    os.close(directory_fd)
-                    directory_fd = next_fd
-                out_fd = os.open(parts[-1], create_flags, 0o600, dir_fd=directory_fd)
+                    before = os.stat(component, dir_fd=parent, follow_symlinks=False)
+                    next_fd = os.open(component, dir_flags, dir_fd=parent)
+                    opened = os.fstat(next_fd)
+                    if (
+                        not stat.S_ISDIR(before.st_mode)
+                        or (before.st_dev, before.st_ino)
+                        != (opened.st_dev, opened.st_ino)
+                    ):
+                        os.close(next_fd)
+                        raise RuntimeError("historical tracked directory swapped")
+                    directory_fds.append(next_fd)
+                stage_still_bound()
+                out_fd = os.open(parts[-1], create_flags, 0o600, dir_fd=directory_fds[-1])
                 try:
                     write_all(out_fd, blob)
                     os.fchmod(out_fd, 0o700 if mode == b"100755" else 0o600)
                     os.fsync(out_fd)
                 finally:
                     os.close(out_fd)
+                # Child directory first, then its parent, while every ancestor
+                # FD still names the original directory rather than a raceable path.
+                for directory_fd in reversed(directory_fds):
+                    os.fsync(directory_fd)
+                stage_still_bound()
             finally:
-                os.close(directory_fd)
+                for directory_fd in reversed(directory_fds):
+                    os.close(directory_fd)
 
             # Git permits zero stat cache fields; its verifier rehashes
             # materialized files and checks canonical committed blob OIDs.
@@ -6291,6 +6320,55 @@ def _move_historical_worktree_noreplace(
     except (RuntimeError, OSError) as error:
         if not moved:
             raise
+
+        # renameat2(RENAME_NOREPLACE) successfully moves the CURRENT source
+        # name, which may no longer denote the captured stage inode. Never
+        # leave an unexpected inode at the privileged fixed consumer name.
+        # Preserve it through a distinct no-clobber recovery name; neither
+        # unlink nor recursive removal is authorized under this race.
+        try:
+            actually_moved = os.stat(
+                destination.name, dir_fd=root_fd, follow_symlinks=False
+            )
+        except FileNotFoundError as lost_destination:
+            raise RuntimeError(
+                "historical relocation destination outcome unknown; owner reconciliation required"
+            ) from lost_destination
+        if (actually_moved.st_dev, actually_moved.st_ino) != expected_identity:
+            for _attempt in range(4):
+                retained_name = destination.name + "--recovery-" + uuid.uuid4().hex[:12]
+                try:
+                    _rename_historical_noreplace(
+                        root_fd, destination.name, root_fd, retained_name
+                    )
+                except FileExistsError:
+                    continue
+                # The move already happened; record that fact before trying
+                # durability checks. A subsequent crash or race fails closed.
+                os.fsync(root_fd)
+                retained_stat = os.stat(
+                    retained_name, dir_fd=root_fd, follow_symlinks=False
+                )
+                if (retained_stat.st_dev, retained_stat.st_ino) != (
+                    actually_moved.st_dev, actually_moved.st_ino
+                ):
+                    raise RuntimeError(
+                        "historical relocated foreign inode changed during quarantine"
+                    ) from error
+                try:
+                    os.stat(destination.name, dir_fd=root_fd, follow_symlinks=False)
+                except FileNotFoundError:
+                    pass
+                else:
+                    raise RuntimeError(
+                        "historical rejected consumer name reappeared; owner reconciliation required"
+                    ) from error
+                raise RuntimeError(
+                    "historical relocation foreign moved inode quarantined; owner reconciliation required"
+                ) from error
+            raise RuntimeError(
+                "historical foreign moved inode quarantine collision; owner reconciliation required"
+            ) from error
         if not restore_on_repair_failure:
             raise RuntimeError(
                 "historical quarantine backlink reconciliation requires owner review"

@@ -378,6 +378,7 @@ def test_actual_git_staged_source_publishes_exact_commit_and_is_idempotent(tmp_p
         return result.stdout.strip()
 
     git(entry.path, "init", "-q")
+    (entry.path / ".git" / "worktrees").mkdir(exist_ok=True)
     git(entry.path, "config", "user.name", "source-pin-integration-test")
     git(entry.path, "config", "user.email", "source-pin-test@example.invalid")
     approved = {}
@@ -569,6 +570,7 @@ def test_historical_pin_rejects_hidden_index_flag_and_quarantines_owned_source(
         return result.stdout.strip()
 
     git(entry.path, "init", "-q")
+    (entry.path / ".git" / "worktrees").mkdir(exist_ok=True)
     git(entry.path, "config", "user.name", "source-custody-test")
     git(entry.path, "config", "user.email", "source-custody-test@example.invalid")
     (entry.path / "data").mkdir()
@@ -711,6 +713,7 @@ def test_historical_pinned_tree_detects_extra_file_planted_after_object_read(
         return result.stdout.strip()
 
     git(entry.path, "init", "-q")
+    (entry.path / ".git" / "worktrees").mkdir(exist_ok=True)
     git(entry.path, "config", "user.name", "source-identity-test")
     git(entry.path, "config", "user.email", "source-identity@example.invalid")
     (entry.path / "data").mkdir()
@@ -787,6 +790,7 @@ def disposable_verified_git_tree(tmp_path, publisher):
         return result.stdout.strip()
 
     git(entry.path, "init", "-q")
+    (entry.path / ".git" / "worktrees").mkdir(exist_ok=True)
     git(entry.path, "config", "user.name", "historical-tree-security-test")
     git(entry.path, "config", "user.email", "historical-tree@example.invalid")
     (entry.path / "safe.py").write_bytes(b"safe\n")
@@ -1076,6 +1080,7 @@ def test_pinned_verifier_does_not_execute_untrusted_local_clean_filter(
         return result.stdout.strip()
 
     git(entry.path, "init", "-q")
+    (entry.path / ".git" / "worktrees").mkdir(exist_ok=True)
     git(entry.path, "config", "user.name", "historical-pin-test")
     git(entry.path, "config", "user.email", "historical-pin@example.invalid")
     (entry.path / "data").mkdir()
@@ -1135,6 +1140,7 @@ def test_pinned_verifier_rejects_foreign_gitfile_before_any_git_command(
         return result.stdout.strip()
 
     git(entry.path, "init", "-q")
+    (entry.path / ".git" / "worktrees").mkdir(exist_ok=True)
     git(entry.path, "config", "user.name", "historical-pin-test")
     git(entry.path, "config", "user.email", "historical-pin@example.invalid")
     (entry.path / "data").mkdir()
@@ -1355,6 +1361,9 @@ def _p1_test_source_context(tmp_path):
         return completed.stdout.strip()
 
     git("init", "-q")
+    # The protected publisher requires an already provisioned canonical Git
+    # worktree registry: fresh test repositories model that bootstrap here.
+    (entry.path / ".git" / "worktrees").mkdir(exist_ok=True)
     git("config", "user.name", "historical-p1-negative-test")
     git("config", "user.email", "historical-p1@example.invalid")
     (entry.path / "scanner.py").write_bytes(b"reviewed code\n")
@@ -1788,7 +1797,7 @@ def test_historical_worktrees_inode_exchange_never_writes_foreign_index(
 
     entry, root, fixed, head, constants, _ = _p1_test_source_context(tmp_path)
     registered = entry.path / ".git" / "worktrees"
-    registered.mkdir()
+    registered.mkdir(exist_ok=True)
     parked = tmp_path / "retained-real-worktrees"
     foreign = tmp_path / "foreign-worktrees"
     foreign.mkdir()
@@ -2116,3 +2125,120 @@ def test_historical_quarantine_refuses_raced_intermediate_symlink_parent(
     assert (fake_root / fixed.name).is_symlink()
     assert marker.read_bytes() == b"foreign owner unchanged"
     assert parked.is_dir()
+
+
+def test_historical_promotion_retracts_foreign_directory_moved_into_consumer(
+    tmp_path, publisher,
+):
+    """P1 RED: successful renameat2 of an interposed foreign inode must vacate fixed."""
+    entry, root, fixed, _head, constants, _ = _p1_test_source_context(tmp_path)
+    foreign = tmp_path / "valuable-foreign-directory"
+    foreign.mkdir()
+    (foreign / "owner-bytes").write_bytes(b"foreign bytes must survive unchanged")
+    retained_original = tmp_path / "retained-original-stage"
+    injected = []
+    actual_rename = publisher["_rename_historical_noreplace"]
+
+    def source_name_swap(source_fd, source_name, dest_fd, dest_name):
+        if dest_name == fixed.name and not injected:
+            (root / source_name).rename(retained_original)
+            foreign.rename(root / source_name)
+            injected.append(True)
+        return actual_rename(source_fd, source_name, dest_fd, dest_name)
+
+    ensure = publisher["ensure_historical_source_pins"]
+    with mock.patch.dict(ensure.__globals__, {
+        **constants, "_rename_historical_noreplace": source_name_swap,
+    }):
+        with pytest.raises(RuntimeError):
+            ensure(entry, "main")
+
+    assert injected, "stage-name swap was not exercised at the atomic rename"
+    assert not fixed.exists() and not fixed.is_symlink(), (
+        "foreign directory remains at fixed privileged consumer path after rejected move"
+    )
+    assert retained_original.is_dir(), "the original stage must not be deleted"
+    preserved = list(root.rglob("owner-bytes"))
+    assert len(preserved) == 1, "exactly one retained foreign owner directory required"
+    assert preserved[0].read_bytes() == b"foreign bytes must survive unchanged"
+
+
+def test_historical_worktrees_swap_before_inode_snapshot_cannot_plant_git_metadata(
+    tmp_path, publisher,
+):
+    """P1 RED: a real-dir swap during mkdir/EEXIST -> stat must not become authority."""
+    import os
+
+    entry, root, fixed, _head, constants, _ = _p1_test_source_context(tmp_path)
+    original_registry = entry.path / ".git" / "worktrees"
+    parked = tmp_path / "retained-canonical-registry"
+    foreign = tmp_path / "attacker-registry"
+    foreign.mkdir()
+    (foreign / "owner-only").write_bytes(b"must preserve exact foreign files")
+    real_stat = os.stat
+    injected = []
+
+    def swap_before_registry_stat(name, *args, **kwargs):
+        if name == "worktrees" and kwargs.get("dir_fd") is not None and not injected:
+            assert original_registry.is_dir()
+            original_registry.rename(parked)
+            foreign.rename(original_registry)
+            injected.append(True)
+        return real_stat(name, *args, **kwargs)
+
+    ensure = publisher["ensure_historical_source_pins"]
+    with mock.patch.dict(ensure.__globals__, constants):
+        with mock.patch.object(os, "stat", swap_before_registry_stat):
+            with pytest.raises((OSError, RuntimeError)):
+                ensure(entry, "main")
+
+    assert sorted(p.name for p in original_registry.iterdir()) == ["owner-only"], (
+        "foreign worktrees registry was accepted and filled with a Gitdir/index"
+    )
+    assert (original_registry / "owner-only").read_bytes() == (
+        b"must preserve exact foreign files"
+    )
+    assert not fixed.exists(), "foreign registry cannot authenticate a source pin"
+
+
+def test_historical_nested_payload_directory_fsynced_before_promotion(
+    tmp_path, publisher,
+):
+    """P2 RED: nested parent dentries must be durable before pin publication."""
+    import os
+    import stat
+
+    entry, root, _, _head, constants, git = _p1_test_source_context(tmp_path)
+    nested = entry.path / "scripts" / "nested.py"
+    nested.parent.mkdir()
+    nested.write_bytes(b"nested reviewed source file\n")
+    git("add", "scripts/nested.py")
+    git("commit", "-qm", "add reviewed nested source")
+    head = git("rev-parse", "HEAD")
+    fixed = root / f"heimgewebe__heim-pc__main--{head}"
+    constants["HISTORICAL_SOURCE_PIN_TREES"] = {head: git("rev-parse", "HEAD^{tree}")}
+    constants["HISTORICAL_SOURCE_PINS"] = {
+        (entry.key, "main"): {
+            head: {
+                "scanner.py": sha256(b"reviewed code\n").hexdigest(),
+                "scripts/nested.py": sha256(b"nested reviewed source file\n").hexdigest(),
+            },
+        },
+    }
+    actual_fsync = os.fsync
+    synced_nested = []
+
+    def record_directory_durability(fd):
+        metadata = os.fstat(fd)
+        if stat.S_ISDIR(metadata.st_mode):
+            physical_name = os.readlink(f"/proc/self/fd/{fd}")
+            if physical_name.endswith("/scripts"):
+                synced_nested.append(True)
+        return actual_fsync(fd)
+
+    ensure = publisher["ensure_historical_source_pins"]
+    with mock.patch.dict(ensure.__globals__, constants):
+        with mock.patch.object(os, "fsync", record_directory_durability):
+            assert ensure(entry, "main") == [fixed]
+    assert (fixed / "scripts/nested.py").read_bytes() == b"nested reviewed source file\n"
+    assert synced_nested, "a tracked nested directory was not fsynced before promotion"
