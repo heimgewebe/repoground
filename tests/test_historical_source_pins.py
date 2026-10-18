@@ -132,28 +132,26 @@ def test_managed_historical_source_is_exactly_materialized_and_reverified(tmp_pa
     def verify(path, repository, sha, digests):
         assert repository == entry.path and sha == HISTORICAL_HEAD
         calls.append(("verify", path))
-    def run(argv, **kwargs):
-        assert argv[-2] == "repair"
-        destination = Path(argv[-1])
-        assert destination == fixed and fixed.is_dir()
-        calls.append(("repair", destination))
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
+    def move(_entry, origin, destination, _identity, *, restore_on_repair_failure):
+        assert destination == fixed and origin.is_dir()
+        origin.rename(destination)
+        calls.append(("backlink", destination))
     with mock.patch.dict(ensure.__globals__, {
         "SOURCE_ROOT": source_root,
         "HISTORICAL_SOURCE_PINS": {
             ("heimgewebe/heim-pc", "main"): {HISTORICAL_HEAD: {"a": "e" * 64}}
         },
-        "prepare_managed_worktree": prepare,
+        "prepare_historical_source_worktree": prepare,
         "_verify_historical_pinned_source": verify,
         "_managed_worktree_git_env": lambda *args, **kwargs: {"GIT_NO_REPLACE_OBJECTS": "1"},
-        "run": run,
+        "_move_historical_worktree_noreplace": move,
         "ensure_source_worktree": mock.Mock(
             side_effect=AssertionError("direct fixed-path checkout forbidden")
         ),
     }):
         assert ensure(entry, "main") == [fixed]
     assert calls[0][0] == "prepare"
-    assert [action for action, _ in calls] == ["prepare", "verify", "verify", "repair", "verify"]
+    assert [action for action, _ in calls] == ["prepare", "verify", "verify", "backlink", "verify"]
     assert fixed.is_dir()
 
 
@@ -318,7 +316,7 @@ def test_historical_pin_failed_stage_is_retained_for_owner_cleanup(tmp_path, pub
         "HISTORICAL_SOURCE_PINS": {
             ("heimgewebe/heim-pc", "main"): {HISTORICAL_HEAD: {"a": "e" * 64}}
         },
-        "prepare_managed_worktree": prepare,
+        "prepare_historical_source_worktree": prepare,
         "_verify_historical_pinned_source": mock.Mock(
             side_effect=RuntimeError("historical pinned source payload digest mismatch")
         ),
@@ -485,12 +483,10 @@ def test_postmove_invalid_pin_is_quarantined_and_fixed_path_removed(
         if path == expected:
             raise RuntimeError("historical pinned source payload digest mismatch")
 
-    def run(argv, **kwargs):
-        assert argv[-2] == "repair"
-        target = Path(argv[-1])
-        assert target.is_dir()
+    def move(_entry, origin, target, _identity, *, restore_on_repair_failure):
+        assert origin.is_dir()
+        origin.rename(target)
         recorded["repairs"].append(target)
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     with mock.patch.dict(ensure.__globals__, {
         "SOURCE_ROOT": root,
@@ -499,12 +495,12 @@ def test_postmove_invalid_pin_is_quarantined_and_fixed_path_removed(
                 HISTORICAL_HEAD: {"one": "a" * 64}
             }
         },
-        "prepare_managed_worktree": prepare,
+        "prepare_historical_source_worktree": prepare,
         "_verify_historical_pinned_source": verify,
         "_managed_worktree_git_env": lambda *a, **kw: {
             "GIT_NO_REPLACE_OBJECTS": "1"
         },
-        "run": run,
+        "_move_historical_worktree_noreplace": move,
         "record_source_recovery": recovery,
         "assert_managed_worktree_identity": mock.Mock(),
     }):
@@ -658,15 +654,13 @@ def test_postmove_invalid_pin_with_raced_staging_name_is_still_quarantined(
         if path == fixed:
             raise RuntimeError("invalid source after promotion")
 
-    def repair(argv, **_kwargs):
-        assert argv[-2] == "repair"
-        target = Path(argv[-1])
-        assert target.is_dir()
+    def move(_entry, origin, target, _identity, *, restore_on_repair_failure):
+        assert origin.is_dir()
+        origin.rename(target)
         state["repairs"].append(target)
         if target == fixed:
             # Simulate a raced new staging directory after atomic promotion.
             state["stage"].mkdir()
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     def recovery(**kwargs):
         state["recovery"] = kwargs
@@ -678,13 +672,13 @@ def test_postmove_invalid_pin_with_raced_staging_name_is_still_quarantined(
                 HISTORICAL_HEAD: {"one": "a" * 64}
             }
         },
-        "prepare_managed_worktree": prepare,
+        "prepare_historical_source_worktree": prepare,
         "_verify_historical_pinned_source": verify,
         "_managed_worktree_git_env": lambda *_args, **_kw: {
             "GIT_NO_REPLACE_OBJECTS": "1"
         },
         "assert_managed_worktree_identity": mock.Mock(),
-        "run": repair,
+        "_move_historical_worktree_noreplace": move,
         "record_source_recovery": recovery,
     }):
         with pytest.raises(RuntimeError, match="postmove verification refused"):
@@ -986,14 +980,15 @@ def test_failed_git_promotion_after_rename_retracts_exact_worktree(
         path.mkdir()
         state["stage"] = path
 
-    def repair_then_fail(argv, **_kwargs):
-        assert argv[-2] == "repair"
-        dest = Path(argv[-1])
-        assert dest.is_dir()
+    def relocate_then_fail(_entry, original, dest, _identity, *, restore_on_repair_failure):
+        assert original.is_dir()
+        original.rename(dest)
         state["repairs"].append(dest)
         if dest == fixed:
-            raise RuntimeError("git repair returned nonzero after atomic rename")
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
+            assert restore_on_repair_failure
+            # Actual mover returns the original inode to the stage on failure.
+            dest.rename(original)
+            raise RuntimeError("backlink reconciliation failed after atomic rename")
 
     with mock.patch.dict(ensure.__globals__, {
         "SOURCE_ROOT": root,
@@ -1002,19 +997,19 @@ def test_failed_git_promotion_after_rename_retracts_exact_worktree(
                 HISTORICAL_HEAD: {"one": "a" * 64}
             }
         },
-        "prepare_managed_worktree": prepare,
+        "prepare_historical_source_worktree": prepare,
         "_verify_historical_pinned_source": mock.Mock(),
         "_managed_worktree_git_env": lambda *_a, **_kw: {
             "GIT_NO_REPLACE_OBJECTS": "1"
         },
         "assert_managed_worktree_identity": mock.Mock(),
-        "run": repair_then_fail,
+        "_move_historical_worktree_noreplace": relocate_then_fail,
         "record_source_recovery": mock.Mock(),
     }):
         with pytest.raises(RuntimeError, match="staging retained for owner cleanup"):
             ensure(entry, "main")
     assert not fixed.exists()
-    assert state["repairs"] == [fixed, state["stage"]]
+    assert state["repairs"] == [fixed]
     assert state["stage"].is_dir()
 
 
@@ -1035,13 +1030,11 @@ def test_postmove_raced_symlink_is_retracted_without_unlinking_target(
     def prepare(path, **_kwargs):
         path.mkdir()
 
-    def repair_with_raced_symlink(argv, **_kwargs):
-        assert argv[-2] == "repair"
-        destination = Path(argv[-1])
-        assert destination == fixed and fixed.is_dir()
+    def move(_entry, source, destination, _identity, *, restore_on_repair_failure):
+        assert destination == fixed and source.is_dir()
+        source.rename(destination)
         fixed.rename(displaced)
         fixed.symlink_to(outside, target_is_directory=True)
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     with mock.patch.dict(ensure.__globals__, {
         "SOURCE_ROOT": root,
@@ -1050,12 +1043,12 @@ def test_postmove_raced_symlink_is_retracted_without_unlinking_target(
                 HISTORICAL_HEAD: {"one": "a" * 64}
             }
         },
-        "prepare_managed_worktree": prepare,
+        "prepare_historical_source_worktree": prepare,
         "_verify_historical_pinned_source": mock.Mock(),
         "_managed_worktree_git_env": lambda *_a, **_kw: {
             "GIT_NO_REPLACE_OBJECTS": "1"
         },
-        "run": repair_with_raced_symlink,
+        "_move_historical_worktree_noreplace": move,
     }):
         with pytest.raises(RuntimeError, match="consumer symlink retracted"):
             ensure(entry, "main")
@@ -1446,3 +1439,63 @@ def test_historical_promotion_refuses_raced_existing_directory_without_nesting(
     assert not (fixed / stages[0].name).exists(), (
         "Git worktree was nested into a raced foreign destination"
     )
+
+
+def test_historical_pin_smudge_filter_never_runs_before_trust_gate(tmp_path, publisher):
+    """Repo-local .git/info/attributes must not execute a filter during staging."""
+    entry, root, fixed, head, constants, git = _p1_test_source_context(tmp_path)
+    marker = tmp_path / "repo-local-smudge-executed"
+    filter_script = tmp_path / "smudge-attack.sh"
+    filter_script.write_text(
+        "#!/bin/sh\nprintf ATTACK > '" + str(marker) + "'\ncat\n",
+        encoding="utf-8",
+    )
+    filter_script.chmod(0o700)
+    git("config", "filter.attacker.smudge", str(filter_script))
+    git("config", "filter.attacker.required", "true")
+    (entry.path / ".git" / "info").mkdir(exist_ok=True)
+    (entry.path / ".git" / "info" / "attributes").write_text(
+        "scanner.py filter=attacker\n", encoding="utf-8"
+    )
+    ensure = publisher["ensure_historical_source_pins"]
+    with mock.patch.dict(ensure.__globals__, constants):
+        assert ensure(entry, "main") == [fixed]
+    assert not marker.exists(), "pinned source executed repo-local smudge"
+    assert (fixed / "scanner.py").read_bytes() == b"reviewed code\n"
+
+
+def test_historical_relocation_refuses_sibling_gitdir_substitution_before_mutation(
+    tmp_path, publisher,
+):
+    """A swap of promoted .git may not repoint a sibling's admin backlink."""
+    entry, root, fixed, head, constants, git = _p1_test_source_context(tmp_path)
+    sibling = tmp_path / "sibling"
+    git("worktree", "add", "--detach", str(sibling), head)
+    sibling_gitdir = Path(
+        (sibling / ".git").read_text(encoding="ascii").removeprefix("gitdir: ").strip()
+    )
+    backlink = sibling_gitdir / "gitdir"
+    original = backlink.read_bytes()
+    ensure = publisher["ensure_historical_source_pins"]
+    atomic_rename = publisher["_rename_historical_noreplace"]
+    injected = []
+
+    def substituted_gitfile(from_fd, source, to_fd, destination):
+        atomic_rename(from_fd, source, to_fd, destination)
+        if destination == fixed.name and not injected:
+            # Injection in precisely the old renameat2 -> git repair window.
+            (fixed / ".git").write_text(
+                "gitdir: " + str(sibling_gitdir) + "\n", encoding="ascii"
+            )
+            injected.append(destination)
+
+    with mock.patch.dict(ensure.__globals__, {
+        **constants,
+        "_rename_historical_noreplace": substituted_gitfile,
+    }):
+        with pytest.raises(RuntimeError, match="staging retained|owner reconciliation"):
+            ensure(entry, "main")
+    assert injected, "the post-rename race hook never executed"
+    assert backlink.read_bytes() == original, "foreign Gitdir backlink changed"
+    assert (sibling / "scanner.py").read_bytes() == b"reviewed code\n"
+    assert not fixed.exists(), "failed pin was published"

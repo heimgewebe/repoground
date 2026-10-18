@@ -5521,6 +5521,125 @@ def _rename_historical_noreplace(
 
 
 
+
+def prepare_historical_source_worktree(
+    path: Path, *, expected_repo: Path, target: str
+) -> None:
+    """Materialize pinned raw Git blobs without checkout filters or callbacks.
+
+    In Git 2.34 checkout-index has no --no-filters option. A no-checkout
+    linked worktree plus read-tree supplies only the Git index; each regular
+    blob is written using no-follow directory descriptors. The historical
+    complete-tree verifier still determines whether the result is trusted.
+    """
+    if (
+        path.parent != SOURCE_ROOT or SOURCE_ROOT.is_symlink()
+        or path.exists() or path.is_symlink()
+        or not SOURCE_REVISION_RE.fullmatch(target)
+        or target not in HISTORICAL_SOURCE_PIN_TREES
+    ):
+        raise RuntimeError("historical source staging scope is unsafe")
+    SOURCE_ROOT.mkdir(parents=True, exist_ok=True)
+    env = _pinned_source_git_env()
+    env.update({
+        "GIT_NO_REPLACE_OBJECTS": "1",
+        "GIT_NO_LAZY_FETCH": "1",
+        "GIT_OPTIONAL_LOCKS": "0",
+    })
+
+    def safe_git(cwd: Path, *args: str) -> bytes:
+        try:
+            result = subprocess.run(
+                [
+                    "/usr/bin/git",
+                    "-c", "core.hooksPath=/dev/null",
+                    "-c", "core.fsmonitor=false",
+                    "-c", "core.useBuiltinFSMonitor=false",
+                    "-c", "core.untrackedCache=false",
+                    "-c", "gc.auto=0",
+                    "-C", str(cwd), *args,
+                ],
+                env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                timeout=30, check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise RuntimeError("historical source safe Git operation unavailable") from exc
+        if result.returncode:
+            raise RuntimeError("historical source safe Git operation failed")
+        return result.stdout
+
+    # --no-checkout avoids smudge/clean filtering. Hooks and FSMonitor are
+    # explicitly suppressed for add and index preparation, before trust.
+    safe_git(expected_repo, "worktree", "add", "--no-checkout", "--detach",
+             str(path), target)
+    safe_git(path, "read-tree", target)
+    tree = safe_git(expected_repo, "rev-parse", "--verify", target + "^{tree}").strip()
+    if tree != HISTORICAL_SOURCE_PIN_TREES[target].encode("ascii"):
+        raise RuntimeError("historical source pinned tree identity changed")
+    raw = safe_git(expected_repo, "ls-tree", "-rz", "--full-tree", target)
+    if len(raw) > 2 * 1024 * 1024:
+        raise RuntimeError("historical source tree listing exceeded bound")
+    records = [part for part in raw.split(b"\0") if part]
+    if not records or len(records) > 2048:
+        raise RuntimeError("historical source tree entry count unsafe")
+    entries: dict[bytes, tuple[bytes, bytes]] = {}
+    for record in records:
+        meta, sep, name = record.partition(b"\t")
+        fields = meta.split(b" ")
+        if (
+            not sep or len(fields) != 3 or fields[1] != b"blob"
+            or fields[0] not in {b"100644", b"100755"}
+            or re.fullmatch(rb"[0-9a-f]{40}", fields[2]) is None
+            or name.startswith(b"/") or name in entries
+            or any(x in {b"", b".", b"..", b".git"} for x in name.split(b"/"))
+        ):
+            raise RuntimeError("historical source has unsupported Git entry")
+        entries[name] = fields[0], fields[2]
+    dir_flags = os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY | os.O_NOFOLLOW
+    file_flags = os.O_WRONLY | os.O_CLOEXEC | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+    root_fd = os.open(path, dir_flags)
+    total_bytes = 0
+    try:
+        for name, (mode, oid) in sorted(entries.items()):
+            blob = safe_git(expected_repo, "cat-file", "blob", oid.decode("ascii"))
+            total_bytes += len(blob)
+            if len(blob) > 1024 * 1024 or total_bytes > 32 * 1024 * 1024:
+                raise RuntimeError("historical source blob size exceeded bound")
+            object_id = hashlib.sha1(
+                b"blob " + str(len(blob)).encode("ascii") + b"\0" + blob
+            ).hexdigest().encode("ascii")
+            if object_id != oid:
+                raise RuntimeError("historical source object bytes changed")
+            directory_fd = os.dup(root_fd)
+            try:
+                parts = name.split(b"/")
+                for component in parts[:-1]:
+                    try:
+                        os.mkdir(component, mode=0o700, dir_fd=directory_fd)
+                    except FileExistsError:
+                        pass
+                    next_fd = os.open(component, dir_flags, dir_fd=directory_fd)
+                    os.close(directory_fd)
+                    directory_fd = next_fd
+                out_fd = os.open(parts[-1], file_flags, 0o600, dir_fd=directory_fd)
+                try:
+                    view = memoryview(blob)
+                    while view:
+                        written = os.write(out_fd, view)
+                        if written <= 0:
+                            raise RuntimeError("historical source blob write incomplete")
+                        view = view[written:]
+                    os.fchmod(out_fd, 0o700 if mode == b"100755" else 0o600)
+                    os.fsync(out_fd)
+                finally:
+                    os.close(out_fd)
+            finally:
+                os.close(directory_fd)
+    finally:
+        os.close(root_fd)
+
+
+
 def _move_historical_worktree_noreplace(
     entry: RepoEntry,
     original: Path,
@@ -5529,11 +5648,10 @@ def _move_historical_worktree_noreplace(
     *,
     restore_on_repair_failure: bool,
 ) -> None:
-    """Relocate a linked worktree without Git nesting into raced destinations.
+    """Move only the bound inode; update only its captured Gitdir descriptor.
 
-    Git worktree move treats an existing destination directory as a *parent*.
-    Do a kernel-enforced, descriptor-relative no-replace rename instead, then
-    reconcile the linked worktree's Gitdir backlink using Git worktree repair.
+    Git worktree repair <path> follows a mutable name and can rewrite an
+    unrelated sibling backlink. Never run it across this trust boundary.
     """
     if (
         original == destination
@@ -5543,7 +5661,12 @@ def _move_historical_worktree_noreplace(
     ):
         raise RuntimeError("historical worktree relocation scope is unsafe")
     directory_flags = os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY | os.O_NOFOLLOW
+    file_flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW
     root_fd = os.open(SOURCE_ROOT, directory_flags)
+    source_fd: int | None = None
+    gitdir_fd: int | None = None
+    moved = False
+    backlink = b""
 
     def path_identity(name: str) -> tuple[int, int]:
         metadata = os.stat(name, dir_fd=root_fd, follow_symlinks=False)
@@ -5556,84 +5679,185 @@ def _move_historical_worktree_noreplace(
         current = SOURCE_ROOT.lstat()
         if (
             not stat.S_ISDIR(current.st_mode)
-            or (current.st_dev, current.st_ino)
-            != (opened.st_dev, opened.st_ino)
+            or (current.st_dev, current.st_ino) != (opened.st_dev, opened.st_ino)
         ):
             raise RuntimeError("historical relocation root directory changed")
 
-    def repair(path: Path) -> None:
-        with tempfile.TemporaryDirectory(
-            prefix="repoground-historical-worktree-repair-", dir="/tmp"
-        ) as config_root:
-            env = _managed_worktree_git_env(
-                entry.path,
-                safe_global_config=Path(config_root) / "global.gitconfig",
+    def read_regular(directory_fd: int, name: str, limit: int = 4096) -> bytes:
+        fd = os.open(name, file_flags, dir_fd=directory_fd)
+        try:
+            before = os.fstat(fd)
+            if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or not 0 < before.st_size <= limit:
+                raise RuntimeError("historical relocation Git metadata unsafe")
+            content = bytearray()
+            while len(content) <= limit:
+                chunk = os.read(fd, min(4096, limit + 1 - len(content)))
+                if not chunk:
+                    break
+                content.extend(chunk)
+            after = os.fstat(fd)
+            current = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+            if (
+                len(content) != before.st_size
+                or (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns)
+                != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns)
+                or (current.st_dev, current.st_ino) != (after.st_dev, after.st_ino)
+            ):
+                raise RuntimeError("historical relocation Git metadata changed")
+            return bytes(content)
+        finally:
+            os.close(fd)
+
+    def assert_gitdir_bound(gitdir: Path, identity: tuple[int, int]) -> None:
+        if (
+            gitdir.is_symlink() or
+            (lambda v: (v.st_dev, v.st_ino))(gitdir.lstat()) != identity
+            or (os.fstat(gitdir_fd).st_dev, os.fstat(gitdir_fd).st_ino) != identity
+        ):
+            raise RuntimeError("historical relocation Gitdir inode drifted")
+
+    def write_backlink(gitdir: Path, identity: tuple[int, int],
+                       previous: bytes, replacement: bytes) -> None:
+        assert_gitdir_bound(gitdir, identity)
+        if read_regular(gitdir_fd, "gitdir") != previous:
+            raise RuntimeError("historical relocation original backlink changed")
+        temporary = ".repoground-gitdir-" + uuid.uuid4().hex
+        fd = os.open(
+            temporary,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW,
+            0o600, dir_fd=gitdir_fd,
+        )
+        try:
+            view = memoryview(replacement)
+            while view:
+                written = os.write(fd, view)
+                if written <= 0:
+                    raise RuntimeError("historical relocation backlink write incomplete")
+                view = view[written:]
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        try:
+            if read_regular(gitdir_fd, "gitdir") != previous:
+                raise RuntimeError("historical relocation backlink raced")
+            assert_gitdir_bound(gitdir, identity)
+            # Atomic replacement is scoped to the preopened, verified Gitdir.
+            # The destination is never obtained from destination/.git.
+            os.replace(
+                temporary, "gitdir", src_dir_fd=gitdir_fd, dst_dir_fd=gitdir_fd
             )
-            run(
-                [
-                    "git", "-c", "core.hooksPath=/dev/null",
-                    "-C", str(entry.path), "worktree", "repair", str(path),
-                ],
-                env=env,
-            )
+            os.fsync(gitdir_fd)
+        finally:
+            try:
+                os.unlink(temporary, dir_fd=gitdir_fd)
+            except FileNotFoundError:
+                pass
+        if read_regular(gitdir_fd, "gitdir") != replacement:
+            raise RuntimeError("historical relocation backlink postwrite drifted")
+        assert_gitdir_bound(gitdir, identity)
 
     try:
         root_still_bound()
         if path_identity(original.name) != expected_identity:
             raise RuntimeError("historical relocation source inode changed")
+        source_fd = os.open(original.name, directory_flags, dir_fd=root_fd)
+        source_info = os.fstat(source_fd)
+        if (source_info.st_dev, source_info.st_ino) != expected_identity:
+            raise RuntimeError("historical relocation source descriptor changed")
+        raw_gitfile = read_regular(source_fd, ".git")
+        prefix = b"gitdir: "
+        if not raw_gitfile.startswith(prefix) or not raw_gitfile.endswith(b"\n"):
+            raise RuntimeError("historical relocation linked Gitfile malformed")
+        try:
+            gitdir = Path(raw_gitfile[len(prefix):-1].decode("ascii"))
+        except UnicodeDecodeError as exc:
+            raise RuntimeError("historical relocation Gitdir path unsafe") from exc
+        canonical = entry.path / ".git" / "worktrees"
+        expected_name = original.name.split("--recovery-", 1)[0]
+        if (
+            not gitdir.is_absolute() or gitdir.parent != canonical
+            or not (
+                gitdir.name == original.name
+                or re.fullmatch(
+                    re.escape(expected_name) + r"--recovery-[0-9a-f]{12}",
+                    gitdir.name,
+                ) is not None
+            )
+            or gitdir.is_symlink()
+        ):
+            raise RuntimeError("historical relocation foreign Gitdir claim")
+        gitdir_fd = os.open(gitdir, directory_flags)
+        gitdir_stat = os.fstat(gitdir_fd)
+        gitdir_identity = (gitdir_stat.st_dev, gitdir_stat.st_ino)
+        assert_gitdir_bound(gitdir, gitdir_identity)
+        backlink = (str(original / ".git") + "\n").encode("utf-8")
+        if read_regular(gitdir_fd, "gitdir") != backlink:
+            raise RuntimeError("historical relocation backlink not stage-bound")
+        # Assert the native Gitdir contains a detached HEAD and the registered
+        # relative common-dir location before touching any admin file.
+        if (
+            read_regular(gitdir_fd, "commondir", 128).strip() != b"../.."
+            or re.fullmatch(rb"[0-9a-f]{40}\n", read_regular(gitdir_fd, "HEAD", 128)) is None
+        ):
+            raise RuntimeError("historical relocation Gitdir metadata unsafe")
+
         _rename_historical_noreplace(
             root_fd, original.name, root_fd, destination.name
         )
-        if path_identity(destination.name) != expected_identity:
+        moved = True
+        if (
+            path_identity(destination.name) != expected_identity
+            or read_regular(source_fd, ".git") != raw_gitfile
+        ):
             raise RuntimeError("historical relocation moved a foreign inode")
         root_still_bound()
+        target_backlink = (str(destination / ".git") + "\n").encode("utf-8")
+        write_backlink(gitdir, gitdir_identity, backlink, target_backlink)
+        backlink = target_backlink
+        if (
+            path_identity(destination.name) != expected_identity
+            or original.exists() or original.is_symlink()
+            or read_regular(source_fd, ".git") != raw_gitfile
+        ):
+            raise RuntimeError("historical relocation postwrite identity drifted")
+        root_still_bound()
+    except (RuntimeError, OSError) as error:
+        if not moved:
+            raise
+        if not restore_on_repair_failure:
+            raise RuntimeError(
+                "historical quarantine backlink reconciliation requires owner review"
+            ) from error
         try:
-            repair(destination)
             if (
                 path_identity(destination.name) != expected_identity
-                or original.exists()
-                or original.is_symlink()
+                or original.exists() or original.is_symlink()
             ):
-                raise RuntimeError("historical relocation post-repair identity drifted")
+                raise RuntimeError("historical relocation rollback identity unavailable")
+            _rename_historical_noreplace(
+                root_fd, destination.name, root_fd, original.name
+            )
+            if (
+                path_identity(original.name) != expected_identity
+                or destination.exists() or destination.is_symlink()
+            ):
+                raise RuntimeError("historical relocation rollback pathname drifted")
+            expected_stage_backlink = (str(original / ".git") + "\n").encode("utf-8")
+            if backlink != expected_stage_backlink:
+                write_backlink(gitdir, gitdir_identity, backlink, expected_stage_backlink)
             root_still_bound()
-        except (RuntimeError, OSError) as error:
-            if not restore_on_repair_failure:
-                raise RuntimeError(
-                    "historical quarantine Git repair requires owner reconciliation"
-                ) from error
-            # Rollback only our inode; never replace a raced stage or
-            # a foreign destination. Any ambiguity remains owner-blocked.
-            try:
-                if (
-                    path_identity(destination.name) != expected_identity
-                    or original.exists()
-                    or original.is_symlink()
-                ):
-                    raise RuntimeError(
-                        "historical relocation rollback identity unavailable"
-                    )
-                _rename_historical_noreplace(
-                    root_fd, destination.name, root_fd, original.name
-                )
-                if (
-                    path_identity(original.name) != expected_identity
-                    or destination.exists()
-                    or destination.is_symlink()
-                ):
-                    raise RuntimeError(
-                        "historical relocation rollback pathname drifted"
-                    )
-                repair(original)
-                root_still_bound()
-            except (RuntimeError, OSError) as rollback_error:
-                raise RuntimeError(
-                    "historical relocation rollback outcome unknown; "
-                    "owner reconciliation required"
-                ) from rollback_error
+        except (RuntimeError, OSError) as rollback_error:
             raise RuntimeError(
-                "historical relocation repair failed; original stage restored"
-            ) from error
+                "historical relocation rollback outcome unknown; owner reconciliation required"
+            ) from rollback_error
+        raise RuntimeError(
+            "historical relocation failed; original stage restored"
+        ) from error
     finally:
+        if gitdir_fd is not None:
+            os.close(gitdir_fd)
+        if source_fd is not None:
+            os.close(source_fd)
         os.close(root_fd)
 
 
@@ -5847,7 +6071,7 @@ def ensure_historical_source_pins(entry: RepoEntry, ref_segment: str) -> list[Pa
         stage_identity: tuple[int, int] | None = None
         moved = False
         try:
-            prepare_managed_worktree(staged, expected_repo=entry.path, target=sha)
+            prepare_historical_source_worktree(staged, expected_repo=entry.path, target=sha)
             stage_identity = _historical_stage_identity(staged)
             _verify_historical_pinned_source(staged, entry.path, sha, digests)
             if expected_path.exists() or expected_path.is_symlink():
