@@ -1671,3 +1671,110 @@ def test_historical_backlink_post_exchange_fsync_error_restores_stage(tmp_path, 
     assert (admin / "gitdir").read_bytes() == baseline, (
         "successful swap went unrecorded and rollback left a stale backlink"
     )
+
+
+@pytest.mark.parametrize("replacement", ("symlink", "directory"))
+def test_historical_canonical_repository_swap_refuses_foreign_metadata(
+    tmp_path, publisher, replacement,
+):
+    """P1: replacing expected_repo just before .git open cannot write to a foreign ODB."""
+    import os
+    import subprocess
+
+    entry, root, fixed, head, constants, _ = _p1_test_source_context(tmp_path)
+    foreign = tmp_path / "foreign-repository"
+    subprocess.run(["/usr/bin/git", "init", "-q", str(foreign)], check=True, timeout=20)
+    (foreign / "owner-data").write_bytes(b"must remain intact")
+    original = tmp_path / "retained-original-repository"
+    observed = []
+    real_open = os.open
+
+    def snapshot(directory):
+        return [
+            (str(p.relative_to(directory)), p.lstat().st_mode,
+             p.read_bytes() if p.is_file() and not p.is_symlink() else None)
+            for p in sorted(directory.rglob("*"))
+        ]
+
+    baseline = snapshot(foreign)
+
+    def attack_before_git_metadata_open(name, *args, **kwargs):
+        # The vulnerable form opens the full '/repo/.git' pathname.
+        # The fixed form opens the final repository component via a trusted fd.
+        if not observed and (
+            str(name) == str(entry.path / ".git")
+            or (name == entry.path.name and kwargs.get("dir_fd") is not None)
+        ):
+            entry.path.rename(original)
+            if replacement == "symlink":
+                entry.path.symlink_to(foreign, target_is_directory=True)
+                destination = foreign
+            else:
+                foreign.rename(entry.path)
+                destination = entry.path
+            observed.append(destination)
+        return real_open(name, *args, **kwargs)
+
+    ensure = publisher["ensure_historical_source_pins"]
+    with mock.patch.dict(ensure.__globals__, constants):
+        with mock.patch.object(os, "open", attack_before_git_metadata_open):
+            with pytest.raises((OSError, RuntimeError)):
+                ensure(entry, "main")
+
+    assert observed, "repository swap injection did not reach the open boundary"
+    assert snapshot(observed[0]) == baseline, (
+        "raced canonical repository redirected Gitdir or index writes to foreign data"
+    )
+    assert not fixed.exists(), "an untrusted repository may not publish a source pin"
+
+
+def test_historical_repository_parent_symlink_race_refuses_foreign_metadata(
+    tmp_path, publisher,
+):
+    """P1: a raced parent symlink cannot redirect the opened repository fd."""
+    import os
+    import subprocess
+
+    entry, root, fixed, head, constants, _ = _p1_test_source_context(tmp_path)
+    original_parent = tmp_path / "repo-parent"
+    original_parent.mkdir()
+    entry.path.rename(original_parent / "odb")
+    entry.path = original_parent / "odb"
+    foreign_parent = tmp_path / "foreign-parent"
+    foreign_parent.mkdir()
+    foreign_repo = foreign_parent / "odb"
+    subprocess.run(["/usr/bin/git", "init", "-q", str(foreign_repo)],
+                   check=True, timeout=20)
+    (foreign_repo / "owner-data").write_bytes(b"foreign repository preserved")
+    baseline = {
+        str(p.relative_to(foreign_repo)):
+            (p.lstat().st_mode, p.read_bytes() if p.is_file() else None)
+        for p in sorted(foreign_repo.rglob("*"))
+    }
+    parked = tmp_path / "retained-repository-parent"
+    swapped = []
+    real_open = os.open
+
+    def attack_parent_component(name, *args, **kwargs):
+        if not swapped and (
+            str(name) == str(entry.path / ".git")
+            or (name == original_parent.name and kwargs.get("dir_fd") is not None)
+        ):
+            original_parent.rename(parked)
+            original_parent.symlink_to(foreign_parent, target_is_directory=True)
+            swapped.append(True)
+        return real_open(name, *args, **kwargs)
+
+    ensure = publisher["ensure_historical_source_pins"]
+    with mock.patch.dict(ensure.__globals__, constants):
+        with mock.patch.object(os, "open", attack_parent_component):
+            with pytest.raises((OSError, RuntimeError)):
+                ensure(entry, "main")
+
+    assert swapped, "parent repository component race did not execute"
+    assert {
+        str(p.relative_to(foreign_repo)):
+            (p.lstat().st_mode, p.read_bytes() if p.is_file() else None)
+        for p in sorted(foreign_repo.rglob("*"))
+    } == baseline, "foreign Git metadata was mutated via a raced parent symlink"
+    assert not fixed.exists(), "untrusted repository must not publish source pin"

@@ -5590,31 +5590,115 @@ def prepare_historical_source_worktree(
                 raise RuntimeError("historical staging write incomplete")
             view = view[written:]
 
-    parent_fd = os.open(SOURCE_ROOT.parent, dir_flags)
+    def open_directory_chain(
+        directory: Path, expected_stat: os.stat_result
+    ) -> tuple[list[int], tuple[str, ...]]:
+        """Open every absolute path component with openat(O_NOFOLLOW).
+
+        The pre-open inode snapshot detects directory replacement between
+        preliminary validation and descriptor binding. Keep all ancestor FDs
+        to recheck the canonical names before and after relevant writes.
+        """
+        parts = directory.parts
+        if (
+            not directory.is_absolute() or len(parts) < 2 or parts[0] != "/"
+            or any(part in ("", ".", "..") for part in parts[1:])
+            or not stat.S_ISDIR(expected_stat.st_mode)
+        ):
+            raise RuntimeError("historical canonical directory path is unsafe")
+        descriptors: list[int] = []
+        try:
+            descriptors.append(os.open("/", dir_flags))
+            for component in parts[1:]:
+                descriptors.append(os.open(component, dir_flags, dir_fd=descriptors[-1]))
+            opened = os.fstat(descriptors[-1])
+            if (opened.st_dev, opened.st_ino) != (
+                expected_stat.st_dev, expected_stat.st_ino
+            ):
+                raise RuntimeError("historical directory inode changed before binding")
+            return descriptors, parts[1:]
+        except BaseException:
+            for descriptor in reversed(descriptors):
+                os.close(descriptor)
+            raise
+
+    def directory_chain_still_bound(
+        descriptors: list[int], components: tuple[str, ...]
+    ) -> None:
+        for parent, opened_fd, name in zip(
+            descriptors[:-1], descriptors[1:], components, strict=True
+        ):
+            current = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            opened = os.fstat(opened_fd)
+            if (
+                not stat.S_ISDIR(current.st_mode)
+                or (current.st_dev, current.st_ino) != (opened.st_dev, opened.st_ino)
+            ):
+                raise RuntimeError("historical canonical directory component changed")
+
+    # Path.lstat only captures the expected identity before opening. Neither
+    # Gitdir selection nor any filesystem effect below follows that pathname.
+    parent_snapshot = SOURCE_ROOT.parent.lstat()
+    repo_snapshot = expected_repo.lstat()
+    parent_chain: list[int] = []
+    repo_chain: list[int] = []
+    parent_components: tuple[str, ...] = ()
+    repo_components: tuple[str, ...] = ()
     root_fd = None
     stage_fd = None
     repo_git_fd = None
     worktrees_fd = None
     gitdir_fd = None
     try:
+        parent_chain, parent_components = open_directory_chain(
+            SOURCE_ROOT.parent, parent_snapshot
+        )
+        parent_fd = parent_chain[-1]
         root_fd = os.open(SOURCE_ROOT.name, dir_flags, dir_fd=parent_fd)
-        repo_git_fd = os.open(expected_repo / ".git", dir_flags)
+        repo_chain, repo_components = open_directory_chain(expected_repo, repo_snapshot)
+        repo_fd = repo_chain[-1]
+        # Pin .git by inode; a real-directory exchange must fail like a symlink.
+        # No Git metadata write is permitted before these checks complete.
+        git_snapshot = os.stat(".git", dir_fd=repo_fd, follow_symlinks=False)
+        if not stat.S_ISDIR(git_snapshot.st_mode):
+            raise RuntimeError("historical canonical .git is not a directory")
+        repo_git_fd = os.open(".git", dir_flags, dir_fd=repo_fd)
+        git_opened = os.fstat(repo_git_fd)
+        if (git_opened.st_dev, git_opened.st_ino) != (
+            git_snapshot.st_dev, git_snapshot.st_ino
+        ):
+            raise RuntimeError("historical canonical .git inode changed")
 
         def root_still_bound() -> None:
-            parent = SOURCE_ROOT.parent.lstat()
+            directory_chain_still_bound(parent_chain, parent_components)
             current = os.stat(SOURCE_ROOT.name, dir_fd=parent_fd, follow_symlinks=False)
-            parent_open = os.fstat(parent_fd)
             root_open = os.fstat(root_fd)
             if (
-                not stat.S_ISDIR(parent.st_mode)
-                or not stat.S_ISDIR(current.st_mode)
-                or (parent.st_dev, parent.st_ino) != (parent_open.st_dev, parent_open.st_ino)
+                not stat.S_ISDIR(current.st_mode)
                 or (current.st_dev, current.st_ino) != (root_open.st_dev, root_open.st_ino)
             ):
                 raise RuntimeError("historical source root inode changed")
 
+        def repo_still_bound() -> None:
+            directory_chain_still_bound(repo_chain, repo_components)
+            current = os.stat(".git", dir_fd=repo_fd, follow_symlinks=False)
+            git_opened = os.fstat(repo_git_fd)
+            repo_opened = os.fstat(repo_fd)
+            if (
+                not stat.S_ISDIR(current.st_mode)
+                or (current.st_dev, current.st_ino) != (git_opened.st_dev, git_opened.st_ino)
+                or (git_opened.st_dev, git_opened.st_ino) != (
+                    git_snapshot.st_dev, git_snapshot.st_ino
+                )
+                or (repo_opened.st_dev, repo_opened.st_ino) != (
+                    repo_snapshot.st_dev, repo_snapshot.st_ino
+                )
+            ):
+                raise RuntimeError("historical canonical repository Gitdir identity changed")
+
         def stage_still_bound() -> None:
             root_still_bound()
+            repo_still_bound()
             current = os.stat(path.name, dir_fd=root_fd, follow_symlinks=False)
             opened = os.fstat(stage_fd)
             if (
@@ -5648,11 +5732,13 @@ def prepare_historical_source_worktree(
             return result.stdout
 
         root_still_bound()
+        repo_still_bound()
         try:
             os.mkdir("worktrees", mode=0o700, dir_fd=repo_git_fd)
         except FileExistsError:
             pass
         worktrees_fd = os.open("worktrees", dir_flags, dir_fd=repo_git_fd)
+        repo_still_bound()
 
         # Register the ordinary Git linked-worktree layout with O_EXCL files
         # under held parent fds. No 'git worktree add' or 'git read-tree'
@@ -5790,8 +5876,11 @@ def prepare_historical_source_worktree(
         ):
             raise RuntimeError("historical staging Git metadata drifted")
     finally:
-        for descriptor in (gitdir_fd, worktrees_fd, repo_git_fd, stage_fd, root_fd, parent_fd):
+        for descriptor in (gitdir_fd, worktrees_fd, repo_git_fd, stage_fd, root_fd):
             if descriptor is not None:
+                os.close(descriptor)
+        for chain in (repo_chain, parent_chain):
+            for descriptor in reversed(chain):
                 os.close(descriptor)
 
 
