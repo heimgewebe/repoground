@@ -1778,3 +1778,341 @@ def test_historical_repository_parent_symlink_race_refuses_foreign_metadata(
         for p in sorted(foreign_repo.rglob("*"))
     } == baseline, "foreign Git metadata was mutated via a raced parent symlink"
     assert not fixed.exists(), "untrusted repository must not publish source pin"
+
+
+def test_historical_worktrees_inode_exchange_never_writes_foreign_index(
+    tmp_path, publisher,
+):
+    """R3 P1 RED: a real-directory exchange before worktrees_fd open must not plant Git metadata."""
+    import os
+
+    entry, root, fixed, head, constants, _ = _p1_test_source_context(tmp_path)
+    registered = entry.path / ".git" / "worktrees"
+    registered.mkdir()
+    parked = tmp_path / "retained-real-worktrees"
+    foreign = tmp_path / "foreign-worktrees"
+    foreign.mkdir()
+    (foreign / "owner-data").write_bytes(b"foreign worktrees must not change")
+    baseline = sorted(str(p.relative_to(foreign)) for p in foreign.rglob("*"))
+    original_open = os.open
+    observed = []
+
+    def swap_at_directory_open(name, *args, **kwargs):
+        if name == "worktrees" and kwargs.get("dir_fd") is not None and not observed:
+            registered.rename(parked)
+            foreign.rename(registered)
+            observed.append(True)
+        return original_open(name, *args, **kwargs)
+
+    with mock.patch.dict(publisher["ensure_historical_source_pins"].__globals__, constants):
+        with mock.patch.object(os, "open", swap_at_directory_open):
+            with pytest.raises((OSError, RuntimeError)):
+                publisher["ensure_historical_source_pins"](entry, "main")
+
+    assert observed, "worktrees-directory race was not exercised"
+    assert sorted(str(p.relative_to(registered)) for p in registered.rglob("*")) == baseline, (
+        "foreign worktrees unexpectedly acquired a Gitdir or index"
+    )
+    assert (registered / "owner-data").read_bytes() == b"foreign worktrees must not change"
+    assert not fixed.exists()
+
+
+def test_historical_stage_inode_exchange_never_writes_to_foreign_empty_dir(
+    tmp_path, publisher,
+):
+    """R3 P1 RED: an empty stage substitution before stage_fd open cannot receive source bytes."""
+    import os
+
+    entry, root, fixed, head, constants, _ = _p1_test_source_context(tmp_path)
+    foreign = tmp_path / "foreign-empty-stage"
+    foreign.mkdir()
+    parked = tmp_path / "retained-original-stage"
+    original_open = os.open
+    observed = []
+    prefix = f"heimgewebe__heim-pc__main--{head}--recovery-"
+
+    def swap_at_stage_open(name, *args, **kwargs):
+        if (
+            isinstance(name, str) and name.startswith(prefix)
+            and kwargs.get("dir_fd") is not None and not observed
+        ):
+            stage = root / name
+            assert stage.is_dir()
+            stage.rename(parked)
+            foreign.rename(stage)
+            observed.append(stage)
+        return original_open(name, *args, **kwargs)
+
+    with mock.patch.dict(publisher["ensure_historical_source_pins"].__globals__, constants):
+        with mock.patch.object(os, "open", swap_at_stage_open):
+            with pytest.raises((OSError, RuntimeError)):
+                publisher["ensure_historical_source_pins"](entry, "main")
+
+    assert observed, "stage-directory race was not exercised"
+    assert list(observed[0].iterdir()) == [], "untrusted empty stage gained Gitdir or payload bytes"
+    assert parked.is_dir(), "original stage must remain preserved for owner reconciliation"
+    assert not fixed.exists()
+
+
+def test_historical_canonical_pre_snapshot_directory_swap_preserves_foreign_git(
+    tmp_path, publisher,
+):
+    """P1: a real-directory substitution after scope checks cannot set the identity baseline."""
+    import shutil
+
+    entry, root, fixed, head, constants, _ = _p1_test_source_context(tmp_path)
+    foreign = tmp_path / "foreign-repo-same-objects"
+    shutil.copytree(entry.path, foreign)
+    original = tmp_path / "retained-original-repo"
+    original_is_symlink = Path.is_symlink
+    swapped = []
+    def snapshot(directory):
+        return [
+            (str(p.relative_to(directory)), p.lstat().st_mode,
+             p.read_bytes() if p.is_file() and not p.is_symlink() else None)
+            for p in sorted(directory.rglob("*"))
+        ]
+    baseline = snapshot(foreign)
+
+    def attack_after_scope_check(path):
+        result = original_is_symlink(path)
+        if path == entry.path and not swapped:
+            entry.path.rename(original)
+            foreign.rename(entry.path)
+            swapped.append(True)
+        return result
+
+    ensure = publisher["ensure_historical_source_pins"]
+    with mock.patch.dict(ensure.__globals__, constants):
+        with mock.patch.object(Path, "is_symlink", attack_after_scope_check):
+            with pytest.raises((OSError, RuntimeError)):
+                ensure(entry, "main")
+    assert swapped, "pre-snapshot repository-name swap was not injected"
+    assert snapshot(entry.path) == baseline, (
+        "canonical identity was adopted after a swap; foreign repository Git metadata changed"
+    )
+    assert not fixed.exists(), "foreign repository cannot authenticate a historical consumer"
+
+
+def test_historical_worktrees_dir_swap_cannot_plant_foreign_index(
+    tmp_path, publisher,
+):
+    """P1: a real-directory exchange between mkdir and openat cannot redirect Git metadata."""
+    entry, root, fixed, head, constants, _ = _p1_test_source_context(tmp_path)
+    foreign = tmp_path / "foreign-worktrees"
+    foreign.mkdir()
+    (foreign / "owner").write_bytes(b"do not mutate foreign directory")
+    parked = tmp_path / "retained-canonical-worktrees"
+    real_open = __import__("os").open
+    swapped = []
+    def swap_worktrees(name, *args, **kwargs):
+        if name == "worktrees" and kwargs.get("dir_fd") is not None and not swapped:
+            canonical = entry.path / ".git" / "worktrees"
+            canonical.rename(parked)
+            foreign.rename(canonical)
+            swapped.append(True)
+        return real_open(name, *args, **kwargs)
+
+    ensure = publisher["ensure_historical_source_pins"]
+    with mock.patch.dict(ensure.__globals__, constants):
+        with mock.patch("os.open", side_effect=swap_worktrees):
+            with pytest.raises((OSError, RuntimeError)):
+                ensure(entry, "main")
+    assert swapped, "Gitdir worktrees swap was not injected"
+    contents = sorted(str(x.relative_to(entry.path / ".git" / "worktrees"))
+                      for x in (entry.path / ".git" / "worktrees").rglob("*"))
+    assert contents == ["owner"], "foreign Gitdir metadata was planted"
+    assert (entry.path / ".git" / "worktrees" / "owner").read_bytes() == (
+        b"do not mutate foreign directory"
+    )
+    assert not fixed.exists()
+
+
+def test_historical_stage_leaf_swap_does_not_write_into_foreign_empty_directory(
+    tmp_path, publisher,
+):
+    """P1: a malicious empty directory may not replace a mkdir-created stage leaf."""
+    entry, root, fixed, head, constants, _ = _p1_test_source_context(tmp_path)
+    foreign = tmp_path / "foreign-empty-stage"
+    foreign.mkdir()
+    parked = tmp_path / "retained-original-empty-stage"
+    real_open = __import__("os").open
+    swapped = []
+    def swap_stage_leaf(name, *args, **kwargs):
+        if (
+            isinstance(name, str)
+            and name.startswith("heimgewebe__heim-pc__main--")
+            and "--recovery-" in name
+            and kwargs.get("dir_fd") is not None
+            and not swapped
+            and (root / name).is_dir()
+        ):
+            (root / name).rename(parked)
+            foreign.rename(root / name)
+            swapped.append(name)
+        return real_open(name, *args, **kwargs)
+
+    ensure = publisher["ensure_historical_source_pins"]
+    with mock.patch.dict(ensure.__globals__, constants):
+        with mock.patch("os.open", side_effect=swap_stage_leaf):
+            with pytest.raises((OSError, RuntimeError)):
+                ensure(entry, "main")
+    assert swapped, "mkdir/open stage-leaf swap was not injected"
+    assert not list((root / swapped[0]).iterdir()), (
+        "publisher wrote tracked bytes or .git into a foreign empty stage directory"
+    )
+    assert parked.is_dir(), "original stage must remain owner-recoverable"
+    assert not fixed.exists()
+
+
+def test_historical_verifier_refuses_raced_intermediate_source_root_symlink(
+    tmp_path, publisher,
+):
+    """P1 RED: a copied valid source under a swapped SOURCE_ROOT is not canonical."""
+    import os
+    import shutil
+
+    entry, root, fixed, head, constants, _ = _p1_test_source_context(tmp_path)
+    ensure = publisher["ensure_historical_source_pins"]
+    with mock.patch.dict(ensure.__globals__, constants):
+        assert ensure(entry, "main") == [fixed]
+
+    fake_root = tmp_path / "foreign-historical-root"
+    fake_root.mkdir()
+    fake_fixed = fake_root / fixed.name
+    shutil.copytree(fixed, fake_fixed)
+    marker = fake_root / "foreign-owner"
+    marker.write_bytes(b"unchanged owner bytes")
+    retained_original = tmp_path / "retained-canonical-source-root"
+    original_open = os.open
+    observed = []
+    foreign_opened = []
+
+    def swap_at_root_fd_open(name, *args, **kwargs):
+        if not observed and (
+            name == fixed or str(name) == str(fixed)
+            or (name == root.name and kwargs.get("dir_fd") is not None)
+        ):
+            root.rename(retained_original)
+            root.symlink_to(fake_root, target_is_directory=True)
+            observed.append(True)
+        descriptor = original_open(name, *args, **kwargs)
+        opened = os.fstat(descriptor)
+        foreign = fake_fixed.stat()
+        if (opened.st_dev, opened.st_ino) == (foreign.st_dev, foreign.st_ino):
+            foreign_opened.append(True)
+        return descriptor
+
+    verify = publisher["_verify_historical_pinned_source"]
+    digests = constants["HISTORICAL_SOURCE_PINS"][(entry.key, "main")][head]
+    with mock.patch.dict(verify.__globals__, constants):
+        with mock.patch.object(os, "open", swap_at_root_fd_open):
+            with pytest.raises((OSError, RuntimeError)):
+                verify(fixed, entry.path, head, digests)
+
+    assert observed, "a SOURCE_ROOT swap must run at the open boundary"
+    assert not foreign_opened, "verifier followed raced root into foreign source"
+    assert marker.read_bytes() == b"unchanged owner bytes"
+    assert retained_original.is_dir(), "original signed source bytes must be retained"
+
+
+def test_historical_verifier_never_opens_raced_foreign_gitdir_registry(
+    tmp_path, publisher,
+):
+    """R3 P1: replacing the canonical worktrees parent with a symlink is rejected."""
+    import os
+    import shutil
+
+    entry, root, fixed, head, constants, _ = _p1_test_source_context(tmp_path)
+    with mock.patch.dict(publisher["ensure_historical_source_pins"].__globals__, constants):
+        assert publisher["ensure_historical_source_pins"](entry, "main") == [fixed]
+
+    registry = entry.path / ".git" / "worktrees"
+    original_gitdir = Path((fixed / ".git").read_text().removeprefix("gitdir: ").strip())
+    fake_registry = tmp_path / "foreign-admin-registry"
+    fake_registry.mkdir()
+    fake_gitdir = fake_registry / original_gitdir.name
+    shutil.copytree(original_gitdir, fake_gitdir)
+    parked = tmp_path / "retained-original-admin-registry"
+    real_open = os.open
+    injected = []
+    foreign_opened = []
+    mode = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    root_fd = os.open(fixed, mode)
+
+    def swap_before_gitdir_open(name, *args, **kwargs):
+        if not injected and (
+            str(name) == str(original_gitdir)
+            or (name == "worktrees" and kwargs.get("dir_fd") is not None)
+        ):
+            registry.rename(parked)
+            registry.symlink_to(fake_registry, target_is_directory=True)
+            injected.append(True)
+        fd = real_open(name, *args, **kwargs)
+        opened = os.fstat(fd)
+        target = fake_gitdir.stat()
+        if (opened.st_dev, opened.st_ino) == (target.st_dev, target.st_ino):
+            foreign_opened.append(True)
+        return fd
+
+    try:
+        verifier = publisher["_verify_historical_pinned_git_tree"]
+        with mock.patch.dict(verifier.__globals__, constants):
+            with mock.patch.object(os, "open", swap_before_gitdir_open):
+                with pytest.raises((OSError, RuntimeError)):
+                    verifier(root_fd, head, entry.path, fixed)
+    finally:
+        os.close(root_fd)
+    assert injected, "Gitdir intermediate symlink race was not exercised"
+    assert not foreign_opened, "verifier opened an attacker-selected linked Gitdir"
+    assert (fake_gitdir / "HEAD").read_bytes() == (original_gitdir / "HEAD").read_bytes()
+
+
+def test_historical_quarantine_refuses_raced_intermediate_symlink_parent(
+    tmp_path, publisher,
+):
+    """R3 P1: symlink quarantine must not move a foreign consumer name."""
+    import os
+
+    entry, root, fixed, head, constants, _ = _p1_test_source_context(tmp_path)
+    outside = tmp_path / "symlink-target"
+    outside.mkdir()
+    fixed.symlink_to(outside, target_is_directory=True)
+    fake_root = tmp_path / "attacker-source-root"
+    fake_root.mkdir()
+    (fake_root / fixed.name).symlink_to(outside, target_is_directory=True)
+    marker = fake_root / "private-owner"
+    marker.write_bytes(b"foreign owner unchanged")
+    parked = tmp_path / "retained-original-root"
+    original_open = os.open
+    injected = []
+    opened_foreign = []
+
+    def swap_before_parent_open(name, *args, **kwargs):
+        if not injected and (
+            str(name) == str(root)
+            or (name == root.name and kwargs.get("dir_fd") is not None)
+        ):
+            root.rename(parked)
+            root.symlink_to(fake_root, target_is_directory=True)
+            injected.append(True)
+        fd = original_open(name, *args, **kwargs)
+        opened = os.fstat(fd)
+        target = fake_root.stat()
+        if (opened.st_dev, opened.st_ino) == (target.st_dev, target.st_ino):
+            opened_foreign.append(True)
+        return fd
+
+    recovery = publisher["_quarantine_failed_historical_consumer_path"]
+    with mock.patch.dict(recovery.__globals__, constants):
+        with mock.patch.object(os, "open", swap_before_parent_open):
+            with pytest.raises((OSError, RuntimeError)):
+                recovery(
+                    entry=entry, ref_segment="main", sha=head,
+                    fixed=fixed, failure_type="R3_foreign_parent_race",
+                )
+    assert injected, "quarantine root swap did not execute"
+    assert not opened_foreign, "quarantine followed symlink into foreign owner directory"
+    assert (fake_root / fixed.name).is_symlink()
+    assert marker.read_bytes() == b"foreign owner unchanged"
+    assert parked.is_dir()
