@@ -2202,11 +2202,14 @@ def test_historical_worktrees_swap_before_inode_snapshot_cannot_plant_git_metada
 
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="#1343 P1: stage mkdir-to-stat real-dir race requires protected producer UID",
-)
+# HIGH-CRITICAL SECURITY GATE: Six adversarial real-Git regression tests
+# below MUST be ordinary required tests, never XFAIL/SKIP. They currently
+# reproduce Same-UID pathname-inode adoption and crash-time consumer exposure.
+# Intentionally RED pytest-full/CI means historical source publication and
+# RepoGround PR #1344 merge remain BLOCKED until a real protected writer/
+# consumer trust boundary is implemented, then independent R3 and Captain PASS.
+# See heimgewebe/repoground#1343; afb41 R3 BLOCK with six P1 findings.
+
 def test_historical_stage_swap_before_first_inode_snapshot_never_owns_foreign(
     tmp_path, publisher,
 ):
@@ -2247,11 +2250,6 @@ def test_historical_stage_swap_before_first_inode_snapshot_never_owns_foreign(
     assert not fixed.exists(), "foreign stage inode must never be activated"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="#1343 P1: registry first scandir is too late to authenticate identity",
-)
 def test_historical_worktrees_swap_before_scandir_never_plants_foreign_admin(
     tmp_path, publisher,
 ):
@@ -2353,11 +2351,6 @@ def test_historical_nested_eexist_never_writes_tracked_blob_into_foreign(
     assert not fixed.exists(), "foreign nested directory cannot authenticate source"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="#1343 P1: kill/crash after consumer rename+fsync exposes foreign inode",
-)
 def test_historical_foreign_consumer_crash_after_rename_never_publishes(
     tmp_path, publisher,
 ):
@@ -2512,11 +2505,6 @@ def test_historical_existing_foreign_nested_directory_is_denied_before_blob_writ
     assert not fixed.exists()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="#1343 P1: canonical repository first lstat adopts a same-UID copied Git repository",
-)
 def test_historical_repo_foreign_swap_before_first_lstat_denies_source_authority(
     tmp_path, publisher,
 ):
@@ -2557,11 +2545,6 @@ def test_historical_repo_foreign_swap_before_first_lstat_denies_source_authority
     assert not fixed.exists(), "foreign repository cannot authorize consumer source"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="#1343 P1: linked Gitdir mkdir-to-stat race adopts another empty inode",
-)
 def test_historical_gitdir_leaf_swap_before_first_inode_snapshot_denies_metadata(
     tmp_path, publisher,
 ):
@@ -2604,11 +2587,6 @@ def test_historical_gitdir_leaf_swap_before_first_inode_snapshot_denies_metadata
     assert not fixed.exists(), "foreign Gitdir cannot back an admitted source"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="#1343 P1: nested mkdir-to-stat still accepts swapped empty directory",
-)
 def test_historical_nested_mkdir_to_first_stat_never_writes_foreign_tracked_file(
     tmp_path, publisher,
 ):
