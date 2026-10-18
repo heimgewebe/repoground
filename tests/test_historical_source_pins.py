@@ -1255,3 +1255,98 @@ def test_historical_symlink_recovery_does_not_overwrite_occupied_target(
 
     assert source.is_symlink()
     assert occupied.read_bytes() == b"unrelated owner data"
+
+
+def test_historical_symlink_highlevel_collision_retries_without_clobber(
+    tmp_path, publisher,
+):
+    """A no-replace collision must not strand the fixed consumer symlink."""
+    import os
+
+    entry = _entry(tmp_path)
+    root = tmp_path / "source-root"
+    root.mkdir()
+    outside = tmp_path / "target"
+    outside.mkdir()
+    (outside / "important").write_bytes(b"unmodified")
+    fixed = root / f"heimgewebe__heim-pc__main--{HISTORICAL_HEAD}"
+    fixed.symlink_to(outside, target_is_directory=True)
+    quarantine = publisher["_quarantine_failed_historical_consumer_path"]
+    original_move = publisher["_rename_historical_noreplace"]
+    attempts = []
+
+    def collide_once(from_fd, name, to_fd, target):
+        attempts.append(target)
+        if len(attempts) == 1:
+            fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                         0o600, dir_fd=to_fd)
+            try:
+                os.write(fd, b"foreign bytes")
+            finally:
+                os.close(fd)
+        return original_move(from_fd, name, to_fd, target)
+
+    with mock.patch.dict(quarantine.__globals__, {
+        "SOURCE_ROOT": root, "_rename_historical_noreplace": collide_once,
+    }):
+        retained = quarantine(
+            entry=entry, ref_segment="main", sha=HISTORICAL_HEAD,
+            fixed=fixed, failure_type="RuntimeError",
+        )
+    assert len(attempts) == 2
+    assert not fixed.exists() and not fixed.is_symlink()
+    dirs = list(root.glob(f"*{HISTORICAL_HEAD}--recovery-*"))
+    assert len(dirs) == 2 and retained in dirs
+    assert (retained / "rejected-symlink").is_symlink()
+    assert (retained / "rejected-symlink").resolve() == outside
+    assert sum(
+        (d / "rejected-symlink").is_file() and
+        (d / "rejected-symlink").read_bytes() == b"foreign bytes"
+        for d in dirs
+    ) == 1
+    assert (outside / "important").read_bytes() == b"unmodified"
+
+
+def test_historical_symlink_collision_exhaustion_preserves_all_bytes(
+    tmp_path, publisher,
+):
+    """Bounded failure cannot delete colliding foreign objects or the original."""
+    import os
+
+    entry = _entry(tmp_path)
+    root = tmp_path / "source-root"
+    root.mkdir()
+    outside = tmp_path / "target"
+    outside.mkdir()
+    (outside / "important").write_bytes(b"unmodified")
+    fixed = root / f"heimgewebe__heim-pc__main--{HISTORICAL_HEAD}"
+    fixed.symlink_to(outside, target_is_directory=True)
+    quarantine = publisher["_quarantine_failed_historical_consumer_path"]
+    original_move = publisher["_rename_historical_noreplace"]
+    attempts = []
+
+    def collide_always(from_fd, name, to_fd, target):
+        attempts.append(target)
+        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                     0o600, dir_fd=to_fd)
+        try:
+            os.write(fd, b"foreign")
+        finally:
+            os.close(fd)
+        return original_move(from_fd, name, to_fd, target)
+
+    with mock.patch.dict(quarantine.__globals__, {
+        "SOURCE_ROOT": root, "_rename_historical_noreplace": collide_always,
+    }):
+        with pytest.raises(RuntimeError, match="owner reconciliation required"):
+            quarantine(
+                entry=entry, ref_segment="main", sha=HISTORICAL_HEAD,
+                fixed=fixed, failure_type="RuntimeError",
+            )
+    assert 2 <= len(attempts) <= 8
+    assert fixed.is_symlink() and fixed.resolve() == outside
+    dirs = list(root.glob(f"*{HISTORICAL_HEAD}--recovery-*"))
+    assert len(dirs) == len(attempts)
+    assert all((d / "rejected-symlink").read_bytes() == b"foreign"
+               for d in dirs)
+    assert (outside / "important").read_bytes() == b"unmodified"

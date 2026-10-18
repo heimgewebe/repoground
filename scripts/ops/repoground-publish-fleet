@@ -5535,11 +5535,10 @@ def _quarantine_failed_historical_consumer_path(
     by no-overwrite rename, not by unlinking the raceable consumer name.
     """
     if fixed.is_symlink():
-        # Never unlink the inspected pathname: a concurrent writer can swap
-        # the symlink for an unrelated regular file between stat and unlink.
-        # Atomically move one name into a newly reserved owner-only recovery
-        # directory without replacing an existing destination, then prove
-        # which inode was moved. Preserve even a raced foreign replacement.
+        # No unlink or recursive delete is authorized at this pathname.
+        # EEXIST from renameat2(RENAME_NOREPLACE) proves no source move:
+        # retry a bounded fresh owner-only directory, preserving every
+        # colliding entry for owner reconciliation.
         directory = os.open(
             fixed.parent, os.O_RDONLY | os.O_CLOEXEC
             | os.O_DIRECTORY | os.O_NOFOLLOW,
@@ -5550,57 +5549,90 @@ def _quarantine_failed_historical_consumer_path(
             )
             if not stat.S_ISLNK(observed.st_mode):
                 raise RuntimeError("historical consumer link identity changed")
-            recovery_id = uuid.uuid4().hex[:12]
-            recovery = revision_source_worktree_path(
-                entry, ref_segment, sha, recovery_id=recovery_id
-            )
-            if recovery.parent != fixed.parent or recovery == fixed:
-                raise RuntimeError("historical consumer symlink recovery scope changed")
-            # mkdir is create-only. The retained directory is recognized
-            # by the historical-pin GC preservation rule.
-            os.mkdir(recovery.name, mode=0o700, dir_fd=directory)
-            quarantine = os.open(
-                recovery.name,
-                os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY | os.O_NOFOLLOW,
-                dir_fd=directory,
-            )
-            try:
-                _rename_historical_noreplace(
-                    directory, fixed.name, quarantine, "rejected-symlink"
+            for _collision_attempt in range(4):
+                recovery_id = uuid.uuid4().hex[:12]
+                recovery = revision_source_worktree_path(
+                    entry, ref_segment, sha, recovery_id=recovery_id
                 )
-                moved = os.stat(
-                    "rejected-symlink", dir_fd=quarantine, follow_symlinks=False
-                )
-                if (
-                    not stat.S_ISLNK(moved.st_mode)
-                    or (moved.st_dev, moved.st_ino)
-                    != (observed.st_dev, observed.st_ino)
-                ):
+                if recovery.parent != fixed.parent or recovery == fixed:
                     raise RuntimeError(
-                        "historical consumer link swap quarantined; owner reconciliation required"
+                        "historical consumer symlink recovery scope changed"
                     )
                 try:
-                    os.stat(fixed.name, dir_fd=directory, follow_symlinks=False)
-                except FileNotFoundError:
-                    pass
-                else:
-                    raise RuntimeError(
-                        "historical consumer name reappeared; owner reconciliation required"
+                    os.mkdir(recovery.name, mode=0o700, dir_fd=directory)
+                except FileExistsError:
+                    # An occupied random recovery path is not ours to alter.
+                    continue
+                quarantine = os.open(
+                    recovery.name,
+                    os.O_RDONLY | os.O_CLOEXEC
+                    | os.O_DIRECTORY | os.O_NOFOLLOW,
+                    dir_fd=directory,
+                )
+                try:
+                    try:
+                        _rename_historical_noreplace(
+                            directory, fixed.name, quarantine, "rejected-symlink"
+                        )
+                    except FileExistsError:
+                        # Only EEXIST is an assured no-effect. Every occupied
+                        # destination remains intact; rebind the source inode
+                        # before any attempt with a new recovery directory.
+                        current = os.stat(
+                            fixed.name, dir_fd=directory, follow_symlinks=False
+                        )
+                        if (
+                            not stat.S_ISLNK(current.st_mode)
+                            or (current.st_dev, current.st_ino)
+                            != (observed.st_dev, observed.st_ino)
+                        ):
+                            raise RuntimeError(
+                                "historical consumer link changed after collision; "
+                                "owner reconciliation required"
+                            )
+                        continue
+                    moved = os.stat(
+                        "rejected-symlink", dir_fd=quarantine,
+                        follow_symlinks=False,
                     )
-            finally:
-                os.close(quarantine)
-            record_source_recovery(
-                entry=entry, ref_segment=ref_segment, sha=sha,
-                preserved=fixed, replacement=recovery,
-                reason={
-                    "kind": "historical_pin_untrusted_symlink_quarantined",
-                    "failure_type": failure_type,
-                    "observed_symlink_device": observed.st_dev,
-                    "observed_symlink_inode": observed.st_ino,
-                },
-                recovery_id=recovery_id,
+                    if (
+                        not stat.S_ISLNK(moved.st_mode)
+                        or (moved.st_dev, moved.st_ino)
+                        != (observed.st_dev, observed.st_ino)
+                    ):
+                        raise RuntimeError(
+                            "historical consumer link swap quarantined; "
+                            "owner reconciliation required"
+                        )
+                    try:
+                        os.stat(
+                            fixed.name, dir_fd=directory, follow_symlinks=False
+                        )
+                    except FileNotFoundError:
+                        pass
+                    else:
+                        raise RuntimeError(
+                            "historical consumer name reappeared; "
+                            "owner reconciliation required"
+                        )
+                finally:
+                    os.close(quarantine)
+                record_source_recovery(
+                    entry=entry, ref_segment=ref_segment, sha=sha,
+                    preserved=fixed, replacement=recovery,
+                    reason={
+                        "kind": "historical_pin_untrusted_symlink_quarantined",
+                        "failure_type": failure_type,
+                        "observed_symlink_device": observed.st_dev,
+                        "observed_symlink_inode": observed.st_ino,
+                    },
+                    recovery_id=recovery_id,
+                )
+                return recovery
+            raise RuntimeError(
+                "historical consumer symlink quarantine collisions exhausted; "
+                "owner reconciliation required"
             )
-            return recovery
         finally:
             os.close(directory)
 
