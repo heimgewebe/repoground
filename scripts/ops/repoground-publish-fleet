@@ -5960,6 +5960,11 @@ def prepare_historical_source_worktree(
         # Direct O_EXCL creation in the captured Gitdir prevents any
         # untrusted Git command from selecting or replacing sibling indexes.
         index_bytes = bytearray(b"DIRC" + struct.pack("!II", 2, len(entries)))
+        # Bind each nested name at most once in this staging invocation.
+        # A pre-existing directory not created here is NOT source authority.
+        # This removes the attacker-controlled EEXIST adoption; it does not
+        # solve mkdir->first-bind races against a same-UID writer.
+        created_tree_dirs: dict[tuple[bytes, ...], tuple[int, int]] = {}
         total_bytes = 0
         for name, (mode, oid) in sorted(entries.items()):
             blob = safe_git("cat-file", "blob", oid.decode("ascii"))
@@ -5977,22 +5982,35 @@ def prepare_historical_source_worktree(
             directory_fds = [os.dup(stage_fd)]
             try:
                 parts = name.split(b"/")
-                for component in parts[:-1]:
+                for depth, component in enumerate(parts[:-1]):
                     parent = directory_fds[-1]
+                    relative = tuple(parts[:depth + 1])
+                    known = created_tree_dirs.get(relative)
                     try:
                         os.mkdir(component, mode=0o700, dir_fd=parent)
                     except FileExistsError:
-                        pass
+                        if known is None:
+                            raise RuntimeError(
+                                "historical tracked directory was not created by staging"
+                            ) from None
+                    else:
+                        if known is not None:
+                            raise RuntimeError(
+                                "historical tracked directory disappeared and reappeared"
+                            )
                     before = os.stat(component, dir_fd=parent, follow_symlinks=False)
                     next_fd = os.open(component, dir_flags, dir_fd=parent)
                     opened = os.fstat(next_fd)
+                    identity = (opened.st_dev, opened.st_ino)
                     if (
                         not stat.S_ISDIR(before.st_mode)
-                        or (before.st_dev, before.st_ino)
-                        != (opened.st_dev, opened.st_ino)
+                        or (before.st_dev, before.st_ino) != identity
+                        or (known is not None and known != identity)
                     ):
                         os.close(next_fd)
                         raise RuntimeError("historical tracked directory swapped")
+                    if known is None:
+                        created_tree_dirs[relative] = identity
                     directory_fds.append(next_fd)
                 stage_still_bound()
                 out_fd = os.open(parts[-1], create_flags, 0o600, dir_fd=directory_fds[-1])

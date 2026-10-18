@@ -2201,6 +2201,210 @@ def test_historical_worktrees_swap_before_inode_snapshot_cannot_plant_git_metada
     assert not fixed.exists(), "foreign registry cannot authenticate a source pin"
 
 
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason="#1343 P1: stage mkdir-to-stat real-dir race requires protected producer UID",
+)
+def test_historical_stage_swap_before_first_inode_snapshot_never_owns_foreign(
+    tmp_path, publisher,
+):
+    """The first post-mkdir os.stat is not authority for the directory just created."""
+    import os
+
+    entry, root, fixed, head, constants, _ = _p1_test_source_context(tmp_path)
+    foreign = tmp_path / "foreign-stage-before-stat"
+    foreign.mkdir()
+    # Deliberately empty: a nonempty foreign stage is rejected before payload writes.
+    parked = tmp_path / "original-stage-before-stat"
+    prefix = fixed.name + "--recovery-"
+    injected = []
+    real_stat = os.stat
+
+    def replace_before_first_stat(name, *args, **kwargs):
+        if (
+            not injected and isinstance(name, str) and name.startswith(prefix)
+            and kwargs.get("dir_fd") is not None
+        ):
+            (root / name).rename(parked)
+            foreign.rename(root / name)
+            injected.append(root / name)
+        return real_stat(name, *args, **kwargs)
+
+    ensure = publisher["ensure_historical_source_pins"]
+    with mock.patch.dict(ensure.__globals__, constants):
+        with mock.patch.object(os, "stat", replace_before_first_stat):
+            try:
+                ensure(entry, "main")
+            except (RuntimeError, OSError):
+                pass
+    if not injected:
+        pytest.fail("no stage before-first-stat exchange happened")
+    assert parked.is_dir()
+    assert not (injected[0] / ".git").exists()
+    assert not (injected[0] / "scanner.py").exists()
+    assert not fixed.exists(), "foreign stage inode must never be activated"
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason="#1343 P1: registry first scandir is too late to authenticate identity",
+)
+def test_historical_worktrees_swap_before_scandir_never_plants_foreign_admin(
+    tmp_path, publisher,
+):
+    """Swap .git/worktrees before *first* registry observation, not before openat."""
+    import os
+
+    entry, _, fixed, _, constants, _ = _p1_test_source_context(tmp_path)
+    canonical = entry.path / ".git" / "worktrees"
+    foreign = tmp_path / "foreign-registry-before-scandir"
+    foreign.mkdir()
+    (foreign / "owner-bytes").write_bytes(b"foreign must remain unmodified")
+    parked = tmp_path / "original-registry-before-scandir"
+    real_scandir = os.scandir
+    injected = []
+
+    def replace_before_scandir(target):
+        if (
+            not injected and isinstance(target, int)
+            and os.readlink(f"/proc/self/fd/{target}") == str(entry.path / ".git")
+        ):
+            canonical.rename(parked)
+            foreign.rename(canonical)
+            injected.append(True)
+        return real_scandir(target)
+
+    ensure = publisher["ensure_historical_source_pins"]
+    with mock.patch.dict(ensure.__globals__, constants):
+        with mock.patch.object(os, "scandir", replace_before_scandir):
+            try:
+                ensure(entry, "main")
+            except (RuntimeError, OSError):
+                pass
+    if not injected:
+        pytest.fail("no pre-scandir canonical worktrees exchange happened")
+    assert parked.is_dir()
+    assert sorted(p.name for p in canonical.iterdir()) == ["owner-bytes"], (
+        "foreign worktrees directory received Gitdir, index, or other metadata"
+    )
+    assert (canonical / "owner-bytes").read_bytes() == b"foreign must remain unmodified"
+    assert not fixed.exists(), "foreign registry cannot authorize pin publication"
+
+
+def test_historical_nested_eexist_never_writes_tracked_blob_into_foreign(
+    tmp_path, publisher,
+):
+    """Plant a nested tracked directory just before mkdir, then expose EEXIST."""
+    import os
+
+    entry, root, _, _, constants, git = _p1_test_source_context(tmp_path)
+    directory = entry.path / "scripts"
+    directory.mkdir()
+    (directory / "leaf.py").write_bytes(b"reviewed nested bytes\n")
+    git("add", "scripts/leaf.py")
+    git("commit", "-qm", "add nested tracked source")
+    head = git("rev-parse", "HEAD")
+    fixed = root / f"heimgewebe__heim-pc__main--{head}"
+    constants["HISTORICAL_SOURCE_PIN_TREES"] = {
+        head: git("rev-parse", "HEAD^{tree}")
+    }
+    constants["HISTORICAL_SOURCE_PINS"] = {
+        (entry.key, "main"): {
+            head: {
+                "scanner.py": sha256(b"reviewed code\n").hexdigest(),
+                "scripts/leaf.py": sha256(b"reviewed nested bytes\n").hexdigest(),
+            },
+        },
+    }
+    foreign = tmp_path / "foreign-nested-before-mkdir"
+    foreign.mkdir()
+    (foreign / "owner-bytes").write_bytes(b"foreign must remain unmodified")
+    real_mkdir = os.mkdir
+    injected = []
+
+    def plant_nested_before_mkdir(component, *args, **kwargs):
+        parent_fd = kwargs.get("dir_fd")
+        if (
+            not injected and component in (b"scripts", "scripts")
+            and parent_fd is not None
+        ):
+            opened_parent = os.readlink(f"/proc/self/fd/{parent_fd}")
+            if opened_parent.startswith(str(root / (fixed.name + "--recovery-"))):
+                foreign.rename(Path(opened_parent) / "scripts")
+                injected.append(Path(opened_parent) / "scripts")
+        return real_mkdir(component, *args, **kwargs)
+
+    ensure = publisher["ensure_historical_source_pins"]
+    with mock.patch.dict(ensure.__globals__, constants):
+        with mock.patch.object(os, "mkdir", plant_nested_before_mkdir):
+            try:
+                ensure(entry, "main")
+            except (RuntimeError, OSError):
+                pass
+    if not injected:
+        pytest.fail("no nested tracked-dir EEXIST race happened")
+    assert (injected[0] / "owner-bytes").read_bytes() == b"foreign must remain unmodified"
+    assert not (injected[0] / "leaf.py").exists(), (
+        "foreign nested directory received tracked blob after untrusted EEXIST"
+    )
+    assert not fixed.exists(), "foreign nested directory cannot authenticate source"
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason="#1343 P1: kill/crash after consumer rename+fsync exposes foreign inode",
+)
+def test_historical_foreign_consumer_crash_after_rename_never_publishes(
+    tmp_path, publisher,
+):
+    """Immediate process termination after rename+fsync must not expose foreign fixed."""
+    import os
+
+    entry, root, fixed, _, constants, _ = _p1_test_source_context(tmp_path)
+    foreign = tmp_path / "foreign-before-rename-crash"
+    foreign.mkdir()
+    (foreign / "owner-bytes").write_bytes(b"foreign must remain unmodified")
+    parked = tmp_path / "retained-authorized-stage-crash"
+    real_rename = publisher["_rename_historical_noreplace"]
+    real_fsync = os.fsync
+    state = {"swapped": False, "crashed": False}
+
+    def replace_stage_before_rename(source_fd, source_name, dest_fd, dest_name):
+        if dest_name == fixed.name and not state["swapped"]:
+            (root / source_name).rename(parked)
+            foreign.rename(root / source_name)
+            state["swapped"] = True
+        return real_rename(source_fd, source_name, dest_fd, dest_name)
+
+    def abrupt_exit_after_durable_consumer(fd):
+        real_fsync(fd)
+        if (
+            state["swapped"] and not state["crashed"] and fixed.exists()
+            and os.readlink(f"/proc/self/fd/{fd}") == str(root)
+        ):
+            state["crashed"] = True
+            raise SystemExit(79)
+
+    ensure = publisher["ensure_historical_source_pins"]
+    with mock.patch.dict(ensure.__globals__, {
+        **constants, "_rename_historical_noreplace": replace_stage_before_rename
+    }):
+        with mock.patch.object(os, "fsync", abrupt_exit_after_durable_consumer):
+            with pytest.raises(SystemExit) as exited:
+                ensure(entry, "main")
+    if not state["swapped"] or not state["crashed"]:
+        pytest.fail("no foreign rename followed by durable consumer crash happened")
+    assert exited.value.code == 79
+    assert parked.is_dir()
+    assert not fixed.exists(), (
+        "foreign inode survives a simulated process death at the fixed consumer path"
+    )
+
+
 def test_historical_nested_payload_directory_fsynced_before_promotion(
     tmp_path, publisher,
 ):
@@ -2242,3 +2446,222 @@ def test_historical_nested_payload_directory_fsynced_before_promotion(
             assert ensure(entry, "main") == [fixed]
     assert (fixed / "scripts/nested.py").read_bytes() == b"nested reviewed source file\n"
     assert synced_nested, "a tracked nested directory was not fsynced before promotion"
+
+
+def test_historical_existing_foreign_nested_directory_is_denied_before_blob_write(
+    tmp_path, publisher,
+):
+    """Fail before modifying an untrusted EEXIST nested directory, not after tree verification."""
+    import os
+
+    entry, root, _fixed, _head, constants, git = _p1_test_source_context(tmp_path)
+    nested = entry.path / "scripts" / "nested.py"
+    nested.parent.mkdir()
+    nested.write_bytes(b"reviewed nested payload\n")
+    git("add", "scripts/nested.py")
+    git("commit", "-qm", "add reviewed nested source")
+    head = git("rev-parse", "HEAD")
+    fixed = root / f"heimgewebe__heim-pc__main--{head}"
+    constants["HISTORICAL_SOURCE_PIN_TREES"] = {head: git("rev-parse", "HEAD^{tree}")}
+    constants["HISTORICAL_SOURCE_PINS"] = {
+        (entry.key, "main"): {
+            head: {"scanner.py": sha256(b"reviewed code\n").hexdigest()},
+        },
+    }
+    real_mkdir = os.mkdir
+    planted = []
+
+    def plant_foreign_nested_dir(name, *args, **kwargs):
+        if name == b"scripts" and kwargs.get("dir_fd") is not None and not planted:
+            # Simulate a same-UID actor winning before the publisher's mkdirat:
+            # the foreign directory is already present at this new path.
+            real_mkdir(name, *args, **kwargs)
+            directory_fd = os.open(
+                name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                dir_fd=kwargs["dir_fd"],
+            )
+            try:
+                marker_fd = os.open(
+                    "foreign-owner", os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                    0o600, dir_fd=directory_fd,
+                )
+                try:
+                    os.write(marker_fd, b"foreign data must be untouched")
+                finally:
+                    os.close(marker_fd)
+            finally:
+                os.close(directory_fd)
+            planted.append(True)
+        return real_mkdir(name, *args, **kwargs)
+
+    with mock.patch.dict(publisher["ensure_historical_source_pins"].__globals__, constants):
+        with mock.patch.object(os, "mkdir", plant_foreign_nested_dir):
+            with pytest.raises((RuntimeError, OSError)):
+                publisher["ensure_historical_source_pins"](entry, "main")
+
+    assert planted, "foreign nested-directory injection did not execute"
+    retained = list(root.glob(f"*{head}--recovery-*"))
+    assert len(retained) == 1
+    assert (retained[0] / "scripts" / "foreign-owner").read_bytes() == (
+        b"foreign data must be untouched"
+    )
+    assert not (retained[0] / "scripts" / "nested.py").exists(), (
+        "publisher wrote reviewed bytes into an attacker-owned nested directory "
+        "before the later full-tree verifier could reject it"
+    )
+    assert not fixed.exists()
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason="#1343 P1: canonical repository first lstat adopts a same-UID copied Git repository",
+)
+def test_historical_repo_foreign_swap_before_first_lstat_denies_source_authority(
+    tmp_path, publisher,
+):
+    """A copied real repo cannot earn trust by winning the first pathname lstat."""
+    import shutil
+
+    entry, _root, fixed, _, constants, _ = _p1_test_source_context(tmp_path)
+    foreign = tmp_path / "foreign-repository-with-reviewed-objects"
+    shutil.copytree(entry.path, foreign)
+    (foreign / ".git" / "owner-only").write_bytes(b"foreign Git metadata untouched")
+    parked = tmp_path / "original-canonical-repository-before-lstat"
+    original_lstat = Path.lstat
+    swapped = []
+
+    def swap_before_first_repo_lstat(path):
+        if path == entry.path and not swapped:
+            entry.path.rename(parked)
+            foreign.rename(entry.path)
+            swapped.append(True)
+        return original_lstat(path)
+
+    ensure = publisher["ensure_historical_source_pins"]
+    with mock.patch.dict(ensure.__globals__, constants):
+        with mock.patch.object(Path, "lstat", swap_before_first_repo_lstat):
+            try:
+                ensure(entry, "main")
+            except (RuntimeError, OSError):
+                pass
+
+    assert swapped, "the canonical repository first-lstat swap was not exercised"
+    assert parked.is_dir(), "original repository must not be deleted"
+    assert (entry.path / ".git" / "owner-only").read_bytes() == (
+        b"foreign Git metadata untouched"
+    )
+    assert not list((entry.path / ".git" / "worktrees").iterdir()), (
+        "foreign copied repo became a linked-Gitdir owner"
+    )
+    assert not fixed.exists(), "foreign repository cannot authorize consumer source"
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason="#1343 P1: linked Gitdir mkdir-to-stat race adopts another empty inode",
+)
+def test_historical_gitdir_leaf_swap_before_first_inode_snapshot_denies_metadata(
+    tmp_path, publisher,
+):
+    """A raced first stat of a newly-created linked Gitdir cannot bind foreign bytes."""
+    import os
+
+    entry, root, fixed, _, constants, _ = _p1_test_source_context(tmp_path)
+    foreign = tmp_path / "foreign-linked-gitdir-before-stat"
+    foreign.mkdir()
+    parked = tmp_path / "original-linked-gitdir-before-stat"
+    registry = entry.path / ".git" / "worktrees"
+    real_stat = os.stat
+    injected = []
+    prefix = fixed.name + "--recovery-"
+
+    def swap_before_gitdir_stat(name, *args, **kwargs):
+        parent_fd = kwargs.get("dir_fd")
+        if (
+            not injected and isinstance(name, str) and name.startswith(prefix)
+            and parent_fd is not None
+            and os.readlink(f"/proc/self/fd/{parent_fd}") == str(registry)
+        ):
+            (registry / name).rename(parked)
+            foreign.rename(registry / name)
+            injected.append(registry / name)
+        return real_stat(name, *args, **kwargs)
+
+    ensure = publisher["ensure_historical_source_pins"]
+    with mock.patch.dict(ensure.__globals__, constants):
+        with mock.patch.object(os, "stat", swap_before_gitdir_stat):
+            try:
+                ensure(entry, "main")
+            except (RuntimeError, OSError):
+                pass
+    assert injected, "linked Gitdir before-first-stat race not exercised"
+    assert parked.is_dir(), "original linked Gitdir must be preserved"
+    assert not list(injected[0].iterdir()), (
+        "publisher wrote HEAD, index, or backlink into another Gitdir inode"
+    )
+    assert not fixed.exists(), "foreign Gitdir cannot back an admitted source"
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason="#1343 P1: nested mkdir-to-stat still accepts swapped empty directory",
+)
+def test_historical_nested_mkdir_to_first_stat_never_writes_foreign_tracked_file(
+    tmp_path, publisher,
+):
+    """Created nested names require a true inode origin, not first-stat agreement."""
+    import os
+
+    entry, root, _, _, constants, git = _p1_test_source_context(tmp_path)
+    (entry.path / "scripts").mkdir()
+    (entry.path / "scripts" / "nested.py").write_bytes(b"approved nested blob\n")
+    git("add", "scripts/nested.py")
+    git("commit", "-qm", "add tracked nested source")
+    head = git("rev-parse", "HEAD")
+    fixed = root / f"heimgewebe__heim-pc__main--{head}"
+    constants["HISTORICAL_SOURCE_PIN_TREES"] = {
+        head: git("rev-parse", "HEAD^{tree}")
+    }
+    constants["HISTORICAL_SOURCE_PINS"] = {
+        (entry.key, "main"): {
+            head: {
+                "scanner.py": sha256(b"reviewed code\n").hexdigest(),
+                "scripts/nested.py": sha256(b"approved nested blob\n").hexdigest(),
+            }
+        },
+    }
+    foreign = tmp_path / "foreign-nested-before-first-stat"
+    foreign.mkdir()
+    parked = tmp_path / "original-nested-before-first-stat"
+    original_stat = os.stat
+    injected = []
+
+    def swap_nested_before_first_stat(name, *args, **kwargs):
+        parent_fd = kwargs.get("dir_fd")
+        if (
+            name in (b"scripts", "scripts") and parent_fd is not None
+            and not injected
+        ):
+            current = os.readlink(f"/proc/self/fd/{parent_fd}")
+            if current.startswith(str(root / (fixed.name + "--recovery-"))):
+                (Path(current) / "scripts").rename(parked)
+                foreign.rename(Path(current) / "scripts")
+                injected.append(Path(current) / "scripts")
+        return original_stat(name, *args, **kwargs)
+
+    ensure = publisher["ensure_historical_source_pins"]
+    with mock.patch.dict(ensure.__globals__, constants):
+        with mock.patch.object(os, "stat", swap_nested_before_first_stat):
+            try:
+                ensure(entry, "main")
+            except (RuntimeError, OSError):
+                pass
+    assert injected, "nested mkdir-to-stat real-directory race not exercised"
+    assert parked.is_dir(), "original nested directory must be retained"
+    assert not (injected[0] / "nested.py").exists(), (
+        "publisher planted a tracked payload in a different real directory inode"
+    )
+    assert not fixed.exists(), "foreign nested directory cannot become consumer source"
