@@ -970,6 +970,9 @@ _FIND_EXPLANATION_OPENERS = frozenset(
         "ob",
     }
 )
+_WHERE_EXPLANATION_VERBS = frozenset(
+    {"do", "does", "did", "schlägt", "scheitert", "tritt", "passiert"}
+)
 
 
 def _find_source_location_complement(
@@ -981,10 +984,8 @@ def _find_source_location_complement(
     if words[0] in {"which", "what", "welche", "welcher", "welches"}:
         return len(words) > 1 and words[1] in _SOURCE_LOCATION_NOUNS
     if require_locative:
-        return words[0] in {"where", "wo"} and words[1:2] not in (
-            ["do"],
-            ["does"],
-            ["did"],
+        return words[0] in {"where", "wo"} and (
+            len(words) == 1 or words[1] not in _WHERE_EXPLANATION_VERBS
         )
     return words[0] not in _FIND_EXPLANATION_OPENERS
 
@@ -1000,20 +1001,7 @@ def _navigation_path_intent(query: str) -> bool:
     if (
         "?" not in query
         and {"implementation", "corresponding", "test"} <= nouns
-        and not nouns
-        & {
-            "why",
-            "how",
-            "what",
-            "when",
-            "warum",
-            "wieso",
-            "wie",
-            "does",
-            "is",
-            "has",
-            "have",
-        }
+        and not nouns & (_FIND_EXPLANATION_OPENERS | {"does", "is", "has", "have"})
     ):
         return True
     # "find" inside a why/how question is content, not a source locator.
@@ -1027,16 +1015,27 @@ def _navigation_path_intent(query: str) -> bool:
         words = words[1:]
     if not words:
         return False
-    if words[0] in {"find", "finde", "finden"}:
-        is_find_out = words[1:2] in (["out"], ["heraus"])
+    if words[0] in {"find", "finde", "finden", "locate", "suche", "zeige"}:
+        complement = words[1:]
+        while complement and complement[0] in {
+            "mir",
+            "mich",
+            "me",
+            "sie",
+            "bitte",
+            "mal",
+            "du",
+        }:
+            complement = complement[1:]
+        is_find_out = complement[:1] in (["out"], ["heraus"])
         return _find_source_location_complement(
-            words[2:] if is_find_out else words[1:],
+            complement[1:] if is_find_out else complement,
             require_locative=is_find_out,
         )
     if words[0] in {"which", "welche", "welcher", "welches"}:
         return len(words) > 1 and words[1] in _SOURCE_LOCATION_NOUNS
     if words[0] in {"where", "wo"}:
-        return len(words) < 2 or words[1] not in {"does", "do", "did"}
+        return len(words) < 2 or words[1] not in _WHERE_EXPLANATION_VERBS
     return words[0] in _NAVIGATION_LOCATORS
 
 

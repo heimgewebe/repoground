@@ -1126,6 +1126,14 @@ def test_navigation_interrogative_vs_locator_construction_20261021():
         "Please find what this test verifies",
         "Finde heraus warum diese Implementierung langsam ist",
         "Finde was dieser Test prüft",
+        "Zeige mir wie die Implementierung funktioniert",
+        "Suche warum die Datei nicht geladen wird",
+        "Locate why this retry handler fails",
+        "Finde bitte heraus warum die Implementierung langsam ist",
+        "Finden Sie heraus warum die Implementierung langsam ist",
+        "Wo schlägt dieser Test fehl?",
+        "Wo scheitert dieser Test?",
+        "Find out where does this test fail?",
         "Why can't the loader find the config file?",
         "Where does this test fail?",
         "Which handler swallows the error?",
@@ -1143,6 +1151,12 @@ def test_navigation_interrogative_vs_locator_construction_20261021():
         "Find out what file implements retry",
         "Finde heraus wo die Implementierung liegt",
         "Finde welche Datei retry implementiert",
+        "Zeige mir die Implementierung",
+        "Suche die Datei mit dem Entrypoint",
+        "Finde bitte heraus wo die Implementierung liegt",
+        "Finden Sie heraus wo die Implementierung liegt",
+        "Wo liegt die Implementierung?",
+        "Wo ist der Test definiert?",
         "In which file is retry implemented?",
         "Find job finalizer implementation and real test",
         "Job finalizer implementation and corresponding real test",
@@ -1203,3 +1217,8 @@ def test_path_hint_missing_citation_survives_as_degraded_diagnostic(monkeypatch)
     assert [row["source_path"] for row in state["resolved_ranges"]] == [
         "tests/test_retry.py"
     ]
+    assert any(
+        omission.get("reason") == "unverified_index_evidence"
+        and omission.get("ref") == "uncitable-hint"
+        for omission in state["omissions"]
+    )
