@@ -940,6 +940,55 @@ _NAVIGATION_OBJECTS = frozenset(
 )
 
 
+_SOURCE_LOCATION_NOUNS = frozenset(
+    {
+        "module",
+        "modul",
+        "file",
+        "datei",
+        "path",
+        "pfad",
+        "source",
+        "quellcode",
+        "filename",
+        "dateiname",
+    }
+)
+_FIND_EXPLANATION_OPENERS = frozenset(
+    {
+        "why",
+        "how",
+        "what",
+        "when",
+        "whether",
+        "if",
+        "warum",
+        "wieso",
+        "wie",
+        "was",
+        "wann",
+        "ob",
+    }
+)
+
+
+def _find_source_location_complement(
+    words: list[str], *, require_locative: bool
+) -> bool:
+    """Use file-location grammar, never a bare explanatory interrogative."""
+    if not words:
+        return False
+    if words[0] in {"which", "what", "welche", "welcher", "welches"}:
+        return len(words) > 1 and words[1] in _SOURCE_LOCATION_NOUNS
+    if require_locative:
+        return words[0] in {"where", "wo"} and words[1:2] not in (
+            ["do"],
+            ["does"],
+            ["did"],
+        )
+    return words[0] not in _FIND_EXPLANATION_OPENERS
+
+
 def _navigation_path_intent(query: str) -> bool:
     """Only explicit source-location requests may bias indexed OR ranking."""
     words = re.findall(r"\b\w+\b", unicodedata.normalize("NFC", query).lower())
@@ -978,29 +1027,14 @@ def _navigation_path_intent(query: str) -> bool:
         words = words[1:]
     if not words:
         return False
-    if words[:2] == ["find", "out"]:
-        words = words[2:]
-        if not words or words[0] not in {
-            "where",
-            "which",
-            "welche",
-            "welcher",
-            "welches",
-        }:
-            return False
+    if words[0] in {"find", "finde", "finden"}:
+        is_find_out = words[1:2] in (["out"], ["heraus"])
+        return _find_source_location_complement(
+            words[2:] if is_find_out else words[1:],
+            require_locative=is_find_out,
+        )
     if words[0] in {"which", "welche", "welcher", "welches"}:
-        return len(words) > 1 and words[1] in {
-            "module",
-            "modul",
-            "file",
-            "datei",
-            "path",
-            "pfad",
-            "source",
-            "quellcode",
-            "filename",
-            "dateiname",
-        }
+        return len(words) > 1 and words[1] in _SOURCE_LOCATION_NOUNS
     if words[0] in {"where", "wo"}:
         return len(words) < 2 or words[1] not in {"does", "do", "did"}
     return words[0] in _NAVIGATION_LOCATORS
