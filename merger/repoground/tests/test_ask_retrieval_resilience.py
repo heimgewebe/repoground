@@ -632,6 +632,15 @@ def test_broad_navigation_or_fallback_recovers_verified_source_paths(monkeypatch
             {"src/grabowski_job_finalizer.py"},
         ),
         (
+            "Find generated operator context surface and associated consumer-surface benchmark evidence",
+            [
+                "docs/consumer-surface-v1.md",
+                "tools/consumer_surface_benchmark.py",
+            ],
+            {"operator": ["docs/generated/operator-context.v1.json"]},
+            {"docs/generated/operator-context.v1.json"},
+        ),
+        (
             "Find configured runtime entrypoint and Grabowski operator implementation",
             [
                 "tests/test_deployment_metadata.py",
@@ -1103,6 +1112,7 @@ def test_navigation_interrogative_vs_locator_construction_20261021():
 
     for query in (
         "Find out why this implementation is slow",
+        "Find out how this context surface is generated",
         "Why can't the loader find the config file?",
         "Where does this test fail?",
         "Which handler swallows the error?",
@@ -1112,6 +1122,7 @@ def test_navigation_interrogative_vs_locator_construction_20261021():
         assert not _navigation_path_intent(query), query
     for query in (
         "Please find the retry implementation",
+        "Find generated operator context surface and associated consumer-surface benchmark evidence",
         "In which file is retry implemented?",
         "Find job finalizer implementation and real test",
         "Job finalizer implementation and corresponding real test",

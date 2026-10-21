@@ -916,6 +916,7 @@ _NAVIGATION_OBJECTS = frozenset(
         "implemented",
         "implementiert",
         "entrypoint",
+        "context",
         "filename",
         "dateiname",
         "file",
@@ -975,7 +976,7 @@ def _navigation_path_intent(query: str) -> bool:
         and words[1] in {"which", "welche", "welcher", "welches"}
     ):
         words = words[1:]
-    if not words or words[:3] == ["find", "out", "why"]:
+    if not words or words[:2] == ["find", "out"]:
         return False
     if words[0] in {"which", "welche", "welcher", "welches"}:
         return len(words) > 1 and words[1] in {
