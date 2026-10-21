@@ -1336,3 +1336,24 @@ def test_path_hints_reject_other_index_snapshot_and_forward_warnings(monkeypatch
     assert any(
         row.get("reason") == "index_artifact_mismatch" for row in state["omissions"]
     )
+
+
+def test_find_out_in_which_file_preserves_source_location_intent():
+    """Explicit file/module complements after find out remain navigation."""
+    from merger.repoground.core.ask_context import _navigation_path_intent
+
+    for query in (
+        "Find out in which file retry is implemented",
+        "Find out in which module retry is implemented",
+        "Finde heraus in welcher Datei retry implementiert ist",
+        "Finden Sie heraus in welcher Datei retry implementiert ist",
+    ):
+        assert _navigation_path_intent(query), query
+
+    for query in (
+        "Find out what caused the error",
+        "Find which handler swallows the error",
+        "Where exactly does this test fail?",
+        "Find out in which way retry is implemented",
+    ):
+        assert not _navigation_path_intent(query), query

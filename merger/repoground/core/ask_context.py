@@ -990,6 +990,12 @@ def _find_source_location_complement(
     """Use file-location grammar, never an explanatory complement."""
     if not words or set(words[:5]) & _FIND_EXPLANATION_NOUNS:
         return False
+    if (
+        len(words) > 2
+        and words[0] == "in"
+        and words[1] in {"which", "welche", "welcher", "welches"}
+    ):
+        words = words[1:]
     if words[0] in {"which", "what", "welche", "welcher", "welches"}:
         return len(words) > 1 and words[1] in _SOURCE_LOCATION_NOUNS
     if require_locative:
