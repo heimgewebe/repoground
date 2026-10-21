@@ -318,8 +318,17 @@ def test_ordinary_relaxed_or_keeps_bm25_order_without_path_hints(monkeypatch):
         ]
         return {
             "status": "available",
-            "query_result": {"results": rows, "fts_query": '"authentication" OR "expired"'},
+            "query_result": {
+                "results": rows,
+                "fts_query": '"authentication" OR "expired"',
+            },
             "resolved_evidence": {"hits": hits},
+            "source_citation_projection": {
+                "items": [
+                    {"chunk_id": hit["chunk_id"], "citation_id": hit["citation_id"]}
+                    for hit in hits
+                ],
+            },
         }
 
     calls = []
@@ -344,6 +353,209 @@ def test_ordinary_relaxed_or_keeps_bm25_order_without_path_hints(monkeypatch):
     assert [row["source_path"] for row in state["resolved_ranges"]] == paths[:2]
     assert calls == []
     assert state["used_bytes"] <= 4000
+
+
+def test_relaxed_response_projects_only_emitted_cited_source_rows(monkeypatch):
+    """Overfetch and path-only hints must not leak raw candidate rows as answers."""
+    from pathlib import Path
+    from merger.repoground.core import ask_context as context
+
+    def indexed(label, paths):
+        rows = []
+        hits = []
+        citations = []
+        for i, source in enumerate(paths):
+            ref = f"{label}-chunk-{i}"
+            citation = f"cit_{label}_{i}"
+            rows.append({"chunk_id": ref, "source_path": source, "score": i})
+            hits.append(
+                {
+                    "chunk_id": ref,
+                    "source_path": source,
+                    "range_status": "resolved",
+                    "range_ref": {"ref": ref},
+                    "citation_id": citation,
+                    "range": {"text": "verified source " + source},
+                }
+            )
+            citations.append({"chunk_id": ref, "citation_id": citation})
+        return {
+            "status": "available",
+            "query_result": {"results": rows},
+            "resolved_evidence": {"hits": hits},
+            "source_citation_projection": {"items": citations},
+        }
+
+    ranked = indexed(
+        "rank",
+        [
+            "tests/test_runtime.py",
+            "src/unrelated.py",
+            "tests/test_extra.py",
+        ],
+    )
+    source_hint = indexed("hint", ["src/runtime_entrypoint.py"])
+
+    monkeypatch.setattr(
+        context,
+        "_run_query",
+        lambda _manifest, _query, _k, prepared_fts_query=None: (
+            ranked if prepared_fts_query is not None else indexed("strict", [])
+        ),
+    )
+    monkeypatch.setattr(
+        context,
+        "_relaxed_path_index_reads",
+        lambda *_args, **_kwargs: [source_hint],
+    )
+    for budget in (1, 4000):
+        pack = context._query_context(
+            Path("/immutable/bundle"),
+            query="Find configured runtime entrypoint implementation",
+            k=2,
+            max_context_tokens=1000,
+            max_context_bytes=budget,
+        )
+        assert pack["strategy"] == "or_relaxed"
+        returned = pack["resolved_ranges"]
+        projected = pack["query_result"]
+        rows = projected["query_result"]["results"]
+        assert 0 < len(rows) == len(returned) <= 2
+        assert [row["source_path"] for row in rows] == [
+            row["source_path"] for row in returned
+        ]
+        assert projected["query_result"]["fts_query"] == pack["fts_query"]
+        cited = [row["citation_id"] for row in returned]
+        assert [hit["citation_id"] for hit in pack["retrieval_hits"]] == cited
+        assert [
+            hit["citation_id"]
+            for hit in projected["source_citation_projection"]["items"]
+        ] == cited
+        assert {
+            hit["citation_id"] for hit in projected["resolved_evidence"]["hits"]
+        } == set(cited)
+        assert pack["used_bytes"] <= budget
+    assert "src/runtime_entrypoint.py" in {
+        row["source_path"]
+        for row in context._query_context(
+            Path("/immutable/bundle"),
+            query="Find configured runtime entrypoint implementation",
+            k=2,
+            max_context_tokens=1000,
+            max_context_bytes=4000,
+        )["resolved_ranges"]
+    }
+
+
+def test_relaxed_source_pool_skips_missing_or_mismatched_citation_projection():
+    """An uncitable resolved hit must not consume one of the k valid slots."""
+    from merger.repoground.core.ask_context import (
+        _balanced_relaxed_ranges,
+        _prefer_diverse_relaxed_sources,
+    )
+
+    paths = [
+        "src/no_citation.py",
+        "src/wrong_citation.py",
+        "src/verified_a.py",
+        "src/verified_b.py",
+    ]
+    rows = [
+        {"chunk_id": f"chunk-{i}", "source_path": path} for i, path in enumerate(paths)
+    ]
+    hits = [
+        {
+            "chunk_id": row["chunk_id"],
+            "source_path": row["source_path"],
+            "range_status": "resolved",
+            "range_ref": {"ref": row["chunk_id"]},
+            "range": {"text": "verified source contents"},
+            **({} if i == 0 else {"citation_id": f"cit_{i}"}),
+        }
+        for i, row in enumerate(rows)
+    ]
+    projected = [
+        {
+            "chunk_id": f"chunk-{i}",
+            "citation_id": ("cit_wrong" if i == 1 else f"cit_{i}"),
+        }
+        for i in range(1, 4)
+    ]
+    selected = _prefer_diverse_relaxed_sources(
+        {
+            "query_result": {"results": rows},
+            "resolved_evidence": {"hits": hits},
+            "source_citation_projection": {"items": projected},
+        },
+        query="Why does the cache expire unexpectedly?",
+        k=2,
+        path_results=[],
+    )
+    assert [row["source_path"] for row in selected["query_result"]["results"]] == paths[
+        2:
+    ]
+    ranges, used, _chars, _cut, _omissions = _balanced_relaxed_ranges(
+        selected,
+        max_context_tokens=100,
+        max_context_bytes=300,
+    )
+    assert used > 0
+    assert [r["citation_id"] for r in ranges] == ["cit_2", "cit_3"]
+    assert [
+        r["citation_id"] for r in selected["source_citation_projection"]["items"]
+    ] == [
+        "cit_2",
+        "cit_3",
+    ]
+
+
+def test_source_navigation_requires_an_actual_locator_phrase():
+    from merger.repoground.core.ask_context import _navigation_path_intent
+
+    for text, is_navigation in (
+        ("Why does file upload fail?", False),
+        ("Why is this implementation slow?", False),
+        ("How is the cache path computed?", False),
+        ("Why is the config file not reloaded?", False),
+        ("Find job finalizer implementation and real test", True),
+        ("Find configured runtime entrypoint and operator implementation", True),
+        ("Where is job_finalizer handled?", True),
+        ("Where is X handled?", True),
+        ("Wo wird job_finalizer implementiert?", True),
+        ("Which module defines job_finalizer?", True),
+    ):
+        assert _navigation_path_intent(text) is is_navigation, text
+
+
+def test_path_hints_skip_locator_words_and_scale_with_requested_k(monkeypatch):
+    from pathlib import Path
+    from merger.repoground.core import ask_context as context
+
+    calls = []
+
+    def indexed(_manifest, _query, *, filters, k, **_kwargs):
+        calls.append((filters["path"], k))
+        return {"status": "available"}
+
+    monkeypatch.setattr(context, "query_existing_index", indexed)
+    context._relaxed_path_index_reads(
+        Path("/immutable/index"),
+        query="Locate job_finalizer implemented",
+        fts_query='"job" OR "finalizer"',
+        k=1,
+    )
+    assert calls[0][0] == "job_finalizer"
+    assert 1 <= len(calls) <= 2
+    assert all(0 < count <= 8 for _term, count in calls)
+    assert all(term not in {"locate", "implemented"} for term, _count in calls)
+    calls.clear()
+    context._relaxed_path_index_reads(
+        Path("/immutable/index"),
+        query="Locate retry backoff",
+        fts_query='"retry" OR "backoff"',
+        k=1,
+    )
+    assert [term for term, _count in calls] == ["retry", "backoff"]
 
 
 def test_broad_navigation_or_fallback_recovers_verified_source_paths(monkeypatch):
@@ -506,11 +718,10 @@ def test_balanced_relaxed_ranges_preserves_evidence_under_tiny_budgets():
         selected, max_context_tokens=100, max_context_bytes=2
     )
     assert [row["source_path"] for row in ranges] == [
-        "src/source_0.py", "src/source_1.py"
+        "src/source_0.py",
+        "src/source_1.py",
     ]
-    assert [row["citation_id"] for row in ranges] == [
-        "cit_0", "cit_1"
-    ]
+    assert [row["citation_id"] for row in ranges] == ["cit_0", "cit_1"]
     assert used == chars == 2
     assert all(row["text_excerpt_bytes"] == 1 for row in ranges)
     assert truncated is True
