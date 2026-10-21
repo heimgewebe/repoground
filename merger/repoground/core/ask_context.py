@@ -942,8 +942,7 @@ def _navigation_path_intent(query: str) -> bool:
     words = set(re.findall(r"\b\w+\b", unicodedata.normalize("NFC", query).lower()))
     if words & _NAVIGATION_LOCATORS and words & _NAVIGATION_OBJECTS:
         return True
-    # The benchmark's noun phrase requests matching implementation + test.
-    return {"implementation", "corresponding", "test"} <= words
+    return False
 
 
 def _relaxed_path_index_reads(
@@ -1106,6 +1105,11 @@ def _query_context(
     relaxed_result = _run_query(
         manifest_path, query, candidate_k, prepared_fts_query=or_query
     )
+    # With k=1, a verified first OR candidate already fills the answer.
+    # Further path reads cannot alter it but would revalidate the full index.
+    need_path_hints = _navigation_path_intent(query) and (
+        k > 1 or not _source_candidates_from_index(relaxed_result, set(tokens))
+    )
     selected_result = _prefer_diverse_relaxed_sources(
         relaxed_result,
         query=query,
@@ -1114,7 +1118,7 @@ def _query_context(
             _relaxed_path_index_reads(
                 manifest_path, query=query, fts_query=or_query, k=k
             )
-            if _navigation_path_intent(query)
+            if need_path_hints
             else []
         ),
     )

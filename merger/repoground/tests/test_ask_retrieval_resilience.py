@@ -593,7 +593,7 @@ def test_broad_navigation_or_fallback_recovers_verified_source_paths(monkeypatch
 
     tests = [
         (
-            "Job finalizer implementation and corresponding real test",
+            "Find job finalizer implementation and corresponding real test",
             [
                 "tests/test_job_finalizer.py",
                 "docs/security-model.md",
@@ -815,3 +815,77 @@ def test_relaxed_source_candidates_retain_sparse_and_substring_matched_sources()
     assert {hit["citation_id"] for hit in selected["resolved_evidence"]["hits"]} == {
         row["citation_id"] for row in ranges
     }
+
+
+def test_navigation_requires_locator_even_for_implementation_and_test_nouns():
+    """A noun phrase is not sufficient to rerank an explanatory search."""
+    from merger.repoground.core.ask_context import _navigation_path_intent
+
+    assert not _navigation_path_intent(
+        "Why does the runtime implementation have a corresponding test?"
+    )
+    assert not _navigation_path_intent(
+        "Job finalizer implementation and corresponding real test"
+    )
+    assert _navigation_path_intent(
+        "Find job finalizer implementation and corresponding real test"
+    )
+    assert _navigation_path_intent("Where is retry implemented?")
+
+
+def test_relaxed_navigation_k_one_skips_ineffective_path_index_reads(monkeypatch):
+    """When the first verified OR candidate fills k=1, path hints cannot help."""
+    from pathlib import Path
+    from merger.repoground.core import ask_context as context
+
+    reads = []
+    path = "src/retry.py"
+    result = {
+        "status": "available",
+        "query_result": {
+            "results": [{"chunk_id": "retry", "source_path": path}],
+            "fts_query": '"retry" OR "implementation"',
+        },
+        "resolved_evidence": {
+            "hits": [
+                {
+                    "chunk_id": "retry",
+                    "source_path": path,
+                    "range_status": "resolved",
+                    "range_ref": {"ref": "retry"},
+                    "range": {"text": "Verified retry implementation"},
+                    "citation_id": "cit_retry",
+                }
+            ]
+        },
+        "source_citation_projection": {
+            "items": [{"chunk_id": "retry", "citation_id": "cit_retry"}]
+        },
+    }
+
+    def fake_run(_manifest, _query, _k, prepared_fts_query=None):
+        if prepared_fts_query is None:
+            return {
+                "status": "available",
+                "query_result": {"results": []},
+                "resolved_evidence": {"hits": []},
+            }
+        return result
+
+    def fake_path_reads(*_args, **_kwargs):
+        reads.append(True)
+        return []
+
+    monkeypatch.setattr(context, "_run_query", fake_run)
+    monkeypatch.setattr(context, "_relaxed_path_index_reads", fake_path_reads)
+    state = context._query_context(
+        Path("immutable-manifest"),
+        query="Find retry implementation",
+        k=1,
+        max_context_tokens=100,
+        max_context_bytes=500,
+    )
+
+    assert state["strategy"] == "or_relaxed"
+    assert [hit["source_path"] for hit in state["resolved_ranges"]] == [path]
+    assert not reads
