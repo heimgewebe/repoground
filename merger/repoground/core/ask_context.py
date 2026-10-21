@@ -537,6 +537,14 @@ def _resolved_ranges_with_budget(
             max_bytes=fair_share,
             max_characters=MAX_EXCERPT_CHARS_PER_HIT,
         )
+        # If the fair share cannot fit the first UTF-8 code point, spend
+        # available bytes on the earlier-ranked hit before later candidates.
+        if not bounded_excerpt and fair_share < remaining:
+            bounded_excerpt = _utf8_prefix(
+                excerpt,
+                max_bytes=remaining,
+                max_characters=MAX_EXCERPT_CHARS_PER_HIT,
+            )
         if len(bounded_excerpt) < len(excerpt):
             truncated = True
             omissions.append(
@@ -939,10 +947,37 @@ _NAVIGATION_OBJECTS = frozenset(
 
 def _navigation_path_intent(query: str) -> bool:
     """Only explicit source-location requests may bias indexed OR ranking."""
-    words = set(re.findall(r"\b\w+\b", unicodedata.normalize("NFC", query).lower()))
-    if words & _NAVIGATION_LOCATORS and words & _NAVIGATION_OBJECTS:
-        return True
-    return False
+    words = re.findall(r"\b\w+\b", unicodedata.normalize("NFC", query).lower())
+    if not words or not set(words) & _NAVIGATION_OBJECTS:
+        return False
+    # Explanatory questions may contain "find file" or "test" as content.
+    # Only a leading locator asks us to prioritize source paths.
+    first = words[0]
+    if first in {"which", "welche", "welcher", "welches"}:
+        return len(words) > 1 and words[1] in {
+            "module",
+            "modul",
+            "file",
+            "datei",
+            "path",
+            "pfad",
+            "source",
+            "quellcode",
+            "filename",
+            "dateiname",
+        }
+    if (
+        first in {"where", "wo"}
+        and len(words) > 1
+        and words[1]
+        in {
+            "does",
+            "do",
+            "did",
+        }
+    ):
+        return False
+    return first in _NAVIGATION_LOCATORS
 
 
 def _relaxed_path_index_reads(
@@ -1018,17 +1053,20 @@ def _prefer_diverse_relaxed_sources(
 
     # Ordinary answers retain original FTS/BM25 order; explicit navigation
     # alone may prioritize filename matches after the first original hit.
+    navigation = _navigation_path_intent(query)
     ordered = (
         candidates[:1] + sorted(candidates[1:], key=lambda row: -row[0])
-        if _navigation_path_intent(query)
+        if navigation
         else candidates
     )
     selected = []
     seen = set()
     for _overlap, source, row, evidence in ordered:
-        if source in seen:
+        # BM25 ranks chunks, not files. Diversity applies only to navigation.
+        identity = source if navigation else row.get("chunk_id")
+        if identity in seen:
             continue
-        seen.add(source)
+        seen.add(identity)
         selected.append((row, evidence))
         if len(selected) == k:
             break
@@ -1098,18 +1136,17 @@ def _query_context(
     if len(tokens) < 2:
         return state
     or_query = _or_fts_query(tokens)
-    # A handful of high-BM25 chunks from one test file can crowd the real
-    # implementation out of a small context pack. Overfetch within the existing
-    # 100-chunk index limit and emit at most k distinct, verified source paths.
-    candidate_k = min(100, max(24, k * 3))
+    # Overfetch verified chunks only as needed; preserve the wider existing
+    # search window for explicit navigation with multiple requested sources.
+    navigation = _navigation_path_intent(query)
+    candidate_k = min(100, max(1, k * 3, 24 if navigation and k > 1 else k))
     relaxed_result = _run_query(
         manifest_path, query, candidate_k, prepared_fts_query=or_query
     )
     # With k=1, a verified first OR candidate already fills the answer.
     # Further path reads cannot alter it but would revalidate the full index.
-    need_path_hints = _navigation_path_intent(query) and (
-        k > 1 or not _source_candidates_from_index(relaxed_result, set(tokens))
-    )
+    verified_candidates = _source_candidates_from_index(relaxed_result, set(tokens))
+    need_path_hints = navigation and (k > 1 or not verified_candidates)
     selected_result = _prefer_diverse_relaxed_sources(
         relaxed_result,
         query=query,
@@ -1122,10 +1159,27 @@ def _query_context(
             else []
         ),
     )
+    # Preserve a bounded diagnostic for candidates without index-projected
+    # verified citations; never expose their text as answer evidence.
+    verified_ids = {row.get("chunk_id") for _, _, row, _ in verified_candidates}
+    raw_rows = relaxed_result.get("query_result")
+    raw_rows = raw_rows.get("results") if isinstance(raw_rows, dict) else []
+    invalid_candidates = [
+        {
+            "lane": "canonical_md",
+            "reason": "unverified_index_evidence",
+            "ref": row["chunk_id"],
+        }
+        for row in (raw_rows if isinstance(raw_rows, list) else [])
+        if isinstance(row, dict)
+        and isinstance(row.get("chunk_id"), str)
+        and row["chunk_id"] not in verified_ids
+    ]
     relaxed = _balanced_relaxed_ranges(
         selected_result, max_context_tokens, max_context_bytes
     )
     if not relaxed[0]:
+        state["omissions"].extend(invalid_candidates)
         return state
     (
         state["resolved_ranges"],
@@ -1134,6 +1188,7 @@ def _query_context(
         state["truncated"],
         state["omissions"],
     ) = relaxed
+    state["omissions"].extend(invalid_candidates)
     emitted = {
         (item.get("source_path"), item.get("citation_id"))
         for item in relaxed[0]
@@ -1146,8 +1201,9 @@ def _query_context(
     ]
     emitted_ids = {hit["chunk_id"] for hit in selected_hits}
     emitted_response = {
-        "status": relaxed_result.get("status"),
+        **relaxed_result,
         "query_result": {
+            **(relaxed_result.get("query_result") or {}),
             **selected_result["query_result"],
             "fts_query": or_query,
             "results": [
@@ -1156,8 +1212,12 @@ def _query_context(
                 if row.get("chunk_id") in emitted_ids
             ],
         },
-        "resolved_evidence": {"hits": selected_hits},
+        "resolved_evidence": {
+            **(relaxed_result.get("resolved_evidence") or {}),
+            "hits": selected_hits,
+        },
         "source_citation_projection": {
+            **(relaxed_result.get("source_citation_projection") or {}),
             "items": [
                 item
                 for item in selected_result["source_citation_projection"]["items"]
@@ -1166,7 +1226,7 @@ def _query_context(
                     item.get("citation_id")
                     in {citation for _source, citation in emitted}
                 )
-            ]
+            ],
         },
     }
     state.update(
@@ -1215,6 +1275,15 @@ def _retrieval_caveats(
             {
                 "kind": "other",
                 "detail": "Context evidence was truncated to respect the hard UTF-8 byte budget.",
+            }
+        )
+    if any(
+        item.get("reason") == "unverified_index_evidence" for item in state["omissions"]
+    ):
+        caveats.append(
+            {
+                "kind": "degraded_validation",
+                "detail": "Some OR retrieval candidates lacked verified citations and were excluded.",
             }
         )
     if state["relaxed"]:

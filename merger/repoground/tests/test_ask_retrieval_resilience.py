@@ -752,8 +752,8 @@ def test_balanced_relaxed_ranges_uses_spare_bytes_for_utf8_evidence():
         selected, max_context_tokens=100, max_context_bytes=2
     )
     assert len(ranges) == 1
-    assert ranges[0]["source_path"] == "src/unicode_1.py"
-    assert ranges[0]["citation_id"] == "cit_1"
+    assert ranges[0]["source_path"] == "src/unicode_0.py"
+    assert ranges[0]["citation_id"] == "cit_0"
     assert ranges[0]["text_excerpt"] == "é"
     assert ranges[0]["text_excerpt_bytes"] == 2
     assert used == 2
@@ -889,3 +889,185 @@ def test_relaxed_navigation_k_one_skips_ineffective_path_index_reads(monkeypatch
     assert state["strategy"] == "or_relaxed"
     assert [hit["source_path"] for hit in state["resolved_ranges"]] == [path]
     assert not reads
+
+
+def test_ordinary_or_keeps_two_verified_chunks_from_same_source():
+    """BM25 is chunk-ranked for explanations; diversity is navigation-only."""
+    from merger.repoground.core.ask_context import _prefer_diverse_relaxed_sources
+
+    paths = ["src/a.py", "src/a.py", "src/b.py"]
+    rows = [
+        {"chunk_id": f"chunk-{i}", "source_path": source}
+        for i, source in enumerate(paths)
+    ]
+    indexed = {
+        "query_result": {"results": rows},
+        "resolved_evidence": {
+            "hits": [
+                {
+                    "chunk_id": row["chunk_id"],
+                    "source_path": row["source_path"],
+                    "range_status": "resolved",
+                    "range_ref": {"ref": row["chunk_id"]},
+                    "range": {"text": "verified text"},
+                    "citation_id": f"cit_{i}",
+                }
+                for i, row in enumerate(rows)
+            ]
+        },
+        "source_citation_projection": {
+            "items": [
+                {"chunk_id": row["chunk_id"], "citation_id": f"cit_{i}"}
+                for i, row in enumerate(rows)
+            ]
+        },
+    }
+    selected = _prefer_diverse_relaxed_sources(
+        indexed, query="Why does retry backoff work?", k=2, path_results=[]
+    )
+    assert [row["chunk_id"] for row in selected["query_result"]["results"]] == [
+        "chunk-0",
+        "chunk-1",
+    ]
+
+
+def test_relaxed_or_keeps_index_metadata_and_reports_uncitable_candidates(monkeypatch):
+    """Excluded stale evidence cannot be silently converted into a clean result."""
+    from pathlib import Path
+    from merger.repoground.core import ask_context as context
+
+    rows = [
+        {"chunk_id": "stale", "source_path": "src/stale.py"},
+        {"chunk_id": "valid", "source_path": "src/valid.py"},
+    ]
+    indexed = {
+        "status": "available",
+        "index_identity": {"sha256": "a" * 64},
+        "warnings": [{"kind": "stale_range"}],
+        "query_result": {"results": rows, "fts_query": "generated", "index_total": 2},
+        "resolved_evidence": {
+            "hits": [
+                {
+                    "chunk_id": "stale",
+                    "source_path": "src/stale.py",
+                    "range_status": "stale",
+                    "range": {"text": "untrusted stale range"},
+                    "citation_id": "cit_stale",
+                },
+                {
+                    "chunk_id": "valid",
+                    "source_path": "src/valid.py",
+                    "range_status": "resolved",
+                    "range_ref": {"ref": "valid"},
+                    "range": {"text": "verified source"},
+                    "citation_id": "cit_valid",
+                },
+            ],
+            "resolver_version": "index-only",
+        },
+        "source_citation_projection": {
+            "items": [{"chunk_id": "valid", "citation_id": "cit_valid"}],
+            "authority": "verified",
+        },
+    }
+    monkeypatch.setattr(
+        context,
+        "_run_query",
+        lambda _manifest, _query, _k, prepared_fts_query=None: (
+            indexed
+            if prepared_fts_query is not None
+            else {
+                "status": "available",
+                "query_result": {"results": []},
+                "resolved_evidence": {"hits": []},
+            }
+        ),
+    )
+    monkeypatch.setattr(context, "_relaxed_path_index_reads", lambda **_kw: [])
+    state = context._query_context(
+        Path("immutable"),
+        query="Why does retry backoff fail?",
+        k=2,
+        max_context_tokens=100,
+        max_context_bytes=400,
+    )
+    emitted = state["query_result"]
+    assert emitted["index_identity"] == indexed["index_identity"]
+    assert emitted["warnings"] == indexed["warnings"]
+    assert emitted["query_result"]["index_total"] == 2
+    assert emitted["resolved_evidence"]["resolver_version"] == "index-only"
+    assert emitted["source_citation_projection"]["authority"] == "verified"
+    assert [row["chunk_id"] for row in emitted["query_result"]["results"]] == ["valid"]
+    assert [hit["citation_id"] for hit in state["retrieval_hits"]] == ["cit_valid"]
+    assert any(
+        omission["reason"] == "unverified_index_evidence" and omission["ref"] == "stale"
+        for omission in state["omissions"]
+    )
+
+
+def test_explanatory_location_words_do_not_invoke_navigation_ranking():
+    from merger.repoground.core.ask_context import _navigation_path_intent
+
+    for query in (
+        "Why can't the loader find the config file?",
+        "Where does this test fail?",
+        "Which handler swallows the error?",
+        "Why does runtime implementation call find source?",
+        "Warum findet das Programm die Datei nicht?",
+    ):
+        assert not _navigation_path_intent(query), query
+    for query in (
+        "Where is retry implemented?",
+        "Find configured runtime entrypoint and operator implementation",
+        "Which module defines job_finalizer?",
+        "Wo wird job_finalizer implementiert?",
+    ):
+        assert _navigation_path_intent(query), query
+
+
+def test_ordinary_k_one_or_does_not_overfetch_twenty_four_sources(monkeypatch):
+    from pathlib import Path
+    from merger.repoground.core import ask_context as context
+
+    observed = []
+
+    def fake_run(_manifest, _query, k, prepared_fts_query=None):
+        if prepared_fts_query is None:
+            return {
+                "status": "available",
+                "query_result": {"results": []},
+                "resolved_evidence": {"hits": []},
+            }
+        observed.append(k)
+        return {
+            "status": "available",
+            "query_result": {
+                "results": [{"chunk_id": "only", "source_path": "src/only.py"}]
+            },
+            "resolved_evidence": {
+                "hits": [
+                    {
+                        "chunk_id": "only",
+                        "source_path": "src/only.py",
+                        "range_status": "resolved",
+                        "range_ref": {"ref": "only"},
+                        "range": {"text": "verified"},
+                        "citation_id": "cit_only",
+                    }
+                ]
+            },
+            "source_citation_projection": {
+                "items": [{"chunk_id": "only", "citation_id": "cit_only"}]
+            },
+        }
+
+    monkeypatch.setattr(context, "_run_query", fake_run)
+    state = context._query_context(
+        Path("immutable"),
+        query="Why does the retry implementation fail?",
+        k=1,
+        max_context_tokens=100,
+        max_context_bytes=100,
+    )
+    assert len(state["resolved_ranges"]) == 1
+    assert observed and observed[0] <= 3
