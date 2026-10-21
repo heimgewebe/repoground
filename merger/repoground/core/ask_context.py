@@ -532,19 +532,13 @@ def _resolved_ranges_with_budget(
             break
         remaining_hits = len(candidates) - position
         fair_share = max(1, remaining // max(1, remaining_hits))
+        # Reserve enough of the remaining bytes for the first UTF-8 code
+        # point when possible; keep earlier BM25 hits ahead of later ones.
         bounded_excerpt = _utf8_prefix(
             excerpt,
-            max_bytes=fair_share,
+            max_bytes=min(remaining, max(fair_share, _utf8_size(excerpt[0]))),
             max_characters=MAX_EXCERPT_CHARS_PER_HIT,
         )
-        # If the fair share cannot fit the first UTF-8 code point, spend
-        # available bytes on the earlier-ranked hit before later candidates.
-        if not bounded_excerpt and fair_share < remaining:
-            bounded_excerpt = _utf8_prefix(
-                excerpt,
-                max_bytes=remaining,
-                max_characters=MAX_EXCERPT_CHARS_PER_HIT,
-            )
         if len(bounded_excerpt) < len(excerpt):
             truncated = True
             omissions.append(
