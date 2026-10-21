@@ -1226,7 +1226,10 @@ def _balanced_relaxed_ranges(
 
 
 def _manifest_content_digest(manifest_path: Path) -> str | None:
-    """Verify the source manifest across separately resolved index reads."""
+    """Use the selected request snapshot, not a later replacement on disk."""
+    bound = active_manifest_snapshot(manifest_path)
+    if bound is not None:
+        return bound.binding.sha256
     try:
         return hashlib.sha256(manifest_path.read_bytes()).hexdigest()
     except OSError:
