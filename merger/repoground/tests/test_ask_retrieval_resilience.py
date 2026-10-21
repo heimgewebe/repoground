@@ -1113,6 +1113,10 @@ def test_navigation_interrogative_vs_locator_construction_20261021():
     for query in (
         "Find out why this implementation is slow",
         "Find out how this context surface is generated",
+        "Find out what the retry handler does",
+        "Find out whether the implementation is thread-safe",
+        "Find out when this test runs",
+        "Find out which handler swallows the error",
         "Why can't the loader find the config file?",
         "Where does this test fail?",
         "Which handler swallows the error?",
@@ -1124,6 +1128,7 @@ def test_navigation_interrogative_vs_locator_construction_20261021():
         "Please find the retry implementation",
         "Find generated operator context surface and associated consumer-surface benchmark evidence",
         "Find out where the retry implementation lives",
+        "Find out which file implements retry",
         "In which file is retry implemented?",
         "Find job finalizer implementation and real test",
         "Job finalizer implementation and corresponding real test",
