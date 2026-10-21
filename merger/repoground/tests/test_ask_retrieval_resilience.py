@@ -556,6 +556,15 @@ def test_path_hints_skip_locator_words_and_scale_with_requested_k(monkeypatch):
         k=1,
     )
     assert [term for term, _count in calls] == ["retry", "backoff"]
+    calls.clear()
+    context._relaxed_path_index_reads(
+        Path("/immutable/index"),
+        query="Locate configured runtime entrypoint module",
+        fts_query='"runtime" OR "entrypoint"',
+        k=2,
+    )
+    # "entrypoint" is a meaningful source-path identifier, not filler.
+    assert [term for term, _count in calls] == ["runtime", "entrypoint"]
 
 
 def test_broad_navigation_or_fallback_recovers_verified_source_paths(monkeypatch):
@@ -594,6 +603,21 @@ def test_broad_navigation_or_fallback_recovers_verified_source_paths(monkeypatch
     tests = [
         (
             "Find job finalizer implementation and corresponding real test",
+            [
+                "tests/test_job_finalizer.py",
+                "docs/security-model.md",
+                "tests/test_runtime.py",
+            ],
+            {
+                "finalizer": [
+                    "tests/test_job_finalizer.py",
+                    "src/grabowski_job_finalizer.py",
+                ],
+            },
+            {"src/grabowski_job_finalizer.py"},
+        ),
+        (
+            "Job finalizer implementation and corresponding real test",
             [
                 "tests/test_job_finalizer.py",
                 "docs/security-model.md",
@@ -824,7 +848,7 @@ def test_navigation_requires_locator_even_for_implementation_and_test_nouns():
     assert not _navigation_path_intent(
         "Why does the runtime implementation have a corresponding test?"
     )
-    assert not _navigation_path_intent(
+    assert _navigation_path_intent(
         "Job finalizer implementation and corresponding real test"
     )
     assert _navigation_path_intent(
@@ -1071,3 +1095,85 @@ def test_ordinary_k_one_or_does_not_overfetch_twenty_four_sources(monkeypatch):
     )
     assert len(state["resolved_ranges"]) == 1
     assert observed and observed[0] <= 3
+
+
+def test_navigation_interrogative_vs_locator_construction_20261021():
+    """Location intent is grammatical; find/which tokens alone are not enough."""
+    from merger.repoground.core.ask_context import _navigation_path_intent
+
+    for query in (
+        "Find out why this implementation is slow",
+        "Why can't the loader find the config file?",
+        "Where does this test fail?",
+        "Which handler swallows the error?",
+        "How is the cache path computed?",
+        "Why does the runtime implementation have a corresponding test?",
+    ):
+        assert not _navigation_path_intent(query), query
+    for query in (
+        "Please find the retry implementation",
+        "In which file is retry implemented?",
+        "Find job finalizer implementation and real test",
+        "Job finalizer implementation and corresponding real test",
+        "Wo wird retry implementiert?",
+    ):
+        assert _navigation_path_intent(query), query
+
+
+def test_path_hint_missing_citation_survives_as_degraded_diagnostic(monkeypatch):
+    """Filtered index candidates rejected as uncitable must not disappear silently."""
+    from pathlib import Path
+    from merger.repoground.core import ask_context as context
+
+    def response(chunk, source, cited=True):
+        row = {"chunk_id": chunk, "source_path": source}
+        hit = {
+            "chunk_id": chunk,
+            "source_path": source,
+            "range_status": "resolved",
+            "range_ref": {"ref": chunk},
+            "range": {"text": "Verified source" if cited else "Unverified hint"},
+        }
+        if cited:
+            hit["citation_id"] = "cit_" + chunk
+        return {
+            "status": "available",
+            "query_result": {"results": [row]},
+            "resolved_evidence": {"hits": [hit]},
+            "source_citation_projection": {
+                "items": [{"chunk_id": chunk, "citation_id": "cit_" + chunk}]
+                if cited
+                else []
+            },
+        }
+
+    def fake_run(_manifest, _query, _k, prepared_fts_query=None):
+        if prepared_fts_query is None:
+            return {
+                "status": "available",
+                "query_result": {"results": []},
+                "resolved_evidence": {"hits": []},
+            }
+        return response("baseline", "tests/test_retry.py")
+
+    monkeypatch.setattr(context, "_run_query", fake_run)
+    monkeypatch.setattr(
+        context,
+        "_relaxed_path_index_reads",
+        lambda *_args, **_kw: [response("uncitable-hint", "src/retry.py", False)],
+    )
+    state = context._query_context(
+        Path("immutable"),
+        query="Find retry implementation",
+        k=2,
+        max_context_tokens=100,
+        max_context_bytes=500,
+    )
+    assert [row["source_path"] for row in state["resolved_ranges"]] == [
+        "tests/test_retry.py"
+    ]
+    assert any(
+        entry.get("reason") == "unverified_index_evidence"
+        and entry.get("ref") == "uncitable-hint"
+        for entry in state["omissions"]
+    )

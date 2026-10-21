@@ -944,10 +944,40 @@ def _navigation_path_intent(query: str) -> bool:
     words = re.findall(r"\b\w+\b", unicodedata.normalize("NFC", query).lower())
     if not words or not set(words) & _NAVIGATION_OBJECTS:
         return False
-    # Explanatory questions may contain "find file" or "test" as content.
-    # Only a leading locator asks us to prioritize source paths.
-    first = words[0]
-    if first in {"which", "welche", "welcher", "welches"}:
+    # Source-pair noun phrases are requests for matching implementation and
+    # test files, unlike explanatory questions containing the same nouns.
+    nouns = set(words)
+    if (
+        "?" not in query
+        and {"implementation", "corresponding", "test"} <= nouns
+        and not nouns
+        & {
+            "why",
+            "how",
+            "what",
+            "when",
+            "warum",
+            "wieso",
+            "wie",
+            "does",
+            "is",
+            "has",
+            "have",
+        }
+    ):
+        return True
+    # "find" inside a why/how question is content, not a source locator.
+    if words[0] in {"please", "bitte"}:
+        words = words[1:]
+    if (
+        len(words) > 2
+        and words[0] == "in"
+        and words[1] in {"which", "welche", "welcher", "welches"}
+    ):
+        words = words[1:]
+    if not words or words[:3] == ["find", "out", "why"]:
+        return False
+    if words[0] in {"which", "welche", "welcher", "welches"}:
         return len(words) > 1 and words[1] in {
             "module",
             "modul",
@@ -960,18 +990,9 @@ def _navigation_path_intent(query: str) -> bool:
             "filename",
             "dateiname",
         }
-    if (
-        first in {"where", "wo"}
-        and len(words) > 1
-        and words[1]
-        in {
-            "does",
-            "do",
-            "did",
-        }
-    ):
-        return False
-    return first in _NAVIGATION_LOCATORS
+    if words[0] in {"where", "wo"}:
+        return len(words) < 2 or words[1] not in {"does", "do", "did"}
+    return words[0] in _NAVIGATION_LOCATORS
 
 
 def _relaxed_path_index_reads(
@@ -1006,7 +1027,7 @@ def _relaxed_path_index_reads(
             5 <= len(term) <= 32
             and term not in generic
             and term not in _NAVIGATION_LOCATORS
-            and term not in _NAVIGATION_OBJECTS
+            and (term == "entrypoint" or term not in _NAVIGATION_OBJECTS)
         )
     ][:2]
     results = []
@@ -1141,34 +1162,37 @@ def _query_context(
     # Further path reads cannot alter it but would revalidate the full index.
     verified_candidates = _source_candidates_from_index(relaxed_result, set(tokens))
     need_path_hints = navigation and (k > 1 or not verified_candidates)
-    selected_result = _prefer_diverse_relaxed_sources(
-        relaxed_result,
-        query=query,
-        k=k,
-        path_results=(
-            _relaxed_path_index_reads(
-                manifest_path, query=query, fts_query=or_query, k=k
-            )
-            if need_path_hints
-            else []
-        ),
+    path_results = (
+        _relaxed_path_index_reads(manifest_path, query=query, fts_query=or_query, k=k)
+        if need_path_hints
+        else []
     )
-    # Preserve a bounded diagnostic for candidates without index-projected
-    # verified citations; never expose their text as answer evidence.
-    verified_ids = {row.get("chunk_id") for _, _, row, _ in verified_candidates}
-    raw_rows = relaxed_result.get("query_result")
-    raw_rows = raw_rows.get("results") if isinstance(raw_rows, dict) else []
-    invalid_candidates = [
-        {
-            "lane": "canonical_md",
-            "reason": "unverified_index_evidence",
-            "ref": row["chunk_id"],
+    selected_result = _prefer_diverse_relaxed_sources(
+        relaxed_result, query=query, k=k, path_results=path_results
+    )
+    # Check every consulted index result, including filtered path hints.
+    # Uncitable candidates never become answer evidence, but must be reported.
+    invalid_candidates = []
+    for indexed in (relaxed_result, *path_results):
+        verified_ids = {
+            row.get("chunk_id")
+            for _overlap, _source, row, _evidence in _source_candidates_from_index(
+                indexed, set(tokens)
+            )
         }
-        for row in (raw_rows if isinstance(raw_rows, list) else [])
-        if isinstance(row, dict)
-        and isinstance(row.get("chunk_id"), str)
-        and row["chunk_id"] not in verified_ids
-    ]
+        raw_rows = indexed.get("query_result")
+        raw_rows = raw_rows.get("results") if isinstance(raw_rows, dict) else []
+        invalid_candidates.extend(
+            {
+                "lane": "canonical_md",
+                "reason": "unverified_index_evidence",
+                "ref": row["chunk_id"],
+            }
+            for row in (raw_rows if isinstance(raw_rows, list) else [])
+            if isinstance(row, dict)
+            and isinstance(row.get("chunk_id"), str)
+            and row["chunk_id"] not in verified_ids
+        )
     relaxed = _balanced_relaxed_ranges(
         selected_result, max_context_tokens, max_context_bytes
     )
