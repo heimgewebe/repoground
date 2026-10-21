@@ -1295,7 +1295,10 @@ def test_path_hints_reject_other_index_snapshot_and_forward_warnings(monkeypatch
             },
         }
 
-    primary = indexed("baseline", "tests/test_retry.py", "a" * 64)
+    repeated_warning = {"kind": "stale_source", "detail": "filtered read caveat"}
+    primary = indexed(
+        "baseline", "tests/test_retry.py", "a" * 64, warnings=[repeated_warning]
+    )
     safe = indexed(
         "safe",
         "src/retry.py",
@@ -1330,8 +1333,12 @@ def test_path_hints_reject_other_index_snapshot_and_forward_warnings(monkeypatch
         "tests/test_retry.py",
         "src/retry.py",
     ]
-    assert {"kind": "stale_source", "detail": "filtered read caveat"} in (
-        state["query_result"].get("warnings") or []
+    assert repeated_warning in (state["query_result"].get("warnings") or [])
+    assert (
+        sum(
+            warning == repeated_warning for warning in state["query_result"]["warnings"]
+        )
+        == 1
     )
     assert any(
         row.get("reason") == "index_artifact_mismatch" for row in state["omissions"]
@@ -1355,6 +1362,9 @@ def test_find_out_in_which_file_preserves_source_location_intent():
         "Find which handler swallows the error",
         "Where exactly does this test fail?",
         "Find out in which way retry is implemented",
+        "Find out where this test fails",
+        "Find where this test fails",
+        "Finde heraus, wo dieser Test fehlschlägt",
     ):
         assert not _navigation_path_intent(query), query
 

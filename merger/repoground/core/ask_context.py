@@ -986,7 +986,19 @@ _FIND_EXPLANATION_OPENERS = frozenset(
     }
 )
 _WHERE_EXPLANATION_VERBS = frozenset(
-    {"do", "does", "did", "schlägt", "scheitert", "tritt", "passiert"}
+    {
+        "do",
+        "does",
+        "did",
+        "fail",
+        "fails",
+        "crashes",
+        "fehlschlägt",
+        "schlägt",
+        "scheitert",
+        "tritt",
+        "passiert",
+    }
 )
 _WHERE_EXPLANATION_PARTICIPLES = frozenset(
     {"failing", "crashing", "breaking", "hanging"}
@@ -1005,7 +1017,7 @@ def _where_is_source_location(words: list[str]) -> bool:
         and following[-1] in _WHERE_EXPLANATION_PARTICIPLES
     ):
         return False
-    return not following or following[0] not in _WHERE_EXPLANATION_VERBS
+    return not following or not (set(following) & _WHERE_EXPLANATION_VERBS)
 
 
 def _find_source_location_complement(
@@ -1022,7 +1034,7 @@ def _find_source_location_complement(
         words = words[1:]
     if words[0] in _SOURCE_LOCATION_QUESTION_WORDS:
         return len(words) > 1 and words[1] in _SOURCE_LOCATION_NOUNS
-    if require_locative:
+    if require_locative or words[0] in {"where", "wo"}:
         return words[0] in {"where", "wo"} and _where_is_source_location(words)
     return words[0] not in _FIND_EXPLANATION_OPENERS
 
@@ -1338,7 +1350,13 @@ def _query_context(
     emitted_ids = {hit["chunk_id"] for hit in selected_hits}
     emitted_response = {
         **relaxed_result,
-        "warnings": list(relaxed_result.get("warnings") or []) + path_warnings,
+        "warnings": list(
+            {
+                json.dumps(warning, sort_keys=True): warning
+                for warning in list(relaxed_result.get("warnings") or [])
+                + path_warnings
+            }.values()
+        ),
         "query_result": {
             **(relaxed_result.get("query_result") or {}),
             **selected_result["query_result"],
