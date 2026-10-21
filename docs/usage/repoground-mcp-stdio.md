@@ -98,6 +98,24 @@ questions through the exact symbol index first. For broader content questions it
 shares `ask_context`'s exact-AND then labelled relaxed-OR retrieval strategy.
 Context is bounded globally and per hit; empty and duplicate excerpts are omitted.
 
+### Precise queries for code navigation
+
+Prefer a concrete filename or code identifier when looking for an implementation or
+its tests. A broad natural-language query with unrelated terms can fall back from
+exact AND retrieval to ranked `or_relaxed` retrieval and miss the target within
+the first `k` results. On a pinned historical benchmark bundle, the concise
+`grabowski_runtime.py` query returned both the runtime source and its entrypoint
+configuration, where a broad runtime-entrypoint query returned neither; the
+`grabowski_job_finalizer.py` query found the implementation omitted by a broader
+finalizer query. See [the reproducible finding](https://github.com/heimgewebe/repoground/issues/1346).
+
+If `retrieval.strategy` is `or_relaxed` or the context pack reports truncated
+evidence, inspect the cited `resolved_ranges`, then narrow the query or use
+`query_existing_index` / `find_symbol` for an exact target. An absent top-`k`
+hit is not proof that a file does not exist. Verify source claims against cited
+ranges and use `live_freshness` separately when current checkout state matters.
+This guidance improves query precision; it does not guarantee recall or correctness.
+
 The call-navigation tools read only bundle-registered `python_call_graph_json` and `python_symbol_index_json` artifacts. They validate artifact integrity and provenance coherence before returning symbol relations. `S1` means one unique local target under the producer's bounded static rules; it does not mean the target executes at runtime. `S0` preserves uncertainty instead of guessing.
 
 Optional explicit write tool:
