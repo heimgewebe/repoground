@@ -1320,6 +1320,7 @@ def test_path_hints_reject_other_index_snapshot_and_forward_warnings(
         "a" * 64,
         warnings=[{"kind": "stale_source", "detail": "filtered read caveat"}],
     )
+    safe["query_result"]["warnings"] = ["Low result coverage"]
     stale = indexed("alien", "src/alien.py", "b" * 64)
 
     def run(_manifest, _query, _k, prepared_fts_query=None):
@@ -1349,6 +1350,18 @@ def test_path_hints_reject_other_index_snapshot_and_forward_warnings(
         "src/retry.py",
     ]
     assert repeated_warning in (state["query_result"].get("warnings") or [])
+    assert "Low result coverage" in state["query_result"]["query_result"]["warnings"]
+    assert any(
+        "Low result coverage" in c["detail"]
+        for c in context._retrieval_caveats(
+            {},
+            {},
+            state=state,
+            retrieval_infrastructure={"index_resolved": True},
+            query="Find retry implementation",
+            additional_evidence_present=False,
+        )
+    )
     assert (
         sum(
             warning == repeated_warning for warning in state["query_result"]["warnings"]
@@ -1488,3 +1501,63 @@ def test_plural_tests_and_where_does_live_are_navigation():
         "Find out where this test fails",
     ):
         assert not _navigation_path_intent(query), query
+
+
+def test_relaxed_projection_only_contains_emitted_chunk_when_citations_share_range(
+    monkeypatch,
+):
+    """Two chunks sharing one canonical range must not leak a second unrendered hit."""
+    from pathlib import Path
+    from merger.repoground.core import ask_context as context
+
+    rows = [
+        {"chunk_id": chunk, "source_path": "src/retry.py"}
+        for chunk in ("chunk-a", "chunk-b")
+    ]
+    hits = [
+        {
+            "chunk_id": row["chunk_id"],
+            "source_path": row["source_path"],
+            "range_status": "resolved",
+            "range_ref": {"ref": "shared-range"},
+            "source_line_range": {"start_line": 2, "end_line": 4},
+            "range": {"text": "The same verified source snippet"},
+            "citation_id": "cit_shared",
+        }
+        for row in rows
+    ]
+    indexed = {
+        "status": "available",
+        "query_result": {"results": rows},
+        "resolved_evidence": {"hits": hits},
+        "source_citation_projection": {
+            "items": [
+                {"chunk_id": x["chunk_id"], "citation_id": "cit_shared"} for x in rows
+            ]
+        },
+    }
+
+    def fake_query(_manifest, _query, _k, prepared_fts_query=None):
+        if prepared_fts_query is None:
+            return {
+                "status": "available",
+                "query_result": {"results": []},
+                "resolved_evidence": {"hits": []},
+            }
+        return indexed
+
+    monkeypatch.setattr(context, "_run_query", fake_query)
+    state = context._query_context(
+        Path("unused"),
+        query="Why does the retry handler fail?",
+        k=2,
+        max_context_tokens=100,
+        max_context_bytes=300,
+    )
+    assert len(state["resolved_ranges"]) == 1
+    assert len(state["retrieval_hits"]) == 1
+    assert len(state["query_result"]["query_result"]["results"]) == 1
+    assert len(state["query_result"]["resolved_evidence"]["hits"]) == 1
+    assert len(state["query_result"]["source_citation_projection"]["items"]) == 1
+    assert state["retrieval_hits"][0]["citation_id"] == "cit_shared"
+    assert any(row["reason"] == "duplicate_range" for row in state["omissions"])

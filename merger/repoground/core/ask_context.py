@@ -1342,6 +1342,12 @@ def _query_context(
         for warning in (indexed.get("warnings") or [])
         if isinstance(warning, dict)
     ]
+    path_query_warnings = [
+        warning
+        for indexed in path_results
+        for warning in (indexed.get("query_result") or {}).get("warnings", [])
+        if isinstance(warning, str)
+    ]
     selected_result = _prefer_diverse_relaxed_sources(
         relaxed_result, query=query, k=k, path_results=path_results
     )
@@ -1402,16 +1408,26 @@ def _query_context(
         state["omissions"],
     ) = relaxed
     state["omissions"].extend(invalid_candidates)
-    emitted = {
-        (item.get("source_path"), item.get("citation_id"))
-        for item in relaxed[0]
-        if isinstance(item.get("citation_id"), str)
-    }
-    selected_hits = [
-        hit
-        for hit in selected_result["resolved_evidence"]["hits"]
-        if (hit.get("source_path"), hit.get("citation_id")) in emitted
-    ]
+    # Citation and path alone are not a unique chunk: two hits may share
+    # the same verified canonical range while only one excerpt is emitted.
+    remaining_hits = list(selected_result["resolved_evidence"]["hits"])
+    selected_hits = []
+    for excerpt in relaxed[0]:
+        for position, hit in enumerate(remaining_hits):
+            address = _source_address_fields(hit)
+            range_ref = (
+                hit.get("range_ref")
+                if isinstance(hit.get("range_ref"), dict)
+                else {"ref": str(hit.get("chunk_id"))}
+            )
+            if (
+                address.get("source_path") == excerpt.get("source_path")
+                and address.get("citation_id") == excerpt.get("citation_id")
+                and address.get("source_line_range") == excerpt.get("source_line_range")
+                and range_ref == excerpt.get("range_ref")
+            ):
+                selected_hits.append(remaining_hits.pop(position))
+                break
     emitted_ids = {hit["chunk_id"] for hit in selected_hits}
     emitted_response = {
         **relaxed_result,
@@ -1425,6 +1441,18 @@ def _query_context(
         "query_result": {
             **(relaxed_result.get("query_result") or {}),
             **selected_result["query_result"],
+            "warnings": list(
+                dict.fromkeys(
+                    [
+                        warning
+                        for warning in (relaxed_result.get("query_result") or {}).get(
+                            "warnings", []
+                        )
+                        if isinstance(warning, str)
+                    ]
+                    + path_query_warnings
+                )
+            ),
             "fts_query": or_query,
             "results": [
                 row
@@ -1442,10 +1470,6 @@ def _query_context(
                 item
                 for item in selected_result["source_citation_projection"]["items"]
                 if item.get("chunk_id") in emitted_ids
-                and (
-                    item.get("citation_id")
-                    in {citation for _source, citation in emitted}
-                )
             ],
         },
     }
@@ -1490,6 +1514,15 @@ def _retrieval_caveats(
     caveats = list(freshness.get("caveats") or []) + list(
         availability.get("caveats") or []
     )
+    if "Low result coverage" in (
+        (state["query_result"].get("query_result") or {}).get("warnings") or []
+    ):
+        caveats.append(
+            {
+                "kind": "other",
+                "detail": "Low result coverage was reported by the indexed retrieval.",
+            }
+        )
     if state["truncated"]:
         caveats.append(
             {
