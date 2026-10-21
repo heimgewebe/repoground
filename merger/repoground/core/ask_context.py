@@ -1021,10 +1021,29 @@ _FIND_EXPLANATION_NOUNS = frozenset(
         "regression",
     }
 )
+_DEBUGGING_NOUNS = _FIND_EXPLANATION_NOUNS | {
+    "error",
+    "failure",
+    "crash",
+    "deadlock",
+    "flaw",
+    "fehlschlag",
+    "absturz",
+}
+
+
+def _has_debugging_complement(words: list[str]) -> bool:
+    return any(
+        noun in _DEBUGGING_NOUNS
+        and link in {"in", "im", "of", "von", "der", "des", "die"}
+        for noun, link in zip(words, words[1:])
+    )
 
 
 def _where_is_source_location(words: list[str]) -> bool:
     """Ignore emphasis but not question verbs that request an explanation."""
+    if _has_debugging_complement(words):
+        return False
     following = words[1:]
     if following[:1] in (["exactly"], ["genau"]):
         following = following[1:]
@@ -1047,7 +1066,11 @@ def _find_source_location_complement(
     """Use file-location grammar, never an explanatory complement."""
     if words[:1] in (["exactly"], ["precisely"], ["genau"], ["exakt"]):
         words = words[1:]
-    if not words or set(words[:5]) & _FIND_EXPLANATION_NOUNS:
+    if (
+        not words
+        or set(words[:5]) & _FIND_EXPLANATION_NOUNS
+        or _has_debugging_complement(words)
+    ):
         return False
     if (
         len(words) > 2
@@ -1441,7 +1464,7 @@ def _query_context(
         state["omissions"].extend(relaxed[4])
         state["omissions"].extend(invalid_candidates)
         state["truncated"] = state["truncated"] or relaxed[3]
-        if relaxed[4]:
+        if relaxed[4] or invalid_candidates:
             state["query_result"] = {
                 **relaxed_result,
                 "warnings": merged_warnings,

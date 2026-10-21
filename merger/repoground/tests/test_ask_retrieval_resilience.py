@@ -1646,6 +1646,10 @@ def test_find_debugging_object_retains_bm25_explanation_ranking():
         "Finde den Fehler in der Implementierung",
         "Find the race condition in this test",
         "Find the root cause of this test failure",
+        "Find the failure in this test",
+        "Find the error in the retry handler",
+        "Where is the bug in the retry handler?",
+        "Wo ist der Fehler in der Implementierung?",
     ):
         assert not _navigation_path_intent(query), query
     assert _navigation_path_intent("Find the error handler")
@@ -1742,3 +1746,63 @@ def test_zero_fit_navigation_keeps_nested_filtered_warnings(tmp_path, monkeypatc
         additional_evidence_present=False,
     )
     assert any("Low result coverage" in c["detail"] for c in caveats)
+
+
+def test_uncitable_or_preserves_query_diagnostics_without_exposing_rows(monkeypatch):
+    """Rejected OR candidates must not retain strict FTS or leak index evidence."""
+    from pathlib import Path
+
+    from merger.repoground.core import ask_context as context
+
+    indexed = {
+        "status": "available",
+        "warnings": [{"kind": "stale_range"}],
+        "query_result": {
+            "results": [{"chunk_id": "stale", "source_path": "src/stale.py"}],
+            "warnings": ["Low result coverage"],
+        },
+        "resolved_evidence": {
+            "hits": [
+                {
+                    "chunk_id": "stale",
+                    "source_path": "src/stale.py",
+                    "range_status": "stale",
+                    "range": {"text": "uncitable stale evidence"},
+                    "citation_id": "cit_stale",
+                }
+            ]
+        },
+        "source_citation_projection": {"items": []},
+    }
+
+    monkeypatch.setattr(
+        context,
+        "_run_query",
+        lambda _m, _q, _k, prepared_fts_query=None: (
+            indexed
+            if prepared_fts_query is not None
+            else {
+                "status": "available",
+                "query_result": {"results": [], "fts_query": "strict AND"},
+                "resolved_evidence": {"hits": []},
+            }
+        ),
+    )
+    monkeypatch.setattr(context, "_relaxed_path_index_reads", lambda *_a, **_kw: [])
+    state = context._query_context(
+        Path("immutable"),
+        query="Why does the retry handler fail?",
+        k=2,
+        max_context_tokens=20,
+        max_context_bytes=40,
+    )
+    assert state["strategy"] == "or_relaxed"
+    assert " OR " in state["fts_query"]
+    assert state["resolved_ranges"] == []
+    assert state["retrieval_hits"] == []
+    assert state["query_result"]["query_result"]["results"] == []
+    assert state["query_result"]["resolved_evidence"]["hits"] == []
+    assert state["query_result"]["source_citation_projection"]["items"] == []
+    assert state["query_result"]["warnings"] == [{"kind": "stale_range"}]
+    assert "Low result coverage" in state["query_result"]["query_result"]["warnings"]
+    assert any(x["reason"] == "unverified_index_evidence" for x in state["omissions"])
