@@ -1459,3 +1459,23 @@ def test_german_navigation_anchor_ignores_heraus(monkeypatch):
     )
     assert anchors and anchors[0] == "retry"
     assert "heraus" not in anchors
+
+
+def test_plural_tests_and_where_does_live_are_navigation():
+    """Plural test locations and 'does ... live' are source queries, not debugging."""
+    from merger.repoground.core.ask_context import _navigation_path_intent
+
+    for query in (
+        "Where are the retry tests?",
+        "Where does the retry implementation live?",
+        "Where exactly does the retry implementation live?",
+    ):
+        assert _navigation_path_intent(query), query
+
+    for query in (
+        "Where does this test fail?",
+        "Where exactly does this test fail?",
+        "Where are the retry tests failing?",
+        "Find out where this test fails",
+    ):
+        assert not _navigation_path_intent(query), query

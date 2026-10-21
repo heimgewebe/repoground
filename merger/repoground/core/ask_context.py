@@ -941,6 +941,7 @@ _NAVIGATION_OBJECTS = frozenset(
         "handled",
         "handler",
         "test",
+        "tests",
     }
 )
 
@@ -1017,6 +1018,10 @@ def _where_is_source_location(words: list[str]) -> bool:
         and following[-1] in _WHERE_EXPLANATION_PARTICIPLES
     ):
         return False
+    if following[:1] in (["do"], ["does"], ["did"]):
+        # An auxiliary alone does not turn an explicit file-location request
+        # into an explanation ("Where does the implementation live?").
+        return following[-1] in {"live", "reside"}
     return not following or not (set(following) & _WHERE_EXPLANATION_VERBS)
 
 
