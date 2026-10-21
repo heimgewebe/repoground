@@ -15,6 +15,7 @@ from merger.repoground.core.bundle_access import (
 )
 from merger.repoground.core.citation_projection import source_authority_projection
 from merger.repoground.core.manifest_snapshot import (
+    MAX_MANIFEST_BYTES,
     active_manifest_snapshot,
     resolve_manifest_path,
 )
@@ -1004,7 +1005,22 @@ _WHERE_EXPLANATION_VERBS = frozenset(
 _WHERE_EXPLANATION_PARTICIPLES = frozenset(
     {"failing", "crashing", "breaking", "hanging"}
 )
-_FIND_EXPLANATION_NOUNS = frozenset({"reason", "cause", "grund", "ursache"})
+_FIND_EXPLANATION_NOUNS = frozenset(
+    {
+        "reason",
+        "cause",
+        "grund",
+        "ursache",
+        "bug",
+        "bugs",
+        "fehler",
+        "issue",
+        "problem",
+        "race",
+        "leak",
+        "regression",
+    }
+)
 
 
 def _where_is_source_location(words: list[str]) -> bool:
@@ -1231,9 +1247,11 @@ def _manifest_content_digest(manifest_path: Path) -> str | None:
     if bound is not None:
         return bound.binding.sha256
     try:
-        return hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+        with manifest_path.open("rb") as stream:
+            raw = stream.read(MAX_MANIFEST_BYTES + 1)
     except OSError:
         return None
+    return hashlib.sha256(raw).hexdigest() if len(raw) <= MAX_MANIFEST_BYTES else None
 
 
 def _query_context(
@@ -1397,6 +1415,24 @@ def _query_context(
             for item in invalid_candidates
         }.values()
     )
+    merged_warnings = list(
+        {
+            json.dumps(warning, sort_keys=True): warning
+            for warning in list(relaxed_result.get("warnings") or []) + path_warnings
+        }.values()
+    )
+    merged_query_warnings = list(
+        dict.fromkeys(
+            [
+                warning
+                for warning in (relaxed_result.get("query_result") or {}).get(
+                    "warnings", []
+                )
+                if isinstance(warning, str)
+            ]
+            + path_query_warnings
+        )
+    )
     relaxed = _balanced_relaxed_ranges(
         selected_result, max_context_tokens, max_context_bytes
     )
@@ -1406,7 +1442,24 @@ def _query_context(
         state["omissions"].extend(invalid_candidates)
         state["truncated"] = state["truncated"] or relaxed[3]
         if relaxed[4]:
-            state["query_result"] = relaxed_result
+            state["query_result"] = {
+                **relaxed_result,
+                "warnings": merged_warnings,
+                "query_result": {
+                    **(relaxed_result.get("query_result") or {}),
+                    "warnings": merged_query_warnings,
+                    "fts_query": or_query,
+                    "results": [],
+                },
+                "resolved_evidence": {
+                    **(relaxed_result.get("resolved_evidence") or {}),
+                    "hits": [],
+                },
+                "source_citation_projection": {
+                    **(relaxed_result.get("source_citation_projection") or {}),
+                    "items": [],
+                },
+            }
             state["retrieval_hits"] = []
             state["fts_query"] = or_query
             state["strategy"] = "or_relaxed"
@@ -1443,28 +1496,11 @@ def _query_context(
     emitted_ids = {hit["chunk_id"] for hit in selected_hits}
     emitted_response = {
         **relaxed_result,
-        "warnings": list(
-            {
-                json.dumps(warning, sort_keys=True): warning
-                for warning in list(relaxed_result.get("warnings") or [])
-                + path_warnings
-            }.values()
-        ),
+        "warnings": merged_warnings,
         "query_result": {
             **(relaxed_result.get("query_result") or {}),
             **selected_result["query_result"],
-            "warnings": list(
-                dict.fromkeys(
-                    [
-                        warning
-                        for warning in (relaxed_result.get("query_result") or {}).get(
-                            "warnings", []
-                        )
-                        if isinstance(warning, str)
-                    ]
-                    + path_query_warnings
-                )
-            ),
+            "warnings": merged_query_warnings,
             "fts_query": or_query,
             "results": [
                 row

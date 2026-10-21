@@ -1608,6 +1608,9 @@ def test_relaxed_utf8_byte_miss_keeps_fts_and_truncation(monkeypatch):
     )
     assert state["resolved_ranges"] == []
     assert state["retrieval_hits"] == []
+    assert state["query_result"]["query_result"]["results"] == []
+    assert state["query_result"]["resolved_evidence"]["hits"] == []
+    assert state["query_result"]["source_citation_projection"]["items"] == []
     assert state["truncated"] is True
     assert state["strategy"] == "or_relaxed"
     assert " OR " in state["fts_query"]
@@ -1632,3 +1635,110 @@ def test_public_pack_rejects_manifest_swap_after_query(monkeypatch, tmp_path):
         context.build_ask_context_pack(
             bundle["manifest"], query="hello", k=5, max_context_tokens=100
         )
+
+
+def test_find_debugging_object_retains_bm25_explanation_ranking():
+    """Find a bug in a handler is not a request to locate the handler file."""
+    from merger.repoground.core.ask_context import _navigation_path_intent
+
+    for query in (
+        "Find the bug in the retry handler",
+        "Finde den Fehler in der Implementierung",
+        "Find the race condition in this test",
+        "Find the root cause of this test failure",
+    ):
+        assert not _navigation_path_intent(query), query
+    assert _navigation_path_intent("Find the error handler")
+    assert _navigation_path_intent("Find the retry implementation")
+
+
+def test_manifest_digest_rejects_oversize_before_read(tmp_path):
+    """Bound the manifest hash like the existing stable snapshot reader."""
+    from merger.repoground.core.ask_context import _manifest_content_digest
+    from merger.repoground.core.manifest_snapshot import MAX_MANIFEST_BYTES
+
+    manifest = tmp_path / "oversized.bundle.manifest.json"
+    manifest.write_bytes(b"x" * (MAX_MANIFEST_BYTES + 1))
+    assert _manifest_content_digest(manifest) is None
+
+
+def test_zero_fit_navigation_keeps_nested_filtered_warnings(tmp_path, monkeypatch):
+    """No excerpt bytes fit, so no raw hits or filtered diagnostics may leak away."""
+    from merger.repoground.core import ask_context as context
+
+    manifest = tmp_path / "immutable.bundle.manifest.json"
+    manifest.write_text("stable", encoding="utf-8")
+    meta = {"sha256": "a" * 64}
+
+    def indexed(ref, source, warning=False):
+        return {
+            "status": "available",
+            "bundle_manifest": str(manifest),
+            "index_artifact": meta,
+            "query_result": {
+                "results": [{"chunk_id": ref, "source_path": source}],
+                "warnings": ["Low result coverage"] if warning else [],
+            },
+            "resolved_evidence": {
+                "hits": [
+                    {
+                        "chunk_id": ref,
+                        "source_path": source,
+                        "range_status": "resolved",
+                        "range_ref": {"ref": ref},
+                        "range": {"text": "évidence"},
+                        "citation_id": "cit_" + ref,
+                    }
+                ]
+            },
+            "source_citation_projection": {
+                "items": [
+                    {
+                        "chunk_id": ref,
+                        "citation_id": "cit_" + ref,
+                    }
+                ]
+            },
+        }
+
+    primary = indexed("primary", "tests/test_retry.py")
+    filtered = indexed("filtered", "src/retry.py", warning=True)
+    monkeypatch.setattr(
+        context,
+        "_run_query",
+        lambda _m, _q, _k, prepared_fts_query=None: (
+            primary
+            if prepared_fts_query is not None
+            else {
+                "status": "available",
+                "query_result": {"results": []},
+                "resolved_evidence": {"hits": []},
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        context, "_relaxed_path_index_reads", lambda *_a, **_kw: [filtered]
+    )
+    state = context._query_context(
+        manifest,
+        query="Find retry implementation",
+        k=2,
+        max_context_tokens=10,
+        max_context_bytes=1,
+    )
+    assert state["resolved_ranges"] == []
+    assert state["retrieval_hits"] == []
+    assert state["query_result"]["query_result"]["results"] == []
+    assert state["query_result"]["resolved_evidence"]["hits"] == []
+    assert state["query_result"]["source_citation_projection"]["items"] == []
+    assert "Low result coverage" in state["query_result"]["query_result"]["warnings"]
+    assert state["truncated"] is True
+    caveats = context._retrieval_caveats(
+        {},
+        {},
+        state=state,
+        retrieval_infrastructure={"index_resolved": True},
+        query="Find retry implementation",
+        additional_evidence_present=False,
+    )
+    assert any("Low result coverage" in c["detail"] for c in caveats)
