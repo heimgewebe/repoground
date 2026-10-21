@@ -932,7 +932,12 @@ _NAVIGATION_OBJECTS = frozenset(
         "definiert",
         "defines",
         "module",
+        "modules",
         "modul",
+        "modulen",
+        "paths",
+        "pfade",
+        "pfaden",
         "handled",
         "handler",
         "test",
@@ -943,16 +948,26 @@ _NAVIGATION_OBJECTS = frozenset(
 _SOURCE_LOCATION_NOUNS = frozenset(
     {
         "module",
+        "modules",
         "modul",
+        "modulen",
         "file",
+        "files",
         "datei",
+        "dateien",
         "path",
+        "paths",
         "pfad",
+        "pfade",
+        "pfaden",
         "source",
         "quellcode",
         "filename",
         "dateiname",
     }
+)
+_SOURCE_LOCATION_QUESTION_WORDS = frozenset(
+    {"which", "what", "welche", "welcher", "welches", "welchem", "welchen"}
 )
 _FIND_EXPLANATION_OPENERS = frozenset(
     {
@@ -973,6 +988,9 @@ _FIND_EXPLANATION_OPENERS = frozenset(
 _WHERE_EXPLANATION_VERBS = frozenset(
     {"do", "does", "did", "schlägt", "scheitert", "tritt", "passiert"}
 )
+_WHERE_EXPLANATION_PARTICIPLES = frozenset(
+    {"failing", "crashing", "breaking", "hanging"}
+)
 _FIND_EXPLANATION_NOUNS = frozenset({"reason", "cause", "grund", "ursache"})
 
 
@@ -981,6 +999,12 @@ def _where_is_source_location(words: list[str]) -> bool:
     following = words[1:]
     if following[:1] in (["exactly"], ["genau"]):
         following = following[1:]
+    if (
+        following
+        and following[0] in {"is", "are", "was", "were"}
+        and following[-1] in _WHERE_EXPLANATION_PARTICIPLES
+    ):
+        return False
     return not following or following[0] not in _WHERE_EXPLANATION_VERBS
 
 
@@ -993,10 +1017,10 @@ def _find_source_location_complement(
     if (
         len(words) > 2
         and words[0] == "in"
-        and words[1] in {"which", "welche", "welcher", "welches"}
+        and words[1] in _SOURCE_LOCATION_QUESTION_WORDS
     ):
         words = words[1:]
-    if words[0] in {"which", "what", "welche", "welcher", "welches"}:
+    if words[0] in _SOURCE_LOCATION_QUESTION_WORDS:
         return len(words) > 1 and words[1] in _SOURCE_LOCATION_NOUNS
     if require_locative:
         return words[0] in {"where", "wo"} and _where_is_source_location(words)
@@ -1023,7 +1047,7 @@ def _navigation_path_intent(query: str) -> bool:
     if (
         len(words) > 2
         and words[0] == "in"
-        and words[1] in {"which", "welche", "welcher", "welches"}
+        and words[1] in _SOURCE_LOCATION_QUESTION_WORDS
     ):
         words = words[1:]
     if not words:
@@ -1045,7 +1069,7 @@ def _navigation_path_intent(query: str) -> bool:
             complement[1:] if is_find_out else complement,
             require_locative=is_find_out,
         )
-    if words[0] in {"which", "welche", "welcher", "welches"}:
+    if words[0] in _SOURCE_LOCATION_QUESTION_WORDS:
         return len(words) > 1 and words[1] in _SOURCE_LOCATION_NOUNS
     if words[0] in {"where", "wo"}:
         return _where_is_source_location(words)

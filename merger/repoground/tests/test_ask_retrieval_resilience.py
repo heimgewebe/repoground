@@ -1357,3 +1357,30 @@ def test_find_out_in_which_file_preserves_source_location_intent():
         "Find out in which way retry is implemented",
     ):
         assert not _navigation_path_intent(query), query
+
+
+def test_r3_locative_inflection_and_progressive_debugging():
+    """German inflections and plural file locators must remain navigation."""
+    from merger.repoground.core.ask_context import _navigation_path_intent
+
+    for query in (
+        "Finde heraus in welchem Modul retry implementiert ist",
+        "In welchem Modul ist retry implementiert?",
+        "Finde heraus in welchen Dateien retry implementiert ist",
+        "Find out which files implement retry",
+        "Which files define job_finalizer?",
+        "In which files is retry implemented?",
+        "Which modules define job_finalizer?",
+        "Where is the failing test implemented?",
+        "Where is retry implemented?",
+    ):
+        assert _navigation_path_intent(query), query
+
+    for query in (
+        "Where is this test failing?",
+        "Where is the handler crashing?",
+        "Where are the tests hanging?",
+        "Find which handler swallows the error",
+        "Find out what caused the error",
+    ):
+        assert not _navigation_path_intent(query), query
