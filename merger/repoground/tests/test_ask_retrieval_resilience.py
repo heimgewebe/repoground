@@ -1561,3 +1561,74 @@ def test_relaxed_projection_only_contains_emitted_chunk_when_citations_share_ran
     assert len(state["query_result"]["source_citation_projection"]["items"]) == 1
     assert state["retrieval_hits"][0]["citation_id"] == "cit_shared"
     assert any(row["reason"] == "duplicate_range" for row in state["omissions"])
+
+
+def test_relaxed_utf8_byte_miss_keeps_fts_and_truncation(monkeypatch):
+    """Valid OR candidates with no one-byte UTF-8 prefix are not 'no matches'."""
+    from pathlib import Path
+    from merger.repoground.core import ask_context as context
+
+    def fake_index(_manifest, _query, _k, prepared_fts_query=None):
+        if prepared_fts_query is None:
+            return {
+                "status": "available",
+                "query_result": {"results": []},
+                "resolved_evidence": {"hits": []},
+            }
+        return {
+            "status": "available",
+            "query_result": {
+                "results": [{"chunk_id": "unicode", "source_path": "src/utf8.py"}],
+                "fts_query": prepared_fts_query,
+            },
+            "resolved_evidence": {
+                "hits": [
+                    {
+                        "chunk_id": "unicode",
+                        "source_path": "src/utf8.py",
+                        "range_status": "resolved",
+                        "range_ref": {"ref": "utf8"},
+                        "range": {"text": "évidence"},
+                        "citation_id": "cit_unicode",
+                    }
+                ]
+            },
+            "source_citation_projection": {
+                "items": [{"chunk_id": "unicode", "citation_id": "cit_unicode"}]
+            },
+        }
+
+    monkeypatch.setattr(context, "_run_query", fake_index)
+    state = context._query_context(
+        Path("unused"),
+        query="Why does utf8 unicode matter?",
+        k=2,
+        max_context_tokens=10,
+        max_context_bytes=1,
+    )
+    assert state["resolved_ranges"] == []
+    assert state["retrieval_hits"] == []
+    assert state["truncated"] is True
+    assert state["strategy"] == "or_relaxed"
+    assert " OR " in state["fts_query"]
+    assert any(x["reason"] == "hard_byte_budget_exceeded" for x in state["omissions"])
+
+
+def test_public_pack_rejects_manifest_swap_after_query(monkeypatch, tmp_path):
+    """No old excerpt may inherit the manifest SHA observed later in the build."""
+    import pytest
+    from merger.repoground.core import ask_context as context
+
+    bundle = _complete_basic_bundle(tmp_path)
+    original = context._query_context
+
+    def changed_manifest(path, **kwargs):
+        state = original(path, **kwargs)
+        path.write_bytes(path.read_bytes() + bytes([10]))
+        return state
+
+    monkeypatch.setattr(context, "_query_context", changed_manifest)
+    with pytest.raises(RuntimeError, match="manifest"):
+        context.build_ask_context_pack(
+            bundle["manifest"], query="hello", k=5, max_context_tokens=100
+        )

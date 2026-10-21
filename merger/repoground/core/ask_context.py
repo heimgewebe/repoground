@@ -1398,7 +1398,16 @@ def _query_context(
         selected_result, max_context_tokens, max_context_bytes
     )
     if not relaxed[0]:
+        # Even when no UTF-8 code point fits, the OR index did find evidence.
+        state["omissions"].extend(relaxed[4])
         state["omissions"].extend(invalid_candidates)
+        state["truncated"] = state["truncated"] or relaxed[3]
+        if relaxed[4]:
+            state["query_result"] = relaxed_result
+            state["retrieval_hits"] = []
+            state["fts_query"] = or_query
+            state["strategy"] = "or_relaxed"
+            state["relaxed"] = True
         return state
     (
         state["resolved_ranges"],
@@ -1684,6 +1693,7 @@ def build_ask_context_pack(
         max_context_tokens, max_context_bytes
     )
     manifest_path = resolve_manifest_path(bundle_manifest)
+    request_manifest_sha256 = _manifest_content_digest(manifest_path)
     snapshot = snapshot_status(manifest_path)
     freshness = _freshness_block(snapshot)
     availability = _availability_block(snapshot)
@@ -1784,6 +1794,11 @@ def build_ask_context_pack(
     }
     if structured_evidence:
         result["structured_evidence"] = structured_evidence
+    if request_manifest_sha256 != _manifest_content_digest(manifest_path) or (
+        request_manifest_sha256 is not None
+        and result["snapshot_ref"].get("manifest_sha256") != request_manifest_sha256
+    ):
+        raise RuntimeError("Bundle manifest changed during ask context construction")
     return result
 
 
