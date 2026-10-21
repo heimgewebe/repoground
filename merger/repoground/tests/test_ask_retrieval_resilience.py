@@ -425,6 +425,75 @@ def test_balanced_relaxed_ranges_reserves_bytes_for_each_verified_source():
     assert truncated is True
 
 
+def test_balanced_relaxed_ranges_preserves_evidence_under_tiny_budgets():
+    """Tiny positive budgets must return verified evidence, not lose every hit."""
+    from merger.repoground.core.ask_context import _balanced_relaxed_ranges
+
+    selected = {
+        "resolved_evidence": {
+            "hits": [
+                {
+                    "chunk_id": f"chunk-{i}",
+                    "source_path": f"src/source_{i}.py",
+                    "range_status": "resolved",
+                    "range_ref": {"ref": f"range-{i}"},
+                    "range": {"text": "verified source"},
+                    "citation_id": f"cit_{i}",
+                }
+                for i in range(3)
+            ]
+        }
+    }
+
+    ranges, used, chars, truncated, omissions = _balanced_relaxed_ranges(
+        selected, max_context_tokens=100, max_context_bytes=2
+    )
+    assert [row["source_path"] for row in ranges] == [
+        "src/source_0.py", "src/source_1.py"
+    ]
+    assert [row["citation_id"] for row in ranges] == [
+        "cit_0", "cit_1"
+    ]
+    assert used == chars == 2
+    assert all(row["text_excerpt_bytes"] == 1 for row in ranges)
+    assert truncated is True
+    assert omissions
+
+
+def test_balanced_relaxed_ranges_uses_spare_bytes_for_utf8_evidence():
+    """A share too small for UTF-8 must not discard the usable total budget."""
+    from merger.repoground.core.ask_context import _balanced_relaxed_ranges
+
+    selected = {
+        "resolved_evidence": {
+            "hits": [
+                {
+                    "chunk_id": f"utf8-{i}",
+                    "source_path": f"src/unicode_{i}.py",
+                    "range_status": "resolved",
+                    "range_ref": {"ref": f"ref-{i}"},
+                    "range": {"text": "évidence"},
+                    "citation_id": f"cit_{i}",
+                }
+                for i in range(2)
+            ]
+        }
+    }
+
+    ranges, used, chars, truncated, omissions = _balanced_relaxed_ranges(
+        selected, max_context_tokens=100, max_context_bytes=2
+    )
+    assert len(ranges) == 1
+    assert ranges[0]["source_path"] == "src/unicode_1.py"
+    assert ranges[0]["citation_id"] == "cit_1"
+    assert ranges[0]["text_excerpt"] == "é"
+    assert ranges[0]["text_excerpt_bytes"] == 2
+    assert used == 2
+    assert chars == 1
+    assert truncated is True
+    assert omissions
+
+
 def test_relaxed_source_candidates_retain_sparse_and_substring_matched_sources():
     from merger.repoground.core.ask_context import (
         _balanced_relaxed_ranges,

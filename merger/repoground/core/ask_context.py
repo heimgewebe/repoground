@@ -958,27 +958,12 @@ def _balanced_relaxed_ranges(
     max_context_tokens: int,
     max_context_bytes: int,
 ) -> tuple[list[dict[str, Any]], int, int, bool, list[dict[str, Any]]]:
-    """Reserve one bounded share per selected hit, so no hint starves another."""
-    hits = selected["resolved_evidence"]["hits"]
-    if not hits:
-        return [], 0, 0, False, []
-    share = max_context_bytes // len(hits)
-    ranges: list[dict[str, Any]] = []
-    bytes_used = characters = 0
-    truncated = False
-    omissions: list[dict[str, Any]] = []
-    for hit in hits:
-        chunk, size, chars, cut, omitted = _resolved_ranges_with_budget(
-            {"resolved_evidence": {"hits": [hit]}},
-            max_context_tokens,
-            max_context_bytes=share,
-        )
-        ranges.extend(chunk)
-        bytes_used += size
-        characters += chars
-        truncated = truncated or cut
-        omissions.extend(omitted)
-    return ranges, bytes_used, characters, truncated, omissions
+    """Share remaining bytes, not a fixed per-hit slice that may round to zero."""
+    # The common allocator already bounds UTF-8 excerpts, preserves citations,
+    # reports omissions, and reallocates unused bytes to later verified hits.
+    return _resolved_ranges_with_budget(
+        selected, max_context_tokens, max_context_bytes=max_context_bytes
+    )
 
 
 def _query_context(
