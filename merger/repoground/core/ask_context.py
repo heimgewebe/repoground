@@ -976,7 +976,7 @@ def _navigation_path_intent(query: str) -> bool:
         and words[1] in {"which", "welche", "welcher", "welches"}
     ):
         words = words[1:]
-    if not words or words[:2] == ["find", "out"]:
+    if not words or words[:3] in (["find", "out", "why"], ["find", "out", "how"]):
         return False
     if words[0] in {"which", "welche", "welcher", "welches"}:
         return len(words) > 1 and words[1] in {

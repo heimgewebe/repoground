@@ -1123,6 +1123,7 @@ def test_navigation_interrogative_vs_locator_construction_20261021():
     for query in (
         "Please find the retry implementation",
         "Find generated operator context surface and associated consumer-surface benchmark evidence",
+        "Find out where the retry implementation lives",
         "In which file is retry implemented?",
         "Find job finalizer implementation and real test",
         "Job finalizer implementation and corresponding real test",
