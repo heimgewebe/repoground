@@ -824,6 +824,204 @@ def _language_context_reserve(
     return min(max(0, used_bytes), 4096, total_context_bytes // 3)
 
 
+def _prefer_diverse_relaxed_sources(
+    query_result: dict[str, Any], *, query: str, k: int
+) -> dict[str, Any]:
+    """Prefer distinct, filename-relevant sources from one verified FTS result.
+
+    Only reorder existing, evidence-resolved index chunks. Never derive a file
+    from the query text or read a live checkout; the immutable bundle remains
+    the sole evidence authority.
+    """
+    raw_result = query_result.get("query_result")
+    resolved = query_result.get("resolved_evidence")
+    rows = raw_result.get("results") if isinstance(raw_result, dict) else None
+    hits = resolved.get("hits") if isinstance(resolved, dict) else None
+    if not isinstance(rows, list) or not isinstance(hits, list):
+        return {"query_result": {"results": []}, "resolved_evidence": {"hits": []}}
+    evidence_by_ref = {
+        hit["chunk_id"]: hit
+        for hit in hits
+        if isinstance(hit, dict)
+        and isinstance(hit.get("chunk_id"), str)
+        and hit.get("range_status") == "resolved"
+    }
+    query_terms = set(_content_tokens(query))
+    candidates: list[tuple[int, int, str, dict[str, Any]]] = []
+    for position, row in enumerate(rows):
+        if not isinstance(row, dict):
+            continue
+        ref = row.get("chunk_id")
+        source = row.get("source_path") or row.get("path")
+        evidence = evidence_by_ref.get(ref)
+        if (
+            not isinstance(ref, str)
+            or not isinstance(source, str)
+            or not source
+            or evidence is None
+            or evidence.get("source_path") != source
+        ):
+            continue
+        path_terms = set(
+            re.findall(
+                r"\b\w+\b",
+                unicodedata.normalize("NFC", source)
+                .lower()
+                .replace("/", " ")
+                .replace("-", " ")
+                .replace("_", " ")
+                .replace(".", " "),
+            )
+        )
+        candidates.append((len(path_terms & query_terms), position, source, row))
+
+    selected: list[dict[str, Any]] = []
+    seen_sources: set[str] = set()
+    # Keep the strongest original text match, even when its filename has no
+    # query tokens. Then diversify by file-address overlap with stable ties.
+    ordered = candidates[:1] + sorted(
+        candidates[1:], key=lambda item: (-item[0], item[1])
+    )
+    for _overlap, _position, source, row in ordered:
+        if source in seen_sources:
+            continue
+        seen_sources.add(source)
+        selected.append(row)
+        if len(selected) == k:
+            break
+    return {
+        "query_result": {"results": selected},
+        "resolved_evidence": {
+            "hits": [evidence_by_ref[row["chunk_id"]] for row in selected]
+        },
+        "source_citation_projection": query_result.get("source_citation_projection"),
+    }
+
+
+def _verified_navigation_paths(
+    manifest_path: Path,
+    *,
+    query: str,
+    fts_query: str,
+    selected_paths: set[str],
+) -> list[dict[str, Any]]:
+    """Recover source/config hits missing from broad OR search.
+
+    Every candidate is selected from immutable index path metadata and must
+    independently match the *same* FTS query with verified citation evidence.
+    No live file reads, inferred filenames, or unbounded index scans.
+    """
+    terms = _content_tokens(query)
+    token_set = set(terms)
+    if not token_set.intersection({"implementation", "implementierung", "entrypoint"}):
+        return []
+    generic = {
+        "find",
+        "configured",
+        "implementation",
+        "implementierung",
+        "operator",
+        "corresponding",
+        "generated",
+        "associated",
+        "actual",
+        "source",
+        "module",
+        "files",
+        "tests",
+        "test",
+        "package",
+        "scripts",
+        "context",
+        "evidence",
+        "query",
+        "where",
+    }
+    anchors = [token for token in terms if len(token) >= 5 and token not in generic][:2]
+    if not anchors:
+        return []
+
+    def overlap(path: str) -> int:
+        basename = set(re.findall(r"[a-z0-9]+", Path(path).stem.lower()))
+        return len(basename & token_set)
+
+    wanted = ["src/"]
+    if "entrypoint" in token_set:
+        wanted.append("config/")
+    missing = [
+        prefix
+        for prefix in wanted
+        if not any(
+            path.startswith(prefix)
+            and bool(
+                set(re.findall(r"[a-z0-9]+", Path(path).stem.lower())) & set(anchors)
+            )
+            for path in selected_paths
+        )
+    ]
+    if not missing:
+        return []
+    possible: dict[str, int] = {}
+    for anchor in anchors:
+        listing = query_existing_index(
+            manifest_path,
+            "",
+            k=100,
+            filters={"path": anchor},
+            resolve_evidence=False,
+            project_sources=False,
+        )
+        raw = (
+            listing.get("query_result")
+            if listing.get("status") == "available"
+            else None
+        )
+        if not isinstance(raw, dict):
+            continue
+        for row in raw.get("results", []):
+            path = row.get("source_path") or row.get("path")
+            if not isinstance(path, str) or path in selected_paths:
+                continue
+            if not re.fullmatch(r"(?:src|config)/[A-Za-z0-9_./-]{1,180}", path):
+                continue
+            if any(part in {".", ".."} for part in path.split("/")):
+                continue
+            score = overlap(path)
+            if score >= 2:
+                possible[path] = score
+
+    matched = []
+    for prefix in missing:
+        choices = [path for path in possible if path.startswith(prefix)]
+        if not choices:
+            continue
+        source = min(
+            choices, key=lambda path: (-possible[path], len(Path(path).stem), path)
+        )
+        result = query_existing_index(
+            manifest_path,
+            query,
+            k=1,
+            filters={"path": source},
+            resolve_evidence=True,
+            project_sources=True,
+            prepared_fts_query=fts_query,
+        )
+        if result.get("status") != "available":
+            continue
+        selected, *_ = _resolved_ranges_with_budget(
+            result, max_context_tokens=400, max_context_bytes=1600
+        )
+        if (
+            len(selected) == 1
+            and selected[0].get("source_path") == source
+            and selected[0].get("status") == "resolved"
+            and _retrieval_hits(result)
+        ):
+            matched.append(result)
+    return matched
+
+
 def _query_context(
     manifest_path: Path,
     *,
@@ -859,9 +1057,16 @@ def _query_context(
     if len(tokens) < 2:
         return state
     or_query = _or_fts_query(tokens)
-    relaxed_result = _run_query(manifest_path, query, k, prepared_fts_query=or_query)
+    # A handful of high-BM25 chunks from one test file can crowd the real
+    # implementation out of a small context pack. Overfetch within the existing
+    # 100-chunk index limit and emit at most k distinct, verified source paths.
+    candidate_k = min(100, max(24, k * 3))
+    relaxed_result = _run_query(
+        manifest_path, query, candidate_k, prepared_fts_query=or_query
+    )
+    selected_result = _prefer_diverse_relaxed_sources(relaxed_result, query=query, k=k)
     relaxed = _resolved_ranges_with_budget(
-        relaxed_result,
+        selected_result,
         max_context_tokens,
         max_context_bytes=max_context_bytes,
     )
@@ -877,12 +1082,68 @@ def _query_context(
     state.update(
         {
             "query_result": relaxed_result,
-            "retrieval_hits": _retrieval_hits(relaxed_result),
+            "retrieval_hits": _retrieval_hits(selected_result),
             "fts_query": or_query,
             "strategy": "or_relaxed",
             "relaxed": True,
         }
     )
+    # Only the relaxed search receives these additional source/config hints.
+    # Each source must independently match the same FTS query in the verified
+    # immutable index, and at most k distinct paths may reach the caller.
+    supplemental = _verified_navigation_paths(
+        manifest_path,
+        query=query,
+        fts_query=or_query,
+        selected_paths={
+            item["source_path"]
+            for item in state["resolved_ranges"]
+            if isinstance(item.get("source_path"), str)
+        },
+    )[:k]
+    if supplemental:
+        keep = max(0, k - len(supplemental))
+        old_refs = {
+            ref.get("citation_id"): ref
+            for ref in state["retrieval_hits"]
+            if isinstance(ref.get("citation_id"), str)
+        }
+        selected = state["resolved_ranges"][:keep]
+        refs = [
+            old_refs[item["citation_id"]]
+            for item in selected
+            if item.get("citation_id") in old_refs
+        ]
+        used = sum(item["text_excerpt_bytes"] for item in selected)
+        chars = sum(item["text_excerpt_characters"] for item in selected)
+        chosen_paths = {item.get("source_path") for item in selected}
+        for result in supplemental:
+            extra, _size, _chars, cut, omitted = _resolved_ranges_with_budget(
+                result,
+                max_context_tokens,
+                max_context_bytes=max(0, max_context_bytes - used),
+            )
+            if not extra:
+                continue
+            hit = extra[0]
+            refs_by_id = {
+                ref.get("citation_id"): ref for ref in _retrieval_hits(result)
+            }
+            related = refs_by_id.get(hit.get("citation_id"))
+            if related is None or hit.get("source_path") in chosen_paths:
+                continue
+            selected.append(hit)
+            refs.append(related)
+            chosen_paths.add(hit["source_path"])
+            used += hit["text_excerpt_bytes"]
+            chars += hit["text_excerpt_characters"]
+            state["truncated"] = state["truncated"] or cut
+            state["omissions"].extend(omitted)
+        if len(selected) > keep:
+            state["resolved_ranges"] = selected
+            state["retrieval_hits"] = refs
+            state["used_bytes"] = used
+            state["used_characters"] = chars
     return state
 
 
@@ -1164,9 +1425,7 @@ def _render_source_authority_text_scalar(value: str) -> str:
         if unicodedata.category(character) in {"Cc", "Cf", "Zl", "Zp"}:
             codepoint = ord(character)
             escape = (
-                f"\\u{codepoint:04x}"
-                if codepoint <= 0xFFFF
-                else f"\\U{codepoint:08x}"
+                f"\\u{codepoint:04x}" if codepoint <= 0xFFFF else f"\\U{codepoint:08x}"
             )
             parts.append(escape)
         else:

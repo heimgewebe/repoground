@@ -75,8 +75,7 @@ def test_no_match_query_signals_emptiness_instead_of_silence(tmp_path):
     no_evidence_caveats = [
         caveat
         for caveat in pack["answer_scaffold"]["caveats_to_surface"]
-        if caveat["kind"] == "other"
-        and "No evidence matched" in caveat["detail"]
+        if caveat["kind"] == "other" and "No evidence matched" in caveat["detail"]
     ]
     assert len(no_evidence_caveats) == 1
 
@@ -211,3 +210,180 @@ def test_resolved_ranges_enforce_utf8_bytes_without_splitting_unicode():
     assert used_bytes != used_characters
     assert truncated is True
     assert omissions[0]["reason"] == "excerpt_truncated"
+
+
+def test_relaxed_or_preserves_diverse_source_paths_and_original_citations(monkeypatch):
+    """Overlapping test chunks must not hide an indexed implementation chunk."""
+    from pathlib import Path
+
+    from merger.repoground.core import ask_context as context
+
+    # This order reproduces the observed Codex finalizer miss at small k:
+    # one test file occupies three high-BM25 chunks; implementation ranks sixth.
+    paths = [
+        "tests/test_job_finalizer.py",
+        "tests/test_job_finalizer.py",
+        "docs/security-model.md",
+        "tests/test_job_finalizer.py",
+        "tests/test_deploy_runtime.py",
+        "src/grabowski_job_finalizer.py",
+    ]
+    results = [
+        {"chunk_id": f"chunk-{index}", "source_path": path, "score": float(index)}
+        for index, path in enumerate(paths)
+    ]
+    evidence = [
+        {
+            "chunk_id": f"chunk-{index}",
+            "source_path": path,
+            "range_status": "resolved",
+            "range_ref": {"ref": f"range-{index}"},
+            "range": {"text": f"verified source evidence for {path}"},
+            "source_line_range": {"start_line": 1, "end_line": 1},
+            "citation_id": f"cit_{index}",
+        }
+        for index, path in enumerate(paths)
+    ]
+    projected = [
+        {"chunk_id": f"chunk-{index}", "citation_id": f"cit_{index}"}
+        for index in range(len(paths))
+    ]
+    calls = []
+
+    def fake_index_query(_manifest, _query, k, prepared_fts_query=None):
+        calls.append((k, prepared_fts_query))
+        if prepared_fts_query is None:
+            return {
+                "status": "available",
+                "query_result": {"results": [], "fts_query": "strict AND"},
+                "resolved_evidence": {"hits": []},
+            }
+        return {
+            "status": "available",
+            "query_result": {"results": results[:k], "fts_query": prepared_fts_query},
+            "resolved_evidence": {"hits": evidence[:k]},
+            "source_citation_projection": {"items": projected[:k]},
+        }
+
+    monkeypatch.setattr(context, "_run_query", fake_index_query)
+    pack = context._query_context(
+        Path("unused-bound-manifest"),
+        query="Find job finalizer implementation and real test",
+        k=3,
+        max_context_tokens=1000,
+        max_context_bytes=4000,
+    )
+    retrieved = pack["resolved_ranges"]
+    assert calls[0][0] == 3
+    assert calls[1][0] > 3  # bounded overfetch before selecting exactly k
+    assert len(retrieved) == 3
+    assert len({item["source_path"] for item in retrieved}) == 3
+    assert "src/grabowski_job_finalizer.py" in {
+        item["source_path"] for item in retrieved
+    }
+    assert {item["citation_id"] for item in retrieved} <= {
+        item["citation_id"] for item in pack["retrieval_hits"]
+    }
+    assert pack["strategy"] == "or_relaxed"
+    assert pack["used_bytes"] <= 4000
+
+
+def test_broad_navigation_or_fallback_recovers_verified_source_paths(monkeypatch):
+    """The read-only OR fallback should not hide implementation behind test hits."""
+    from pathlib import Path
+
+    from merger.repoground.core import ask_context as module
+
+    def evidence(paths):
+        rows = []
+        resolved = []
+        projections = []
+        for number, path in enumerate(paths):
+            chunk_id = f"chunk-{number}-{path}"
+            citation_id = f"cit_{number:02d}abcdef"
+            rows.append({"chunk_id": chunk_id, "source_path": path, "score": -1.0})
+            resolved.append(
+                {
+                    "chunk_id": chunk_id,
+                    "source_path": path,
+                    "range_status": "resolved",
+                    "range": {"text": f"Bounded, verified contents of {path}"},
+                    "source_line_range": {"start_line": 1, "end_line": 2},
+                    "range_ref": {"ref": chunk_id},
+                    "citation_id": citation_id,
+                }
+            )
+            projections.append({"chunk_id": chunk_id, "citation_id": citation_id})
+        return {
+            "status": "available",
+            "query_result": {"results": rows, "fts_query": '"finalizer" OR "runtime"'},
+            "resolved_evidence": {"hits": resolved},
+            "source_citation_projection": {"items": projections},
+        }
+
+    tests = [
+        (
+            "Job finalizer implementation and corresponding real test",
+            [
+                "tests/test_job_finalizer.py",
+                "docs/security-model.md",
+                "tests/test_runtime.py",
+            ],
+            {
+                "finalizer": [
+                    "tests/test_job_finalizer.py",
+                    "src/grabowski_job_finalizer.py",
+                ],
+            },
+            {"src/grabowski_job_finalizer.py"},
+        ),
+        (
+            "Find configured runtime entrypoint and Grabowski operator implementation",
+            [
+                "tests/test_deployment_metadata.py",
+                "tools/deploy_runtime.py",
+                "src/grabowski_mcp.py",
+            ],
+            {
+                "runtime": [
+                    "tools/deploy_runtime.py",
+                    "src/grabowski_runtime.py",
+                    "config/runtime-entrypoint.json",
+                ],
+                "entrypoint": ["config/runtime-entrypoint.json"],
+            },
+            {"src/grabowski_runtime.py", "config/runtime-entrypoint.json"},
+        ),
+    ]
+    for query, original, source_paths, required in tests:
+        calls = []
+
+        def fake_run(_manifest, _query, _k, prepared_fts_query=None):
+            return evidence([] if prepared_fts_query is None else original)
+
+        def fake_index(_manifest, query_text, *, filters=None, **kwargs):
+            path = (filters or {}).get("path", "")
+            calls.append((query_text, path, kwargs))
+            if not query_text:
+                return evidence(source_paths.get(path, []))
+            return evidence([path]) if path in required else evidence([])
+
+        monkeypatch.setattr(module, "_run_query", fake_run)
+        monkeypatch.setattr(module, "query_existing_index", fake_index)
+        state = module._query_context(
+            Path("/immutable/manifest.json"),
+            query=query,
+            k=3,
+            max_context_tokens=5000,
+            max_context_bytes=10000,
+        )
+        returned = {hit["source_path"] for hit in state["resolved_ranges"]}
+        assert state["strategy"] == "or_relaxed"
+        assert required <= returned
+        assert len(state["resolved_ranges"]) <= 3
+        assert state["used_bytes"] <= 10000
+        assert all(
+            hit["citation_id"].startswith("cit_") for hit in state["resolved_ranges"]
+        )
+        assert all(call[2].get("k", 0) <= 100 for call in calls)
+        assert any(not q for q, _, _ in calls), "path-candidate index was not queried"
