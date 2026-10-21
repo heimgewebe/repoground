@@ -1024,6 +1024,8 @@ def _find_source_location_complement(
     words: list[str], *, require_locative: bool
 ) -> bool:
     """Use file-location grammar, never an explanatory complement."""
+    if words[:1] in (["exactly"], ["genau"]):
+        words = words[1:]
     if not words or set(words[:5]) & _FIND_EXPLANATION_NOUNS:
         return False
     if (
@@ -1074,6 +1076,8 @@ def _navigation_path_intent(query: str) -> bool:
             "bitte",
             "mal",
             "du",
+            "exactly",
+            "genau",
         }:
             complement = complement[1:]
         is_find_out = complement[:1] in (["out"], ["heraus"])
@@ -1094,6 +1098,9 @@ def _relaxed_path_index_reads(
     """Two bounded read-only path hints, still constrained by the original FTS."""
     generic = {
         "find",
+        "heraus",
+        "genau",
+        "exactly",
         "configured",
         "implementation",
         "implementierung",
@@ -1209,6 +1216,14 @@ def _balanced_relaxed_ranges(
     )
 
 
+def _manifest_content_digest(manifest_path: Path) -> str | None:
+    """Verify the source manifest across separately resolved index reads."""
+    try:
+        return hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
 def _query_context(
     manifest_path: Path,
     *,
@@ -1248,6 +1263,9 @@ def _query_context(
     # search window for explicit navigation with multiple requested sources.
     navigation = _navigation_path_intent(query)
     candidate_k = min(100, max(1, k * 3, 24 if navigation and k > 1 else k))
+    manifest_digest_before = (
+        _manifest_content_digest(manifest_path) if navigation else None
+    )
     relaxed_result = _run_query(
         manifest_path, query, candidate_k, prepared_fts_query=or_query
     )
@@ -1260,13 +1278,20 @@ def _query_context(
         if need_path_hints
         else []
     )
+    # The path may name a different manifest after an atomic replacement.
+    # Hash only a small manifest, not the entire SQLite index, on navigation.
+    manifest_content_unchanged = not path_results or (
+        manifest_digest_before is not None
+        and manifest_digest_before == _manifest_content_digest(manifest_path)
+    )
     # Separate index queries can observe different SQLite bytes after a swap.
     # Only combine evidence from the same hashed artifact and bound manifest.
     artifact = relaxed_result.get("index_artifact")
     stable_path_results = [
         indexed
         for indexed in path_results
-        if isinstance(artifact, dict)
+        if manifest_content_unchanged
+        and isinstance(artifact, dict)
         and isinstance(artifact.get("sha256"), str)
         and re.fullmatch(r"[0-9a-f]{64}", artifact["sha256"])
         and isinstance(relaxed_result.get("bundle_manifest"), str)
@@ -1290,7 +1315,11 @@ def _query_context(
         [
             {
                 "lane": "canonical_md",
-                "reason": "index_artifact_mismatch",
+                "reason": (
+                    "bundle_manifest_identity_unverified"
+                    if not manifest_content_unchanged
+                    else "index_artifact_mismatch"
+                ),
                 "ref": "filtered_path_index",
             }
         ]
@@ -1442,14 +1471,16 @@ def _retrieval_caveats(
             }
         )
     if any(
-        item.get("reason") == "index_artifact_mismatch" for item in state["omissions"]
+        item.get("reason")
+        in {"index_artifact_mismatch", "bundle_manifest_identity_unverified"}
+        for item in state["omissions"]
     ):
         caveats.append(
             {
                 "kind": "degraded_validation",
                 "detail": (
                     "Filtered source candidates from a different or unverified index "
-                    "artifact were excluded."
+                    "artifact or bundle manifest were excluded."
                 ),
             }
         )

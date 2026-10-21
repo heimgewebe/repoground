@@ -355,9 +355,10 @@ def test_ordinary_relaxed_or_keeps_bm25_order_without_path_hints(monkeypatch):
     assert state["used_bytes"] <= 4000
 
 
-def test_relaxed_response_projects_only_emitted_cited_source_rows(monkeypatch):
+def test_relaxed_response_projects_only_emitted_cited_source_rows(
+    monkeypatch, tmp_path
+):
     """Overfetch and path-only hints must not leak raw candidate rows as answers."""
-    from pathlib import Path
     from merger.repoground.core import ask_context as context
 
     def indexed(label, paths):
@@ -414,9 +415,11 @@ def test_relaxed_response_projects_only_emitted_cited_source_rows(monkeypatch):
         "_relaxed_path_index_reads",
         lambda *_args, **_kwargs: [source_hint],
     )
+    manifest = tmp_path / "immutable.manifest.json"
+    manifest.write_text("fixture-A", encoding="utf-8")
     for budget in (1, 4000):
         pack = context._query_context(
-            Path("/immutable/bundle"),
+            manifest,
             query="Find configured runtime entrypoint implementation",
             k=2,
             max_context_tokens=1000,
@@ -444,7 +447,7 @@ def test_relaxed_response_projects_only_emitted_cited_source_rows(monkeypatch):
     assert "src/runtime_entrypoint.py" in {
         row["source_path"]
         for row in context._query_context(
-            Path("/immutable/bundle"),
+            manifest,
             query="Find configured runtime entrypoint implementation",
             k=2,
             max_context_tokens=1000,
@@ -573,10 +576,10 @@ def test_path_hints_skip_locator_words_and_scale_with_requested_k(monkeypatch):
     assert [term for term, _count in calls] == ["runtime", "entrypoint"]
 
 
-def test_broad_navigation_or_fallback_recovers_verified_source_paths(monkeypatch):
+def test_broad_navigation_or_fallback_recovers_verified_source_paths(
+    monkeypatch, tmp_path
+):
     """The read-only OR fallback should not hide implementation behind test hits."""
-    from pathlib import Path
-
     from merger.repoground.core import ask_context as module
 
     def evidence(paths):
@@ -670,6 +673,8 @@ def test_broad_navigation_or_fallback_recovers_verified_source_paths(monkeypatch
             {"src/grabowski_runtime.py", "config/runtime-entrypoint.json"},
         ),
     ]
+    manifest = tmp_path / "immutable.manifest.json"
+    manifest.write_text("fixture-A", encoding="utf-8")
     for query, original, source_paths, required in tests:
         calls = []
 
@@ -686,7 +691,7 @@ def test_broad_navigation_or_fallback_recovers_verified_source_paths(monkeypatch
         monkeypatch.setattr(module, "_run_query", fake_run)
         monkeypatch.setattr(module, "query_existing_index", fake_index)
         state = module._query_context(
-            Path("/immutable/manifest.json"),
+            manifest,
             query=query,
             k=3,
             max_context_tokens=5000,
@@ -1184,9 +1189,10 @@ def test_navigation_interrogative_vs_locator_construction_20261021():
         assert _navigation_path_intent(query), query
 
 
-def test_path_hint_missing_citation_survives_as_degraded_diagnostic(monkeypatch):
+def test_path_hint_missing_citation_survives_as_degraded_diagnostic(
+    monkeypatch, tmp_path
+):
     """Filtered index candidates rejected as uncitable must not disappear silently."""
-    from pathlib import Path
     from merger.repoground.core import ask_context as context
 
     def response(chunk, source, cited=True):
@@ -1235,8 +1241,10 @@ def test_path_hint_missing_citation_survives_as_degraded_diagnostic(monkeypatch)
             response("uncitable-hint", "src/retry.py", False),
         ],
     )
+    manifest = tmp_path / "immutable.manifest.json"
+    manifest.write_text("stable", encoding="utf-8")
     state = context._query_context(
-        Path("immutable"),
+        manifest,
         query="Find retry implementation",
         k=2,
         max_context_tokens=100,
@@ -1260,10 +1268,10 @@ def test_path_hint_missing_citation_survives_as_degraded_diagnostic(monkeypatch)
     )
 
 
-def test_path_hints_reject_other_index_snapshot_and_forward_warnings(monkeypatch):
+def test_path_hints_reject_other_index_snapshot_and_forward_warnings(
+    monkeypatch, tmp_path
+):
     """OR and filtered citations must have the same verified index artifact."""
-    from pathlib import Path
-
     from merger.repoground.core import ask_context as context
 
     def indexed(ref, source, sha, warnings=None):
@@ -1295,6 +1303,8 @@ def test_path_hints_reject_other_index_snapshot_and_forward_warnings(monkeypatch
             },
         }
 
+    manifest = tmp_path / "immutable.manifest.json"
+    manifest.write_text("snapshot-A", encoding="utf-8")
     repeated_warning = {"kind": "stale_source", "detail": "filtered read caveat"}
     primary = indexed(
         "baseline", "tests/test_retry.py", "a" * 64, warnings=[repeated_warning]
@@ -1323,7 +1333,7 @@ def test_path_hints_reject_other_index_snapshot_and_forward_warnings(monkeypatch
         lambda *_args, **_kw: [safe, stale],
     )
     state = context._query_context(
-        Path("immutable"),
+        manifest,
         query="Find retry implementation",
         k=3,
         max_context_tokens=200,
@@ -1344,6 +1354,35 @@ def test_path_hints_reject_other_index_snapshot_and_forward_warnings(monkeypatch
         row.get("reason") == "index_artifact_mismatch" for row in state["omissions"]
     )
 
+    def swap_manifest(*_args, **_kwargs):
+        manifest.write_text("snapshot-B", encoding="utf-8")
+        return [safe]
+
+    monkeypatch.setattr(context, "_relaxed_path_index_reads", swap_manifest)
+    swapped = context._query_context(
+        manifest,
+        query="Find retry implementation",
+        k=3,
+        max_context_tokens=200,
+        max_context_bytes=800,
+    )
+    assert [row["source_path"] for row in swapped["resolved_ranges"]] == [
+        "tests/test_retry.py"
+    ]
+    assert any(
+        row.get("reason") == "bundle_manifest_identity_unverified"
+        for row in swapped["omissions"]
+    )
+    caveats = context._retrieval_caveats(
+        {},
+        {},
+        state=swapped,
+        retrieval_infrastructure={"index_resolved": True},
+        query="Find retry implementation",
+        additional_evidence_present=False,
+    )
+    assert any(caveat["kind"] == "degraded_validation" for caveat in caveats)
+
 
 def test_find_out_in_which_file_preserves_source_location_intent():
     """Explicit file/module complements after find out remain navigation."""
@@ -1354,6 +1393,8 @@ def test_find_out_in_which_file_preserves_source_location_intent():
         "Find out in which module retry is implemented",
         "Finde heraus in welcher Datei retry implementiert ist",
         "Finden Sie heraus in welcher Datei retry implementiert ist",
+        "Find exactly which file implements retry",
+        "Finde genau heraus in welcher Datei retry implementiert ist",
     ):
         assert _navigation_path_intent(query), query
 
@@ -1365,6 +1406,8 @@ def test_find_out_in_which_file_preserves_source_location_intent():
         "Find out where this test fails",
         "Find where this test fails",
         "Finde heraus, wo dieser Test fehlschlägt",
+        "Find exactly why this implementation is slow",
+        "Finde genau heraus warum diese Implementierung langsam ist",
     ):
         assert not _navigation_path_intent(query), query
 
@@ -1394,3 +1437,25 @@ def test_r3_locative_inflection_and_progressive_debugging():
         "Find out what caused the error",
     ):
         assert not _navigation_path_intent(query), query
+
+
+def test_german_navigation_anchor_ignores_heraus(monkeypatch):
+    """Intent words must not use up scarce filtered path lookups."""
+    from pathlib import Path
+    from merger.repoground.core import ask_context as context
+
+    anchors = []
+
+    def query_stub(_manifest, _query, **kwargs):
+        anchors.append(kwargs["filters"]["path"])
+        return {"status": "available"}
+
+    monkeypatch.setattr(context, "query_existing_index", query_stub)
+    context._relaxed_path_index_reads(
+        Path("unused"),
+        query="Finde heraus in welcher Datei retry implementiert ist",
+        fts_query='"retry" OR "implementiert"',
+        k=3,
+    )
+    assert anchors and anchors[0] == "retry"
+    assert "heraus" not in anchors
