@@ -973,20 +973,27 @@ _FIND_EXPLANATION_OPENERS = frozenset(
 _WHERE_EXPLANATION_VERBS = frozenset(
     {"do", "does", "did", "schlägt", "scheitert", "tritt", "passiert"}
 )
+_FIND_EXPLANATION_NOUNS = frozenset({"reason", "cause", "grund", "ursache"})
+
+
+def _where_is_source_location(words: list[str]) -> bool:
+    """Ignore emphasis but not question verbs that request an explanation."""
+    following = words[1:]
+    if following[:1] in (["exactly"], ["genau"]):
+        following = following[1:]
+    return not following or following[0] not in _WHERE_EXPLANATION_VERBS
 
 
 def _find_source_location_complement(
     words: list[str], *, require_locative: bool
 ) -> bool:
-    """Use file-location grammar, never a bare explanatory interrogative."""
-    if not words:
+    """Use file-location grammar, never an explanatory complement."""
+    if not words or set(words[:5]) & _FIND_EXPLANATION_NOUNS:
         return False
     if words[0] in {"which", "what", "welche", "welcher", "welches"}:
         return len(words) > 1 and words[1] in _SOURCE_LOCATION_NOUNS
     if require_locative:
-        return words[0] in {"where", "wo"} and (
-            len(words) == 1 or words[1] not in _WHERE_EXPLANATION_VERBS
-        )
+        return words[0] in {"where", "wo"} and _where_is_source_location(words)
     return words[0] not in _FIND_EXPLANATION_OPENERS
 
 
@@ -1035,7 +1042,7 @@ def _navigation_path_intent(query: str) -> bool:
     if words[0] in {"which", "welche", "welcher", "welches"}:
         return len(words) > 1 and words[1] in _SOURCE_LOCATION_NOUNS
     if words[0] in {"where", "wo"}:
-        return len(words) < 2 or words[1] not in _WHERE_EXPLANATION_VERBS
+        return _where_is_source_location(words)
     return words[0] in _NAVIGATION_LOCATORS
 
 
@@ -1211,12 +1218,43 @@ def _query_context(
         if need_path_hints
         else []
     )
+    # Separate index queries can observe different SQLite bytes after a swap.
+    # Only combine evidence from the same hashed artifact and bound manifest.
+    artifact = relaxed_result.get("index_artifact")
+    stable_path_results = [
+        indexed
+        for indexed in path_results
+        if isinstance(artifact, dict)
+        and isinstance(artifact.get("sha256"), str)
+        and re.fullmatch(r"[0-9a-f]{64}", artifact["sha256"])
+        and isinstance(relaxed_result.get("bundle_manifest"), str)
+        and indexed.get("index_artifact") == artifact
+        and indexed.get("bundle_manifest") == relaxed_result["bundle_manifest"]
+    ]
+    rejected_path_identity = len(stable_path_results) != len(path_results)
+    path_results = stable_path_results
+    path_warnings = [
+        warning
+        for indexed in path_results
+        for warning in (indexed.get("warnings") or [])
+        if isinstance(warning, dict)
+    ]
     selected_result = _prefer_diverse_relaxed_sources(
         relaxed_result, query=query, k=k, path_results=path_results
     )
     # Check every consulted index result, including filtered path hints.
     # Uncitable candidates never become answer evidence, but must be reported.
-    invalid_candidates = []
+    invalid_candidates = (
+        [
+            {
+                "lane": "canonical_md",
+                "reason": "index_artifact_mismatch",
+                "ref": "filtered_path_index",
+            }
+        ]
+        if rejected_path_identity
+        else []
+    )
     for indexed in (relaxed_result, *path_results):
         verified_ids = {
             row.get("chunk_id")
@@ -1237,6 +1275,12 @@ def _query_context(
             and isinstance(row.get("chunk_id"), str)
             and row["chunk_id"] not in verified_ids
         )
+    invalid_candidates = list(
+        {
+            (item["lane"], item["reason"], item["ref"]): item
+            for item in invalid_candidates
+        }.values()
+    )
     relaxed = _balanced_relaxed_ranges(
         selected_result, max_context_tokens, max_context_bytes
     )
@@ -1264,6 +1308,7 @@ def _query_context(
     emitted_ids = {hit["chunk_id"] for hit in selected_hits}
     emitted_response = {
         **relaxed_result,
+        "warnings": list(relaxed_result.get("warnings") or []) + path_warnings,
         "query_result": {
             **(relaxed_result.get("query_result") or {}),
             **selected_result["query_result"],
@@ -1346,6 +1391,18 @@ def _retrieval_caveats(
             {
                 "kind": "degraded_validation",
                 "detail": "Some OR retrieval candidates lacked verified citations and were excluded.",
+            }
+        )
+    if any(
+        item.get("reason") == "index_artifact_mismatch" for item in state["omissions"]
+    ):
+        caveats.append(
+            {
+                "kind": "degraded_validation",
+                "detail": (
+                    "Filtered source candidates from a different or unverified index "
+                    "artifact were excluded."
+                ),
             }
         )
     if state["relaxed"]:

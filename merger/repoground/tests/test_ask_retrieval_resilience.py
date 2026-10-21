@@ -381,6 +381,12 @@ def test_relaxed_response_projects_only_emitted_cited_source_rows(monkeypatch):
             citations.append({"chunk_id": ref, "citation_id": citation})
         return {
             "status": "available",
+            "bundle_manifest": "immutable",
+            "index_artifact": {
+                "sha256": "a" * 64,
+                "path": "index.sqlite",
+                "bytes": 4096,
+            },
             "query_result": {"results": rows},
             "resolved_evidence": {"hits": hits},
             "source_citation_projection": {"items": citations},
@@ -595,6 +601,12 @@ def test_broad_navigation_or_fallback_recovers_verified_source_paths(monkeypatch
             projections.append({"chunk_id": chunk_id, "citation_id": citation_id})
         return {
             "status": "available",
+            "bundle_manifest": "immutable",
+            "index_artifact": {
+                "sha256": "a" * 64,
+                "path": "index.sqlite",
+                "bytes": 4096,
+            },
             "query_result": {"results": rows, "fts_query": '"finalizer" OR "runtime"'},
             "resolved_evidence": {"hits": resolved},
             "source_citation_projection": {"items": projections},
@@ -1134,6 +1146,10 @@ def test_navigation_interrogative_vs_locator_construction_20261021():
         "Wo schlägt dieser Test fehl?",
         "Wo scheitert dieser Test?",
         "Find out where does this test fail?",
+        "Find the root cause why this implementation is slow",
+        "Finde den Grund warum dieser Test fehlschlägt",
+        "Where exactly does this test fail?",
+        "Wo genau schlägt dieser Test fehl?",
         "Why can't the loader find the config file?",
         "Where does this test fail?",
         "Which handler swallows the error?",
@@ -1157,6 +1173,9 @@ def test_navigation_interrogative_vs_locator_construction_20261021():
         "Finden Sie heraus wo die Implementierung liegt",
         "Wo liegt die Implementierung?",
         "Wo ist der Test definiert?",
+        "Where exactly is the retry implementation?",
+        "Wo genau liegt die Implementierung?",
+        "Find the root module implementing retry",
         "In which file is retry implemented?",
         "Find job finalizer implementation and real test",
         "Job finalizer implementation and corresponding real test",
@@ -1183,6 +1202,12 @@ def test_path_hint_missing_citation_survives_as_degraded_diagnostic(monkeypatch)
             hit["citation_id"] = "cit_" + chunk
         return {
             "status": "available",
+            "bundle_manifest": "immutable",
+            "index_artifact": {
+                "sha256": "a" * 64,
+                "path": "index.sqlite",
+                "bytes": 4096,
+            },
             "query_result": {"results": [row]},
             "resolved_evidence": {"hits": [hit]},
             "source_citation_projection": {
@@ -1205,7 +1230,10 @@ def test_path_hint_missing_citation_survives_as_degraded_diagnostic(monkeypatch)
     monkeypatch.setattr(
         context,
         "_relaxed_path_index_reads",
-        lambda *_args, **_kw: [response("uncitable-hint", "src/retry.py", False)],
+        lambda *_args, **_kw: [
+            response("uncitable-hint", "src/retry.py", False),
+            response("uncitable-hint", "src/retry.py", False),
+        ],
     )
     state = context._query_context(
         Path("immutable"),
@@ -1221,4 +1249,90 @@ def test_path_hint_missing_citation_survives_as_degraded_diagnostic(monkeypatch)
         omission.get("reason") == "unverified_index_evidence"
         and omission.get("ref") == "uncitable-hint"
         for omission in state["omissions"]
+    )
+    assert (
+        sum(
+            row.get("reason") == "unverified_index_evidence"
+            and row.get("ref") == "uncitable-hint"
+            for row in state["omissions"]
+        )
+        == 1
+    )
+
+
+def test_path_hints_reject_other_index_snapshot_and_forward_warnings(monkeypatch):
+    """OR and filtered citations must have the same verified index artifact."""
+    from pathlib import Path
+
+    from merger.repoground.core import ask_context as context
+
+    def indexed(ref, source, sha, warnings=None):
+        citation = "cit_" + ref
+        return {
+            "status": "available",
+            "bundle_manifest": "immutable",
+            "index_artifact": {
+                "sha256": sha,
+                "path": "index.sqlite",
+                "bytes": 4096,
+            },
+            "warnings": warnings or [],
+            "query_result": {"results": [{"chunk_id": ref, "source_path": source}]},
+            "resolved_evidence": {
+                "hits": [
+                    {
+                        "chunk_id": ref,
+                        "source_path": source,
+                        "range_status": "resolved",
+                        "range_ref": {"ref": ref},
+                        "range": {"text": "Verified " + source},
+                        "citation_id": citation,
+                    }
+                ]
+            },
+            "source_citation_projection": {
+                "items": [{"chunk_id": ref, "citation_id": citation}]
+            },
+        }
+
+    primary = indexed("baseline", "tests/test_retry.py", "a" * 64)
+    safe = indexed(
+        "safe",
+        "src/retry.py",
+        "a" * 64,
+        warnings=[{"kind": "stale_source", "detail": "filtered read caveat"}],
+    )
+    stale = indexed("alien", "src/alien.py", "b" * 64)
+
+    def run(_manifest, _query, _k, prepared_fts_query=None):
+        if prepared_fts_query is None:
+            return {
+                "status": "available",
+                "query_result": {"results": []},
+                "resolved_evidence": {"hits": []},
+            }
+        return primary
+
+    monkeypatch.setattr(context, "_run_query", run)
+    monkeypatch.setattr(
+        context,
+        "_relaxed_path_index_reads",
+        lambda *_args, **_kw: [safe, stale],
+    )
+    state = context._query_context(
+        Path("immutable"),
+        query="Find retry implementation",
+        k=3,
+        max_context_tokens=200,
+        max_context_bytes=800,
+    )
+    assert [row["source_path"] for row in state["resolved_ranges"]] == [
+        "tests/test_retry.py",
+        "src/retry.py",
+    ]
+    assert {"kind": "stale_source", "detail": "filtered read caveat"} in (
+        state["query_result"].get("warnings") or []
+    )
+    assert any(
+        row.get("reason") == "index_artifact_mismatch" for row in state["omissions"]
     )
