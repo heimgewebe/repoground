@@ -1029,7 +1029,7 @@ def _find_source_location_complement(
     words: list[str], *, require_locative: bool
 ) -> bool:
     """Use file-location grammar, never an explanatory complement."""
-    if words[:1] in (["exactly"], ["genau"]):
+    if words[:1] in (["exactly"], ["precisely"], ["genau"], ["exakt"]):
         words = words[1:]
     if not words or set(words[:5]) & _FIND_EXPLANATION_NOUNS:
         return False
@@ -1082,7 +1082,9 @@ def _navigation_path_intent(query: str) -> bool:
             "mal",
             "du",
             "exactly",
+            "precisely",
             "genau",
+            "exakt",
         }:
             complement = complement[1:]
         is_find_out = complement[:1] in (["out"], ["heraus"])
@@ -1105,7 +1107,9 @@ def _relaxed_path_index_reads(
         "find",
         "heraus",
         "genau",
+        "exakt",
         "exactly",
+        "precisely",
         "configured",
         "implementation",
         "implementierung",
@@ -1285,10 +1289,37 @@ def _query_context(
     )
     # The path may name a different manifest after an atomic replacement.
     # Hash only a small manifest, not the entire SQLite index, on navigation.
-    manifest_content_unchanged = not path_results or (
+    manifest_content_unchanged = not navigation or (
         manifest_digest_before is not None
         and manifest_digest_before == _manifest_content_digest(manifest_path)
     )
+    if not manifest_content_unchanged:
+        # Even the OR result belongs to the old manifest: never cite it under
+        # the replacement snapshot identity, regardless of the path hints.
+        state.update(
+            {
+                "query_result": {
+                    "status": "invalid",
+                    "error_code": "bundle_manifest_identity_unverified",
+                    "error": "Bundle manifest changed during retrieval.",
+                    "query_result": {"results": [], "fts_query": or_query},
+                },
+                "retrieval_hits": [],
+                "resolved_ranges": [],
+                "used_bytes": 0,
+                "used_characters": 0,
+                "truncated": False,
+                "omissions": [
+                    {
+                        "lane": "canonical_md",
+                        "reason": "bundle_manifest_identity_unverified",
+                        "ref": "bundle_manifest",
+                    }
+                ],
+                "fts_query": or_query,
+            }
+        )
+        return state
     # Separate index queries can observe different SQLite bytes after a swap.
     # Only combine evidence from the same hashed artifact and bound manifest.
     artifact = relaxed_result.get("index_artifact")

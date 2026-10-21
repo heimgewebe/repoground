@@ -212,10 +212,10 @@ def test_resolved_ranges_enforce_utf8_bytes_without_splitting_unicode():
     assert omissions[0]["reason"] == "excerpt_truncated"
 
 
-def test_relaxed_or_preserves_diverse_source_paths_and_original_citations(monkeypatch):
+def test_relaxed_or_preserves_diverse_source_paths_and_original_citations(
+    monkeypatch, tmp_path
+):
     """Overlapping test chunks must not hide an indexed implementation chunk."""
-    from pathlib import Path
-
     from merger.repoground.core import ask_context as context
 
     # This order reproduces the observed Codex finalizer miss at small k:
@@ -267,8 +267,10 @@ def test_relaxed_or_preserves_diverse_source_paths_and_original_citations(monkey
 
     monkeypatch.setattr(context, "_run_query", fake_index_query)
     monkeypatch.setattr(context, "_relaxed_path_index_reads", lambda *_a, **_k: [])
+    manifest = tmp_path / "immutable.manifest.json"
+    manifest.write_text("stable", encoding="utf-8")
     pack = context._query_context(
-        Path("unused-bound-manifest"),
+        manifest,
         query="Find job finalizer implementation and real test",
         k=3,
         max_context_tokens=1000,
@@ -883,9 +885,10 @@ def test_navigation_requires_locator_even_for_implementation_and_test_nouns():
     assert _navigation_path_intent("Where is retry implemented?")
 
 
-def test_relaxed_navigation_k_one_skips_ineffective_path_index_reads(monkeypatch):
+def test_relaxed_navigation_k_one_skips_ineffective_path_index_reads(
+    monkeypatch, tmp_path
+):
     """When the first verified OR candidate fills k=1, path hints cannot help."""
-    from pathlib import Path
     from merger.repoground.core import ask_context as context
 
     reads = []
@@ -928,8 +931,10 @@ def test_relaxed_navigation_k_one_skips_ineffective_path_index_reads(monkeypatch
 
     monkeypatch.setattr(context, "_run_query", fake_run)
     monkeypatch.setattr(context, "_relaxed_path_index_reads", fake_path_reads)
+    manifest = tmp_path / "immutable.manifest.json"
+    manifest.write_text("stable", encoding="utf-8")
     state = context._query_context(
-        Path("immutable-manifest"),
+        manifest,
         query="Find retry implementation",
         k=1,
         max_context_tokens=100,
@@ -1366,9 +1371,9 @@ def test_path_hints_reject_other_index_snapshot_and_forward_warnings(
         max_context_tokens=200,
         max_context_bytes=800,
     )
-    assert [row["source_path"] for row in swapped["resolved_ranges"]] == [
-        "tests/test_retry.py"
-    ]
+    assert swapped["resolved_ranges"] == []
+    assert swapped["retrieval_hits"] == []
+    assert swapped["query_result"]["status"] == "invalid"
     assert any(
         row.get("reason") == "bundle_manifest_identity_unverified"
         for row in swapped["omissions"]
@@ -1395,6 +1400,8 @@ def test_find_out_in_which_file_preserves_source_location_intent():
         "Finden Sie heraus in welcher Datei retry implementiert ist",
         "Find exactly which file implements retry",
         "Finde genau heraus in welcher Datei retry implementiert ist",
+        "Find precisely which file implements retry",
+        "Finde exakt heraus in welcher Datei retry implementiert ist",
     ):
         assert _navigation_path_intent(query), query
 
@@ -1408,6 +1415,8 @@ def test_find_out_in_which_file_preserves_source_location_intent():
         "Finde heraus, wo dieser Test fehlschlägt",
         "Find exactly why this implementation is slow",
         "Finde genau heraus warum diese Implementierung langsam ist",
+        "Find precisely why this implementation is slow",
+        "Finde exakt heraus warum diese Implementierung langsam ist",
     ):
         assert not _navigation_path_intent(query), query
 
