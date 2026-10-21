@@ -824,21 +824,16 @@ def _language_context_reserve(
     return min(max(0, used_bytes), 4096, total_context_bytes // 3)
 
 
-def _prefer_diverse_relaxed_sources(
-    query_result: dict[str, Any], *, query: str, k: int
-) -> dict[str, Any]:
-    """Prefer distinct, filename-relevant sources from one verified FTS result.
-
-    Only reorder existing, evidence-resolved index chunks. Never derive a file
-    from the query text or read a live checkout; the immutable bundle remains
-    the sole evidence authority.
-    """
-    raw_result = query_result.get("query_result")
-    resolved = query_result.get("resolved_evidence")
-    rows = raw_result.get("results") if isinstance(raw_result, dict) else None
+def _source_candidates_from_index(
+    response: dict[str, Any], query_terms: set[str]
+) -> list[tuple[int, str, dict[str, Any], dict[str, Any]]]:
+    """Return only source-addressed, evidence-resolved chunks from one index read."""
+    raw = response.get("query_result")
+    resolved = response.get("resolved_evidence")
+    rows = raw.get("results") if isinstance(raw, dict) else None
     hits = resolved.get("hits") if isinstance(resolved, dict) else None
     if not isinstance(rows, list) or not isinstance(hits, list):
-        return {"query_result": {"results": []}, "resolved_evidence": {"hits": []}}
+        return []
     evidence_by_ref = {
         hit["chunk_id"]: hit
         for hit in hits
@@ -846,23 +841,20 @@ def _prefer_diverse_relaxed_sources(
         and isinstance(hit.get("chunk_id"), str)
         and hit.get("range_status") == "resolved"
     }
-    query_terms = set(_content_tokens(query))
-    candidates: list[tuple[int, int, str, dict[str, Any]]] = []
-    for position, row in enumerate(rows):
+    candidates = []
+    for row in rows:
         if not isinstance(row, dict):
             continue
-        ref = row.get("chunk_id")
         source = row.get("source_path") or row.get("path")
-        evidence = evidence_by_ref.get(ref)
+        evidence = evidence_by_ref.get(row.get("chunk_id"))
         if (
-            not isinstance(ref, str)
-            or not isinstance(source, str)
+            not isinstance(source, str)
             or not source
             or evidence is None
             or evidence.get("source_path") != source
         ):
             continue
-        path_terms = set(
+        filename_tokens = set(
             re.findall(
                 r"\b\w+\b",
                 unicodedata.normalize("NFC", source)
@@ -873,153 +865,120 @@ def _prefer_diverse_relaxed_sources(
                 .replace(".", " "),
             )
         )
-        candidates.append((len(path_terms & query_terms), position, source, row))
-
-    selected: list[dict[str, Any]] = []
-    seen_sources: set[str] = set()
-    # Keep the strongest original text match, even when its filename has no
-    # query tokens. Then diversify by file-address overlap with stable ties.
-    ordered = candidates[:1] + sorted(
-        candidates[1:], key=lambda item: (-item[0], item[1])
-    )
-    for _overlap, _position, source, row in ordered:
-        if source in seen_sources:
-            continue
-        seen_sources.add(source)
-        selected.append(row)
-        if len(selected) == k:
-            break
-    return {
-        "query_result": {"results": selected},
-        "resolved_evidence": {
-            "hits": [evidence_by_ref[row["chunk_id"]] for row in selected]
-        },
-        "source_citation_projection": query_result.get("source_citation_projection"),
-    }
+        candidates.append((len(filename_tokens & query_terms), source, row, evidence))
+    return candidates
 
 
-def _verified_navigation_paths(
-    manifest_path: Path,
-    *,
-    query: str,
-    fts_query: str,
-    selected_paths: set[str],
+def _relaxed_path_index_reads(
+    manifest_path: Path, *, query: str, fts_query: str, k: int
 ) -> list[dict[str, Any]]:
-    """Recover source/config hits missing from broad OR search.
-
-    Every candidate is selected from immutable index path metadata and must
-    independently match the *same* FTS query with verified citation evidence.
-    No live file reads, inferred filenames, or unbounded index scans.
-    """
-    terms = _content_tokens(query)
-    token_set = set(terms)
-    if not token_set.intersection({"implementation", "implementierung", "entrypoint"}):
-        return []
+    """Two bounded read-only path hints, still constrained by the original FTS."""
     generic = {
         "find",
         "configured",
         "implementation",
         "implementierung",
-        "operator",
         "corresponding",
-        "generated",
         "associated",
+        "generated",
+        "begrenztes",
+        "änderungsumfeld",
         "actual",
+        "real",
         "source",
-        "module",
         "files",
-        "tests",
-        "test",
-        "package",
+        "script",
         "scripts",
-        "context",
-        "evidence",
+        "package",
         "query",
         "where",
+        "context",
     }
-    anchors = [token for token in terms if len(token) >= 5 and token not in generic][:2]
-    if not anchors:
-        return []
-
-    def overlap(path: str) -> int:
-        basename = set(re.findall(r"[a-z0-9]+", Path(path).stem.lower()))
-        return len(basename & token_set)
-
-    wanted = ["src/"]
-    if "entrypoint" in token_set:
-        wanted.append("config/")
-    missing = [
-        prefix
-        for prefix in wanted
-        if not any(
-            path.startswith(prefix)
-            and bool(
-                set(re.findall(r"[a-z0-9]+", Path(path).stem.lower())) & set(anchors)
-            )
-            for path in selected_paths
-        )
-    ]
-    if not missing:
-        return []
-    possible: dict[str, int] = {}
+    anchors = [
+        term
+        for term in _content_tokens(query)
+        if 5 <= len(term) <= 32 and "_" not in term and term not in generic
+    ][:2]
+    results = []
     for anchor in anchors:
-        listing = query_existing_index(
-            manifest_path,
-            "",
-            k=100,
-            filters={"path": anchor},
-            resolve_evidence=False,
-            project_sources=False,
-        )
-        raw = (
-            listing.get("query_result")
-            if listing.get("status") == "available"
-            else None
-        )
-        if not isinstance(raw, dict):
-            continue
-        for row in raw.get("results", []):
-            path = row.get("source_path") or row.get("path")
-            if not isinstance(path, str) or path in selected_paths:
-                continue
-            if not re.fullmatch(r"(?:src|config)/[A-Za-z0-9_./-]{1,180}", path):
-                continue
-            if any(part in {".", ".."} for part in path.split("/")):
-                continue
-            score = overlap(path)
-            if score >= 2:
-                possible[path] = score
-
-    matched = []
-    for prefix in missing:
-        choices = [path for path in possible if path.startswith(prefix)]
-        if not choices:
-            continue
-        source = min(
-            choices, key=lambda path: (-possible[path], len(Path(path).stem), path)
-        )
-        result = query_existing_index(
+        indexed = query_existing_index(
             manifest_path,
             query,
-            k=1,
-            filters={"path": source},
+            k=min(100, max(50, k * 4)),
+            filters={"path": anchor},
             resolve_evidence=True,
             project_sources=True,
             prepared_fts_query=fts_query,
         )
-        if result.get("status") != "available":
-            continue
-        selected, *_ = _resolved_ranges_with_budget(
-            result, max_context_tokens=400, max_context_bytes=1600
+        if indexed.get("status") == "available":
+            results.append(indexed)
+    return results
+
+
+def _prefer_diverse_relaxed_sources(
+    query_result: dict[str, Any],
+    *,
+    query: str,
+    k: int,
+    path_results: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Take at most k distinct sources with existing verifiable citations."""
+    candidates = []
+    projected = []
+    for result in (query_result, *path_results):
+        candidates.extend(
+            _source_candidates_from_index(result, set(_content_tokens(query)))
         )
-        if (
-            len(selected) == 1
-            and selected[0].get("source_path") == source
-            and selected[0].get("status") == "resolved"
-            and _retrieval_hits(result)
-        ):
-            matched.append(result)
-    return matched
+        citations = result.get("source_citation_projection")
+        if isinstance(citations, dict) and isinstance(citations.get("items"), list):
+            projected.extend(
+                item for item in citations["items"] if isinstance(item, dict)
+            )
+
+    # Retain the first full-text match before favoring filename-specific sources.
+    ordered = candidates[:1] + sorted(candidates[1:], key=lambda row: -row[0])
+    selected = []
+    seen = set()
+    for _overlap, source, row, evidence in ordered:
+        if source in seen:
+            continue
+        seen.add(source)
+        selected.append((row, evidence))
+        if len(selected) == k:
+            break
+    return {
+        "query_result": {"results": [row for row, _ in selected]},
+        "resolved_evidence": {"hits": [hit for _, hit in selected]},
+        "source_citation_projection": {"items": projected},
+    }
+
+
+def _balanced_relaxed_ranges(
+    selected: dict[str, Any],
+    max_context_tokens: int,
+    max_context_bytes: int,
+) -> tuple[list[dict[str, Any]], int, int, bool, list[dict[str, Any]]]:
+    """Reserve one bounded share per selected hit, so no hint starves another."""
+    hits = selected["resolved_evidence"]["hits"]
+    if not hits:
+        return [], 0, 0, False, []
+    share = max_context_bytes // len(hits)
+    ranges: list[dict[str, Any]] = []
+    bytes_used = characters = 0
+    truncated = False
+    omissions: list[dict[str, Any]] = []
+    for hit in hits:
+        chunk, size, chars, cut, omitted = _resolved_ranges_with_budget(
+            {"resolved_evidence": {"hits": [hit]}},
+            max_context_tokens,
+            max_context_bytes=share,
+        )
+        ranges.extend(chunk)
+        bytes_used += size
+        characters += chars
+        truncated = truncated or cut
+        omissions.extend(omitted)
+    return ranges, bytes_used, characters, truncated, omissions
 
 
 def _query_context(
@@ -1064,11 +1023,16 @@ def _query_context(
     relaxed_result = _run_query(
         manifest_path, query, candidate_k, prepared_fts_query=or_query
     )
-    selected_result = _prefer_diverse_relaxed_sources(relaxed_result, query=query, k=k)
-    relaxed = _resolved_ranges_with_budget(
-        selected_result,
-        max_context_tokens,
-        max_context_bytes=max_context_bytes,
+    selected_result = _prefer_diverse_relaxed_sources(
+        relaxed_result,
+        query=query,
+        k=k,
+        path_results=_relaxed_path_index_reads(
+            manifest_path, query=query, fts_query=or_query, k=k
+        ),
+    )
+    relaxed = _balanced_relaxed_ranges(
+        selected_result, max_context_tokens, max_context_bytes
     )
     if not relaxed[0]:
         return state
@@ -1082,68 +1046,17 @@ def _query_context(
     state.update(
         {
             "query_result": relaxed_result,
-            "retrieval_hits": _retrieval_hits(selected_result),
+            "retrieval_hits": [
+                hit
+                for hit in _retrieval_hits(selected_result)
+                if hit.get("citation_id")
+                in {item.get("citation_id") for item in relaxed[0]}
+            ],
             "fts_query": or_query,
             "strategy": "or_relaxed",
             "relaxed": True,
         }
     )
-    # Only the relaxed search receives these additional source/config hints.
-    # Each source must independently match the same FTS query in the verified
-    # immutable index, and at most k distinct paths may reach the caller.
-    supplemental = _verified_navigation_paths(
-        manifest_path,
-        query=query,
-        fts_query=or_query,
-        selected_paths={
-            item["source_path"]
-            for item in state["resolved_ranges"]
-            if isinstance(item.get("source_path"), str)
-        },
-    )[:k]
-    if supplemental:
-        keep = max(0, k - len(supplemental))
-        old_refs = {
-            ref.get("citation_id"): ref
-            for ref in state["retrieval_hits"]
-            if isinstance(ref.get("citation_id"), str)
-        }
-        selected = state["resolved_ranges"][:keep]
-        refs = [
-            old_refs[item["citation_id"]]
-            for item in selected
-            if item.get("citation_id") in old_refs
-        ]
-        used = sum(item["text_excerpt_bytes"] for item in selected)
-        chars = sum(item["text_excerpt_characters"] for item in selected)
-        chosen_paths = {item.get("source_path") for item in selected}
-        for result in supplemental:
-            extra, _size, _chars, cut, omitted = _resolved_ranges_with_budget(
-                result,
-                max_context_tokens,
-                max_context_bytes=max(0, max_context_bytes - used),
-            )
-            if not extra:
-                continue
-            hit = extra[0]
-            refs_by_id = {
-                ref.get("citation_id"): ref for ref in _retrieval_hits(result)
-            }
-            related = refs_by_id.get(hit.get("citation_id"))
-            if related is None or hit.get("source_path") in chosen_paths:
-                continue
-            selected.append(hit)
-            refs.append(related)
-            chosen_paths.add(hit["source_path"])
-            used += hit["text_excerpt_bytes"]
-            chars += hit["text_excerpt_characters"]
-            state["truncated"] = state["truncated"] or cut
-            state["omissions"].extend(omitted)
-        if len(selected) > keep:
-            state["resolved_ranges"] = selected
-            state["retrieval_hits"] = refs
-            state["used_bytes"] = used
-            state["used_characters"] = chars
     return state
 
 

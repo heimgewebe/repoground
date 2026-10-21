@@ -266,6 +266,7 @@ def test_relaxed_or_preserves_diverse_source_paths_and_original_citations(monkey
         }
 
     monkeypatch.setattr(context, "_run_query", fake_index_query)
+    monkeypatch.setattr(context, "_relaxed_path_index_reads", lambda *_a, **_k: [])
     pack = context._query_context(
         Path("unused-bound-manifest"),
         query="Find job finalizer implementation and real test",
@@ -364,9 +365,9 @@ def test_broad_navigation_or_fallback_recovers_verified_source_paths(monkeypatch
         def fake_index(_manifest, query_text, *, filters=None, **kwargs):
             path = (filters or {}).get("path", "")
             calls.append((query_text, path, kwargs))
-            if not query_text:
-                return evidence(source_paths.get(path, []))
-            return evidence([path]) if path in required else evidence([])
+            # The path hint is an FTS-constrained substring filter, not an
+            # exact-path query. Every simulated candidate still has evidence.
+            return evidence(source_paths.get(path, []))
 
         monkeypatch.setattr(module, "_run_query", fake_run)
         monkeypatch.setattr(module, "query_existing_index", fake_index)
@@ -386,4 +387,94 @@ def test_broad_navigation_or_fallback_recovers_verified_source_paths(monkeypatch
             hit["citation_id"].startswith("cit_") for hit in state["resolved_ranges"]
         )
         assert all(call[2].get("k", 0) <= 100 for call in calls)
-        assert any(not q for q, _, _ in calls), "path-candidate index was not queried"
+        assert 1 <= len(calls) <= 2
+        assert all(
+            q == query and options.get("prepared_fts_query") for q, _, options in calls
+        )
+
+
+def test_balanced_relaxed_ranges_reserves_bytes_for_each_verified_source():
+    from merger.repoground.core.ask_context import _balanced_relaxed_ranges
+
+    paths = [
+        "tests/test_runtime.py",
+        "src/grabowski_runtime.py",
+        "config/runtime-entrypoint.json",
+    ]
+    selected = {
+        "resolved_evidence": {
+            "hits": [
+                {
+                    "chunk_id": f"chunk-{i}",
+                    "source_path": path,
+                    "range_status": "resolved",
+                    "range_ref": {"ref": f"range-{i}"},
+                    "range": {"text": "verified " + ("x" * 1000)},
+                    "citation_id": f"cit_{i}",
+                }
+                for i, path in enumerate(paths)
+            ]
+        }
+    }
+    ranges, used_bytes, _chars, truncated, _omissions = _balanced_relaxed_ranges(
+        selected, max_context_tokens=1000, max_context_bytes=900
+    )
+    assert [row["source_path"] for row in ranges] == paths
+    assert 0 < used_bytes <= 900
+    assert all(row["text_excerpt_bytes"] <= 300 for row in ranges)
+    assert truncated is True
+
+
+def test_relaxed_source_candidates_retain_sparse_and_substring_matched_sources():
+    from merger.repoground.core.ask_context import (
+        _balanced_relaxed_ranges,
+        _prefer_diverse_relaxed_sources,
+    )
+
+    def indexed(paths):
+        rows = []
+        hits = []
+        citations = []
+        for path in paths:
+            ref = "chunk:" + path
+            rows.append({"chunk_id": ref, "source_path": path})
+            hits.append(
+                {
+                    "chunk_id": ref,
+                    "source_path": path,
+                    "range_status": "resolved",
+                    "range_ref": {"ref": ref},
+                    "range": {"text": "verified source" * 35},
+                    "citation_id": "cit_" + str(len(hits)),
+                }
+            )
+            citations.append({"chunk_id": ref, "citation_id": hits[-1]["citation_id"]})
+        return {
+            "query_result": {"results": rows},
+            "resolved_evidence": {"hits": hits},
+            "source_citation_projection": {"items": citations},
+        }
+
+    original = indexed(["tests/test_runtime.py"])
+    # The path index can return another substring match first. That must not
+    # prevent the real implementation from being selected and cited.
+    hints = indexed(["fixtures/src/grabowski_runtime.py", "src/grabowski_runtime.py"])
+    selected = _prefer_diverse_relaxed_sources(
+        original,
+        query="Find Grabowski runtime implementation",
+        k=5,
+        path_results=[hints],
+    )
+    ranges, used, _chars, _truncated, _omissions = _balanced_relaxed_ranges(
+        selected, max_context_tokens=1000, max_context_bytes=6000
+    )
+    assert len(ranges) == 3  # fewer than k is still a valid complete result
+    assert {row["source_path"] for row in ranges} == {
+        "tests/test_runtime.py",
+        "fixtures/src/grabowski_runtime.py",
+        "src/grabowski_runtime.py",
+    }
+    assert 0 < used <= 6000
+    assert {hit["citation_id"] for hit in selected["resolved_evidence"]["hits"]} == {
+        row["citation_id"] for row in ranges
+    }
