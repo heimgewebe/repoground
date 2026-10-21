@@ -289,6 +289,63 @@ def test_relaxed_or_preserves_diverse_source_paths_and_original_citations(monkey
     assert pack["used_bytes"] <= 4000
 
 
+def test_ordinary_relaxed_or_keeps_bm25_order_without_path_hints(monkeypatch):
+    """Non-navigation fallback must not substitute filename overlap for BM25."""
+    from pathlib import Path
+    from merger.repoground.core import ask_context as context
+
+    paths = [
+        "src/error_flow.py",
+        "src/session_timeout.py",
+        "src/authentication.py",
+    ]
+
+    def indexed(source_paths):
+        rows = [
+            {"chunk_id": f"chunk-{i}", "source_path": path}
+            for i, path in enumerate(source_paths)
+        ]
+        hits = [
+            {
+                "chunk_id": row["chunk_id"],
+                "source_path": row["source_path"],
+                "range_status": "resolved",
+                "range_ref": {"ref": row["chunk_id"]},
+                "range": {"text": "verified ranked explanation " + row["source_path"]},
+                "citation_id": f"cit_{i}",
+            }
+            for i, row in enumerate(rows)
+        ]
+        return {
+            "status": "available",
+            "query_result": {"results": rows, "fts_query": '"authentication" OR "expired"'},
+            "resolved_evidence": {"hits": hits},
+        }
+
+    calls = []
+
+    def query(_manifest, _question, k, prepared_fts_query=None):
+        return indexed([] if prepared_fts_query is None else paths[:k])
+
+    def path_lookup(*_args, **_kwargs):
+        calls.append("path-index")
+        return [indexed(["src/authentication.py"])]
+
+    monkeypatch.setattr(context, "_run_query", query)
+    monkeypatch.setattr(context, "_relaxed_path_index_reads", path_lookup)
+    state = context._query_context(
+        Path("immutable-manifest"),
+        query="Why does authentication fail for an expired token?",
+        k=2,
+        max_context_tokens=1000,
+        max_context_bytes=4000,
+    )
+    assert state["strategy"] == "or_relaxed"
+    assert [row["source_path"] for row in state["resolved_ranges"]] == paths[:2]
+    assert calls == []
+    assert state["used_bytes"] <= 4000
+
+
 def test_broad_navigation_or_fallback_recovers_verified_source_paths(monkeypatch):
     """The read-only OR fallback should not hide implementation behind test hits."""
     from pathlib import Path

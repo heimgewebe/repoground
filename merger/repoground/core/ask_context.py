@@ -869,6 +869,21 @@ def _source_candidates_from_index(
     return candidates
 
 
+_NAVIGATION_HINT_TERMS = frozenset(
+    {
+        "find", "locate", "implementation", "implementierung", "implemented",
+        "implementiert", "entrypoint", "filename", "dateiname", "file", "files",
+        "datei", "dateien", "path", "pfad", "sourcecode", "quellcode",
+        "defined", "definiert",
+    }
+)
+
+
+def _navigation_path_intent(query: str) -> bool:
+    """Only explicit source-location requests may favor filename matches."""
+    return bool(set(_content_tokens(query)) & _NAVIGATION_HINT_TERMS)
+
+
 def _relaxed_path_index_reads(
     manifest_path: Path, *, query: str, fts_query: str, k: int
 ) -> list[dict[str, Any]]:
@@ -935,8 +950,13 @@ def _prefer_diverse_relaxed_sources(
                 item for item in citations["items"] if isinstance(item, dict)
             )
 
-    # Retain the first full-text match before favoring filename-specific sources.
-    ordered = candidates[:1] + sorted(candidates[1:], key=lambda row: -row[0])
+    # Ordinary answers retain original FTS/BM25 order; explicit navigation
+    # alone may prioritize filename matches after the first original hit.
+    ordered = (
+        candidates[:1] + sorted(candidates[1:], key=lambda row: -row[0])
+        if _navigation_path_intent(query)
+        else candidates
+    )
     selected = []
     seen = set()
     for _overlap, source, row, evidence in ordered:
@@ -1012,8 +1032,12 @@ def _query_context(
         relaxed_result,
         query=query,
         k=k,
-        path_results=_relaxed_path_index_reads(
-            manifest_path, query=query, fts_query=or_query, k=k
+        path_results=(
+            _relaxed_path_index_reads(
+                manifest_path, query=query, fts_query=or_query, k=k
+            )
+            if _navigation_path_intent(query)
+            else []
         ),
     )
     relaxed = _balanced_relaxed_ranges(
