@@ -1621,6 +1621,7 @@ def test_public_pack_rejects_manifest_swap_after_query(monkeypatch, tmp_path):
     """No old excerpt may inherit the manifest SHA observed later in the build."""
     import pytest
     from merger.repoground.core import ask_context as context
+    from merger.repoground.core.manifest_snapshot import ManifestBindingError
 
     bundle = _complete_basic_bundle(tmp_path)
     original = context._query_context
@@ -1631,7 +1632,7 @@ def test_public_pack_rejects_manifest_swap_after_query(monkeypatch, tmp_path):
         return state
 
     monkeypatch.setattr(context, "_query_context", changed_manifest)
-    with pytest.raises(RuntimeError, match="manifest"):
+    with pytest.raises((RuntimeError, ManifestBindingError), match="manifest"):
         context.build_ask_context_pack(
             bundle["manifest"], query="hello", k=5, max_context_tokens=100
         )
@@ -1650,10 +1651,17 @@ def test_find_debugging_object_retains_bm25_explanation_ranking():
         "Find the error in the retry handler",
         "Where is the bug in the retry handler?",
         "Wo ist der Fehler in der Implementierung?",
+        "Find the test failure",
+        "Find the handler crash",
+        "Where is the test failure?",
+        "Where is the retry handler bug?",
+        "Where in the retry handler is the bug?",
+        "Where in this test is the failure?",
     ):
         assert not _navigation_path_intent(query), query
     assert _navigation_path_intent("Find the error handler")
     assert _navigation_path_intent("Find the retry implementation")
+    assert _navigation_path_intent("Where in this file is the error handler defined?")
 
 
 def test_manifest_digest_rejects_oversize_before_read(tmp_path):
@@ -1806,3 +1814,28 @@ def test_uncitable_or_preserves_query_diagnostics_without_exposing_rows(monkeypa
     assert state["query_result"]["warnings"] == [{"kind": "stale_range"}]
     assert "Low result coverage" in state["query_result"]["query_result"]["warnings"]
     assert any(x["reason"] == "unverified_index_evidence" for x in state["omissions"])
+
+
+def test_unbound_ask_pins_snapshot_during_index_query(tmp_path, monkeypatch):
+    """Unbound CLI callers must use the canonical snapshot binding, not ABA hashes."""
+    import hashlib
+
+    from merger.repoground.core import ask_context as context
+    from merger.repoground.core.manifest_snapshot import active_manifest_snapshot
+
+    bundle = _complete_basic_bundle(tmp_path)
+    manifest = bundle["manifest"]
+    digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+    observed = []
+    original_query = context._query_context
+
+    def inspect_binding(path, **kwargs):
+        active = active_manifest_snapshot(path)
+        observed.append(active.binding.sha256 if active is not None else None)
+        return original_query(path, **kwargs)
+
+    monkeypatch.setattr(context, "_query_context", inspect_binding)
+    result = context.build_ask_context_pack(manifest, query="hello")
+    assert observed == [digest]
+    assert result["snapshot_ref"]["manifest_sha256"] == digest
+    assert result["resolved_ranges"][0]["citation_id"].startswith("cit_")

@@ -17,7 +17,9 @@ from merger.repoground.core.citation_projection import source_authority_projecti
 from merger.repoground.core.manifest_snapshot import (
     MAX_MANIFEST_BYTES,
     active_manifest_snapshot,
+    capture_manifest_snapshot,
     resolve_manifest_path,
+    use_manifest_binding,
 )
 from merger.repoground.core.language_structure import (
     compose_language_structure_evidence,
@@ -1042,7 +1044,7 @@ def _has_debugging_complement(words: list[str]) -> bool:
 
 def _where_is_source_location(words: list[str]) -> bool:
     """Ignore emphasis but not question verbs that request an explanation."""
-    if _has_debugging_complement(words):
+    if words[-1] in _DEBUGGING_NOUNS or _has_debugging_complement(words):
         return False
     following = words[1:]
     if following[:1] in (["exactly"], ["genau"]):
@@ -1068,7 +1070,7 @@ def _find_source_location_complement(
         words = words[1:]
     if (
         not words
-        or set(words[:5]) & _FIND_EXPLANATION_NOUNS
+        or set(words[:5]) & (_DEBUGGING_NOUNS - {"error"})
         or _has_debugging_complement(words)
     ):
         return False
@@ -1751,11 +1753,23 @@ def build_ask_context_pack(
     existing read-only index query and reports token budget as a constraint, not as a
     quality or correctness proof.
     """
+    if active_manifest_snapshot(bundle_manifest) is None:
+        # Bind unscoped CLI calls to the existing immutable request snapshot.
+        # The one nested call sees that binding and cannot recurse further.
+        with use_manifest_binding(capture_manifest_snapshot(bundle_manifest).binding):
+            return build_ask_context_pack(
+                bundle_manifest,
+                query=query,
+                task_profile=task_profile,
+                max_context_tokens=max_context_tokens,
+                max_context_bytes=max_context_bytes,
+                max_answer_tokens=max_answer_tokens,
+                k=k,
+            )
     token_derived_byte_ceiling, total_context_bytes = _context_budget(
         max_context_tokens, max_context_bytes
     )
     manifest_path = resolve_manifest_path(bundle_manifest)
-    request_manifest_sha256 = _manifest_content_digest(manifest_path)
     snapshot = snapshot_status(manifest_path)
     freshness = _freshness_block(snapshot)
     availability = _availability_block(snapshot)
@@ -1856,11 +1870,6 @@ def build_ask_context_pack(
     }
     if structured_evidence:
         result["structured_evidence"] = structured_evidence
-    if request_manifest_sha256 != _manifest_content_digest(manifest_path) or (
-        request_manifest_sha256 is not None
-        and result["snapshot_ref"].get("manifest_sha256") != request_manifest_sha256
-    ):
-        raise RuntimeError("Bundle manifest changed during ask context construction")
     return result
 
 
