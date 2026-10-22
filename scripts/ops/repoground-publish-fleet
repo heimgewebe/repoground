@@ -10,6 +10,7 @@ The publisher is fail-closed around generation identity:
 from __future__ import annotations
 
 import argparse
+import ctypes
 import fcntl
 import glob
 import grp
@@ -170,6 +171,36 @@ RETIRED_REPOSITORY_ALIASES = {
 }
 SOURCE_REVISION_RE = re.compile(r"^[0-9a-f]{40}$")
 SOURCE_RECOVERY_SCHEMA = "repoground.managed-source-recovery.v1"
+# Independently measured from the pinned historical commit, not derived from
+# the currently checked-out source or mutable refs/replace at verification time.
+HISTORICAL_SOURCE_PIN_TREES = {
+    "d6d4b3c4337d8bd51758d10d83975c9d61fd18d7":
+        "fe2c5afd07ad36fe66759a37fe53a703bd38947b",
+}
+
+# A reviewed source-custody pin, not a rootbroker scan/restore authorization.
+# Generic fleet GC must not silently discard this exact historical source
+# after temporary build leases expire. Change only via protected source review.
+# Source SHA bindings: Grabowski #1546, RepoGround #1343.
+HISTORICAL_SOURCE_PINS: dict[
+    tuple[str, str], dict[str, dict[str, str]]
+] = {
+    ("heimgewebe/heim-pc", "main"): {
+        "d6d4b3c4337d8bd51758d10d83975c9d61fd18d7": {
+            "scripts/nixos_critical_user_data_inventory.py":
+                "5f3b9aa1e2ad49da932ac699023f7f020e562d1d6ec0584a8c9dafb6ffaef572",
+            "scripts/nixos_critical_data_inventory.py":
+                "f71996ac1b3722a0785465e9504c2cfd23878d1b85597ddaff7a5bebf0a49d84",
+            "nixos/production/critical-user-data-contract-v1.json":
+                "d979b42a8a030ca37b5a3c57ac192c81324d72bf3ac292adbda427eeec2c8097",
+            "nixos/production/critical-user-home-data-contract-v1.json":
+                "385cf944e6a28c94a4593eeb1e6e5c87141cb26a4dc8a6cc96b783e21a623347",
+            "nixos/production/recovery-contract-v1.json":
+                "fcd9856f9038652469605b97818bb6904bf34bb54843b4e322e797dc3533a5b6",
+        }
+    }
+}
+
 _UNSAFE_GIT_BRANCH_TOKENS = (" ", "\t", "\n", "..", "~", "^", ":", "?", "*", "[", "\\", "@{")
 
 
@@ -2209,7 +2240,8 @@ def prepare_managed_worktree(
             assert_managed_worktree_clean(path, expected_repo, env=env)
             assert_managed_worktree_idle(path)
             run(
-                ["git", "-C", str(path), "reset", "--hard", target],
+                ["git", "-c", "core.hooksPath=/dev/null",
+                 "-C", str(path), "reset", "--hard", target],
                 env=env,
             )
             assert_managed_worktree_clean(path, expected_repo, env=env)
@@ -2218,6 +2250,7 @@ def prepare_managed_worktree(
         run(
             [
                 "git",
+                "-c", "core.hooksPath=/dev/null",
                 "-C",
                 str(expected_repo),
                 "worktree",
@@ -2654,6 +2687,17 @@ def _authority_git_env() -> dict[str, str]:
     return env
 
 
+def _pinned_source_git_env() -> dict[str, str]:
+    """Disable replace-object substitution only for source custody Git IO.
+
+    Ordinary Fleet member Git transport uses a separately audited exact
+    authority environment: do not widen its GIT_* surface.
+    """
+    env = _authority_git_env()
+    env["GIT_NO_REPLACE_OBJECTS"] = "1"
+    return env
+
+
 def _credential_config_discovery_env() -> dict[str, str]:
     env = {
         key: value
@@ -2843,7 +2887,7 @@ def _managed_worktree_git_env(
     *,
     safe_global_config: Path,
 ) -> dict[str, str]:
-    env = _authority_git_env()
+    env = _pinned_source_git_env()
     env["PATH"] = _fleet_member_credential_helper_path()
     entries = _global_system_checkout_filter_config(repo_path)
     if not entries:
@@ -3456,7 +3500,6 @@ def _fleet_member_ssh_include_paths(home: Path, values: list[str]) -> list[Path]
         else:
             raw_path = Path(raw_pattern)
             candidate = raw_path if raw_path.is_absolute() else ssh_root / raw_path
-
         for matched in sorted(glob.glob(str(candidate), recursive=False)):
             path = Path(matched)
             try:
@@ -4943,6 +4986,1773 @@ def ensure_source_worktree(entry: RepoEntry, ref_segment: str, sha: str) -> Path
     return replacement
 
 
+
+def _open_historical_nofollow_absolute_dir(path: Path) -> int:
+    """Open every absolute directory component; the caller owns the final FD."""
+    if (
+        not path.is_absolute() or not path.parts or path.parts[0] != "/"
+        or any(part in {"", ".", ".."} for part in path.parts[1:])
+    ):
+        raise RuntimeError("historical absolute directory scope is unsafe")
+    flags = os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY | os.O_NOFOLLOW
+    fd = os.open("/", flags)
+    try:
+        for component in path.parts[1:]:
+            before = os.stat(component, dir_fd=fd, follow_symlinks=False)
+            if not stat.S_ISDIR(before.st_mode):
+                raise RuntimeError("historical path component is not a directory")
+            child = os.open(component, flags, dir_fd=fd)
+            opened = os.fstat(child)
+            if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
+                os.close(child)
+                raise RuntimeError("historical directory component changed before open")
+            os.close(fd)
+            fd = child
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def _open_historical_canonical_gitdir(
+    common: Path, worktree_name: str,
+) -> tuple[int, int, int]:
+    """Bind canonical .git, worktrees and linked Gitdir via directory FDs."""
+    if re.fullmatch(r"[A-Za-z0-9_.-]{1,200}", worktree_name) is None:
+        raise RuntimeError("historical linked Gitdir name is unsafe")
+    flags = os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY | os.O_NOFOLLOW
+    common_fd = _open_historical_nofollow_absolute_dir(common)
+    worktrees_fd: int | None = None
+    linked_fd: int | None = None
+    try:
+        registry = os.stat("worktrees", dir_fd=common_fd, follow_symlinks=False)
+        if not stat.S_ISDIR(registry.st_mode):
+            raise RuntimeError("historical Gitdir registry is not a directory")
+        worktrees_fd = os.open("worktrees", flags, dir_fd=common_fd)
+        opened_registry = os.fstat(worktrees_fd)
+        if (opened_registry.st_dev, opened_registry.st_ino) != (
+            registry.st_dev, registry.st_ino
+        ):
+            raise RuntimeError("historical linked-worktree registry changed")
+        named = os.stat(worktree_name, dir_fd=worktrees_fd, follow_symlinks=False)
+        if not stat.S_ISDIR(named.st_mode):
+            raise RuntimeError("historical linked Gitdir is not a directory")
+        linked_fd = os.open(worktree_name, flags, dir_fd=worktrees_fd)
+        opened = os.fstat(linked_fd)
+        if (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino):
+            raise RuntimeError("historical linked Gitdir inode changed")
+        return common_fd, worktrees_fd, linked_fd
+    except BaseException:
+        for owned in (linked_fd, worktrees_fd, common_fd):
+            if owned is not None:
+                os.close(owned)
+        raise
+
+
+def _verify_historical_pinned_git_tree(
+    root_fd: int, expected_head: str, repository: Path, source: Path
+) -> str:
+    """Verify a full historical checkout without executing untrusted Git status.
+
+    The source's .git gitfile is a *claimed* identity, not a Git authority.
+    Read it with O_NOFOLLOW from the pinned root inode, verify the exact
+    registered linked-worktree metadata, and resolve objects only through the
+    publisher's canonical repository. Git never selects its Gitdir/config from
+    the untrusted source pathname. Check every tracked byte and enumerate ALL
+    names via that same root fd, including a final post-hash traversal.
+    This is a bounded observation, not post-return filesystem immutability.
+    """
+    if re.fullmatch(r"[0-9a-f]{40}", expected_head) is None:
+        raise RuntimeError("historical source commit identity invalid")
+    root_alias = f"/proc/self/fd/{root_fd}"
+    root_info = os.fstat(root_fd)
+    if not stat.S_ISDIR(root_info.st_mode):
+        raise RuntimeError("historical source root fd is not a directory")
+
+    dir_flags = os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY | os.O_NOFOLLOW
+    file_flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW
+
+    def fingerprint(info: os.stat_result) -> tuple[int, ...]:
+        return (
+            info.st_dev, info.st_ino, info.st_mode, info.st_nlink,
+            info.st_size, info.st_mtime_ns, info.st_ctime_ns,
+        )
+
+    def read_regular(directory_fd: int, leaf: str, limit: int) -> tuple[bytes, tuple[int, ...]]:
+        fd = os.open(leaf, file_flags, dir_fd=directory_fd)
+        try:
+            first = os.fstat(fd)
+            if (
+                not stat.S_ISREG(first.st_mode) or first.st_nlink != 1
+                or not 0 < first.st_size <= limit
+            ):
+                raise RuntimeError("historical Git metadata file has unsafe identity")
+            data = bytearray()
+            while len(data) <= limit:
+                chunk = os.read(fd, min(4096, limit + 1 - len(data)))
+                if not chunk:
+                    break
+                data.extend(chunk)
+            last = os.fstat(fd)
+            if len(data) != first.st_size or fingerprint(first) != fingerprint(last):
+                raise RuntimeError("historical Git metadata file changed during read")
+            current = os.stat(leaf, dir_fd=directory_fd, follow_symlinks=False)
+            if fingerprint(current) != fingerprint(last):
+                raise RuntimeError("historical Git metadata pathname changed during read")
+            return bytes(data), fingerprint(last)
+        finally:
+            os.close(fd)
+
+    # Source worktrees are never allowed to name an arbitrary Gitdir. The
+    # canonical repository is owned by the fleet publisher, not by the
+    # checked-out historical revision or a source-controlled .git pointer.
+    common = repository / ".git"
+    if (
+        not repository.is_absolute() or repository.is_symlink()
+        or common.is_symlink() or not common.is_dir()
+        or common.resolve(strict=True) != common
+    ):
+        raise RuntimeError("historical source canonical Git object store unsafe")
+    gitfile, gitfile_identity = read_regular(root_fd, ".git", 4096)
+    try:
+        gitfile_line = gitfile.decode("ascii").removesuffix("\n")
+    except UnicodeDecodeError as exc:
+        raise RuntimeError("historical source gitfile encoding unsafe") from exc
+    if not gitfile_line.startswith("gitdir: "):
+        raise RuntimeError("historical source gitfile is not a linked worktree")
+    gitdir = Path(gitfile_line[8:])
+    if (
+        not gitdir.is_absolute()
+        or gitdir.parent != common / "worktrees"
+        or re.fullmatch(r"[A-Za-z0-9_.-]{1,200}", gitdir.name) is None
+        or gitdir.is_symlink() or not gitdir.is_dir()
+        or gitdir.resolve(strict=True) != gitdir
+    ):
+        raise RuntimeError("historical source gitfile targets foreign Gitdir")
+    common_fd, registry_fd, gitdir_fd = _open_historical_canonical_gitdir(
+        common, gitdir.name
+    )
+    index_fd: int | None = None
+    try:
+        gitdir_identity = fingerprint(os.fstat(gitdir_fd))
+        head_data, head_identity = read_regular(gitdir_fd, "HEAD", 128)
+        link_data, backlink_identity = read_regular(gitdir_fd, "gitdir", 4096)
+        commondir_data, commondir_identity = read_regular(gitdir_fd, "commondir", 128)
+        if (
+            head_data != (expected_head + "\n").encode("ascii")
+            or link_data != (str(source / ".git") + "\n").encode("utf-8")
+            or commondir_data.strip() != b"../.."
+        ):
+            raise RuntimeError("historical linked worktree metadata changed")
+
+        index_fd = os.open("index", file_flags, dir_fd=gitdir_fd)
+        index_first = os.fstat(index_fd)
+        if not stat.S_ISREG(index_first.st_mode) or index_first.st_nlink != 1:
+            raise RuntimeError("historical source Git index identity unsafe")
+        index_identity = fingerprint(index_first)
+
+        env = _pinned_source_git_env()
+        env["GIT_INDEX_FILE"] = f"/proc/self/fd/{index_fd}"
+        env["GIT_OPTIONAL_LOCKS"] = "0"
+
+        def read_git(*arguments: str) -> bytes:
+            # No status, checkout, diff or worktree commands here: those may
+            # run repo-local filters/fsmonitor/hooks before bytes are checked.
+            if not arguments or arguments[0] not in {"cat-file", "rev-parse", "ls-tree", "ls-files"}:
+                raise RuntimeError("historical verifier attempted executable Git action")
+            try:
+                result = subprocess.run(
+                    [
+                        "/usr/bin/git",
+                        "-c", "core.fsmonitor=false",
+                        "-c", "core.useBuiltinFSMonitor=false",
+                        "-c", "core.untrackedCache=false",
+                        "-c", "core.hooksPath=/dev/null",
+                        "-c", "gc.auto=0",
+                        "-c", "core.pager=cat",
+                        f"--git-dir=/proc/self/fd/{common_fd}", f"--work-tree={root_alias}",
+                        *arguments,
+                    ],
+                    pass_fds=(root_fd, common_fd, index_fd), env=env,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    timeout=30, check=False,
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                raise RuntimeError("historical verified Git object read unavailable") from exc
+            if result.returncode or len(result.stdout) > 2 * 1024 * 1024:
+                raise RuntimeError("historical verified Git object read rejected")
+            return result.stdout
+
+        tree = read_git("rev-parse", "--verify", expected_head + "^{tree}").strip()
+        commit = read_git("cat-file", "-p", expected_head)
+        if (
+            re.fullmatch(rb"[0-9a-f]{40}", tree) is None
+            or commit.split(b"\n", 1)[0] != b"tree " + tree
+            or HISTORICAL_SOURCE_PIN_TREES.get(expected_head) != tree.decode("ascii")
+        ):
+            raise RuntimeError("historical pinned Git commit or tree identity drifted")
+
+        tree_records = read_git("ls-tree", "-rz", "--full-tree", expected_head).split(b"\0")
+        index_records = read_git("ls-files", "--stage", "-z").split(b"\0")
+        flag_records = read_git("ls-files", "-v", "-z").split(b"\0")
+        expected: dict[bytes, tuple[bytes, bytes]] = {}
+        stage: dict[bytes, tuple[bytes, bytes]] = {}
+        flags: dict[bytes, bytes] = {}
+        for record in filter(None, tree_records):
+            metadata, sep, name = record.partition(b"\t")
+            fields = metadata.split(b" ")
+            if not sep or len(fields) != 3 or fields[1] != b"blob":
+                raise RuntimeError("historical pinned Git tree has unsupported entries")
+            mode, _, oid = fields
+            if mode not in {b"100644", b"100755"} or re.fullmatch(rb"[0-9a-f]{40}", oid) is None:
+                raise RuntimeError("historical pinned Git tree has unsupported file type")
+            parts = name.split(b"/")
+            if (
+                name in expected or name.startswith(b"/")
+                or any(component in {b"", b".", b".."} for component in parts)
+            ):
+                raise RuntimeError("historical pinned Git tree has unsafe paths")
+            expected[name] = mode, oid
+        for record in filter(None, index_records):
+            metadata, sep, name = record.partition(b"\t")
+            fields = metadata.split(b" ")
+            if not sep or len(fields) != 3 or fields[2] != b"0" or name in stage:
+                raise RuntimeError("historical pinned Git index has unsafe stages")
+            stage[name] = fields[0], fields[1]
+        for record in filter(None, flag_records):
+            if len(record) < 3 or record[1:2] != b" " or record[2:] in flags:
+                raise RuntimeError("historical pinned Git index flags malformed")
+            flags[record[2:]] = record[:1]
+        if (
+            not expected or len(expected) > 2048
+            or stage != expected or set(flags) != set(expected)
+            or any(flag != b"H" for flag in flags.values())
+        ):
+            raise RuntimeError("historical Git source index/stage/flags drifted")
+
+        expected_directories: set[bytes] = set()
+        for filename in expected:
+            components = filename.split(b"/")
+            for i in range(1, len(components)):
+                expected_directories.add(b"/".join(components[:i]))
+
+        def enumerate_root(
+            expected_fingerprints: dict[bytes, tuple[int, ...]] | None = None,
+        ) -> None:
+            # Traversal is rooted at the same opened inode, not source by name.
+            # Empty directories and ignored/untracked files are not permitted.
+            todo = [(os.dup(root_fd), b"")]
+            observed_files: set[bytes] = set()
+            observed_directories: set[bytes] = set()
+            total_entries = 0
+            try:
+                while todo:
+                    fd, prefix = todo.pop()
+                    try:
+                        with os.scandir(fd) as iterator:
+                            names = [os.fsencode(item.name) for item in iterator]
+                        for name in names:
+                            total_entries += 1
+                            if total_entries > 4096 or name in {b"", b".", b".."}:
+                                raise RuntimeError("historical root directory exceeds bounded inventory")
+                            relative = prefix + name
+                            info = os.stat(name, dir_fd=fd, follow_symlinks=False)
+                            if not prefix and name == b".git":
+                                if fingerprint(info) != gitfile_identity:
+                                    raise RuntimeError("historical root gitfile changed")
+                            elif stat.S_ISDIR(info.st_mode):
+                                if relative not in expected_directories:
+                                    raise RuntimeError("historical root has unexpected directory")
+                                child = os.open(name, dir_flags, dir_fd=fd)
+                                if (os.fstat(child).st_dev, os.fstat(child).st_ino) != (
+                                    info.st_dev, info.st_ino
+                                ):
+                                    os.close(child)
+                                    raise RuntimeError("historical root directory swapped")
+                                observed_directories.add(relative)
+                                todo.append((child, relative + b"/"))
+                            elif stat.S_ISREG(info.st_mode):
+                                if relative not in expected or info.st_nlink != 1:
+                                    raise RuntimeError("historical root has unexpected file")
+                                if (
+                                    expected_fingerprints is not None
+                                    and fingerprint(info) != expected_fingerprints[relative]
+                                ):
+                                    raise RuntimeError(
+                                        "historical root tracked file identity drifted"
+                                    )
+                                observed_files.add(relative)
+                            else:
+                                raise RuntimeError("historical root symlink or special file unsafe")
+                    finally:
+                        os.close(fd)
+                if observed_files != set(expected) or observed_directories != expected_directories:
+                    raise RuntimeError("historical root file/directory set drifted")
+            finally:
+                for fd, _ in todo:
+                    os.close(fd)
+
+        def parent_dir(parts: tuple[bytes, ...]) -> int:
+            fd = os.dup(root_fd)
+            try:
+                for component in parts[:-1]:
+                    next_fd = os.open(component, dir_flags, dir_fd=fd)
+                    os.close(fd)
+                    fd = next_fd
+                return fd
+            except BaseException:
+                os.close(fd)
+                raise
+
+        verified: list[tuple[tuple[bytes, ...], tuple[int, ...]]] = []
+        total_bytes = 0
+        try:
+            enumerate_root()
+            for name, (mode, expected_oid) in sorted(expected.items()):
+                parts = tuple(name.split(b"/"))
+                parent_fd = parent_dir(parts)
+                try:
+                    file_fd = os.open(parts[-1], file_flags, dir_fd=parent_fd)
+                    try:
+                        before = os.fstat(file_fd)
+                        if (
+                            not stat.S_ISREG(before.st_mode) or before.st_nlink != 1
+                            or before.st_size < 0 or before.st_size > 1024 * 1024
+                            # Git records only the executable bit, not a checkout's
+                            # stricter umask. Reject privilege/write additions,
+                            # while permitting regular 0600/0700 materialization.
+                            or (stat.S_IMODE(before.st_mode) & 0o7000) != 0
+                            or (stat.S_IMODE(before.st_mode) & 0o022) != 0
+                            or (before.st_mode & 0o400) == 0
+                            or (
+                                ((before.st_mode & 0o111) != 0)
+                                != (mode == b"100755")
+                            )
+                        ):
+                            raise RuntimeError("historical pinned Git file mode or identity unsafe")
+                        digest = hashlib.sha1()
+                        digest.update(b"blob " + str(before.st_size).encode("ascii") + b"\0")
+                        size = 0
+                        while size <= before.st_size:
+                            chunk = os.read(file_fd, 64 * 1024)
+                            if not chunk:
+                                break
+                            digest.update(chunk)
+                            size += len(chunk)
+                        after = os.fstat(file_fd)
+                        current = os.stat(parts[-1], dir_fd=parent_fd, follow_symlinks=False)
+                        if (
+                            size != before.st_size or fingerprint(before) != fingerprint(after)
+                            or fingerprint(current) != fingerprint(after)
+                            or digest.hexdigest().encode("ascii") != expected_oid
+                        ):
+                            raise RuntimeError("historical pinned Git tracked file bytes drifted")
+                        verified.append((parts, fingerprint(after)))
+                        total_bytes += size
+                        if total_bytes > 32 * 1024 * 1024:
+                            raise RuntimeError("historical pinned Git tree exceeds byte budget")
+                    finally:
+                        os.close(file_fd)
+                finally:
+                    os.close(parent_fd)
+            for parts, original in verified:
+                parent_fd = parent_dir(parts)
+                try:
+                    if fingerprint(os.stat(
+                        parts[-1], dir_fd=parent_fd, follow_symlinks=False
+                    )) != original:
+                        raise RuntimeError("historical pinned Git final pathname drifted")
+                finally:
+                    os.close(parent_fd)
+            if (
+                read_regular(root_fd, ".git", 4096) != (gitfile, gitfile_identity)
+                or read_regular(gitdir_fd, "HEAD", 128) != (head_data, head_identity)
+                or read_regular(gitdir_fd, "gitdir", 4096) != (link_data, backlink_identity)
+                or read_regular(gitdir_fd, "commondir", 128) != (
+                    commondir_data, commondir_identity
+                )
+                or fingerprint(os.fstat(gitdir_fd)) != gitdir_identity
+                or fingerprint(os.stat("index", dir_fd=gitdir_fd, follow_symlinks=False))
+                != index_identity
+                or read_git("rev-parse", "--verify", expected_head + "^{tree}").strip() != tree
+            ):
+                raise RuntimeError("historical linked source identity changed during verification")
+            # Last pathname observation rebinds *all* tracked bytes to
+            # the inode/size/mode/time tuple hashed above, after Git metadata.
+            enumerate_root({
+                b"/".join(parts): original for parts, original in verified
+            })
+        except OSError as exc:
+            raise RuntimeError("historical source fd tree read unavailable") from exc
+        return tree.decode("ascii")
+    finally:
+        if index_fd is not None:
+            os.close(index_fd)
+        os.close(gitdir_fd)
+        os.close(registry_fd)
+        os.close(common_fd)
+
+
+def _verify_historical_pinned_source(
+    source: Path, repository: Path, expected_head: str, file_digests: dict[str, str]
+) -> None:
+    """Verify all pinned payloads against ONE exact Git worktree and root inode.
+
+    No detached per-file source reopen is authoritative: otherwise concurrent
+    root replacement can present approved files in different directories.
+    This remains an observation, not permanent filesystem immutability or
+    privileged inventory/restore authorization.
+    """
+    if (
+        source.parent != SOURCE_ROOT or source == SOURCE_ROOT
+        or SOURCE_ROOT.is_symlink()
+        or source.is_symlink()
+        or not source.is_dir()
+        or not SOURCE_REVISION_RE.fullmatch(expected_head)
+        or not isinstance(file_digests, dict)
+        or not file_digests
+    ):
+        raise RuntimeError("historical pinned source directory or binding is unsafe")
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    directory = getattr(os, "O_DIRECTORY", 0)
+    if not nofollow or not directory:
+        raise RuntimeError("historical pinned source requires no-follow directory IO")
+    dir_flags = os.O_RDONLY | os.O_CLOEXEC | nofollow | directory
+    file_flags = os.O_RDONLY | os.O_CLOEXEC | nofollow
+
+    def fingerprint(value: os.stat_result) -> tuple[int, ...]:
+        return (
+            value.st_dev, value.st_ino, value.st_mode, value.st_nlink,
+            value.st_size, value.st_mtime_ns, value.st_ctime_ns,
+        )
+
+    def open_parent(root_fd: int, components: tuple[str, ...]) -> int:
+        parent_fd = os.dup(root_fd)
+        try:
+            for component in components:
+                child_fd = os.open(component, dir_flags, dir_fd=parent_fd)
+                os.close(parent_fd)
+                parent_fd = child_fd
+            return parent_fd
+        except BaseException:
+            os.close(parent_fd)
+            raise
+
+    source_root_fd = _open_historical_nofollow_absolute_dir(SOURCE_ROOT)
+    try:
+        root_fd = os.open(source.name, dir_flags, dir_fd=source_root_fd)
+    except BaseException:
+        os.close(source_root_fd)
+        raise
+    try:
+        root_meta = os.fstat(root_fd)
+        root_identity = (root_meta.st_dev, root_meta.st_ino)
+
+        def rebind_root() -> None:
+            try:
+                current = os.stat(
+                    source.name, dir_fd=source_root_fd, follow_symlinks=False
+                )
+                parent_fd = _open_historical_nofollow_absolute_dir(SOURCE_ROOT)
+                try:
+                    parent = os.fstat(parent_fd)
+                    bound_parent = os.fstat(source_root_fd)
+                finally:
+                    os.close(parent_fd)
+            except OSError as exc:
+                raise RuntimeError("historical pinned source root changed") from exc
+            if (
+                not stat.S_ISDIR(current.st_mode)
+                or (current.st_dev, current.st_ino) != root_identity
+                or (parent.st_dev, parent.st_ino) != (
+                    bound_parent.st_dev, bound_parent.st_ino
+                )
+            ):
+                raise RuntimeError("historical pinned source root changed during verification")
+
+        rebind_root()
+        # Do not execute git status here: worktree .git/config and clean
+        # filters are untrusted until the exact source/Gitdir is proven.
+        tree_oid = _verify_historical_pinned_git_tree(
+            root_fd, expected_head, repository, source
+        )
+        rebind_root()
+
+        # Keep the root fd open for the ENTIRE five-file verification. Capture
+        # every pinned name/inode and rewalk all names at the end, so a second
+        # directory tree or a later file replacement cannot silently pass.
+        verified: list[tuple[tuple[str, ...], tuple[int, ...]]] = []
+        for relative, expected_digest in sorted(file_digests.items()):
+            if (
+                not isinstance(relative, str) or not relative
+                or not isinstance(expected_digest, str)
+                or re.fullmatch(r"[0-9a-f]{64}", expected_digest) is None
+            ):
+                raise RuntimeError("historical pinned source digest binding is unsafe")
+            relative_path = Path(relative)
+            parts = relative_path.parts
+            if (
+                relative_path.is_absolute() or not parts
+                or any(part in {"", ".", ".."} for part in parts)
+                or chr(92) in relative
+            ):
+                raise RuntimeError("historical pinned source path is unsafe")
+            parent_fd = open_parent(root_fd, parts[:-1])
+            try:
+                try:
+                    file_fd = os.open(parts[-1], file_flags, dir_fd=parent_fd)
+                except OSError as exc:
+                    raise RuntimeError("historical pinned source symlink or path is unsafe") from exc
+                try:
+                    before = os.fstat(file_fd)
+                    if (
+                        not stat.S_ISREG(before.st_mode)
+                        or before.st_nlink != 1
+                        or (stat.S_IMODE(before.st_mode) & 0o7000) != 0
+                        or (stat.S_IMODE(before.st_mode) & 0o022) != 0
+                        or not 0 < before.st_size <= 512 * 1024
+                    ):
+                        raise RuntimeError("historical pinned source payload is unsafe")
+                    data = bytearray()
+                    while len(data) <= 512 * 1024:
+                        chunk = os.read(file_fd, 64 * 1024)
+                        if not chunk:
+                            break
+                        data.extend(chunk)
+                    after = os.fstat(file_fd)
+                    if len(data) > 512 * 1024 or fingerprint(before) != fingerprint(after):
+                        raise RuntimeError("historical pinned source payload changed during read")
+                    if hashlib.sha256(data).hexdigest() != expected_digest:
+                        raise RuntimeError("historical pinned source payload digest mismatch")
+                    current_name = os.stat(
+                        parts[-1], dir_fd=parent_fd, follow_symlinks=False
+                    )
+                    if fingerprint(current_name) != fingerprint(after):
+                        raise RuntimeError("historical pinned source pathname changed during read")
+                    verified.append((parts, fingerprint(after)))
+                finally:
+                    os.close(file_fd)
+            finally:
+                os.close(parent_fd)
+            rebind_root()
+
+        for parts, original in verified:
+            parent_fd = open_parent(root_fd, parts[:-1])
+            try:
+                rebound = os.stat(parts[-1], dir_fd=parent_fd, follow_symlinks=False)
+                if fingerprint(rebound) != original:
+                    raise RuntimeError("historical pinned source final pathname changed")
+            finally:
+                os.close(parent_fd)
+        rebind_root()
+        if _verify_historical_pinned_git_tree(
+            root_fd, expected_head, repository, source
+        ) != tree_oid:
+            raise RuntimeError("historical pinned source final Git identity changed")
+        rebind_root()
+    except OSError as exc:
+        raise RuntimeError("historical pinned source path is unsafe") from exc
+    finally:
+        os.close(root_fd)
+        os.close(source_root_fd)
+
+
+def _historical_stage_identity(path: Path) -> tuple[int, int]:
+    """Inspect one physical directory identity without following a symlink."""
+    try:
+        metadata = path.lstat()
+    except OSError as exc:
+        raise RuntimeError("historical source worktree path is unavailable") from exc
+    if not stat.S_ISDIR(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
+        raise RuntimeError("historical source worktree path is unsafe")
+    return metadata.st_dev, metadata.st_ino
+
+
+
+def _rename_historical_noreplace(
+    source_dir_fd: int, source_name: str,
+    recovery_dir_fd: int, recovery_name: str,
+) -> None:
+    """Use Linux renameat2(RENAME_NOREPLACE); never overwrite owner data.
+
+    Both names are relative to already-open no-follow directory descriptors.
+    No unlink fallback is safe for a raced, untrusted consumer pathname.
+    """
+    libc = ctypes.CDLL(None, use_errno=True)
+    renameat2 = getattr(libc, "renameat2", None)
+    if renameat2 is None:
+        raise RuntimeError("historical safe quarantine requires renameat2")
+    renameat2.argtypes = (
+        ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p,
+        ctypes.c_uint,
+    )
+    renameat2.restype = ctypes.c_int
+    if renameat2(
+        source_dir_fd, os.fsencode(source_name),
+        recovery_dir_fd, os.fsencode(recovery_name),
+        1,  # RENAME_NOREPLACE; kernel refuses an occupied recovery name.
+    ) != 0:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error))
+
+
+
+
+
+def prepare_historical_source_worktree(
+    path: Path, *, expected_repo: Path, target: str
+) -> None:
+    """Materialize approved Git blobs/index under pre-opened, no-follow inodes.
+
+    Never run checkout callbacks or a pathname-selected Git index mutation.
+    A linked worktree is registered with only descriptor-relative O_EXCL
+    metadata under already opened parent inodes; its canonical Git index v2
+    is likewise created without Git callbacks. Ambiguity retains the stage.
+    """
+    import struct
+
+    # Snapshot the canonical repository and staging root before any separate
+    # pathname validation could become a same-UID interposition point.
+    # These are only pre-open expectations; the FD walker below must match both.
+    if (
+        not expected_repo.is_absolute() or not SOURCE_ROOT.is_absolute()
+        or path.parent != SOURCE_ROOT or path == SOURCE_ROOT
+        or not SOURCE_REVISION_RE.fullmatch(target)
+        or target not in HISTORICAL_SOURCE_PIN_TREES
+    ):
+        raise RuntimeError("historical source staging scope is unsafe")
+    repo_snapshot = expected_repo.lstat()
+    source_snapshot = SOURCE_ROOT.lstat()
+    if (
+        not stat.S_ISDIR(repo_snapshot.st_mode)
+        or not stat.S_ISDIR(source_snapshot.st_mode)
+        or expected_repo.is_symlink() or SOURCE_ROOT.is_symlink()
+        or path.exists() or path.is_symlink()
+    ):
+        raise RuntimeError("historical source staging identity changed")
+    dir_flags = os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY | os.O_NOFOLLOW
+    read_flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW
+    create_flags = os.O_WRONLY | os.O_CLOEXEC | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+    env = _pinned_source_git_env()
+    env.update({
+        "GIT_NO_REPLACE_OBJECTS": "1",
+        "GIT_NO_LAZY_FETCH": "1",
+        "GIT_OPTIONAL_LOCKS": "0",
+    })
+
+    def regular_bytes(parent_fd: int, name: str, bound: int = 4096) -> bytes:
+        descriptor = os.open(name, read_flags, dir_fd=parent_fd)
+        try:
+            before = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(before.st_mode) or before.st_nlink != 1
+                or before.st_size <= 0 or before.st_size > bound
+            ):
+                raise RuntimeError("historical staging Git metadata is unsafe")
+            data = bytearray()
+            while len(data) <= bound:
+                chunk = os.read(descriptor, min(4096, bound + 1 - len(data)))
+                if not chunk:
+                    break
+                data.extend(chunk)
+            after = os.fstat(descriptor)
+            current = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+            if (
+                len(data) != before.st_size
+                or (before.st_dev, before.st_ino, before.st_mtime_ns, before.st_ctime_ns)
+                != (after.st_dev, after.st_ino, after.st_mtime_ns, after.st_ctime_ns)
+                or (current.st_dev, current.st_ino) != (after.st_dev, after.st_ino)
+            ):
+                raise RuntimeError("historical staging Git metadata identity changed")
+            return bytes(data)
+        finally:
+            os.close(descriptor)
+
+    def write_all(fd: int, data: bytes) -> None:
+        view = memoryview(data)
+        while view:
+            written = os.write(fd, view)
+            if written <= 0:
+                raise RuntimeError("historical staging write incomplete")
+            view = view[written:]
+
+    def open_directory_chain(
+        directory: Path, expected_stat: os.stat_result
+    ) -> tuple[list[int], tuple[str, ...]]:
+        """Open every absolute path component with openat(O_NOFOLLOW).
+
+        The pre-open inode snapshot detects directory replacement between
+        preliminary validation and descriptor binding. Keep all ancestor FDs
+        to recheck the canonical names before and after relevant writes.
+        """
+        parts = directory.parts
+        if (
+            not directory.is_absolute() or len(parts) < 2 or parts[0] != "/"
+            or any(part in ("", ".", "..") for part in parts[1:])
+            or not stat.S_ISDIR(expected_stat.st_mode)
+        ):
+            raise RuntimeError("historical canonical directory path is unsafe")
+        descriptors: list[int] = []
+        try:
+            descriptors.append(os.open("/", dir_flags))
+            for component in parts[1:]:
+                descriptors.append(os.open(component, dir_flags, dir_fd=descriptors[-1]))
+            opened = os.fstat(descriptors[-1])
+            if (opened.st_dev, opened.st_ino) != (
+                expected_stat.st_dev, expected_stat.st_ino
+            ):
+                raise RuntimeError("historical directory inode changed before binding")
+            return descriptors, parts[1:]
+        except BaseException:
+            for descriptor in reversed(descriptors):
+                os.close(descriptor)
+            raise
+
+    def directory_chain_still_bound(
+        descriptors: list[int], components: tuple[str, ...]
+    ) -> None:
+        for parent, opened_fd, name in zip(
+            descriptors[:-1], descriptors[1:], components, strict=True
+        ):
+            current = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            opened = os.fstat(opened_fd)
+            if (
+                not stat.S_ISDIR(current.st_mode)
+                or (current.st_dev, current.st_ino) != (opened.st_dev, opened.st_ino)
+            ):
+                raise RuntimeError("historical canonical directory component changed")
+
+    # Path.lstat only captures the expected identity before opening. Neither
+    # Gitdir selection nor any filesystem effect below follows that pathname.
+    parent_snapshot = SOURCE_ROOT.parent.lstat()
+    parent_chain: list[int] = []
+    repo_chain: list[int] = []
+    parent_components: tuple[str, ...] = ()
+    repo_components: tuple[str, ...] = ()
+    root_fd = None
+    stage_fd = None
+    repo_git_fd = None
+    worktrees_fd = None
+    gitdir_fd = None
+    try:
+        parent_chain, parent_components = open_directory_chain(
+            SOURCE_ROOT.parent, parent_snapshot
+        )
+        parent_fd = parent_chain[-1]
+        root_fd = os.open(SOURCE_ROOT.name, dir_flags, dir_fd=parent_fd)
+        root_opened = os.fstat(root_fd)
+        if (root_opened.st_dev, root_opened.st_ino) != (
+            source_snapshot.st_dev, source_snapshot.st_ino
+        ):
+            raise RuntimeError("historical source root changed before binding")
+        repo_chain, repo_components = open_directory_chain(expected_repo, repo_snapshot)
+        repo_fd = repo_chain[-1]
+        # Pin .git by inode; a real-directory exchange must fail like a symlink.
+        # No Git metadata write is permitted before these checks complete.
+        git_snapshot = os.stat(".git", dir_fd=repo_fd, follow_symlinks=False)
+        if not stat.S_ISDIR(git_snapshot.st_mode):
+            raise RuntimeError("historical canonical .git is not a directory")
+        repo_git_fd = os.open(".git", dir_flags, dir_fd=repo_fd)
+        git_opened = os.fstat(repo_git_fd)
+        if (git_opened.st_dev, git_opened.st_ino) != (
+            git_snapshot.st_dev, git_snapshot.st_ino
+        ):
+            raise RuntimeError("historical canonical .git inode changed")
+
+        def root_still_bound() -> None:
+            directory_chain_still_bound(parent_chain, parent_components)
+            current = os.stat(SOURCE_ROOT.name, dir_fd=parent_fd, follow_symlinks=False)
+            root_open = os.fstat(root_fd)
+            if (
+                not stat.S_ISDIR(current.st_mode)
+                or (current.st_dev, current.st_ino) != (root_open.st_dev, root_open.st_ino)
+            ):
+                raise RuntimeError("historical source root inode changed")
+
+        def repo_still_bound() -> None:
+            directory_chain_still_bound(repo_chain, repo_components)
+            current = os.stat(".git", dir_fd=repo_fd, follow_symlinks=False)
+            git_opened = os.fstat(repo_git_fd)
+            repo_opened = os.fstat(repo_fd)
+            if (
+                not stat.S_ISDIR(current.st_mode)
+                or (current.st_dev, current.st_ino) != (git_opened.st_dev, git_opened.st_ino)
+                or (git_opened.st_dev, git_opened.st_ino) != (
+                    git_snapshot.st_dev, git_snapshot.st_ino
+                )
+                or (repo_opened.st_dev, repo_opened.st_ino) != (
+                    repo_snapshot.st_dev, repo_snapshot.st_ino
+                )
+            ):
+                raise RuntimeError("historical canonical repository Gitdir identity changed")
+            if worktrees_fd is not None:
+                current_worktrees = os.stat(
+                    "worktrees", dir_fd=repo_git_fd, follow_symlinks=False
+                )
+                opened_worktrees = os.fstat(worktrees_fd)
+                if (
+                    not stat.S_ISDIR(current_worktrees.st_mode)
+                    or (current_worktrees.st_dev, current_worktrees.st_ino)
+                    != (worktrees_snapshot.st_dev, worktrees_snapshot.st_ino)
+                    or (opened_worktrees.st_dev, opened_worktrees.st_ino)
+                    != (worktrees_snapshot.st_dev, worktrees_snapshot.st_ino)
+                ):
+                    raise RuntimeError("historical canonical worktrees inode changed")
+            if gitdir_fd is not None:
+                current_gitdir = os.stat(
+                    path.name, dir_fd=worktrees_fd, follow_symlinks=False
+                )
+                opened_gitdir = os.fstat(gitdir_fd)
+                if (
+                    not stat.S_ISDIR(current_gitdir.st_mode)
+                    or (current_gitdir.st_dev, current_gitdir.st_ino)
+                    != (gitdir_snapshot.st_dev, gitdir_snapshot.st_ino)
+                    or (opened_gitdir.st_dev, opened_gitdir.st_ino)
+                    != (gitdir_snapshot.st_dev, gitdir_snapshot.st_ino)
+                ):
+                    raise RuntimeError("historical canonical linked Gitdir inode changed")
+
+        def stage_still_bound() -> None:
+            root_still_bound()
+            repo_still_bound()
+            current = os.stat(path.name, dir_fd=root_fd, follow_symlinks=False)
+            opened = os.fstat(stage_fd)
+            if (
+                not stat.S_ISDIR(current.st_mode)
+                or (current.st_dev, current.st_ino) != (opened.st_dev, opened.st_ino)
+            ):
+                raise RuntimeError("historical staged worktree inode changed")
+
+        def safe_git(*args: str) -> bytes:
+            if not args or args[0] not in {"rev-parse", "ls-tree", "cat-file"}:
+                raise RuntimeError("historical staging denied mutating Git command")
+            try:
+                result = subprocess.run(
+                    [
+                        "/usr/bin/git",
+                        "-c", "core.hooksPath=/dev/null",
+                        "-c", "core.fsmonitor=false",
+                        "-c", "core.useBuiltinFSMonitor=false",
+                        "-c", "core.untrackedCache=false",
+                        "-c", "gc.auto=0",
+                        f"--git-dir=/proc/self/fd/{repo_git_fd}", *args,
+                    ],
+                    pass_fds=(repo_git_fd,), env=env,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    timeout=30, check=False,
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                raise RuntimeError("historical source safe Git operation unavailable") from exc
+            if result.returncode:
+                raise RuntimeError("historical source safe Git operation failed")
+            return result.stdout
+
+        root_still_bound()
+        repo_still_bound()
+        # The canonical linked-worktree registry must already exist: mkdirat
+        # followed by an inode snapshot can adopt an attacker-exchanged empty
+        # directory. Bind the pre-existing registry before any Git metadata
+        # write, then compare its directory entry through the held .git fd.
+        # Initial Git registry provisioning is deliberately outside the
+        # historical-source security boundary.
+        # Capture the pre-existing registry dentry inode through the held .git
+        # descriptor *before* opening its pathname. A same-UID exchange during
+        # the scan-to-open boundary is rejected without planting Git metadata.
+        with os.scandir(repo_git_fd) as scan:
+            registry = [item for item in scan if item.name == "worktrees"]
+        if len(registry) != 1 or not registry[0].is_dir(follow_symlinks=False):
+            raise RuntimeError("historical canonical worktrees registry not provisioned")
+        expected_registry_ino = registry[0].inode()
+        worktrees_fd = os.open("worktrees", dir_flags, dir_fd=repo_git_fd)
+        worktrees_snapshot = os.fstat(worktrees_fd)
+        if (
+            worktrees_snapshot.st_dev != os.fstat(repo_git_fd).st_dev
+            or worktrees_snapshot.st_ino != expected_registry_ino
+        ):
+            raise RuntimeError("historical worktrees registry exchanged before binding")
+        repo_still_bound()
+
+        # Register the ordinary Git linked-worktree layout with O_EXCL files
+        # under held parent fds. No 'git worktree add' or 'git read-tree'
+        # may follow a name or execute a local callback before trust checks.
+        os.mkdir(path.name, mode=0o700, dir_fd=root_fd)
+        stage_snapshot = os.stat(path.name, dir_fd=root_fd, follow_symlinks=False)
+        if not stat.S_ISDIR(stage_snapshot.st_mode):
+            raise RuntimeError("historical staging directory is not a directory")
+        stage_fd = os.open(path.name, dir_flags, dir_fd=root_fd)
+        if (os.fstat(stage_fd).st_dev, os.fstat(stage_fd).st_ino) != (
+            stage_snapshot.st_dev, stage_snapshot.st_ino
+        ):
+            raise RuntimeError("historical staged inode was replaced before binding")
+        stage_still_bound()
+        with os.scandir(stage_fd) as scan:
+            if next(scan, None) is not None:
+                raise RuntimeError("historical staging directory is not empty")
+        os.mkdir(path.name, mode=0o700, dir_fd=worktrees_fd)
+        gitdir_snapshot = os.stat(path.name, dir_fd=worktrees_fd, follow_symlinks=False)
+        if not stat.S_ISDIR(gitdir_snapshot.st_mode):
+            raise RuntimeError("historical linked Gitdir is not a directory")
+        gitdir_fd = os.open(path.name, dir_flags, dir_fd=worktrees_fd)
+        stage_still_bound()
+        gitdir = expected_repo / ".git" / "worktrees" / path.name
+
+        def create_metadata(parent: int, name: str, payload: bytes) -> None:
+            descriptor = os.open(name, create_flags, 0o600, dir_fd=parent)
+            try:
+                write_all(descriptor, payload)
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+
+        stage_still_bound()
+        create_metadata(gitdir_fd, "commondir", b"../..\n")
+        stage_still_bound()
+        create_metadata(gitdir_fd, "HEAD", (target + "\n").encode("ascii"))
+        stage_still_bound()
+        create_metadata(
+            gitdir_fd, "gitdir", (str(path / ".git") + "\n").encode("utf-8")
+        )
+        stage_still_bound()
+        create_metadata(
+            stage_fd, ".git", ("gitdir: " + str(gitdir) + "\n").encode("utf-8")
+        )
+        stage_still_bound()
+        current_gitdir = os.stat(path.name, dir_fd=worktrees_fd, follow_symlinks=False)
+        opened_gitdir = os.fstat(gitdir_fd)
+        if (current_gitdir.st_dev, current_gitdir.st_ino) != (
+            opened_gitdir.st_dev, opened_gitdir.st_ino
+        ):
+            raise RuntimeError("historical staging Gitdir inode changed")
+        gitfile = regular_bytes(stage_fd, ".git")
+        if (
+            gitfile != ("gitdir: " + str(gitdir) + "\n").encode("utf-8")
+            or regular_bytes(gitdir_fd, "gitdir")
+            != (str(path / ".git") + "\n").encode("utf-8")
+            or regular_bytes(gitdir_fd, "HEAD", 128) != (target + "\n").encode("ascii")
+            or regular_bytes(gitdir_fd, "commondir", 128).strip() != b"../.."
+        ):
+            raise RuntimeError("historical staging linked Gitdir metadata drifted")
+
+        tree = safe_git("rev-parse", "--verify", target + "^{tree}").strip()
+        if tree != HISTORICAL_SOURCE_PIN_TREES[target].encode("ascii"):
+            raise RuntimeError("historical source pinned tree identity changed")
+        raw = safe_git("ls-tree", "-rz", "--full-tree", target)
+        if len(raw) > 2 * 1024 * 1024:
+            raise RuntimeError("historical source tree listing exceeded bound")
+        records = [part for part in raw.split(b"\0") if part]
+        if not records or len(records) > 2048:
+            raise RuntimeError("historical source tree entry count unsafe")
+        entries: dict[bytes, tuple[bytes, bytes]] = {}
+        for record in records:
+            metadata, sep, name = record.partition(b"\t")
+            fields = metadata.split(b" ")
+            if (
+                not sep or len(fields) != 3 or fields[1] != b"blob"
+                or fields[0] not in {b"100644", b"100755"}
+                or re.fullmatch(rb"[0-9a-f]{40}", fields[2]) is None
+                or name.startswith(b"/") or name in entries
+                or any(x in {b"", b".", b"..", b".git"} for x in name.split(b"/"))
+            ):
+                raise RuntimeError("historical source has unsupported Git entry")
+            entries[name] = fields[0], fields[2]
+
+        # Format v2 is Git's fixed binary DIRC index, SHA-1 OIDs, stage=0.
+        # Direct O_EXCL creation in the captured Gitdir prevents any
+        # untrusted Git command from selecting or replacing sibling indexes.
+        index_bytes = bytearray(b"DIRC" + struct.pack("!II", 2, len(entries)))
+        # Bind each nested name at most once in this staging invocation.
+        # A pre-existing directory not created here is NOT source authority.
+        # This removes the attacker-controlled EEXIST adoption; it does not
+        # solve mkdir->first-bind races against a same-UID writer.
+        created_tree_dirs: dict[tuple[bytes, ...], tuple[int, int]] = {}
+        total_bytes = 0
+        for name, (mode, oid) in sorted(entries.items()):
+            blob = safe_git("cat-file", "blob", oid.decode("ascii"))
+            total_bytes += len(blob)
+            if len(blob) > 1024 * 1024 or total_bytes > 32 * 1024 * 1024:
+                raise RuntimeError("historical source blob size exceeded bound")
+            object_id = hashlib.sha1(
+                b"blob " + str(len(blob)).encode("ascii") + b"\0" + blob
+            ).hexdigest().encode("ascii")
+            if object_id != oid:
+                raise RuntimeError("historical source object bytes changed")
+
+            # Persist nested Git tree dentries bottom-up. fsync(stage_fd)
+            # alone does not persist newly created files under scripts/... .
+            directory_fds = [os.dup(stage_fd)]
+            try:
+                parts = name.split(b"/")
+                for depth, component in enumerate(parts[:-1]):
+                    parent = directory_fds[-1]
+                    relative = tuple(parts[:depth + 1])
+                    known = created_tree_dirs.get(relative)
+                    try:
+                        os.mkdir(component, mode=0o700, dir_fd=parent)
+                    except FileExistsError:
+                        if known is None:
+                            raise RuntimeError(
+                                "historical tracked directory was not created by staging"
+                            ) from None
+                    else:
+                        if known is not None:
+                            raise RuntimeError(
+                                "historical tracked directory disappeared and reappeared"
+                            )
+                    before = os.stat(component, dir_fd=parent, follow_symlinks=False)
+                    next_fd = os.open(component, dir_flags, dir_fd=parent)
+                    opened = os.fstat(next_fd)
+                    identity = (opened.st_dev, opened.st_ino)
+                    if (
+                        not stat.S_ISDIR(before.st_mode)
+                        or (before.st_dev, before.st_ino) != identity
+                        or (known is not None and known != identity)
+                    ):
+                        os.close(next_fd)
+                        raise RuntimeError("historical tracked directory swapped")
+                    if known is None:
+                        created_tree_dirs[relative] = identity
+                    directory_fds.append(next_fd)
+                stage_still_bound()
+                out_fd = os.open(parts[-1], create_flags, 0o600, dir_fd=directory_fds[-1])
+                try:
+                    write_all(out_fd, blob)
+                    os.fchmod(out_fd, 0o700 if mode == b"100755" else 0o600)
+                    os.fsync(out_fd)
+                finally:
+                    os.close(out_fd)
+                # Child directory first, then its parent, while every ancestor
+                # FD still names the original directory rather than a raceable path.
+                for directory_fd in reversed(directory_fds):
+                    os.fsync(directory_fd)
+                stage_still_bound()
+            finally:
+                for directory_fd in reversed(directory_fds):
+                    os.close(directory_fd)
+
+            # Git permits zero stat cache fields; its verifier rehashes
+            # materialized files and checks canonical committed blob OIDs.
+            stat_cache = (0, 0, 0, 0, 0, 0, int(mode, 8), 0, 0, len(blob))
+            item = bytearray(struct.pack("!10I", *stat_cache))
+            item.extend(bytes.fromhex(oid.decode("ascii")))
+            item.extend(struct.pack("!H", min(len(name), 0xFFF)))
+            item.extend(name)
+            item.append(0)
+            while len(item) % 8:
+                item.append(0)
+            index_bytes.extend(item)
+        if len(index_bytes) > 2 * 1024 * 1024:
+            raise RuntimeError("historical source index exceeds bound")
+        index_bytes.extend(hashlib.sha1(index_bytes).digest())
+        descriptor = os.open("index", create_flags, 0o600, dir_fd=gitdir_fd)
+        try:
+            write_all(descriptor, index_bytes)
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        stage_still_bound()
+        os.fsync(stage_fd)
+        os.fsync(gitdir_fd)
+        # Directory entries are separate durable state from fsynced file bytes.
+        # Persist parent dentries before a consumer pin can be promoted.
+        os.fsync(worktrees_fd)
+        os.fsync(repo_git_fd)
+        os.fsync(root_fd)
+        stage_still_bound()
+        if (
+            regular_bytes(stage_fd, ".git") != gitfile
+            or regular_bytes(gitdir_fd, "gitdir")
+            != (str(path / ".git") + "\n").encode("utf-8")
+        ):
+            raise RuntimeError("historical staging Git metadata drifted")
+    finally:
+        for descriptor in (gitdir_fd, worktrees_fd, repo_git_fd, stage_fd, root_fd):
+            if descriptor is not None:
+                os.close(descriptor)
+        for chain in (repo_chain, parent_chain):
+            for descriptor in reversed(chain):
+                os.close(descriptor)
+
+
+
+def _exchange_historical_backlink(
+    directory_fd: int, staged_name: str, published_name: str
+) -> None:
+    """Swap two names without destroying either inode (Linux RENAME_EXCHANGE)."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    renameat2 = getattr(libc, "renameat2", None)
+    if renameat2 is None:
+        raise RuntimeError("historical backlink requires kernel atomic exchange")
+    renameat2.argtypes = (
+        ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint,
+    )
+    renameat2.restype = ctypes.c_int
+    if renameat2(
+        directory_fd, os.fsencode(staged_name),
+        directory_fd, os.fsencode(published_name),
+        2,  # RENAME_EXCHANGE; both occupied entries remain present.
+    ) != 0:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error))
+
+
+def _move_historical_worktree_noreplace(
+    entry: RepoEntry,
+    original: Path,
+    destination: Path,
+    expected_identity: tuple[int, int],
+    *,
+    restore_on_repair_failure: bool,
+) -> None:
+    """Move only the bound inode; update only its captured Gitdir descriptor.
+
+    Git worktree repair <path> follows a mutable name and can rewrite an
+    unrelated sibling backlink. Never run it across this trust boundary.
+    """
+    if (
+        original == destination
+        or original.parent != SOURCE_ROOT
+        or destination.parent != SOURCE_ROOT
+        or SOURCE_ROOT.is_symlink()
+    ):
+        raise RuntimeError("historical worktree relocation scope is unsafe")
+    directory_flags = os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY | os.O_NOFOLLOW
+    file_flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW
+    root_fd = _open_historical_nofollow_absolute_dir(SOURCE_ROOT)
+    source_fd: int | None = None
+    common_fd: int | None = None
+    registry_fd: int | None = None
+    gitdir_fd: int | None = None
+    moved = False
+    backlink = b""
+
+    def path_identity(name: str) -> tuple[int, int]:
+        metadata = os.stat(name, dir_fd=root_fd, follow_symlinks=False)
+        if not stat.S_ISDIR(metadata.st_mode):
+            raise RuntimeError("historical relocation source is not a directory")
+        return metadata.st_dev, metadata.st_ino
+
+    def root_still_bound() -> None:
+        # Re-open every ancestor without following a raced intermediate
+        # symlink, then compare to the source-root FD retained by this move.
+        probe_fd = _open_historical_nofollow_absolute_dir(SOURCE_ROOT)
+        try:
+            opened = os.fstat(root_fd)
+            current = os.fstat(probe_fd)
+            if (current.st_dev, current.st_ino) != (opened.st_dev, opened.st_ino):
+                raise RuntimeError("historical relocation root directory changed")
+        finally:
+            os.close(probe_fd)
+
+    def read_regular(directory_fd: int, name: str, limit: int = 4096) -> bytes:
+        fd = os.open(name, file_flags, dir_fd=directory_fd)
+        try:
+            before = os.fstat(fd)
+            if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or not 0 < before.st_size <= limit:
+                raise RuntimeError("historical relocation Git metadata unsafe")
+            content = bytearray()
+            while len(content) <= limit:
+                chunk = os.read(fd, min(4096, limit + 1 - len(content)))
+                if not chunk:
+                    break
+                content.extend(chunk)
+            after = os.fstat(fd)
+            current = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+            if (
+                len(content) != before.st_size
+                or (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns)
+                != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns)
+                or (current.st_dev, current.st_ino) != (after.st_dev, after.st_ino)
+            ):
+                raise RuntimeError("historical relocation Git metadata changed")
+            return bytes(content)
+        finally:
+            os.close(fd)
+
+    def assert_gitdir_bound(gitdir: Path, identity: tuple[int, int]) -> None:
+        # Do not reopen the linked Gitdir through its mutable absolute path.
+        # The exact canonical common-dir and worktrees names must still map to
+        # the retained parent descriptors before touching any backlink.
+        if gitdir.parent != entry.path / ".git" / "worktrees":
+            raise RuntimeError("historical relocation Gitdir claim is foreign")
+        check_fd = _open_historical_nofollow_absolute_dir(entry.path / ".git")
+        try:
+            common_open = os.fstat(common_fd)
+            common_name = os.fstat(check_fd)
+        finally:
+            os.close(check_fd)
+        registry_name = os.stat("worktrees", dir_fd=common_fd, follow_symlinks=False)
+        registry_open = os.fstat(registry_fd)
+        linked_name = os.stat(gitdir.name, dir_fd=registry_fd, follow_symlinks=False)
+        linked_open = os.fstat(gitdir_fd)
+        if (
+            not stat.S_ISDIR(registry_name.st_mode)
+            or not stat.S_ISDIR(linked_name.st_mode)
+            or (common_open.st_dev, common_open.st_ino) != (common_name.st_dev, common_name.st_ino)
+            or (registry_name.st_dev, registry_name.st_ino) != (registry_open.st_dev, registry_open.st_ino)
+            or (linked_name.st_dev, linked_name.st_ino) != identity
+            or (linked_open.st_dev, linked_open.st_ino) != identity
+        ):
+            raise RuntimeError("historical relocation Gitdir inode drifted")
+
+    def write_backlink(gitdir: Path, identity: tuple[int, int],
+                       previous: bytes, replacement: bytes) -> None:
+        nonlocal backlink
+        assert_gitdir_bound(gitdir, identity)
+        if read_regular(gitdir_fd, "gitdir") != previous:
+            raise RuntimeError("historical relocation original backlink changed")
+        original_fd = os.open("gitdir", file_flags, dir_fd=gitdir_fd)
+        try:
+            original_stat = os.fstat(original_fd)
+            named = os.stat("gitdir", dir_fd=gitdir_fd, follow_symlinks=False)
+            if (
+                not stat.S_ISREG(original_stat.st_mode)
+                or original_stat.st_nlink != 1
+                or (original_stat.st_dev, original_stat.st_ino)
+                != (named.st_dev, named.st_ino)
+            ):
+                raise RuntimeError("historical relocation backlink original inode unsafe")
+            previous_identity = (original_stat.st_dev, original_stat.st_ino)
+        finally:
+            os.close(original_fd)
+        retained = ".repoground-gitdir-previous-" + uuid.uuid4().hex
+        fd = os.open(
+            retained,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW,
+            0o600, dir_fd=gitdir_fd,
+        )
+        try:
+            view = memoryview(replacement)
+            while view:
+                written = os.write(fd, view)
+                if written <= 0:
+                    raise RuntimeError("historical relocation backlink write incomplete")
+                view = view[written:]
+            staged_stat = os.fstat(fd)
+            replacement_identity = (staged_stat.st_dev, staged_stat.st_ino)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        # Do NOT use check-then-os.replace: a same-UID racer can exchange the
+        # 'gitdir' leaf after the check; replace would silently DELETE that
+        # foreign file. Atomic exchange retains both old and new inodes.
+        if read_regular(gitdir_fd, "gitdir") != previous:
+            raise RuntimeError("historical relocation backlink raced before exchange")
+        assert_gitdir_bound(gitdir, identity)
+        _exchange_historical_backlink(gitdir_fd, retained, "gitdir")
+        # The effect has happened even if any subsequent fsync/readback fails.
+        # Update outer rollback state before attempting durability checks.
+        backlink = replacement
+        new_stat = os.stat("gitdir", dir_fd=gitdir_fd, follow_symlinks=False)
+        preserved_stat = os.stat(retained, dir_fd=gitdir_fd, follow_symlinks=False)
+        if (
+            (new_stat.st_dev, new_stat.st_ino) != replacement_identity
+            or (preserved_stat.st_dev, preserved_stat.st_ino) != previous_identity
+            or read_regular(gitdir_fd, "gitdir") != replacement
+            or read_regular(gitdir_fd, retained) != previous
+        ):
+            # A raced foreign file remains at 'retained' (not unlinked).
+            # The caller must fail closed and owner-reconcile all names.
+            raise RuntimeError(
+                "historical relocation exchanged backlink raced; "
+                "both entries retained for owner reconciliation"
+            )
+        # Preserve the exact original backlink in this private, randomly
+        # named Gitdir entry. No pathname unlink of a raced foreign inode.
+        os.fsync(gitdir_fd)
+        assert_gitdir_bound(gitdir, identity)
+
+
+    try:
+        root_still_bound()
+        if path_identity(original.name) != expected_identity:
+            raise RuntimeError("historical relocation source inode changed")
+        source_fd = os.open(original.name, directory_flags, dir_fd=root_fd)
+        source_info = os.fstat(source_fd)
+        if (source_info.st_dev, source_info.st_ino) != expected_identity:
+            raise RuntimeError("historical relocation source descriptor changed")
+        raw_gitfile = read_regular(source_fd, ".git")
+        prefix = b"gitdir: "
+        if not raw_gitfile.startswith(prefix) or not raw_gitfile.endswith(b"\n"):
+            raise RuntimeError("historical relocation linked Gitfile malformed")
+        try:
+            gitdir = Path(raw_gitfile[len(prefix):-1].decode("ascii"))
+        except UnicodeDecodeError as exc:
+            raise RuntimeError("historical relocation Gitdir path unsafe") from exc
+        canonical = entry.path / ".git" / "worktrees"
+        expected_name = original.name.split("--recovery-", 1)[0]
+        if (
+            not gitdir.is_absolute() or gitdir.parent != canonical
+            or not (
+                gitdir.name == original.name
+                or re.fullmatch(
+                    re.escape(expected_name) + r"--recovery-[0-9a-f]{12}",
+                    gitdir.name,
+                ) is not None
+            )
+            or gitdir.is_symlink()
+        ):
+            raise RuntimeError("historical relocation foreign Gitdir claim")
+        common_fd, registry_fd, gitdir_fd = _open_historical_canonical_gitdir(
+            entry.path / ".git", gitdir.name
+        )
+        gitdir_stat = os.fstat(gitdir_fd)
+        gitdir_identity = (gitdir_stat.st_dev, gitdir_stat.st_ino)
+        assert_gitdir_bound(gitdir, gitdir_identity)
+        backlink = (str(original / ".git") + "\n").encode("utf-8")
+        if read_regular(gitdir_fd, "gitdir") != backlink:
+            raise RuntimeError("historical relocation backlink not stage-bound")
+        # Assert the native Gitdir contains a detached HEAD and the registered
+        # relative common-dir location before touching any admin file.
+        if (
+            read_regular(gitdir_fd, "commondir", 128).strip() != b"../.."
+            or re.fullmatch(rb"[0-9a-f]{40}\n", read_regular(gitdir_fd, "HEAD", 128)) is None
+        ):
+            raise RuntimeError("historical relocation Gitdir metadata unsafe")
+
+        _rename_historical_noreplace(
+            root_fd, original.name, root_fd, destination.name
+        )
+        moved = True
+        # A rename succeeded even when its following directory fsync fails;
+        # keep moved=True so rollback remains effect-aware.
+        os.fsync(root_fd)
+        if (
+            path_identity(destination.name) != expected_identity
+            or read_regular(source_fd, ".git") != raw_gitfile
+        ):
+            raise RuntimeError("historical relocation moved a foreign inode")
+        root_still_bound()
+        target_backlink = (str(destination / ".git") + "\n").encode("utf-8")
+        write_backlink(gitdir, gitdir_identity, backlink, target_backlink)
+        backlink = target_backlink
+        if (
+            path_identity(destination.name) != expected_identity
+            or original.exists() or original.is_symlink()
+            or read_regular(source_fd, ".git") != raw_gitfile
+        ):
+            raise RuntimeError("historical relocation postwrite identity drifted")
+        root_still_bound()
+        os.fsync(registry_fd)
+        os.fsync(common_fd)
+        os.fsync(root_fd)
+    except (RuntimeError, OSError) as error:
+        if not moved:
+            raise
+
+        # renameat2(RENAME_NOREPLACE) successfully moves the CURRENT source
+        # name, which may no longer denote the captured stage inode. Never
+        # leave an unexpected inode at the privileged fixed consumer name.
+        # Preserve it through a distinct no-clobber recovery name; neither
+        # unlink nor recursive removal is authorized under this race.
+        try:
+            actually_moved = os.stat(
+                destination.name, dir_fd=root_fd, follow_symlinks=False
+            )
+        except FileNotFoundError as lost_destination:
+            raise RuntimeError(
+                "historical relocation destination outcome unknown; owner reconciliation required"
+            ) from lost_destination
+        if (actually_moved.st_dev, actually_moved.st_ino) != expected_identity:
+            for _attempt in range(4):
+                retained_name = destination.name + "--recovery-" + uuid.uuid4().hex[:12]
+                try:
+                    _rename_historical_noreplace(
+                        root_fd, destination.name, root_fd, retained_name
+                    )
+                except FileExistsError:
+                    continue
+                # The move already happened; record that fact before trying
+                # durability checks. A subsequent crash or race fails closed.
+                os.fsync(root_fd)
+                retained_stat = os.stat(
+                    retained_name, dir_fd=root_fd, follow_symlinks=False
+                )
+                if (retained_stat.st_dev, retained_stat.st_ino) != (
+                    actually_moved.st_dev, actually_moved.st_ino
+                ):
+                    raise RuntimeError(
+                        "historical relocated foreign inode changed during quarantine"
+                    ) from error
+                try:
+                    os.stat(destination.name, dir_fd=root_fd, follow_symlinks=False)
+                except FileNotFoundError:
+                    pass
+                else:
+                    raise RuntimeError(
+                        "historical rejected consumer name reappeared; owner reconciliation required"
+                    ) from error
+                raise RuntimeError(
+                    "historical relocation foreign moved inode quarantined; owner reconciliation required"
+                ) from error
+            raise RuntimeError(
+                "historical foreign moved inode quarantine collision; owner reconciliation required"
+            ) from error
+        if not restore_on_repair_failure:
+            raise RuntimeError(
+                "historical quarantine backlink reconciliation requires owner review"
+            ) from error
+        try:
+            if (
+                path_identity(destination.name) != expected_identity
+                or original.exists() or original.is_symlink()
+            ):
+                raise RuntimeError("historical relocation rollback identity unavailable")
+            _rename_historical_noreplace(
+                root_fd, destination.name, root_fd, original.name
+            )
+            os.fsync(root_fd)
+            if (
+                path_identity(original.name) != expected_identity
+                or destination.exists() or destination.is_symlink()
+            ):
+                raise RuntimeError("historical relocation rollback pathname drifted")
+            expected_stage_backlink = (str(original / ".git") + "\n").encode("utf-8")
+            if backlink != expected_stage_backlink:
+                write_backlink(gitdir, gitdir_identity, backlink, expected_stage_backlink)
+            root_still_bound()
+        except (RuntimeError, OSError) as rollback_error:
+            raise RuntimeError(
+                "historical relocation rollback outcome unknown; owner reconciliation required"
+            ) from rollback_error
+        raise RuntimeError(
+            "historical relocation failed; original stage restored"
+        ) from error
+    finally:
+        if gitdir_fd is not None:
+            os.close(gitdir_fd)
+        if registry_fd is not None:
+            os.close(registry_fd)
+        if common_fd is not None:
+            os.close(common_fd)
+        if source_fd is not None:
+            os.close(source_fd)
+        os.close(root_fd)
+
+
+def _quarantine_failed_historical_consumer_path(
+    *,
+    entry: RepoEntry,
+    ref_segment: str,
+    sha: str,
+    fixed: Path,
+    failure_type: str,
+    expected_identity: tuple[int, int] | None = None,
+    preferred_recovery: Path | None = None,
+    preferred_recovery_id: str | None = None,
+) -> Path | None:
+    """Retract a rejected managed source without deleting its tracked bytes.
+
+    A foreign directory is never moved merely because its name collides. A
+    symlink exposes a target on ordinary open(), so quarantine its entry
+    by no-overwrite rename, not by unlinking the raceable consumer name.
+    """
+    if fixed.is_symlink():
+        # No unlink or recursive delete is authorized at this pathname.
+        # EEXIST from renameat2(RENAME_NOREPLACE) proves no source move:
+        # retry a bounded fresh owner-only directory, preserving every
+        # colliding entry for owner reconciliation.
+        if fixed.parent != SOURCE_ROOT:
+            raise RuntimeError("historical consumer quarantine root is foreign")
+        source_parent_snapshot = fixed.parent.lstat()
+        if not stat.S_ISDIR(source_parent_snapshot.st_mode):
+            raise RuntimeError("historical consumer quarantine parent unsafe")
+        directory = _open_historical_nofollow_absolute_dir(fixed.parent)
+        try:
+            bound_parent = os.fstat(directory)
+            if (bound_parent.st_dev, bound_parent.st_ino) != (
+                source_parent_snapshot.st_dev, source_parent_snapshot.st_ino
+            ):
+                raise RuntimeError("historical consumer quarantine parent changed")
+            observed = os.stat(
+                fixed.name, dir_fd=directory, follow_symlinks=False
+            )
+            if not stat.S_ISLNK(observed.st_mode):
+                raise RuntimeError("historical consumer link identity changed")
+            for _collision_attempt in range(4):
+                recovery_id = uuid.uuid4().hex[:12]
+                recovery = revision_source_worktree_path(
+                    entry, ref_segment, sha, recovery_id=recovery_id
+                )
+                if recovery.parent != fixed.parent or recovery == fixed:
+                    raise RuntimeError(
+                        "historical consumer symlink recovery scope changed"
+                    )
+                try:
+                    os.mkdir(recovery.name, mode=0o700, dir_fd=directory)
+                except FileExistsError:
+                    # An occupied random recovery path is not ours to alter.
+                    continue
+                recovery_snapshot = os.stat(
+                    recovery.name, dir_fd=directory, follow_symlinks=False
+                )
+                quarantine = os.open(
+                    recovery.name,
+                    os.O_RDONLY | os.O_CLOEXEC
+                    | os.O_DIRECTORY | os.O_NOFOLLOW,
+                    dir_fd=directory,
+                )
+                try:
+                    bound_recovery = os.fstat(quarantine)
+                    if (
+                        not stat.S_ISDIR(recovery_snapshot.st_mode)
+                        or (bound_recovery.st_dev, bound_recovery.st_ino)
+                        != (recovery_snapshot.st_dev, recovery_snapshot.st_ino)
+                    ):
+                        raise RuntimeError("historical symlink quarantine dir swapped")
+                    try:
+                        _rename_historical_noreplace(
+                            directory, fixed.name, quarantine, "rejected-symlink"
+                        )
+                    except FileExistsError:
+                        # Only EEXIST is an assured no-effect. Every occupied
+                        # destination remains intact; rebind the source inode
+                        # before any attempt with a new recovery directory.
+                        current = os.stat(
+                            fixed.name, dir_fd=directory, follow_symlinks=False
+                        )
+                        if (
+                            not stat.S_ISLNK(current.st_mode)
+                            or (current.st_dev, current.st_ino)
+                            != (observed.st_dev, observed.st_ino)
+                        ):
+                            raise RuntimeError(
+                                "historical consumer link changed after collision; "
+                                "owner reconciliation required"
+                            )
+                        continue
+                    os.fsync(quarantine)
+                    os.fsync(directory)
+                    moved = os.stat(
+                        "rejected-symlink", dir_fd=quarantine,
+                        follow_symlinks=False,
+                    )
+                    if (
+                        not stat.S_ISLNK(moved.st_mode)
+                        or (moved.st_dev, moved.st_ino)
+                        != (observed.st_dev, observed.st_ino)
+                    ):
+                        raise RuntimeError(
+                            "historical consumer link swap quarantined; "
+                            "owner reconciliation required"
+                        )
+                    try:
+                        os.stat(
+                            fixed.name, dir_fd=directory, follow_symlinks=False
+                        )
+                    except FileNotFoundError:
+                        pass
+                    else:
+                        raise RuntimeError(
+                            "historical consumer name reappeared; "
+                            "owner reconciliation required"
+                        )
+                finally:
+                    os.close(quarantine)
+                record_source_recovery(
+                    entry=entry, ref_segment=ref_segment, sha=sha,
+                    preserved=fixed, replacement=recovery,
+                    reason={
+                        "kind": "historical_pin_untrusted_symlink_quarantined",
+                        "failure_type": failure_type,
+                        "observed_symlink_device": observed.st_dev,
+                        "observed_symlink_inode": observed.st_ino,
+                    },
+                    recovery_id=recovery_id,
+                )
+                return recovery
+            raise RuntimeError(
+                "historical consumer symlink quarantine collisions exhausted; "
+                "owner reconciliation required"
+            )
+        finally:
+            os.close(directory)
+
+    identity = _historical_stage_identity(fixed)
+    if expected_identity is not None and identity != expected_identity:
+        raise RuntimeError("historical pinned source foreign destination must not be moved")
+    # Recognize only the repository's own registered detached linked worktree.
+    # It may be dirty, so a force-remove/reset is never an option.
+    assert_managed_worktree_identity(fixed, entry.path)
+    if _historical_stage_identity(fixed) != identity:
+        raise RuntimeError("historical consumer identity drifted before quarantine")
+    if (
+        preferred_recovery is not None
+        and not preferred_recovery.exists()
+        and not preferred_recovery.is_symlink()
+    ):
+        recovery = preferred_recovery
+        recovery_id = preferred_recovery_id
+    else:
+        recovery_id = uuid.uuid4().hex[:12]
+        recovery = revision_source_worktree_path(
+            entry, ref_segment, sha, recovery_id=recovery_id
+        )
+    if (
+        recovery == fixed or recovery.exists() or recovery.is_symlink()
+        or not isinstance(recovery_id, str)
+        or re.fullmatch(r"[0-9a-f]{12}", recovery_id) is None
+    ):
+        raise RuntimeError("historical consumer recovery destination unavailable")
+    _move_historical_worktree_noreplace(
+        entry, fixed, recovery, identity, restore_on_repair_failure=False
+    )
+    if (
+        fixed.exists() or fixed.is_symlink()
+        or _historical_stage_identity(recovery) != identity
+    ):
+        raise RuntimeError("historical consumer quarantine readback failed")
+    record_source_recovery(
+        entry=entry, ref_segment=ref_segment, sha=sha,
+        preserved=fixed, replacement=recovery,
+        reason={
+            "kind": "historical_pin_retracted_from_fixed_consumer",
+            "failure_type": failure_type,
+        },
+        recovery_id=recovery_id,
+    )
+    return recovery
+
+
+def ensure_historical_source_pins(entry: RepoEntry, ref_segment: str) -> list[Path]:
+    """Stage, verify and promote only reviewed historical source OIDs.
+
+    A committed source pin remains outside privileged inventory authority.
+    An ambiguous Git move may NEVER be retried as a presumed no-effect.
+    """
+    pins = HISTORICAL_SOURCE_PINS.get((entry.key, ref_segment), {})
+    preserved: list[Path] = []
+    for sha, digests in sorted(pins.items()):
+        if not SOURCE_REVISION_RE.fullmatch(sha):
+            raise RuntimeError("historical pinned source revision is invalid")
+        expected_path = revision_source_worktree_path(entry, ref_segment, sha)
+        if expected_path.exists() or expected_path.is_symlink():
+            try:
+                _verify_historical_pinned_source(
+                    expected_path, entry.path, sha, digests
+                )
+            except (RuntimeError, OSError) as failure:
+                try:
+                    _quarantine_failed_historical_consumer_path(
+                        entry=entry, ref_segment=ref_segment, sha=sha,
+                        fixed=expected_path, failure_type=type(failure).__name__,
+                    )
+                except (RuntimeError, OSError) as recovery_error:
+                    raise RuntimeError(
+                        "historical pinned source is invalid and fixed consumer "
+                        "path requires owner reconciliation"
+                    ) from recovery_error
+                raise RuntimeError(
+                    "historical pinned source invalid; consumer name retracted"
+                ) from failure
+            preserved.append(expected_path)
+            continue
+
+        # Random recovery suffixes never themselves become consumer authority.
+        # Retention GC must preserve these in-flight/recovery identities.
+        recovery_id = uuid.uuid4().hex[:12]
+        staged = revision_source_worktree_path(
+            entry, ref_segment, sha, recovery_id=recovery_id
+        )
+        if staged.exists() or staged.is_symlink():
+            raise RuntimeError("historical source staging identity already exists")
+        stage_identity: tuple[int, int] | None = None
+        moved = False
+        try:
+            prepare_historical_source_worktree(staged, expected_repo=entry.path, target=sha)
+            stage_identity = _historical_stage_identity(staged)
+            _verify_historical_pinned_source(staged, entry.path, sha, digests)
+            if expected_path.exists() or expected_path.is_symlink():
+                raise RuntimeError("historical pinned source destination appeared during staging")
+            # Revalidate just before publication, while the existing Fleet
+            # run holds its authoritative exclusive publisher lock.
+            _verify_historical_pinned_source(staged, entry.path, sha, digests)
+            if _historical_stage_identity(staged) != stage_identity:
+                raise RuntimeError("historical pinned source staging identity changed")
+            if expected_path.exists() or expected_path.is_symlink():
+                raise RuntimeError("historical pinned source destination appeared before move")
+
+            _move_historical_worktree_noreplace(
+                entry, staged, expected_path, stage_identity,
+                restore_on_repair_failure=True,
+            )
+            moved = True
+            if _historical_stage_identity(expected_path) != stage_identity:
+                raise RuntimeError("historical pinned source post-move identity changed")
+            _verify_historical_pinned_source(
+                expected_path, entry.path, sha, digests
+            )
+        except (RuntimeError, OSError) as failure:
+            fixed_visible = expected_path.exists() or expected_path.is_symlink()
+            staged_visible = staged.exists() or staged.is_symlink()
+            if fixed_visible:
+                if expected_path.is_symlink():
+                    # If a raced path has become a symlink, never leave a
+                    # followable alias at the privileged consumer name. We
+                    # unlink ONLY the symlink itself, not any displaced tree.
+                    try:
+                        _quarantine_failed_historical_consumer_path(
+                            entry=entry, ref_segment=ref_segment, sha=sha,
+                            fixed=expected_path,
+                            failure_type=type(failure).__name__,
+                        )
+                    except (RuntimeError, OSError) as link_error:
+                        raise RuntimeError(
+                            "historical consumer symlink cleanup outcome unknown"
+                        ) from link_error
+                    raise RuntimeError(
+                        "historical pinned source promotion refused; consumer "
+                        "symlink retracted"
+                    ) from failure
+                # A returned Git failure can mean "move happened". Retract
+                # only the exact identity proven to come from our stage. A
+                # second stage path does not authorize leaving that fixed name.
+                if (
+                    stage_identity is None
+                    or _historical_stage_identity(expected_path) != stage_identity
+                ):
+                    raise RuntimeError(
+                        "historical pinned source promotion outcome unknown; "
+                        "foreign fixed path requires owner reconciliation"
+                    ) from failure
+                try:
+                    _quarantine_failed_historical_consumer_path(
+                        entry=entry, ref_segment=ref_segment, sha=sha,
+                        fixed=expected_path, expected_identity=stage_identity,
+                        failure_type=type(failure).__name__,
+                        preferred_recovery=staged if not staged_visible else None,
+                        preferred_recovery_id=recovery_id if not staged_visible else None,
+                    )
+                except (RuntimeError, OSError) as rollback_error:
+                    raise RuntimeError(
+                        "historical pinned source quarantine outcome unknown; "
+                        "consumer readiness remains blocked"
+                    ) from rollback_error
+                raise RuntimeError(
+                    "historical pinned source postmove verification refused; "
+                    "worktree quarantined"
+                ) from failure
+
+            # Never recursively remove a rejected stage by a pathname that
+            # another UID/process can swap after its inode check. Preserve
+            # tracked and untracked bytes for explicit owner reconciliation;
+            # the fixed privileged-consumer name was never published here.
+            if staged_visible:
+                if (
+                    stage_identity is None
+                    or _historical_stage_identity(staged) != stage_identity
+                ):
+                    raise RuntimeError(
+                        "historical pinned source incomplete stage requires owner cleanup"
+                    ) from failure
+                raise RuntimeError(
+                    "historical pinned source staging retained for owner cleanup"
+                ) from failure
+            raise
+        if moved:
+            preserved.append(expected_path)
+    return preserved
+
+
 def prune_obsolete_revision_source_worktrees(
     entry: RepoEntry, ref_segment: str, current: Path
 ) -> dict[str, object]:
@@ -4952,8 +6762,37 @@ def prune_obsolete_revision_source_worktrees(
     preserved: list[dict[str, str]] = []
     if not SOURCE_ROOT.is_dir():
         return {"removed": removed, "preserved": preserved}
+    # Preflight all available reviewed source pins before any GC mutation.
+    # Ordinary published-main selection is never authority to delete a pin.
+    pins = HISTORICAL_SOURCE_PINS.get((entry.key, ref_segment), {})
+    protected_pins: set[Path] = set()
+    for sha, digests in sorted(pins.items()):
+        historical = revision_source_worktree_path(entry, ref_segment, sha)
+        if not historical.exists() and not historical.is_symlink():
+            raise RuntimeError("historical pinned source missing; refusing GC")
+        _verify_historical_pinned_source(historical, entry.path, sha, digests)
+        protected_pins.add(historical)
     for candidate in sorted(SOURCE_ROOT.iterdir()):
         if candidate == current or not candidate.name.startswith(prefix):
+            continue
+        if candidate in protected_pins:
+            preserved.append({
+                "path": str(candidate),
+                "reason": "reviewed_historical_source_pin",
+            })
+            continue
+        # Recovery-suffixed stages for a reviewed pin are NEVER ordinary
+        # obsolete-source GC targets: they may still be in validation or
+        # carry failed-promotion evidence requiring explicit owner closeout.
+        suffix = candidate.name[len(prefix):]
+        if any(
+            re.fullmatch(re.escape(sha) + r"--recovery-[0-9a-f]{12}", suffix)
+            for sha in pins
+        ):
+            preserved.append({
+                "path": str(candidate),
+                "reason": "reviewed_historical_source_stage_requires_owner_closeout",
+            })
             continue
         if not is_revision_source_worktree(entry, ref_segment, candidate):
             preserved.append(
@@ -6535,6 +8374,10 @@ def main(argv: list[str]) -> int:
                 should_publish = (
                     args.force_republish or previous_fingerprint != fingerprint
                 )
+                # Also run on the no-change fast path; successful current
+                # publication must not be required for historical source
+                # availability. No Rootbroker/inventory action is implied.
+                ensure_historical_source_pins(entry, ref_segment)
                 if not should_publish:
                     skipped += 1
                     write_state(
