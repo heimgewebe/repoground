@@ -1056,7 +1056,9 @@ def _where_is_source_location(words: list[str]) -> bool:
     if (
         following
         and set(following) & {"is", "are", "was", "were"}
-        and following[-1] in _WHERE_EXPLANATION_PARTICIPLES
+        and set(following) & _WHERE_EXPLANATION_PARTICIPLES
+        and not set(following)
+        & {"implemented", "defined", "located", "implementiert", "definiert"}
     ):
         return False
     if following[:1] in (["do"], ["does"], ["did"]):
@@ -1077,6 +1079,11 @@ def _find_source_location_complement(
         or set(words[:5]) & (_DEBUGGING_NOUNS - {"error"})
         or words[-1] in _DEBUGGING_NOUNS
         or _has_debugging_complement(words)
+        or (
+            not set(words) & _SOURCE_LOCATION_NOUNS
+            and set(words) & {"cause", "causes", "causing"}
+            and set(words) & {"fail", "fails", "failing"}
+        )
     ):
         return False
     if (
@@ -1105,6 +1112,10 @@ def _navigation_path_intent(query: str) -> bool:
         and {"implementation", "corresponding", "test"} <= nouns
         and not nouns
         & (_FIND_EXPLANATION_OPENERS | _DEBUGGING_NOUNS | {"does", "is", "has", "have"})
+        and not (
+            nouns & {"cause", "causes", "causing"}
+            and nouns & {"fail", "fails", "failing"}
+        )
     ):
         return True
     # "find" inside a why/how question is content, not a source locator.

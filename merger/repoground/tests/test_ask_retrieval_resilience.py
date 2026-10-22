@@ -1663,8 +1663,11 @@ def test_find_debugging_object_retains_bm25_explanation_ranking():
         "Where are the test failures?",
         "Find where tests are failing",
         "Find the implementation causing corresponding test failures",
+        "Find where tests are failing in CI",
+        "Find the implementation that causes the corresponding test to fail",
     ):
         assert not _navigation_path_intent(query), query
+    assert _navigation_path_intent("Find the file that causes this test to fail")
     assert _navigation_path_intent("Find the error handler")
     assert _navigation_path_intent("Find the retry implementation")
     assert _navigation_path_intent("Where in this file is the error handler defined?")
