@@ -15,8 +15,11 @@ from merger.repoground.core.bundle_access import (
 )
 from merger.repoground.core.citation_projection import source_authority_projection
 from merger.repoground.core.manifest_snapshot import (
+    MAX_MANIFEST_BYTES,
     active_manifest_snapshot,
+    capture_manifest_snapshot,
     resolve_manifest_path,
+    use_manifest_binding,
 )
 from merger.repoground.core.language_structure import (
     compose_language_structure_evidence,
@@ -532,9 +535,11 @@ def _resolved_ranges_with_budget(
             break
         remaining_hits = len(candidates) - position
         fair_share = max(1, remaining // max(1, remaining_hits))
+        # Reserve enough of the remaining bytes for the first UTF-8 code
+        # point when possible; keep earlier BM25 hits ahead of later ones.
         bounded_excerpt = _utf8_prefix(
             excerpt,
-            max_bytes=fair_share,
+            max_bytes=min(remaining, max(fair_share, _utf8_size(excerpt[0]))),
             max_characters=MAX_EXCERPT_CHARS_PER_HIT,
         )
         if len(bounded_excerpt) < len(excerpt):
@@ -824,6 +829,473 @@ def _language_context_reserve(
     return min(max(0, used_bytes), 4096, total_context_bytes // 3)
 
 
+def _source_candidates_from_index(
+    response: dict[str, Any], query_terms: set[str]
+) -> list[tuple[int, str, dict[str, Any], dict[str, Any]]]:
+    """Return only source-addressed, evidence-resolved chunks from one index read."""
+    raw = response.get("query_result")
+    resolved = response.get("resolved_evidence")
+    rows = raw.get("results") if isinstance(raw, dict) else None
+    hits = resolved.get("hits") if isinstance(resolved, dict) else None
+    if not isinstance(rows, list) or not isinstance(hits, list):
+        return []
+    projection = response.get("source_citation_projection")
+    items = projection.get("items") if isinstance(projection, dict) else None
+    citations_by_ref: dict[str, str] = {}
+    ambiguous_refs: set[str] = set()
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, dict):
+            continue
+        ref = item.get("chunk_id")
+        citation = item.get("citation_id")
+        if (
+            not isinstance(ref, str)
+            or not isinstance(citation, str)
+            or not citation.startswith("cit_")
+        ):
+            continue
+        previous = citations_by_ref.setdefault(ref, citation)
+        if previous != citation:
+            ambiguous_refs.add(ref)
+    evidence_by_ref = {
+        hit["chunk_id"]: hit
+        for hit in hits
+        if isinstance(hit, dict)
+        and isinstance(hit.get("chunk_id"), str)
+        and hit.get("chunk_id") not in ambiguous_refs
+        and hit.get("range_status") == "resolved"
+        and isinstance(hit.get("citation_id"), str)
+        and hit["citation_id"].startswith("cit_")
+        and citations_by_ref.get(hit["chunk_id"]) == hit["citation_id"]
+    }
+    candidates = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        source = row.get("source_path") or row.get("path")
+        evidence = evidence_by_ref.get(row.get("chunk_id"))
+        if (
+            not isinstance(source, str)
+            or not source
+            or evidence is None
+            or evidence.get("source_path") != source
+        ):
+            continue
+        filename_tokens = set(
+            re.findall(
+                r"\b\w+\b",
+                unicodedata.normalize("NFC", source)
+                .lower()
+                .replace("/", " ")
+                .replace("-", " ")
+                .replace("_", " ")
+                .replace(".", " "),
+            )
+        )
+        candidates.append((len(filename_tokens & query_terms), source, row, evidence))
+    return candidates
+
+
+_NAVIGATION_LOCATORS = frozenset(
+    {
+        "find",
+        "finde",
+        "finden",
+        "locate",
+        "where",
+        "wo",
+        "which",
+        "welche",
+        "welcher",
+        "welches",
+        "suche",
+        "zeige",
+    }
+)
+_NAVIGATION_OBJECTS = frozenset(
+    {
+        "implementation",
+        "implementierung",
+        "implemented",
+        "implementiert",
+        "entrypoint",
+        "context",
+        "filename",
+        "dateiname",
+        "file",
+        "files",
+        "datei",
+        "dateien",
+        "path",
+        "pfad",
+        "source",
+        "sourcecode",
+        "quellcode",
+        "defined",
+        "definiert",
+        "defines",
+        "module",
+        "modules",
+        "modul",
+        "modulen",
+        "paths",
+        "pfade",
+        "pfaden",
+        "handled",
+        "handler",
+        "test",
+        "tests",
+    }
+)
+
+
+_SOURCE_LOCATION_NOUNS = frozenset(
+    {
+        "module",
+        "modules",
+        "modul",
+        "modulen",
+        "file",
+        "files",
+        "datei",
+        "dateien",
+        "path",
+        "paths",
+        "pfad",
+        "pfade",
+        "pfaden",
+        "source",
+        "quellcode",
+        "filename",
+        "dateiname",
+    }
+)
+_SOURCE_LOCATION_QUESTION_WORDS = frozenset(
+    {"which", "what", "welche", "welcher", "welches", "welchem", "welchen"}
+)
+_FIND_EXPLANATION_OPENERS = frozenset(
+    {
+        "why",
+        "how",
+        "what",
+        "when",
+        "whether",
+        "if",
+        "warum",
+        "wieso",
+        "wie",
+        "was",
+        "wann",
+        "ob",
+    }
+)
+_WHERE_EXPLANATION_VERBS = frozenset(
+    {
+        "do",
+        "does",
+        "did",
+        "fail",
+        "fails",
+        "crashes",
+        "fehlschlägt",
+        "schlägt",
+        "scheitert",
+        "tritt",
+        "passiert",
+    }
+)
+_WHERE_EXPLANATION_PARTICIPLES = frozenset(
+    {"failing", "crashing", "breaking", "hanging"}
+)
+_FIND_EXPLANATION_NOUNS = frozenset(
+    {
+        "reason",
+        "cause",
+        "grund",
+        "ursache",
+        "bug",
+        "bugs",
+        "fehler",
+        "issue",
+        "problem",
+        "race",
+        "leak",
+        "regression",
+    }
+)
+_DEBUGGING_NOUNS = _FIND_EXPLANATION_NOUNS | {
+    "error",
+    "errors",
+    "failure",
+    "failures",
+    "crash",
+    "crashes",
+    "deadlock",
+    "deadlocks",
+    "flaw",
+    "fehlschlag",
+    "absturz",
+}
+
+
+def _has_debugging_complement(words: list[str]) -> bool:
+    return any(
+        noun in _DEBUGGING_NOUNS
+        and link in {"in", "im", "of", "von", "der", "des", "die"}
+        for noun, link in zip(words, words[1:])
+    )
+
+
+def _where_is_source_location(words: list[str]) -> bool:
+    """Ignore emphasis but not question verbs that request an explanation."""
+    if words[-1] in _DEBUGGING_NOUNS or _has_debugging_complement(words):
+        return False
+    following = words[1:]
+    if following[:1] in (["exactly"], ["genau"]):
+        following = following[1:]
+    if (
+        following
+        and set(following) & {"is", "are", "was", "were"}
+        and set(following) & _WHERE_EXPLANATION_PARTICIPLES
+        and not set(following)
+        & {"implemented", "defined", "located", "implementiert", "definiert"}
+    ):
+        return False
+    if following[:1] in (["do"], ["does"], ["did"]):
+        # An auxiliary alone does not turn an explicit file-location request
+        # into an explanation ("Where does the implementation live?").
+        return following[-1] in {"live", "reside"}
+    return not following or not (set(following) & _WHERE_EXPLANATION_VERBS)
+
+
+def _find_source_location_complement(
+    words: list[str], *, require_locative: bool
+) -> bool:
+    """Use file-location grammar, never an explanatory complement."""
+    if words[:1] in (["exactly"], ["precisely"], ["genau"], ["exakt"]):
+        words = words[1:]
+    if (
+        not words
+        or set(words[:5]) & (_DEBUGGING_NOUNS - {"error"})
+        or words[-1] in _DEBUGGING_NOUNS
+        or _has_debugging_complement(words)
+        or (
+            not set(words) & _SOURCE_LOCATION_NOUNS
+            and set(words) & {"cause", "causes", "causing"}
+            and set(words) & {"fail", "fails", "failing"}
+        )
+    ):
+        return False
+    if (
+        len(words) > 2
+        and words[0] == "in"
+        and words[1] in _SOURCE_LOCATION_QUESTION_WORDS
+    ):
+        words = words[1:]
+    if words[0] in _SOURCE_LOCATION_QUESTION_WORDS:
+        return len(words) > 1 and words[1] in _SOURCE_LOCATION_NOUNS
+    if require_locative or words[0] in {"where", "wo"}:
+        return words[0] in {"where", "wo"} and _where_is_source_location(words)
+    return words[0] not in _FIND_EXPLANATION_OPENERS
+
+
+def _navigation_path_intent(query: str) -> bool:
+    """Only explicit source-location requests may bias indexed OR ranking."""
+    words = re.findall(r"\b\w+\b", unicodedata.normalize("NFC", query).lower())
+    if not words or not set(words) & _NAVIGATION_OBJECTS:
+        return False
+    # Source-pair noun phrases are requests for matching implementation and
+    # test files, unlike explanatory questions containing the same nouns.
+    nouns = set(words)
+    if (
+        "?" not in query
+        and {"implementation", "corresponding", "test"} <= nouns
+        and not nouns
+        & (_FIND_EXPLANATION_OPENERS | _DEBUGGING_NOUNS | {"does", "is", "has", "have"})
+        and not (
+            nouns & {"cause", "causes", "causing"}
+            and nouns & {"fail", "fails", "failing"}
+        )
+    ):
+        return True
+    # "find" inside a why/how question is content, not a source locator.
+    if words[0] in {"please", "bitte"}:
+        words = words[1:]
+    if (
+        len(words) > 2
+        and words[0] == "in"
+        and words[1] in _SOURCE_LOCATION_QUESTION_WORDS
+    ):
+        words = words[1:]
+    if not words:
+        return False
+    if words[0] in {"find", "finde", "finden", "locate", "suche", "zeige"}:
+        complement = words[1:]
+        while complement and complement[0] in {
+            "mir",
+            "mich",
+            "me",
+            "sie",
+            "bitte",
+            "mal",
+            "du",
+            "exactly",
+            "precisely",
+            "genau",
+            "exakt",
+        }:
+            complement = complement[1:]
+        is_find_out = complement[:1] in (["out"], ["heraus"])
+        return _find_source_location_complement(
+            complement[1:] if is_find_out else complement,
+            require_locative=is_find_out,
+        )
+    if words[0] in _SOURCE_LOCATION_QUESTION_WORDS:
+        return len(words) > 1 and words[1] in _SOURCE_LOCATION_NOUNS
+    if words[0] in {"where", "wo"}:
+        return _where_is_source_location(words)
+    return words[0] in _NAVIGATION_LOCATORS
+
+
+def _relaxed_path_index_reads(
+    manifest_path: Path, *, query: str, fts_query: str, k: int
+) -> list[dict[str, Any]]:
+    """Two bounded read-only path hints, still constrained by the original FTS."""
+    generic = {
+        "find",
+        "heraus",
+        "genau",
+        "exakt",
+        "exactly",
+        "precisely",
+        "configured",
+        "implementation",
+        "implementierung",
+        "corresponding",
+        "associated",
+        "generated",
+        "begrenztes",
+        "änderungsumfeld",
+        "actual",
+        "real",
+        "source",
+        "files",
+        "script",
+        "scripts",
+        "package",
+        "query",
+        "where",
+        "context",
+    }
+    anchors = [
+        term
+        for term in _content_tokens(query)
+        if (
+            5 <= len(term) <= 32
+            and term not in generic
+            and term not in _NAVIGATION_LOCATORS
+            and (term == "entrypoint" or term not in _NAVIGATION_OBJECTS)
+        )
+    ][:2]
+    results = []
+    for anchor in anchors:
+        indexed = query_existing_index(
+            manifest_path,
+            query,
+            k=min(100, max(1, k * 4)),
+            filters={"path": anchor},
+            resolve_evidence=True,
+            project_sources=True,
+            prepared_fts_query=fts_query,
+        )
+        if indexed.get("status") == "available":
+            results.append(indexed)
+    return results
+
+
+def _prefer_diverse_relaxed_sources(
+    query_result: dict[str, Any],
+    *,
+    query: str,
+    k: int,
+    path_results: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Take at most k distinct sources with existing verifiable citations."""
+    candidates = []
+    projected = []
+    for result in (query_result, *path_results):
+        candidates.extend(
+            _source_candidates_from_index(result, set(_content_tokens(query)))
+        )
+        citations = result.get("source_citation_projection")
+        if isinstance(citations, dict) and isinstance(citations.get("items"), list):
+            projected.extend(
+                item for item in citations["items"] if isinstance(item, dict)
+            )
+
+    # Ordinary answers retain original FTS/BM25 order; explicit navigation
+    # alone may prioritize filename matches after the first original hit.
+    navigation = _navigation_path_intent(query)
+    ordered = (
+        candidates[:1] + sorted(candidates[1:], key=lambda row: -row[0])
+        if navigation
+        else candidates
+    )
+    selected = []
+    seen = set()
+    for _overlap, source, row, evidence in ordered:
+        # BM25 ranks chunks, not files. Diversity applies only to navigation.
+        identity = source if navigation else row.get("chunk_id")
+        if identity in seen:
+            continue
+        seen.add(identity)
+        selected.append((row, evidence))
+        if len(selected) == k:
+            break
+    projection_by_identity = {
+        (item.get("chunk_id"), item.get("citation_id")): item
+        for item in projected
+        if isinstance(item.get("chunk_id"), str)
+        and isinstance(item.get("citation_id"), str)
+    }
+    return {
+        "query_result": {"results": [row for row, _ in selected]},
+        "resolved_evidence": {"hits": [hit for _, hit in selected]},
+        "source_citation_projection": {
+            "items": [
+                projection_by_identity[(row["chunk_id"], hit["citation_id"])]
+                for row, hit in selected
+            ]
+        },
+    }
+
+
+def _balanced_relaxed_ranges(
+    selected: dict[str, Any],
+    max_context_tokens: int,
+    max_context_bytes: int,
+) -> tuple[list[dict[str, Any]], int, int, bool, list[dict[str, Any]]]:
+    """Share remaining bytes, not a fixed per-hit slice that may round to zero."""
+    # The common allocator already bounds UTF-8 excerpts, preserves citations,
+    # reports omissions, and reallocates unused bytes to later verified hits.
+    return _resolved_ranges_with_budget(
+        selected, max_context_tokens, max_context_bytes=max_context_bytes
+    )
+
+
+def _manifest_content_digest(manifest_path: Path) -> str | None:
+    """Use the selected request snapshot, not a later replacement on disk."""
+    bound = active_manifest_snapshot(manifest_path)
+    if bound is not None:
+        return bound.binding.sha256
+    try:
+        with manifest_path.open("rb") as stream:
+            raw = stream.read(MAX_MANIFEST_BYTES + 1)
+    except OSError:
+        return None
+    return hashlib.sha256(raw).hexdigest() if len(raw) <= MAX_MANIFEST_BYTES else None
+
+
 def _query_context(
     manifest_path: Path,
     *,
@@ -859,13 +1331,181 @@ def _query_context(
     if len(tokens) < 2:
         return state
     or_query = _or_fts_query(tokens)
-    relaxed_result = _run_query(manifest_path, query, k, prepared_fts_query=or_query)
-    relaxed = _resolved_ranges_with_budget(
-        relaxed_result,
-        max_context_tokens,
-        max_context_bytes=max_context_bytes,
+    # Overfetch verified chunks only as needed; preserve the wider existing
+    # search window for explicit navigation with multiple requested sources.
+    navigation = _navigation_path_intent(query)
+    candidate_k = min(100, max(1, k * 3, 24 if navigation and k > 1 else k))
+    manifest_digest_before = (
+        _manifest_content_digest(manifest_path) if navigation else None
+    )
+    relaxed_result = _run_query(
+        manifest_path, query, candidate_k, prepared_fts_query=or_query
+    )
+    # With k=1, a verified first OR candidate already fills the answer.
+    # Further path reads cannot alter it but would revalidate the full index.
+    verified_candidates = _source_candidates_from_index(relaxed_result, set(tokens))
+    need_path_hints = navigation and (k > 1 or not verified_candidates)
+    path_results = (
+        _relaxed_path_index_reads(manifest_path, query=query, fts_query=or_query, k=k)
+        if need_path_hints
+        else []
+    )
+    # The path may name a different manifest after an atomic replacement.
+    # Hash only a small manifest, not the entire SQLite index, on navigation.
+    manifest_content_unchanged = not navigation or (
+        manifest_digest_before is not None
+        and manifest_digest_before == _manifest_content_digest(manifest_path)
+    )
+    if not manifest_content_unchanged:
+        # Even the OR result belongs to the old manifest: never cite it under
+        # the replacement snapshot identity, regardless of the path hints.
+        state.update(
+            {
+                "query_result": {
+                    "status": "invalid",
+                    "error_code": "bundle_manifest_identity_unverified",
+                    "error": "Bundle manifest changed during retrieval.",
+                    "query_result": {"results": [], "fts_query": or_query},
+                },
+                "retrieval_hits": [],
+                "resolved_ranges": [],
+                "used_bytes": 0,
+                "used_characters": 0,
+                "truncated": False,
+                "omissions": [
+                    {
+                        "lane": "canonical_md",
+                        "reason": "bundle_manifest_identity_unverified",
+                        "ref": "bundle_manifest",
+                    }
+                ],
+                "fts_query": or_query,
+            }
+        )
+        return state
+    # Separate index queries can observe different SQLite bytes after a swap.
+    # Only combine evidence from the same hashed artifact and bound manifest.
+    artifact = relaxed_result.get("index_artifact")
+    stable_path_results = [
+        indexed
+        for indexed in path_results
+        if manifest_content_unchanged
+        and isinstance(artifact, dict)
+        and isinstance(artifact.get("sha256"), str)
+        and re.fullmatch(r"[0-9a-f]{64}", artifact["sha256"])
+        and isinstance(relaxed_result.get("bundle_manifest"), str)
+        and indexed.get("index_artifact") == artifact
+        and indexed.get("bundle_manifest") == relaxed_result["bundle_manifest"]
+    ]
+    rejected_path_identity = len(stable_path_results) != len(path_results)
+    path_results = stable_path_results
+    path_warnings = [
+        warning
+        for indexed in path_results
+        for warning in (indexed.get("warnings") or [])
+        if isinstance(warning, dict)
+    ]
+    path_query_warnings = [
+        warning
+        for indexed in path_results
+        for warning in (indexed.get("query_result") or {}).get("warnings", [])
+        if isinstance(warning, str)
+    ]
+    selected_result = _prefer_diverse_relaxed_sources(
+        relaxed_result, query=query, k=k, path_results=path_results
+    )
+    # Check every consulted index result, including filtered path hints.
+    # Uncitable candidates never become answer evidence, but must be reported.
+    invalid_candidates = (
+        [
+            {
+                "lane": "canonical_md",
+                "reason": (
+                    "bundle_manifest_identity_unverified"
+                    if not manifest_content_unchanged
+                    else "index_artifact_mismatch"
+                ),
+                "ref": "filtered_path_index",
+            }
+        ]
+        if rejected_path_identity
+        else []
+    )
+    for indexed in (relaxed_result, *path_results):
+        verified_ids = {
+            row.get("chunk_id")
+            for _overlap, _source, row, _evidence in _source_candidates_from_index(
+                indexed, set(tokens)
+            )
+        }
+        raw_rows = indexed.get("query_result")
+        raw_rows = raw_rows.get("results") if isinstance(raw_rows, dict) else []
+        invalid_candidates.extend(
+            {
+                "lane": "canonical_md",
+                "reason": "unverified_index_evidence",
+                "ref": row["chunk_id"],
+            }
+            for row in (raw_rows if isinstance(raw_rows, list) else [])
+            if isinstance(row, dict)
+            and isinstance(row.get("chunk_id"), str)
+            and row["chunk_id"] not in verified_ids
+        )
+    invalid_candidates = list(
+        {
+            (item["lane"], item["reason"], item["ref"]): item
+            for item in invalid_candidates
+        }.values()
+    )
+    merged_warnings = list(
+        {
+            json.dumps(warning, sort_keys=True): warning
+            for warning in list(relaxed_result.get("warnings") or []) + path_warnings
+        }.values()
+    )
+    merged_query_warnings = list(
+        dict.fromkeys(
+            [
+                warning
+                for warning in (relaxed_result.get("query_result") or {}).get(
+                    "warnings", []
+                )
+                if isinstance(warning, str)
+            ]
+            + path_query_warnings
+        )
+    )
+    relaxed = _balanced_relaxed_ranges(
+        selected_result, max_context_tokens, max_context_bytes
     )
     if not relaxed[0]:
+        # Even when no UTF-8 code point fits, the OR index did find evidence.
+        state["omissions"].extend(relaxed[4])
+        state["omissions"].extend(invalid_candidates)
+        state["truncated"] = state["truncated"] or relaxed[3]
+        if relaxed[4] or invalid_candidates:
+            state["query_result"] = {
+                **relaxed_result,
+                "warnings": merged_warnings,
+                "query_result": {
+                    **(relaxed_result.get("query_result") or {}),
+                    "warnings": merged_query_warnings,
+                    "fts_query": or_query,
+                    "results": [],
+                },
+                "resolved_evidence": {
+                    **(relaxed_result.get("resolved_evidence") or {}),
+                    "hits": [],
+                },
+                "source_citation_projection": {
+                    **(relaxed_result.get("source_citation_projection") or {}),
+                    "items": [],
+                },
+            }
+            state["retrieval_hits"] = []
+            state["fts_query"] = or_query
+            state["strategy"] = "or_relaxed"
+            state["relaxed"] = True
         return state
     (
         state["resolved_ranges"],
@@ -874,10 +1514,59 @@ def _query_context(
         state["truncated"],
         state["omissions"],
     ) = relaxed
+    state["omissions"].extend(invalid_candidates)
+    # Citation and path alone are not a unique chunk: two hits may share
+    # the same verified canonical range while only one excerpt is emitted.
+    remaining_hits = list(selected_result["resolved_evidence"]["hits"])
+    selected_hits = []
+    for excerpt in relaxed[0]:
+        for position, hit in enumerate(remaining_hits):
+            address = _source_address_fields(hit)
+            range_ref = (
+                hit.get("range_ref")
+                if isinstance(hit.get("range_ref"), dict)
+                else {"ref": str(hit.get("chunk_id"))}
+            )
+            if (
+                address.get("source_path") == excerpt.get("source_path")
+                and address.get("citation_id") == excerpt.get("citation_id")
+                and address.get("source_line_range") == excerpt.get("source_line_range")
+                and range_ref == excerpt.get("range_ref")
+            ):
+                selected_hits.append(remaining_hits.pop(position))
+                break
+    emitted_ids = {hit["chunk_id"] for hit in selected_hits}
+    emitted_response = {
+        **relaxed_result,
+        "warnings": merged_warnings,
+        "query_result": {
+            **(relaxed_result.get("query_result") or {}),
+            **selected_result["query_result"],
+            "warnings": merged_query_warnings,
+            "fts_query": or_query,
+            "results": [
+                row
+                for row in selected_result["query_result"]["results"]
+                if row.get("chunk_id") in emitted_ids
+            ],
+        },
+        "resolved_evidence": {
+            **(relaxed_result.get("resolved_evidence") or {}),
+            "hits": selected_hits,
+        },
+        "source_citation_projection": {
+            **(relaxed_result.get("source_citation_projection") or {}),
+            "items": [
+                item
+                for item in selected_result["source_citation_projection"]["items"]
+                if item.get("chunk_id") in emitted_ids
+            ],
+        },
+    }
     state.update(
         {
-            "query_result": relaxed_result,
-            "retrieval_hits": _retrieval_hits(relaxed_result),
+            "query_result": emitted_response,
+            "retrieval_hits": _retrieval_hits(emitted_response),
             "fts_query": or_query,
             "strategy": "or_relaxed",
             "relaxed": True,
@@ -915,11 +1604,43 @@ def _retrieval_caveats(
     caveats = list(freshness.get("caveats") or []) + list(
         availability.get("caveats") or []
     )
+    if "Low result coverage" in (
+        (state["query_result"].get("query_result") or {}).get("warnings") or []
+    ):
+        caveats.append(
+            {
+                "kind": "other",
+                "detail": "Low result coverage was reported by the indexed retrieval.",
+            }
+        )
     if state["truncated"]:
         caveats.append(
             {
                 "kind": "other",
                 "detail": "Context evidence was truncated to respect the hard UTF-8 byte budget.",
+            }
+        )
+    if any(
+        item.get("reason") == "unverified_index_evidence" for item in state["omissions"]
+    ):
+        caveats.append(
+            {
+                "kind": "degraded_validation",
+                "detail": "Some OR retrieval candidates lacked verified citations and were excluded.",
+            }
+        )
+    if any(
+        item.get("reason")
+        in {"index_artifact_mismatch", "bundle_manifest_identity_unverified"}
+        for item in state["omissions"]
+    ):
+        caveats.append(
+            {
+                "kind": "degraded_validation",
+                "detail": (
+                    "Filtered source candidates from a different or unverified index "
+                    "artifact or bundle manifest were excluded."
+                ),
             }
         )
     if state["relaxed"]:
@@ -1049,6 +1770,19 @@ def build_ask_context_pack(
     existing read-only index query and reports token budget as a constraint, not as a
     quality or correctness proof.
     """
+    if active_manifest_snapshot(bundle_manifest) is None:
+        # Bind unscoped CLI calls to the existing immutable request snapshot.
+        # The one nested call sees that binding and cannot recurse further.
+        with use_manifest_binding(capture_manifest_snapshot(bundle_manifest).binding):
+            return build_ask_context_pack(
+                bundle_manifest,
+                query=query,
+                task_profile=task_profile,
+                max_context_tokens=max_context_tokens,
+                max_context_bytes=max_context_bytes,
+                max_answer_tokens=max_answer_tokens,
+                k=k,
+            )
     token_derived_byte_ceiling, total_context_bytes = _context_budget(
         max_context_tokens, max_context_bytes
     )
@@ -1164,9 +1898,7 @@ def _render_source_authority_text_scalar(value: str) -> str:
         if unicodedata.category(character) in {"Cc", "Cf", "Zl", "Zp"}:
             codepoint = ord(character)
             escape = (
-                f"\\u{codepoint:04x}"
-                if codepoint <= 0xFFFF
-                else f"\\U{codepoint:08x}"
+                f"\\u{codepoint:04x}" if codepoint <= 0xFFFF else f"\\U{codepoint:08x}"
             )
             parts.append(escape)
         else:
