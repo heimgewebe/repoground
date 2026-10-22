@@ -1661,6 +1661,8 @@ def test_find_debugging_object_retains_bm25_explanation_ranking():
         "Find the test errors",
         "Find the test failures",
         "Where are the test failures?",
+        "Find where tests are failing",
+        "Find the implementation causing corresponding test failures",
     ):
         assert not _navigation_path_intent(query), query
     assert _navigation_path_intent("Find the error handler")

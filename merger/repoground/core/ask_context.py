@@ -1055,7 +1055,7 @@ def _where_is_source_location(words: list[str]) -> bool:
         following = following[1:]
     if (
         following
-        and following[0] in {"is", "are", "was", "were"}
+        and set(following) & {"is", "are", "was", "were"}
         and following[-1] in _WHERE_EXPLANATION_PARTICIPLES
     ):
         return False
@@ -1103,7 +1103,8 @@ def _navigation_path_intent(query: str) -> bool:
     if (
         "?" not in query
         and {"implementation", "corresponding", "test"} <= nouns
-        and not nouns & (_FIND_EXPLANATION_OPENERS | {"does", "is", "has", "have"})
+        and not nouns
+        & (_FIND_EXPLANATION_OPENERS | _DEBUGGING_NOUNS | {"does", "is", "has", "have"})
     ):
         return True
     # "find" inside a why/how question is content, not a source locator.
