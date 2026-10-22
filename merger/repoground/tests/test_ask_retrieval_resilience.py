@@ -1657,6 +1657,10 @@ def test_find_debugging_object_retains_bm25_explanation_ranking():
         "Where is the retry handler bug?",
         "Where in the retry handler is the bug?",
         "Where in this test is the failure?",
+        "Find the retry handler error",
+        "Find the test errors",
+        "Find the test failures",
+        "Where are the test failures?",
     ):
         assert not _navigation_path_intent(query), query
     assert _navigation_path_intent("Find the error handler")

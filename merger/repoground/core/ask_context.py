@@ -1025,9 +1025,13 @@ _FIND_EXPLANATION_NOUNS = frozenset(
 )
 _DEBUGGING_NOUNS = _FIND_EXPLANATION_NOUNS | {
     "error",
+    "errors",
     "failure",
+    "failures",
     "crash",
+    "crashes",
     "deadlock",
+    "deadlocks",
     "flaw",
     "fehlschlag",
     "absturz",
@@ -1071,6 +1075,7 @@ def _find_source_location_complement(
     if (
         not words
         or set(words[:5]) & (_DEBUGGING_NOUNS - {"error"})
+        or words[-1] in _DEBUGGING_NOUNS
         or _has_debugging_complement(words)
     ):
         return False
