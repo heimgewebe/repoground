@@ -98,3 +98,23 @@ Git-based evidence tool. The tracked Claude project launcher already passes
 the required argument. No shared user config or runtime was modified here;
 an authorized separate revision-bound consumer rollout remains necessary.
 Actual Codex and Claude model-invocation traces are still unverified.
+### Quoted Git path integrity hardening
+
+A real disposable Git repository with two modified files reproduced a
+coverage defect: an ordinary `plain.py` change was reported, while the
+simultaneously modified tracked filename containing a newline was omitted.
+The previous pack returned a partial change list without disclosing this
+unparsed file. That behavior must not silently mislead an agent.
+
+The report now compares the parsed textual diff against the authoritative
+NUL-delimited `git diff --name-only -z --no-renames` path inventory of the
+same exact base/target revisions. If a quoted/unrepresentable path is
+missing or an inventory read fails, the report returns `status=invalid`
+with `diff_paths_unresolved` (or an explicit inventory error) and **no**
+partial changed-file list. Agents can use Git directly as the fallback.
+One targeted negative regression test commits both filenames and verifies
+the fail-closed behavior without mutating the source worktree.
+
+The focused first-branch evidence/MCP/context tests after this change:
+**62 passed**, Ruff **all checks passed**. Prior whole-repository counts
+refer to an earlier commit and must be re-run on the eventual PR head.

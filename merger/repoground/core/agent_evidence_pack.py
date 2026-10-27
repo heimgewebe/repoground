@@ -258,9 +258,28 @@ def build_evidence_pack(
     if expected_diff_sha256 is not None and expected_diff_sha256 != diff_sha:
         return _invalid("diff_sha256_mismatch")
 
+    # The textual diff parser cannot reliably decode quoted Git path names
+    # (newlines, control characters, non-ASCII quotePath). Compare it with
+    # Git's NUL-delimited authoritative path inventory before making claims.
+    # Otherwise a mixed diff could silently omit a changed file.
+    raw_names, names_error = _bounded_git(
+        root, ["diff", "--no-ext-diff", "--no-textconv", "--no-renames",
+               "--name-only", "-z", base_revision, target_revision, "--"],
+        max_bytes=MAX_DIFF_BYTES,
+    )
+    if names_error or raw_names is None:
+        return _invalid("diff_path_inventory_unavailable")
+    if raw_names and not raw_names.endswith("\0"):
+        return _invalid("diff_path_inventory_invalid")
+    names = sorted(name for name in raw_names.split("\0") if name)
     parsed = parse_unified_diff(diff)
     if not parsed["file_count"] or parsed.get("truncated"):
         return _invalid("empty_or_truncated_diff")
+    reported_names = sorted(
+        str(item.get("path")) for item in parsed["files"]
+    )
+    if names != reported_names:
+        return _invalid("diff_paths_unresolved")
     dirty, dirty_error = _bounded_git(root, ["status", "--porcelain", "--untracked-files=normal"])
     worktree_state = "unknown" if dirty_error else ("dirty" if dirty else "clean")
     bundle, gap_codes = _bundle_identity(bundle_manifest)

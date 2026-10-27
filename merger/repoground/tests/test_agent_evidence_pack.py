@@ -201,3 +201,24 @@ def test_contract_impact_reports_only_direct_changed_contract_paths(tmp_path):
     }
     assert report["change_status_counts"]["added"] == 1
     assert all("verified_contract_consumer" not in hint.values() for hint in report["hints"])
+
+def test_mixed_git_quoted_paths_never_silently_omits_changes(tmp_path):
+    repo, _base, _head = seeded_repo(tmp_path)
+    quoted_name = "line\nbreak.py"
+    (repo / quoted_name).write_text("value=1\n", encoding="utf-8")
+    git(repo, "add", quoted_name)
+    git(repo, "commit", "-qm", "introduce unusual tracked filename")
+    base = git(repo, "rev-parse", "HEAD")
+    (repo / quoted_name).write_text("value=2\n", encoding="utf-8")
+    (repo / "alpha.py").write_text("def old():\n    return 3\n", encoding="utf-8")
+    git(repo, "add", quoted_name, "alpha.py")
+    git(repo, "commit", "-qm", "change ordinary and quoted filenames")
+    head = git(repo, "rev-parse", "HEAD")
+    result = build_evidence_pack(
+        repo_root=repo, base_revision=base, target_revision=head
+    )
+    assert result["status"] == "invalid"
+    assert result["reason"] == "diff_paths_unresolved"
+    assert result["changed_files"] == []
+    assert result["mutation_boundary"]["writes"] == []
+    assert git(repo, "status", "--porcelain") == ""
