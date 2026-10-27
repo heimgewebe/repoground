@@ -427,3 +427,52 @@ def test_configured_ignore_submodules_all_does_not_hide_gitlink_changes(tmp_path
         "diff_paths_unresolved", "empty_or_truncated_diff",
     })
     assert git(repo, "status", "--porcelain") == ""
+
+
+def test_partial_clone_missing_blob_never_invokes_promisor_transport(
+    tmp_path, monkeypatch,
+):
+    """Read-only evidence must neither fetch nor modify Git object storage."""
+    repo, base, head = seeded_repo(tmp_path)
+    old_blob = git(repo, "rev-parse", f"{base}:alpha.py")
+    loose_blob = repo / ".git" / "objects" / old_blob[:2] / old_blob[2:]
+    assert loose_blob.is_file()
+    held_blob = tmp_path / "held-blob"
+    loose_blob.rename(held_blob)
+    # Simulate a promisor checkout without hitting the network. The only
+    # alleged SSH transport is an executable that records invocation.
+    git(repo, "config", "extensions.partialClone", "origin")
+    git(repo, "config", "remote.origin.promisor", "true")
+    git(repo, "config", "remote.origin.partialclonefilter", "blob:none")
+    git(repo, "config", "remote.origin.url", "ssh://example.invalid/forbidden")
+    marker = tmp_path / "attempted-remote-fetch"
+    fake_ssh = tmp_path / "fake-git-ssh"
+    fake_ssh.write_text(
+        "#!/bin/sh\nprintf attempted > \"$PROBE_MARKER\"\nexit 37\n",
+        encoding="utf-8",
+    )
+    fake_ssh.chmod(0o700)
+    monkeypatch.setenv("GIT_SSH_COMMAND", str(fake_ssh))
+    monkeypatch.setenv("PROBE_MARKER", str(marker))
+    # Deliberately hostile inherited values: _bounded_git must override
+    # them so even config-driven promisor fetches cannot reach transport.
+    monkeypatch.setenv("GIT_NO_LAZY_FETCH", "0")
+    monkeypatch.setenv("GIT_ALLOW_PROTOCOL", "ssh")
+
+    before_objects = {
+        str(p.relative_to(repo / ".git")) for p in (repo / ".git").rglob("*")
+        if p.is_file()
+    }
+    result = build_evidence_pack(
+        repo_root=repo, base_revision=base, target_revision=head
+    )
+    assert result["status"] == "invalid"
+    assert result["reason"] in {
+        "git_command_failed", "diff_unavailable", "unavailable_commit",
+    }
+    assert not marker.exists(), "a Git evidence read attempted an SSH fetch"
+    assert not loose_blob.exists(), "read-only operation restored an object"
+    assert {
+        str(p.relative_to(repo / ".git")) for p in (repo / ".git").rglob("*")
+        if p.is_file()
+    } == before_objects

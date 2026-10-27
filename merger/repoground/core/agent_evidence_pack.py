@@ -93,9 +93,19 @@ def _bounded_git(root: Path, args: list[str], *, max_bytes: int = 131072) -> tup
     command = [
         "git", "-c", "core.hooksPath=/dev/null", "-c", "color.ui=never",
         "-c", "core.fsmonitor=false", "-c", "diff.external=",
-        "-c", "protocol.file.allow=never", "-C", str(root), *args,
+        "-c", "protocol.allow=never", "-c", "protocol.file.allow=never",
+        "-C", str(root), *args,
     ]
-    env = dict(os.environ, GIT_OPTIONAL_LOCKS="0", GIT_TERMINAL_PROMPT="0")
+    # Git partial clones can lazily fetch missing *promisor* objects even
+    # during an ordinary "diff". Explicitly prohibit all transports and
+    # disable lazy fetch; read-only CLI/MCP must never mutate .git this way.
+    # Override hostile inherited GIT_ALLOW_PROTOCOL/GIT_NO_LAZY_FETCH values.
+    env = dict(
+        os.environ,
+        GIT_OPTIONAL_LOCKS="0", GIT_TERMINAL_PROMPT="0",
+        GIT_NO_LAZY_FETCH="1", GIT_ALLOW_PROTOCOL="",
+        GIT_PROTOCOL_FROM_USER="0",
+    )
     process: subprocess.Popen[bytes] | None = None
     try:
         process = subprocess.Popen(
