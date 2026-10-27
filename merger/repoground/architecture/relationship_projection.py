@@ -11,9 +11,9 @@ import json
 import re
 from collections import Counter
 from pathlib import PurePosixPath
-from merger.repoground.architecture.path_classification import is_test_path
+from typing import Any, Mapping, Sequence
 
-from typing import Any, Mapping
+from merger.repoground.architecture.path_classification import is_test_path
 
 KIND = "lenskit.relationship_projection"
 VERSION = "1.0"
@@ -163,6 +163,8 @@ def project_relationships(
     call_graph: Mapping[str, Any],
     architecture_graph: Mapping[str, Any],
     max_edges: int = MAX_EDGES,
+    declared_edges: Sequence[Mapping[str, Any]] = (),
+    declared_coverage: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Project S0/S1 directed relations from three co-revision producer artifacts.
 
@@ -199,6 +201,33 @@ def project_relationships(
     edges.extend(_definition_edges(symbols, known_files, gaps))
     edges.extend(_import_edges(imports, known_files, gaps))
     edges.extend(_call_edges(calls, known_files, known_symbols, gaps))
+    for declared in declared_edges:
+        if not isinstance(declared, Mapping):
+            raise ValueError("declared relationship record is invalid")
+        src = declared.get("src")
+        dst = declared.get("dst")
+        if not isinstance(src, str) or src not in known_files or not isinstance(dst, str):
+            raise ValueError("declared relationship has no known file source or target")
+        origin = declared.get("source")
+        if not isinstance(origin, Mapping) or origin.get("path") != src.removeprefix("file:"):
+            raise ValueError("declared relationship source and file identity mismatch")
+        relation = declared.get("relation")
+        status = declared.get("resolution_status")
+        level = declared.get("evidence_level")
+        if relation not in {"defines", "calls", "imports", "references", "declares_contract", "configures_service"}:
+            raise ValueError("unsupported declared relation type")
+        source = _source(origin["path"], origin["start_line"], origin["end_line"])
+        js_declared = (
+            relation == "defines"
+            and dst.startswith(f"js:{origin['path']}:function:")
+            and dst.endswith(f":L{source['start_line']}")
+        )
+        if level == "S1" and (status != "resolved" or not (dst in known_files or js_declared)):
+            raise ValueError("declared S1 relation requires a unique file or explicit definition")
+        edges.append(_edge(
+            relation, src, dst, source, status, level, str(declared.get("origin_artifact")),
+            candidates=declared.get("candidate_target_ids"),
+        ))
 
     unique = {edge["id"]: edge for edge in edges}
     ordered = sorted(unique.values(), key=lambda item: (
@@ -224,6 +253,7 @@ def project_relationships(
             "producer_skipped_python_call_files": call_graph.get("skipped_files_count", 0),
             "producer_repository_truncated": architecture_graph.get("coverage", {}).get("repository_truncated", False),
             "gaps": {key: gaps[key] for key in sorted(gaps)},
+            **({"declared_source_coverage": dict(declared_coverage)} if declared_coverage is not None else {}),
         },
         "does_not_establish": list(NONCLAIMS),
     }
@@ -240,13 +270,18 @@ def generate_relationship_document(
     The caller provides the snapshot identity; production consumers must obtain
     it from a validated bundle manifest and must check source freshness.
     """
+    from merger.repoground.architecture.declared_relations import extract_declared_relations
     from merger.repoground.architecture.call_graph import generate_call_graph_document
     from merger.repoground.architecture.import_graph import generate_import_graph_document
     from merger.repoground.architecture.symbol_index import generate_symbol_index_document
 
+    architecture = generate_import_graph_document(repo_root, run_id, canonical_sha256)
+    declared, coverage = extract_declared_relations(repo_root, architecture)
     return project_relationships(
         symbol_index=generate_symbol_index_document(repo_root, run_id, canonical_sha256),
         call_graph=generate_call_graph_document(repo_root, run_id, canonical_sha256),
-        architecture_graph=generate_import_graph_document(repo_root, run_id, canonical_sha256),
+        architecture_graph=architecture,
         max_edges=max_edges,
+        declared_edges=declared,
+        declared_coverage=coverage,
     )
