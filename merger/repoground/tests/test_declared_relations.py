@@ -107,6 +107,23 @@ class TestDeclaredRelations(unittest.TestCase):
         self.assertEqual(1, coverage["edge_counts"]["defines"])
 
 
+    def test_javascript_inline_declarations_do_not_hide_body_calls(self):
+        self.write("web/inline.ts", (
+            "function helper() {}\n"
+            "function main() { helper(); }\n"
+            "function recursive() { recursive(); }\n"
+        ))
+        edges, _ = self.projection()
+        definitions = [e for e in edges if e["relation"] == "defines"]
+        calls = [e for e in edges if e["relation"] == "calls"]
+        self.assertEqual(3, len(definitions))
+        self.assertEqual(2, len(calls), calls)
+        self.assertEqual([2, 3], sorted(e["source"]["start_line"] for e in calls))
+        self.assertTrue(all(e["evidence_level"] == "S0" for e in calls))
+        candidates = [e["candidate_target_ids"] for e in calls]
+        self.assertIn(["js:web/inline.ts:function:helper:L1"], candidates)
+        self.assertIn(["js:web/inline.ts:function:recursive:L3"], candidates)
+
     def test_json_schema_instance_data_cannot_become_proven_contract_ref(self):
         self.write("schemas/base.json", '{"type":"object"}\n')
         self.write("schemas/default.json", (
