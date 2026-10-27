@@ -2,6 +2,10 @@ import datetime
 import json
 from pathlib import Path
 from typing import Any, Optional
+import hashlib as _hashlib
+import re as _re
+import yaml as _yaml
+from .history_lens import _git_read, _git_tree, _repo_id, _repo_root, _revision
 
 try:
     import jsonschema
@@ -235,3 +239,244 @@ def add_bundle(index_path: Path, repo_id: str, bundle_path: str) -> dict:
         json.dump(fed_data, handle, indent=2, sort_keys=True)
 
     return fed_data
+
+# Thread 2: explicit, revision-pinned Fleet federation. Persisted federation-index.v1
+# remains untouched. All facts below are a read-only projection of Git objects.
+
+_FEDERATION_EVIDENCE_KIND = "repoground.federation-evidence"
+_MAX_FLEET_TARGETS = 64
+_MAX_SYNC_ENTRIES = 128
+_MAX_RELATIONS = 256
+
+
+def _git_object_bytes(root: Path, tree: dict[str, str], path: str) -> bytes | None:
+    if not isinstance(path, str) or path.startswith("/") or "\x00" in path or "\\" in path:
+        return None
+    if any(part in ("", ".", "..") for part in path.split("/")):
+        return None
+    oid = tree.get(path)
+    if not oid:
+        return None
+    try:
+        return _git_read(root, "cat-file", "blob", oid, max_bytes=250_000)
+    except ValueError:
+        return None
+
+
+def _artifact_evidence(repo_id: str, commit: str, path: str,
+                       tree: dict[str, str], data: bytes | None,
+                       line: int | None = None) -> dict[str, Any]:
+    return {
+        "repo_id": repo_id, "commit": commit, "path": path,
+        "blob_oid": tree.get(path), "sha256": _hashlib.sha256(data).hexdigest() if data is not None else None,
+        "line_start": line, "line_end": line, "source_type": "git_blob",
+        "status": "observed" if data is not None else "unavailable",
+    }
+
+
+def _declaration_line(contents: str, key: str, *, mapping: bool = False) -> int | None:
+    """Return a unique exact source line; ambiguous declarations remain unresolved."""
+    if mapping:
+        pattern = _re.compile(r"^\s{2}" + _re.escape(key) + r":\s*(?:#.*)?$")
+    else:
+        pattern = _re.compile(r"^\s*-\s*name:\s*['\"]?" + _re.escape(key) + r"['\"]?\s*(?:#.*)?$")
+    found = [n for n, line in enumerate(contents.splitlines(), 1) if pattern.fullmatch(line)]
+    return found[0] if len(found) == 1 else None
+
+
+def _validated_yaml_mapping(data: bytes | None, label: str) -> dict[str, Any]:
+    if data is None:
+        return {}
+    try:
+        obj = _yaml.safe_load(data.decode("utf-8"))
+    except (_yaml.YAMLError, UnicodeDecodeError) as exc:
+        raise ValueError(f"invalid YAML at {label}") from exc
+    if not isinstance(obj, dict):
+        raise ValueError(f"expected YAML mapping at {label}")
+    return obj
+
+
+def fleet_revision_relations(metarepo: Path, metarepo_commit: str,
+                             targets: dict[str, tuple[Path, str]]) -> dict[str, Any]:
+    """Compute directional declarations, never assume fleet=runtime dependency.
+
+    targets is an explicitly authorized set of local repos with full Git SHAs.
+    No clone/fetch/publish occurs; missing target commits and paths stay visible.
+    """
+    if not isinstance(targets, dict) or len(targets) > _MAX_FLEET_TARGETS:
+        raise ValueError("targets must be a bounded mapping")
+    source_root = _repo_root(metarepo)
+    source_commit = _revision(source_root, metarepo_commit)
+    source_tree, tree_limited = _git_tree(source_root, source_commit)
+    fleet_path = "fleet/repos.yml"
+    metadata_path = "fleet/repo-metadata.yml"
+    sync_path = "sync/metarepo-sync.yml"
+    fleet_blob = _git_object_bytes(source_root, source_tree, fleet_path)
+    if fleet_blob is None:
+        return {
+            "kind": _FEDERATION_EVIDENCE_KIND, "version": "1",
+            "status": "unavailable", "source_repo": "metarepo",
+            "source_commit": source_commit, "relations": [],
+            "observation_time": None, "publication_time": None,
+            "gaps": ["authoritative_fleet_repos_yml_unavailable"],
+            "does_not_establish": ["runtime_dependency", "successful_sync", "deployed_version", "causal_relation"],
+            "authoritative_membership_source": fleet_path,
+            "supplementary_sources": [metadata_path, sync_path],
+        }
+    if len(fleet_blob) > 250_000:
+        raise ValueError("fleet source exceeds parsing limit")
+    fleet_text = fleet_blob.decode("utf-8")
+    fleet = _validated_yaml_mapping(fleet_blob, fleet_path)
+    if not isinstance(fleet.get("repos"), list):
+        raise ValueError("invalid authoritative fleet schema")
+
+    member_kind = {}
+    for item in fleet["repos"]:
+        if not isinstance(item, dict) or not isinstance(item.get("name"), str):
+            raise ValueError("invalid fleet member entry")
+        name = _repo_id(item["name"])
+        if name in member_kind:
+            raise ValueError("ambiguous duplicate fleet member")
+        member_kind[name] = "fleet_core"
+    related = (fleet.get("static") or {}).get("include", [])
+    if not isinstance(related, list):
+        raise ValueError("invalid related fleet list")
+    for item in related:
+        if not isinstance(item, dict) or not isinstance(item.get("name"), str):
+            raise ValueError("invalid related entry")
+        name = _repo_id(item["name"])
+        if name in member_kind:
+            raise ValueError("ambiguous fleet member/related overlap")
+        if item.get("status") != "related":
+            raise ValueError("non-related static include is not a Fleet declaration")
+        member_kind[name] = "fleet_related"
+
+    metadata_blob = _git_object_bytes(source_root, source_tree, metadata_path)
+    sync_blob = _git_object_bytes(source_root, source_tree, sync_path)
+    metadata = _validated_yaml_mapping(metadata_blob, metadata_path)
+    sync_data = _validated_yaml_mapping(sync_blob, sync_path)
+    annotations = metadata.get("repositories", {})
+    if not isinstance(annotations, dict):
+        raise ValueError("invalid metadata repositories mapping")
+    sync_entries = sync_data.get("entries", [])
+    if not isinstance(sync_entries, list) or len(sync_entries) > _MAX_SYNC_ENTRIES:
+        raise ValueError("sync entries unavailable or over limit")
+
+    relations = []
+    gaps = ["git_tree_capped"] if tree_limited else []
+    for name in sorted(targets):
+        _repo_id(name)
+        target_spec = targets[name]
+        if not isinstance(target_spec, (tuple, list)) or len(target_spec) != 2:
+            raise ValueError("target must contain repo directory and Git SHA")
+        target_root = _repo_root(Path(target_spec[0]))
+        target_sha = _revision(target_root, target_spec[1])
+        target_tree, limited = _git_tree(target_root, target_sha)
+        if limited:
+            gaps.append("target_git_tree_capped:" + name)
+
+        kind = member_kind.get(name)
+        if not kind:
+            gaps.append("target_not_listed_in_authoritative_fleet:" + name)
+            continue
+        line = _declaration_line(fleet_text, name)
+        if line is None:
+            gaps.append("fleet_declaration_ambiguous:" + name)
+            continue
+        annotation = annotations.get(name, {})
+        if annotation and not isinstance(annotation, dict):
+            gaps.append("invalid_metadata:" + name)
+            annotation = {}
+        if annotation.get("fleet") is False:
+            gaps.append("metadata_fleet_false:" + name)
+            # Membership is sourced from fleet/repos.yml; report the conflict.
+            # Never silently promote this target to a runtime dependency.
+        relations.append({
+            "relation_type": kind, "direction": "metarepo_to_target",
+            "confidence": "declared", "asserts_runtime_dependency": False,
+            "source": _artifact_evidence("metarepo", source_commit, fleet_path, source_tree, fleet_blob, line),
+            "target": {"repo_id": name, "commit": target_sha, "path": None,
+                       "blob_oid": None, "sha256": None, "source_type": "commit_identity_only",
+                       "status": "commit_verified"},
+            "status": "conflicting_declarations" if annotation.get("fleet") is False else "observed_declaration",
+        })
+        if annotation and metadata_blob is not None:
+            metadata_line = _declaration_line(metadata_blob.decode("utf-8"), name, mapping=True)
+            if metadata_line is not None:
+                relations.append({
+                    "relation_type": "fleet_metadata", "direction": "metarepo_to_target",
+                    "confidence": "declared", "asserts_runtime_dependency": False,
+                    "source": _artifact_evidence("metarepo", source_commit, metadata_path,
+                                                 source_tree, metadata_blob, metadata_line),
+                    "target": {"repo_id": name, "commit": target_sha, "path": None,
+                               "blob_oid": None, "sha256": None, "source_type": "commit_identity_only",
+                               "status": "commit_verified"},
+                    "status": "observed_declaration",
+                    "metadata": {key: annotation[key] for key in ("domain", "scope", "default_branch")
+                                 if isinstance(annotation.get(key), str)},
+                })
+
+        # Existing metarepo-sync.yml declares a copy *target path*, not a
+        # validated runtime dependency or successful rollout to every fleet repo.
+        if sync_blob is None:
+            gaps.append("sync_manifest_unavailable")
+            continue
+        for entry in sync_entries:
+            if not isinstance(entry, dict):
+                gaps.append("invalid_sync_entry")
+                continue
+            source_path = entry.get("source")
+            paths = entry.get("targets")
+            if not isinstance(source_path, str) or not isinstance(paths, list):
+                gaps.append("invalid_sync_entry")
+                continue
+            source_bytes = _git_object_bytes(source_root, source_tree, source_path)
+            if source_bytes is None:
+                gaps.append("sync_source_unavailable:" + str(entry.get("id", "")))
+                continue
+            for target_path in paths[:8]:
+                if not isinstance(target_path, str):
+                    continue
+                target_bytes = _git_object_bytes(target_root, target_tree, target_path)
+                if target_bytes is None:
+                    # A copy declaration without a target is not a proven link.
+                    continue
+                same = _hashlib.sha256(source_bytes).digest() == _hashlib.sha256(target_bytes).digest()
+                relations.append({
+                    "relation_type": "declared_copy_target",
+                    "direction": "metarepo_to_target",
+                    "confidence": "observed_content" if same else "declaration_only",
+                    "asserts_runtime_dependency": False,
+                    "source": _artifact_evidence("metarepo", source_commit, source_path,
+                                                 source_tree, source_bytes),
+                    "target": _artifact_evidence(name, target_sha, target_path,
+                                                 target_tree, target_bytes),
+                    "declaration": _artifact_evidence("metarepo", source_commit, sync_path,
+                                                       source_tree, sync_blob),
+                    "status": "identical_content" if same else "diverged_at_revisions",
+                    "sync_entry_id": str(entry.get("id", ""))[:128],
+                })
+                if len(relations) >= _MAX_RELATIONS:
+                    gaps.append("relation_limit")
+                    break
+            if len(relations) >= _MAX_RELATIONS:
+                break
+        if len(relations) >= _MAX_RELATIONS:
+            break
+    relations.sort(key=lambda row: (
+        row["target"]["repo_id"], row["relation_type"],
+        row["source"]["path"] or "", row["target"]["path"] or "",
+    ))
+    return {
+        "kind": _FEDERATION_EVIDENCE_KIND, "version": "1",
+        "status": "partial" if gaps else "ok",
+        "source_repo": "metarepo", "source_commit": source_commit,
+        "observation_time": None, "publication_time": None,
+        "relations": relations[:_MAX_RELATIONS], "gaps": sorted(set(gaps)),
+        "does_not_establish": [
+            "runtime_dependency", "successful_sync", "deployed_version",
+            "pr_approval", "ci_success", "causal_relation"
+        ],
+        "authoritative_membership_source": fleet_path,
+        "supplementary_sources": [metadata_path, sync_path],
+    }

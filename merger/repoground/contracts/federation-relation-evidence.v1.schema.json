@@ -1,0 +1,303 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://heimgewebe.local/schema/federation-relation-evidence.v1.schema.json",
+  "title": "RepoGround revision-pinned directed cross-repository relation evidence (v1)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "version",
+    "status",
+    "source_repo",
+    "source_commit",
+    "relations",
+    "gaps",
+    "does_not_establish",
+    "authoritative_membership_source",
+    "supplementary_sources",
+    "observation_time",
+    "publication_time"
+  ],
+  "properties": {
+    "kind": {
+      "const": "repoground.federation-evidence"
+    },
+    "version": {
+      "const": "1"
+    },
+    "status": {
+      "enum": [
+        "ok",
+        "partial",
+        "unavailable",
+        "ambiguous",
+        "stale"
+      ]
+    },
+    "source_repo": {
+      "const": "metarepo"
+    },
+    "source_commit": {
+      "type": "string",
+      "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+    },
+    "observation_time": {
+      "type": "null"
+    },
+    "publication_time": {
+      "type": "null"
+    },
+    "relations": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "relation_type",
+          "direction",
+          "confidence",
+          "asserts_runtime_dependency",
+          "source",
+          "target",
+          "status"
+        ],
+        "properties": {
+          "relation_type": {
+            "enum": [
+              "fleet_core",
+              "fleet_related",
+              "fleet_metadata",
+              "declared_copy_target"
+            ]
+          },
+          "direction": {
+            "const": "metarepo_to_target"
+          },
+          "confidence": {
+            "enum": [
+              "declared",
+              "observed_content",
+              "declaration_only"
+            ]
+          },
+          "asserts_runtime_dependency": {
+            "const": false
+          },
+          "source": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "repo_id",
+              "commit",
+              "path",
+              "blob_oid",
+              "sha256",
+              "source_type",
+              "status"
+            ],
+            "properties": {
+              "repo_id": {
+                "type": "string"
+              },
+              "commit": {
+                "type": "string",
+                "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+              },
+              "path": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "blob_oid": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "sha256": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "line_start": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 1
+              },
+              "line_end": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 1
+              },
+              "source_type": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              }
+            }
+          },
+          "target": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "repo_id",
+              "commit",
+              "path",
+              "blob_oid",
+              "sha256",
+              "source_type",
+              "status"
+            ],
+            "properties": {
+              "repo_id": {
+                "type": "string"
+              },
+              "commit": {
+                "type": "string",
+                "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+              },
+              "path": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "blob_oid": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "sha256": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "line_start": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 1
+              },
+              "line_end": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 1
+              },
+              "source_type": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              }
+            }
+          },
+          "declaration": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "repo_id",
+              "commit",
+              "path",
+              "blob_oid",
+              "sha256",
+              "source_type",
+              "status"
+            ],
+            "properties": {
+              "repo_id": {
+                "type": "string"
+              },
+              "commit": {
+                "type": "string",
+                "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+              },
+              "path": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "blob_oid": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "sha256": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "line_start": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 1
+              },
+              "line_end": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 1
+              },
+              "source_type": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              }
+            }
+          },
+          "status": {
+            "enum": [
+              "observed_declaration",
+              "conflicting_declarations",
+              "identical_content",
+              "diverged_at_revisions"
+            ]
+          }
+        }
+      }
+    },
+    "gaps": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "does_not_establish": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "authoritative_membership_source": {
+      "const": "fleet/repos.yml"
+    },
+    "supplementary_sources": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}
