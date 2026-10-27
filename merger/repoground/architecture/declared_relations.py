@@ -43,13 +43,18 @@ def _resolve_local(
     source_path: str, ref: str, known_files: set[str], *, extensions: Sequence[str],
 ) -> tuple[str, str, list[str]]:
     """Resolve only unique repository-local path spellings, never import search paths."""
-    if not ref.startswith(("./", "../")):
+    if not ref.startswith(("./", "../")) or "%" in ref:
         return "module:" + ref, "unresolved", []
     basedir = str(PurePosixPath(source_path).parent)
     base = posixpath.normpath(posixpath.join(basedir, ref))
     if base == ".." or base.startswith("../") or base.startswith("/"):
         return "module:" + ref, "unresolved", []
     suffix = PurePosixPath(base).suffix
+    if suffix and suffix not in extensions:
+        candidate = "file:" + base
+        return "module:" + ref, "unresolved", (
+            [candidate] if candidate in known_files else []
+        )
     paths = [base] if suffix in extensions else [
         *(base + ext for ext in extensions),
         *(base + "/index" + ext for ext in extensions),
@@ -80,7 +85,7 @@ def _js_edges(path: str, source: str, known: set[str]) -> list[dict[str, Any]]:
         result.append(_edge(
             relation, "file:" + path, target, evidence,
             status, "S1" if status == "resolved" else "S0", "js_ts_lexical_declaration",
-            candidates=possibilities if status == "ambiguous" else None,
+            candidates=possibilities if status != "resolved" else None,
         ))
     return result
 
