@@ -27,9 +27,6 @@ _JS_DECLARATION = re.compile(
     r"(?P<quote>['\"])(?P<ref>[^'\"\s]{1,240})(?P=quote)",
     re.DOTALL,
 )
-_JS_TRIVIA = re.compile(
-    r"/\*[\s\S]*?\*/|//[^\n]*|\x60(?:\\.|[^\x60])*\x60"
-)
 _NIX_TRIVIA = re.compile(
     r"/\*[\s\S]*?\*/|''[\s\S]*?''|\"(?:\\.|[^\"\\])*\"|#[^\n]*"
 )
@@ -94,19 +91,53 @@ _JS_FUNCTION = re.compile(
     r"(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)\s*\("
 )
 _JS_CALL = re.compile(r"(?<![.\w$])(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)\s*\(")
-_JS_STRING = re.compile(r"""'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*" """ .strip(), re.DOTALL)
+def _masked(text: str) -> list[str]:
+    return ["\n" if char == "\n" else " " for char in text]
 
 
 def _js_sources(source: str) -> tuple[list[str], list[str]]:
-    """Separate syntax eligibility from import-specifier extraction.
+    """Mask comments and strings in one ordered lexical pass.
 
-    A quoted continued string is not an import/function declaration, even when
-    its middle line begins with those tokens. Keep actual import string values
-    in the second projection only after a syntax-eligible line is established.
+    Only the literal-preserving view supplies an import specifier after
+    an eligible syntax token has been seen. We do not parse template
+    interpolation or general JS expressions: missing edges are preferable
+    to promoting characters in comments to S1 dependencies.
     """
-    syntax = _JS_TRIVIA.sub(_mask, _JS_STRING.sub(_mask, source))
-    with_literals = _JS_TRIVIA.sub(_mask, source)
-    return syntax.splitlines(), with_literals.splitlines()
+    syntax = list(source)
+    literals = list(source)
+    length = len(source)
+    index = 0
+    while index < length:
+        comment_end = None
+        if source.startswith("//", index):
+            newline = source.find("\n", index + 2)
+            comment_end = length if newline < 0 else newline
+        elif source.startswith("/*", index):
+            closing = source.find("*/", index + 2)
+            comment_end = length if closing < 0 else closing + 2
+        if comment_end is not None:
+            syntax[index:comment_end] = _masked(source[index:comment_end])
+            literals[index:comment_end] = _masked(source[index:comment_end])
+            index = comment_end
+            continue
+        quote = source[index]
+        if quote in ("'", '"', chr(96)):
+            end = index + 1
+            while end < length:
+                if source[end] == "\\":
+                    end = min(end + 2, length)
+                    continue
+                if source[end] == quote:
+                    end += 1
+                    break
+                end += 1
+            syntax[index:end] = _masked(source[index:end])
+            if quote == chr(96):
+                literals[index:end] = _masked(source[index:end])
+            index = end
+            continue
+        index += 1
+    return "".join(syntax).splitlines(), "".join(literals).splitlines()
 
 
 def _js_function_edges(path: str, source: str) -> list[dict[str, Any]]:
@@ -153,7 +184,7 @@ def _js_function_edges(path: str, source: str) -> list[dict[str, Any]]:
 
 
 _NIX_DIRECT_IMPORT = re.compile(
-    r"(?<![\w.])import\s+(?P<ref>\.{1,2}/[A-Za-z0-9_./-]+\.nix)(?![\w])"
+    r"(?<![\w.])import\s+(?P<ref>\.{1,2}/[A-Za-z0-9_./-]+\.nix)(?=$|[\s;,\)\]\}])"
 )
 _NIX_IMPORTS_START = re.compile(r"^\s*imports\s*=\s*\[")
 _NIX_LIST_CONTENT = re.compile(r"\s*(?:(?:\.{1,2}/[A-Za-z0-9_./-]+\.nix)\s*)*")

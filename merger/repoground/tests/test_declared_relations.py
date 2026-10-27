@@ -195,6 +195,46 @@ class TestDeclaredRelations(unittest.TestCase):
         self.assertEqual(1, len(calls))
         self.assertEqual("S0", calls[0]["evidence_level"])
 
+    def test_apostrophe_in_js_comment_cannot_swallow_true_declarations(self):
+        self.write("web/util.ts", "export const value = 1;\n")
+        self.write("web/comment.ts", (
+            "// user's helper\n"
+            "export function real() {}\n"
+            "import './util';\n"
+            "const url = 'https://example.com/api';\n"
+            "real();\n"
+        ))
+        edges, _ = self.projection()
+        edges = [item for item in edges if item["src"] == "file:web/comment.ts"]
+        self.assertTrue(any(
+            item["relation"] == "defines"
+            and item["dst"] == "js:web/comment.ts:function:real:L2"
+            for item in edges
+        ))
+        self.assertTrue(any(
+            item["relation"] == "imports" and item["dst"] == "file:web/util.ts"
+            and item["evidence_level"] == "S1" for item in edges
+        ))
+        self.assertTrue(any(
+            item["relation"] == "calls" and item["evidence_level"] == "S0"
+            for item in edges
+        ))
+
+    def test_nix_similar_path_suffixes_cannot_promote_prefix(self):
+        self.write("foo.nix", "{ ... }: { }\n")
+        self.write("bar.nix", "{ ... }: { }\n")
+        self.write("flake.nix", (
+            "a = import ./foo.nix.bak;\n"
+            "b = import ./foo.nix-old;\n"
+            "c = import ./foo.nix/path;\n"
+            "d = import ./foo.nix+extra;\n"
+            "e = import ./bar.nix;\n"
+        ))
+        edges, _ = self.projection()
+        imports = [item for item in edges if item["src"] == "file:flake.nix"]
+        self.assertEqual(["file:bar.nix"], [item["dst"] for item in imports])
+        self.assertTrue(all(item["evidence_level"] == "S1" for item in imports))
+
     def test_output_bytes_and_file_limits_deterministic(self):
         self.write("a.ts", "import './unknown';\n")
         self.write("b.ts", "import './unknown';\n")
