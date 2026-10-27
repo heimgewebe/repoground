@@ -25,7 +25,7 @@ _YAML_BLOCK = re.compile(
     r"^(?P<indent>[ \t]*)(?:-[ \t]+)?[a-zA-Z_][\w.-]*:[ \t]*[|>](?:[-+][1-9]?|[1-9][-+]?)?[ \t]*(?:#.*)?$"
 )
 _YAML_PARENT = re.compile(
-    r"^[ \t]*(?P<prefix>-[ \t]+)?(?P<key>[A-Za-z_][\w.-]*):[ \t]*(?:#.*)?$"
+    r"^[ \t]*(?P<prefix>-[ \t]+)?(?P<key>[A-Za-z_][\w.-]*):[ \t]*(?:&[A-Za-z0-9_-]+[ \t]*)?(?:#.*)?$"
 )
 _YAML_QUOTED_VALUE = re.compile(
     r"""^[ \t]*(?:-[ \t]+)?[A-Za-z_][\w.-]*:[ \t]*(?P<quote>["'])"""
@@ -118,8 +118,7 @@ def _without_inline_code(paragraph: str) -> str:
         end = start + 1
         while end < len(paragraph) and paragraph[end] == marker:
             end += 1
-        if not _escaped_markdown_opener(paragraph, start):
-            runs.append((start, end))
+        runs.append((start, end))
         index = end
 
     next_run: list[int | None] = [None] * len(runs)
@@ -133,6 +132,9 @@ def _without_inline_code(paragraph: str) -> str:
     visible = list(paragraph)
     index = 0
     while index < len(runs):
+        if _escaped_markdown_opener(paragraph, runs[index][0]):
+            index += 1
+            continue
         closing = next_run[index]
         if closing is None:
             index += 1
@@ -223,8 +225,69 @@ def _markdown_fence_text(
     return content, None
 
 
+def _mask_markdown_comment_line(
+    line: str, comment_open: bool,
+) -> tuple[str, bool]:
+    """Mask HTML comments in prose, never backtick-quoted examples."""
+    chars = list(line)
+    cursor = 0
+    if comment_open:
+        closing = line.find("-->")
+        if closing < 0:
+            return _mask_span(line), True
+        chars[:closing + 3] = " " * (closing + 3)
+        cursor = closing + 3
+    while cursor < len(line):
+        visible = _without_inline_code("".join(chars))
+        start = visible.find("<!--", cursor)
+        if start < 0:
+            break
+        closing = line.find("-->", start + 4)
+        if closing < 0:
+            chars[start:] = " " * (len(line) - start)
+            return "".join(chars), True
+        chars[start:closing + 3] = " " * (closing + 3 - start)
+        cursor = closing + 3
+    return "".join(chars), False
+
+
+def _markdown_mask_html_comments(source: str) -> str:
+    """Preserve fences when HTML comment syntax is literal code content."""
+    masked: list[str] = []
+    fenced: tuple[str, int, int | None] | None = None
+    comment_open = False
+    for raw in source.splitlines(keepends=True):
+        line = raw.rstrip("\r\n")
+        ending = raw[len(line):]
+        if comment_open:
+            clean, comment_open = _mask_markdown_comment_line(line, True)
+            masked.append(clean + ending)
+            continue
+        content = _markdown_quote_content(line)
+        if fenced is not None:
+            candidate, _ = _markdown_fence_text(content, fenced[2])
+            closing = _MD_FENCE.match(candidate)
+            if closing is not None:
+                marks = closing.group("marks")
+                if (marks[0] == fenced[0] and len(marks) >= fenced[1]
+                        and not candidate[closing.end("marks"):].strip()):
+                    fenced = None
+            masked.append(raw)
+            continue
+        candidate, indent = _markdown_fence_text(content)
+        opening = _MD_FENCE.match(candidate)
+        if opening is not None:
+            marks = opening.group("marks")
+            fenced = marks[0], len(marks), indent
+            masked.append(raw)
+            continue
+        clean, comment_open = _mask_markdown_comment_line(line, False)
+        masked.append(clean + ending)
+    return "".join(masked)
+
+
 def _markdown_edges(path: str, source: str, known: set[str]) -> list[dict[str, Any]]:
-    sanitized = _MD_COMMENT.sub(lambda m: _mask_span(m.group(0)), source)
+    sanitized = _markdown_mask_html_comments(source)
     edges: list[dict[str, Any]] = []
     fenced: tuple[str, int, int | None] | None = None
     in_html_code = False
