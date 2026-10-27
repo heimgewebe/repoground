@@ -63,7 +63,7 @@ def _selector_properties() -> dict[str, Any]:
     }
 
 
-def _tool_definitions(enable_snapshot_create: bool) -> list[dict[str, Any]]:
+def _tool_definitions(enable_snapshot_create: bool, enable_change_evidence: bool = False) -> list[dict[str, Any]]:
     selector = _selector_properties()
 
     def schema(
@@ -255,6 +255,37 @@ def _tool_definitions(enable_snapshot_create: bool) -> list[dict[str, Any]]:
                         "verbose": {"type": "boolean", "default": False},
                     },
                     ["name"],
+                ),
+                "annotations": _read_annotations(),
+            }
+        )
+    if enable_change_evidence:
+        tools.append(
+            {
+                "name": "change_evidence_pack",
+                "title": "RepoGround PR change evidence",
+                "description": (
+                    "For PR reviews, regressions, test selection and contract changes: "
+                    "read exact base/target commit SHA, Git diff SHA-256, changed ranges "
+                    "and bounded historical bundle hints. Source-backed, read-only; no "
+                    "approval, patch, refresh or merge. Requires server --repo-root."
+                ),
+                "inputSchema": schema(
+                    {
+                        "base_revision": {"type": "string", "minLength": 40, "maxLength": 40},
+                        "target_revision": {"type": "string", "minLength": 40, "maxLength": 40},
+                        "use_case": {
+                            "type": "string",
+                            "enum": ["explain-change", "find-related-tests", "contract-impact",
+                                     "cross-repo-impact", "what-changed-since", "source-and-proof"],
+                            "default": "explain-change",
+                        },
+                        "context_budget_tokens": {
+                            "type": "integer", "minimum": 1, "maximum": 4000, "default": 1200,
+                        },
+                        "expected_diff_sha256": {"type": ["string", "null"]},
+                    },
+                    ["base_revision", "target_revision"],
                 ),
                 "annotations": _read_annotations(),
             }
@@ -775,6 +806,21 @@ class RepoGroundMcpStdioServer:
             binding,
         )
 
+    def _call_change_evidence_pack(
+        self, arguments: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        if self.repo_root is None:
+            raise McpProtocolError(
+                -32602, "change_evidence_pack requires --repo-root at MCP startup"
+            )
+        call_args, manifest, binding = self._selected_call_args(arguments)
+        from merger.repoground.core.agent_evidence_pack import build_evidence_pack
+
+        call_args["repo_root"] = self.repo_root
+        return self._invoke_bound_tool(
+            build_evidence_pack, call_args, manifest, binding
+        )
+
     def _call_snapshot_create(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         if not self.enable_snapshot_create or self.repo_root is None:
             raise McpProtocolError(-32602, "snapshot_create is disabled")
@@ -802,6 +848,7 @@ class RepoGroundMcpStdioServer:
             "grounding_verify": self._call_grounding_verify,
             "find_symbol": self._call_find_symbol,
             "snapshot_create": self._call_snapshot_create,
+            "change_evidence_pack": self._call_change_evidence_pack,
         }
         handler = handlers.get(name)
         if handler is not None:
@@ -879,7 +926,7 @@ class RepoGroundMcpStdioServer:
             return {}
         self._require_operation()
         if method == "tools/list":
-            return {"tools": _tool_definitions(self.enable_snapshot_create)}
+            return {"tools": _tool_definitions(self.enable_snapshot_create, self.repo_root is not None)}
         if method == "tools/call":
             return self._tool_call(params)
         if method == "resources/list":
