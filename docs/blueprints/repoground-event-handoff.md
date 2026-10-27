@@ -96,3 +96,28 @@ Publishing both feature branches was attempted through Grabowski's guarded `bran
 Großer Adler's read-only Git observation does not constitute a completed independent code review. Gegner's countercheck endpoint returned HTTP 429; no successful independent countercheck is claimed.
 
 **Integration sequence after the credential gate is resolved:** publish the Evidence Pack branch as its own PR, run GitHub CI and risk-scaled review, integrate it; then publish/rebase the stacked event PR and verify CI/publisher-hook replay at exact promoted commits. Thread 1 and Thread 2 contracts can be joined later through versioned adapters only, without editing their concurrent internal graph/history/federation sources.
+## Additional event-branch end-to-end verification
+
+After adding explicit receipt retrieval and tamper checks, the *entire*
+RepoGround Python suite ran on the stacked event branch with the same four
+independently reproduced clean-main failures intentionally deselected:
+**6123 passed, 12 skipped, 4 deselected**, 248.05 seconds, exit 0.
+The focused event/MCP suite passed 69 tests before this whole-repo run.
+
+An additional **real Git commit-diff rehearsal** generated one event receipt
+for merged PR #1351 and then invoked the actual
+`scripts/repoground-event-handoff.py --read-event-key` CLI.
+Result: `published` -> `available` for the *same* event payload,
+five changed files, a clean checkout, event key
+`0e53b3605e137776148ef47e624c005fd0cf7d3eccabd3ed504e31144087b219`,
+and readback receipt SHA-256
+`adeabd51cfcd3183fcfe35f18abd73c3c3657b412effbd613536d1ce9364a8ff`.
+The source Git change was real; its event delivery was synthetic and explicitly
+not a GitHub-webhook authenticity test. The temporary receipt directory
+was deleted after verification.
+
+The first consumer branch subsequently advanced to
+`503f5afb8eb69431b256f77606b5a62c8997b524` after this stacked
+event branch was created. Do **not** claim the event branch already contains
+that later first-branch change: rebase this second branch onto the
+first integrated consumer head and rerun all admission tests before merging.
