@@ -9,6 +9,18 @@ Leitlinien:
 - Keine Implementierung in diesem PR.
 - Keine Blaupausen-Megafusion.
 
+## Strategische Anschlussplanung ab 27.10.2026
+
+Der [ausführbare RepoGround-Vision- und Agentenadoptionsplan](repoground-vision-and-agent-adoption.md)
+ordnet die nächsten **praktischen** Arbeiten: P0 echte Bündelverfügbarkeit und nachweisbare
+Nutzung durch Grabowski/Claude/Codex, P1 vorhandenes deterministisches Retrieval wirksam
+machen, danach revisionsgebundene Change Intelligence, Föderation und Zeitgeschichte.
+
+Er ist **kein** Ersatz für die Phasen-/Contract-Arbeit dieses Dokuments und
+**keine** alternative Statusautorität. Priorität, Freigaben und Done-Zustände
+werden bei der tatsächlichen Abarbeitung anhand der jeweils aktuellen Primärquellen,
+Tests und kanonischen Task-ID bestätigt. Keine breite Feature-Arbeit vor P0-/Nutzennachweis.
+
 ## Statuswahrheit
 
 - Kanonische Taskstatus: `docs/tasks/index.json`.

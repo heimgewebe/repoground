@@ -48,6 +48,31 @@ For coding, review, or repository-maintenance work, use this order:
 
 Stop without mutation when the current revision, task/claim, lease ownership, or required evidence cannot be established. A RepoGround context pass does not establish correctness, test sufficiency, merge readiness, runtime health, or permission to deploy.
 
+## Using RepoGround as an actual agent tool (phased adoption)
+
+The [RepoGround vision and agent adoption plan](docs/roadmap/repoground-vision-and-agent-adoption.md)
+prioritizes an **operationally available, measurable** consumer path before expanding feature breadth.
+For suitable code navigation, PR review, test selection, change-impact or source-grounding tasks:
+
+1. Bind the actual repository revision and worktree state from Git. Check that a unique,
+   healthy and relevant RepoGround publication and read-only tool are **currently** available.
+   Do not infer a live bundle from the presence of an MCP config file or old docs.
+2. When available, prefer bounded task-profile retrieval or symbol/range tools for relevant
+   evidence and carry their precise source/revision into the task. Do not mistake a
+   derived navigation result for canonical content or current runtime truth.
+3. When missing, stale, ambiguous, or forbidden, explicitly mark RepoGround unavailable
+   and use normal Git, file-search and required primary-source checks. Optional retrieval
+   unavailability must not invent a new global stop gate or weaken an existing safety gate.
+4. For pilot evaluation, distinguish a **real tool invocation and useful evidence** from
+   "tool connected" or an agent's self-report. Compare end-to-end coding outcomes and costs
+   with the normal non-RepoGround workflow. Avoid snapshot-freshness-only self-benchmarks.
+5. Do not assume this repo's AGENTS.md configures Claude, Codex, or Grabowski elsewhere.
+   Their host/repository consumers require their own bounded, reviewed integration PRs
+   with actual readback receipts.
+
+This remains a non-agentic, deterministic read surface. RepoGround does not approve
+patches, tests, merges, releases, or deployments.
+
 ## RepoGround CLI Client vs Service Launcher
 
 `merger/repoground/cli/serve.py` is the RepoGround service entry point / launcher.
