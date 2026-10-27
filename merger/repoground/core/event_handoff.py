@@ -231,8 +231,9 @@ def publish_event(
     if not repo.is_dir():
         raise EventInputError("repository_not_found")
     out = _target(Path(outbox_root), repo)
-    if not out.exists():
-        out.mkdir(parents=True, mode=0o700)
+    # Two authenticated publishers can arrive before this outbox exists. The
+    # first creator must not make the second fail before the shared flock.
+    out.mkdir(parents=True, mode=0o700, exist_ok=True)
     if out.is_symlink():
         raise EventInputError("outbox_root_symlink")
     key_material = {

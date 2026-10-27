@@ -2,6 +2,7 @@
 import hashlib
 import json
 from pathlib import Path
+from threading import Barrier
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -305,3 +306,27 @@ def test_timing_tamper_is_rejected_on_consumer_read(tmp_path):
     path.write_text(json.dumps(forged), encoding="utf-8")
     with pytest.raises(EventInputError, match="outbox_receipt_timing_mismatch"):
         read_event_receipt(outbox_root=out, event_key=made["event_key"])
+
+
+def test_concurrent_first_outbox_creation_does_not_fail_before_flock(tmp_path, monkeypatch):
+    repo, base, head = seeded_repo(tmp_path)
+    out = tmp_path / "new-outbox"
+    barrier = Barrier(2)
+    original_mkdir = Path.mkdir
+
+    def simultaneous_mkdir(self, *args, **kwargs):
+        if self == out:
+            barrier.wait(timeout=6)
+        return original_mkdir(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "mkdir", simultaneous_mkdir)
+    same_event = event(base, head, id="simultaneous-first-delivery")
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        receipts = list(pool.map(
+            lambda _: publish_event(event=same_event, repo_root=repo, outbox_root=out),
+            range(2),
+        ))
+    assert sorted(item["status"] for item in receipts) == ["deduplicated", "published"]
+    assert len(report_files(out)) == 1
+    assert receipts[0]["event_key"] == receipts[1]["event_key"]
+    assert git(repo, "status", "--porcelain") == ""
