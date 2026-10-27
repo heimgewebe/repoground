@@ -155,3 +155,42 @@ merge readiness or deployed code was made.
 The two real consumers have now been exercised independently, but
 **they have not yet consumed the final merged #1357/#1358/#1360 code**.
 Fresh post-Captain readbacks remain mandatory.
+
+## Additional current-head P2: no recovery worktree accumulation
+
+The post-P1/P2 source received Codex review thread
+`PRRT_kwDOP0INTM6w1UEo`: when the canonical managed
+revision worktree is dirty, the unchanged Fleet polling path could
+create one new recovery checkout *per timer tick* but did not prune
+previous clean and unleased recoveries. This is material storage
+and lifetime drift, not just presentation.
+
+The same original #1360 branch now uses
+`_unchanged_authenticated_event_with_prune()` to invoke
+the **existing** `prune_obsolete_revision_source_worktrees()`
+policy in the unchanged path, including when authentication is blocked.
+That policy removes only verified clean, idle, unleased revision
+source worktrees; it preserves dirty canonical checkouts and reports
+unsafe candidates. The result includes a bounded prune receipt and
+increments the existing `prune_failed` warning counter.
+No new cleanup or retention authority was introduced.
+
+RED→GREEN regression uses real disposable Git worktrees:
+`test_unchanged_dirty_checkout_prunes_previous_clean_recovery`
+asserts that two consecutive polls retain the dirty canonical
+checkout unchanged, remove the *prior* disposable recovery and
+retain at most one new disposable recovery. The test covers
+authentication-blocked replays as well.
+
+Fresh tests after this P2 correction:
+- Focused source/events tests: **31 passed**, exit 0.
+- Ruff: **pass**.
+- Whole RepoGround Python suite: **6151 passed, 12 skipped,
+  4 independently reproduced unchanged-main baseline failures
+  deselected**, exit 0 in 250.51 s. Grabowski task
+  `27e7e23fab7f4184935b6337`, stdout
+  SHA-256 `220c4c3b83723f9bb2a75c1cf35e3f7080c3ecc972101d15fe587bf26bc250db`.
+
+No production unit was restarted, publisher-installed source
+was not switched, and the review-thread closure still requires
+an exact newly published PR head.

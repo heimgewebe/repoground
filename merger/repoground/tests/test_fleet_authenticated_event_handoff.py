@@ -274,3 +274,50 @@ def test_anonymous_or_invalid_identity_fails_before_event_publication(
     assert result["status"] == "blocked"
     assert result["reason"] == "authenticated_github_principal_invalid"
     assert not outbox(m, entry).exists()
+
+
+def test_unchanged_dirty_checkout_prunes_previous_clean_recovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Hourly unchanged polls must not accumulate disposable full worktrees."""
+    m = module()
+    repo, _base, head = seeded_repo(tmp_path)
+    entry = SimpleNamespace(
+        owner="heimgewebe", repo="demorepo",
+        key="heimgewebe/demorepo", path=repo,
+    )
+    monkeypatch.setattr(m, "SOURCE_ROOT", tmp_path / "managed-sources")
+    monkeypatch.setattr(m, "STATE_ROOT", tmp_path / "managed-fleet-state")
+    canonical = m.ensure_source_worktree(entry, "main", head)
+    # Never reset or delete the canonical source with valuable dirty data.
+    dirty = canonical / "operator-untracked.txt"
+    dirty.write_text("preserve me", encoding="utf-8")
+    monkeypatch.setattr(
+        m, "_attempt_authenticated_fleet_handoff",
+        lambda *args, **kwargs: {"status": "blocked", "reason": "api_unavailable"},
+    )
+
+    def unchanged() -> dict:
+        return m._unchanged_authenticated_event_with_prune(
+            entry, ref_segment="main", source_sha=head,
+            manifest_path=None,
+        )
+
+    first = unchanged()
+    assert first["authenticated_events"]["status"] == "blocked"
+    first_recoveries = list(m.SOURCE_ROOT.glob("*--recovery-*"))
+    assert len(first_recoveries) == 1
+
+    second = unchanged()
+    assert second["authenticated_events"]["status"] == "blocked"
+    assert second["prune_failed"] is False
+    assert first_recoveries[0].exists() is False
+    current_recoveries = list(m.SOURCE_ROOT.glob("*--recovery-*"))
+    assert len(current_recoveries) == 1
+    assert current_recoveries[0] != first_recoveries[0]
+    assert str(first_recoveries[0]) in second["source_worktree_prune"]["removed"]
+    assert canonical.exists() and dirty.read_text() == "preserve me"
+    assert any(
+        row["path"] == str(canonical)
+        for row in second["source_worktree_prune"]["preserved"]
+    )

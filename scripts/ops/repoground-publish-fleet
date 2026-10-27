@@ -6289,6 +6289,38 @@ def _attempt_authenticated_fleet_handoff(
         return {"status": "blocked", "reason": str(exc)[:200]}
 
 
+
+def _unchanged_authenticated_event_with_prune(
+    entry: RepoEntry, *, ref_segment: str, source_sha: str,
+    manifest_path: str | None,
+) -> dict[str, object]:
+    """Reuse normal bounded revision-worktree cleanup after unchanged polls.
+
+    A dirty canonical checkout may need a clean recovery worktree. Never
+    reset the dirty source; prune only clean, idle and unleased *older*
+    recovery worktrees through the already established publisher policy.
+    This cleanup also runs when an authenticated event is blocked.
+    """
+    current = ensure_source_worktree(entry, ref_segment, source_sha)
+    event_result = _attempt_authenticated_fleet_handoff(
+        entry, source_sha=source_sha,
+        source_wt=current, manifest_path=manifest_path,
+    )
+    try:
+        prune_report = prune_obsolete_revision_source_worktrees(
+            entry, ref_segment, current,
+        )
+        prune_failed = False
+    except Exception as exc:
+        prune_report = {"status": "warn", "error": str(exc)[:2000]}
+        prune_failed = True
+    return {
+        "authenticated_events": event_result,
+        "source_worktree_prune": prune_report,
+        "prune_failed": prune_failed,
+    }
+
+
 def publish(
     entry: RepoEntry,
     *,
@@ -6820,13 +6852,17 @@ def main(argv: list[str]) -> int:
                     try:
                         if not state or state.get("source_commit") != source_sha:
                             raise RuntimeError("unchanged_event_source_not_current")
-                        source_wt = ensure_source_worktree(
-                            entry, ref_segment, source_sha
-                        )
-                        event_result = _attempt_authenticated_fleet_handoff(
-                            entry, source_sha=source_sha, source_wt=source_wt,
+                        outcome = _unchanged_authenticated_event_with_prune(
+                            entry, ref_segment=ref_segment,
+                            source_sha=source_sha,
                             manifest_path=state.get("manifest_path"),
                         )
+                        event_result = outcome["authenticated_events"]
+                        unchanged_detail["source_worktree_prune"] = outcome[
+                            "source_worktree_prune"
+                        ]
+                        if outcome["prune_failed"]:
+                            prune_failed += 1
                     except (RuntimeError, ValueError, OSError) as exc:
                         event_result = {"status": "blocked", "reason": str(exc)[:200]}
                     unchanged_detail["authenticated_events"] = event_result
