@@ -124,6 +124,18 @@ class TestDeclaredRelations(unittest.TestCase):
         self.assertEqual("file:schemas/base.json", legitimate[0]["dst"])
         self.assertEqual("S1", legitimate[0]["evidence_level"])
 
+
+    def test_percent_encoded_schema_path_remains_unproven(self):
+        self.write("schemas/base schema.json", '{"type":"object"}\n')
+        self.write("schemas/base%20schema.json", '{"type":"object"}\n')
+        self.write("schemas/encoded.json", '{"$ref":"base%20schema.json"}\n')
+        edges, _ = self.projection()
+        own = [e for e in edges if e["src"] == "file:schemas/encoded.json"]
+        self.assertEqual(1, len(own), own)
+        self.assertEqual("S0", own[0]["evidence_level"])
+        self.assertEqual("unresolved", own[0]["resolution_status"])
+        self.assertNotEqual("file:schemas/base%20schema.json", own[0]["dst"])
+
     def test_jsx_child_text_cannot_become_s1_function_or_import(self):
         self.write("web/util.js", "export const value = 1;\n")
         for suffix in ("jsx", "tsx"):
