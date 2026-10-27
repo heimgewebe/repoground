@@ -438,6 +438,8 @@ def _compose_edges(path: str, source: str) -> list[dict[str, Any]]:
 
 
 def _edges_for_source(path: str, source: str, known: set[str]) -> list[dict[str, Any]]:
+    from merger.repoground.architecture.static_config_links import config_reference_edges
+
     suffix = PurePosixPath(path).suffix.lower()
     if suffix in _JS_SUFFIXES:
         return _js_edges(path, source, known) + _js_function_edges(path, source)
@@ -446,8 +448,8 @@ def _edges_for_source(path: str, source: str, known: set[str]) -> list[dict[str,
     if suffix == ".json":
         return _json_edges(path, source, known)
     if suffix in {".yaml", ".yml"}:
-        return _compose_edges(path, source)
-    return []
+        return _compose_edges(path, source) + config_reference_edges(path, source, known)
+    return config_reference_edges(path, source, known)
 
 
 def extract_declared_relations(
@@ -481,8 +483,13 @@ def extract_declared_relations(
     files = sorted(
         _safe_path(node["path"]) for node in nodes
         if isinstance(node, dict) and node.get("kind") == "file"
-        and isinstance(node.get("path"), str) and PurePosixPath(node["path"]).suffix.lower()
-        in (*_JS_SUFFIXES, ".nix", ".json", ".yaml", ".yml")
+        and isinstance(node.get("path"), str) and (
+            PurePosixPath(node["path"]).suffix.lower()
+            in (*_JS_SUFFIXES, ".nix", ".json", ".yaml", ".yml", ".md",
+                ".sh", ".bash", ".zsh", ".service", ".socket", ".target",
+                ".timer", ".path", ".caddy")
+            or PurePosixPath(node["path"]).name == "Caddyfile"
+        )
     )
     root_resolved = repo_root.resolve()
     emitted: list[dict[str, Any]] = []
@@ -535,6 +542,9 @@ def extract_declared_relations(
         "does_not_establish": [
             "runtime_dependencies", "parser_completeness", "schema_pointer_validity",
             "installed_packages", "running_compose_services",
+            "markdown_anchor_validity", "github_actions_execution",
+            "shell_source_working_directory", "installed_systemd_units",
+            "caddy_import_expansion",
         ],
     }
     return edges, coverage

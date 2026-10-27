@@ -39,7 +39,16 @@ _DEFAULT_MAX_GRAPH_FILES = _HARD_MAX_GRAPH_FILES
 _DEFAULT_MAX_GRAPH_SOURCE_BYTES = _HARD_MAX_GRAPH_SOURCE_BYTES
 
 _GRAPH_FILE_LANGUAGES = {
+    ".bash": "shell",
+    ".caddy": "caddy",
     ".cjs": "javascript",
+    ".path": "systemd",
+    ".service": "systemd",
+    ".sh": "shell",
+    ".socket": "systemd",
+    ".target": "systemd",
+    ".timer": "systemd",
+    ".zsh": "shell",
     ".js": "javascript",
     ".mjs": "javascript",
     ".nix": "nix",
@@ -56,6 +65,13 @@ _GRAPH_FILE_LANGUAGES = {
     ".yaml": "yaml",
     ".yml": "yaml",
 }
+
+
+def _graph_inventory_language(file_path: Path) -> str | None:
+    """Central file classifier for the graph and Git-head source verifier."""
+    if file_path.name == "Caddyfile":
+        return "caddy"
+    return _GRAPH_FILE_LANGUAGES.get(file_path.suffix.lower())
 
 
 class SourceRootError(ValueError):
@@ -145,7 +161,7 @@ def _scan_graph_source_files(repo_root: Path) -> tuple[list[Path], list[Path]]:
                 if ".github" not in root_parts:
                     python_files.append(file_path)
                 continue
-            if suffix not in _GRAPH_FILE_LANGUAGES:
+            if _graph_inventory_language(file_path) is None:
                 continue
             if filename.lower().endswith(".graph.json"):
                 continue
@@ -236,12 +252,15 @@ def _inventory_file_node(repo_root: Path, file_path: Path) -> Node | None:
         logger.warning("Could not stat graph file %s: %s", relative_path, exc)
         return None
     node_id = f"file:{relative_path}"
+    language = _graph_inventory_language(file_path)
+    if language is None:
+        return None
     return {
         "node_id": node_id,
         "kind": "file",
         "path": relative_path,
         "repo": "",
-        "language": _GRAPH_FILE_LANGUAGES[file_path.suffix.lower()],
+        "language": language,
         "layer": _infer_layer(relative_path),
         "is_test": _is_test_file(relative_path),
         "size_bytes": size_bytes,

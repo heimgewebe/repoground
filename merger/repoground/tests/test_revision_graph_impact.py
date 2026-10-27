@@ -192,6 +192,30 @@ class TestRevisionGraphImpact(unittest.TestCase):
                 repo_root=self.root, base_sha=self.head, head_sha=new_head,
             )
 
+    def test_ignored_caddyfile_is_not_revision_bound_s0_evidence(self):
+        exclude = self.root / ".git" / "info" / "exclude"
+        exclude.write_text("Caddyfile\n", encoding="utf-8")
+        self.write("Caddyfile", "import ./untracked.caddy\n")
+        self.assertEqual("", self.git("status", "--porcelain").strip())
+        with self.assertRaisesRegex(ValueError, "ignored_source_not_in_head"):
+            self.report()
+
+    def test_tracked_caddyfile_symlink_cannot_claim_git_tree_bytes(self):
+        outside = self.root.parent / f"{self.root.name}-external-caddy"
+        outside.write_text("import ./untracked.caddy\n", encoding="utf-8")
+        self.addCleanup(outside.unlink)
+        try:
+            (self.root / "Caddyfile").symlink_to(outside)
+        except OSError as exc:
+            self.skipTest(str(exc))
+        self.git("add", "Caddyfile")
+        self.commit("tracked config symlink")
+        head = self.git("rev-parse", "HEAD").strip()
+        with self.assertRaisesRegex(ValueError, "tracked_source_symlink_untrusted"):
+            compile_revision_impact(
+                repo_root=self.root, base_sha=self.head, head_sha=head,
+            )
+
     def test_s0_candidate_call_involving_changed_symbol_is_reported(self):
         from merger.repoground.core.revision_graph_impact import _impact_from_relations
 
