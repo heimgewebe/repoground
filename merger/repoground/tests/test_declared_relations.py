@@ -235,6 +235,49 @@ class TestDeclaredRelations(unittest.TestCase):
         self.assertEqual(["file:bar.nix"], [item["dst"] for item in imports])
         self.assertTrue(all(item["evidence_level"] == "S1" for item in imports))
 
+    def test_schema_id_may_rebase_and_must_not_claim_wrong_file(self):
+        self.write("schemas/base.json", '{"type":"object"}\n')
+        self.write("schemas/nested/base.json", '{"type":"object"}\n')
+        self.write("schemas/consumer.json", (
+            '{"$id":"nested/consumer.json","$ref":"base.json"}\n'
+        ))
+        self.write("schemas/scoped.json", (
+            '{"properties":{"inner":{"$id":"nested/inner.json","$ref":"base.json"}}}\n'
+        ))
+        edges, _ = self.projection()
+        hits = [
+            row for row in edges if row["relation"] == "declares_contract"
+            and row["src"] in {"file:schemas/consumer.json", "file:schemas/scoped.json"}
+        ]
+        self.assertEqual(2, len(hits))
+        for edge in hits:
+            self.assertEqual("S0", edge["evidence_level"])
+            self.assertEqual("unresolved", edge["resolution_status"])
+            self.assertNotEqual("file:schemas/base.json", edge["dst"])
+
+    def test_js_regex_quotes_do_not_consume_real_symbols_or_imports(self):
+        self.write("web/util.js", "export const x = 1;\n")
+        self.write("web/consumer.js", (
+            "const quote = /\"/;\n"
+            "const cls = /[\"']+/;\n"
+            "const escaped = /a\\/b/;\n"
+            "export function real() {}\n"
+            "import './util';\n"
+            "real();\n"
+        ))
+        edges, _ = self.projection()
+        own = [row for row in edges if row["src"] == "file:web/consumer.js"]
+        self.assertTrue(any(
+            row["relation"] == "defines"
+            and row["dst"] == "js:web/consumer.js:function:real:L4" for row in own
+        ))
+        self.assertTrue(any(
+            row["relation"] == "imports"
+            and row["dst"] == "file:web/util.js"
+            and row["evidence_level"] == "S1" for row in own
+        ))
+        self.assertEqual(1, len([row for row in own if row["relation"] == "calls"]))
+
     def test_output_bytes_and_file_limits_deterministic(self):
         self.write("a.ts", "import './unknown';\n")
         self.write("b.ts", "import './unknown';\n")

@@ -95,6 +95,41 @@ def _masked(text: str) -> list[str]:
     return ["\n" if char == "\n" else " " for char in text]
 
 
+_JS_REGEX_CONTEXT = re.compile(r"\b(?:return|throw|case|yield)\s*$")
+
+
+def _js_regex_end(source: str, start: int) -> int | None:
+    """Recognize a bounded regular-expression token only in expression-start context.
+
+    Division and regex are grammar-ambiguous without a JS parser. Restrict this
+    to common unambiguous lexical positions; other syntax remains unproven.
+    """
+    before = source[max(0, start - 100):start].rstrip()
+    if not before or (
+        before[-1] not in "=([{:,!?"
+        and _JS_REGEX_CONTEXT.search(before) is None
+    ):
+        return None
+    index = start + 1
+    inside_class = False
+    while index < len(source) and source[index] not in "\r\n":
+        char = source[index]
+        if char == "\\":
+            index += 2
+            continue
+        if char == "[":
+            inside_class = True
+        elif char == "]":
+            inside_class = False
+        elif char == "/" and not inside_class:
+            index += 1
+            while index < len(source) and source[index].isalpha():
+                index += 1
+            return index
+        index += 1
+    return None
+
+
 def _js_sources(source: str) -> tuple[list[str], list[str]]:
     """Mask comments and strings in one ordered lexical pass.
 
@@ -120,6 +155,13 @@ def _js_sources(source: str) -> tuple[list[str], list[str]]:
             literals[index:comment_end] = _masked(source[index:comment_end])
             index = comment_end
             continue
+        if source[index] == "/":
+            regex_end = _js_regex_end(source, index)
+            if regex_end is not None:
+                syntax[index:regex_end] = _masked(source[index:regex_end])
+                literals[index:regex_end] = _masked(source[index:regex_end])
+                index = regex_end
+                continue
         quote = source[index]
         if quote in ("'", '"', chr(96)):
             end = index + 1
@@ -267,11 +309,26 @@ def _resolve_schema_ref(
     return "schema-ref:" + ref, "unresolved", []
 
 
+def _schema_has_id_scope(value: Any) -> bool:
+    """Any nested $id may rebase refs; S1 requires modeled URI scope."""
+    remaining = [value]
+    while remaining:
+        entry = remaining.pop()
+        if isinstance(entry, dict):
+            if "$id" in entry:
+                return True
+            remaining.extend(entry.values())
+        elif isinstance(entry, list):
+            remaining.extend(entry)
+    return False
+
+
 def _json_edges(path: str, source: str, known: set[str]) -> list[dict[str, Any]]:
     try:
-        json.loads(source)
+        schema = json.loads(source)
     except (ValueError, RecursionError):
         return []
+    has_id_scope = _schema_has_id_scope(schema)
     result: list[dict[str, Any]] = []
     for match in _JSON_REF.finditer(source):
         ref = json.loads('"' + match.group("ref") + '"')
@@ -282,11 +339,14 @@ def _json_edges(path: str, source: str, known: set[str]) -> list[dict[str, Any]]
             target, status, candidates = "contract-pointer:" + path + ref, "unresolved", []
         else:
             target, status, candidates = _resolve_schema_ref(path, ref, known)
+        if has_id_scope and status == "resolved":
+            candidates = [target]
+            target, status = "schema-ref:" + ref, "unresolved"
         line = source.count("\n", 0, match.start()) + 1
         result.append(_edge(
             "declares_contract", "file:" + path, target, _source(path, line, line),
             status, "S1" if status == "resolved" else "S0", "json_schema_declared_ref",
-            candidates=candidates if status == "ambiguous" else None,
+            candidates=candidates if status in {"ambiguous", "unresolved"} and has_id_scope else None,
         ))
     return result
 
