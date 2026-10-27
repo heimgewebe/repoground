@@ -375,3 +375,53 @@ def test_inherited_git_environment_cannot_write_traces_or_inject_settings(tmp_pa
     assert all("GIT_TRACE2_EVENT" not in env for env in spy)
     assert all("GIT_CONFIG_COUNT" not in env for env in spy)
     assert all(env["GIT_NO_LAZY_FETCH"] == "1" for env in spy)
+
+
+def test_repo_signature_config_cannot_execute_gpg_program_during_read(tmp_path):
+    """The fixture proves the local Git config would execute a program absent the override."""
+    repo, commits = create_repo(tmp_path)
+    unsigned_commit = subprocess.run(
+        ["git", "-C", str(repo), "cat-file", "commit", commits[-1]],
+        capture_output=True, check=True,
+    ).stdout
+    header, delimiter, message = unsigned_commit.partition(b"\n\n")
+    assert delimiter
+    signature = (
+        b"\ngpgsig -----BEGIN PGP SIGNATURE-----\n"
+        b" Version: disposable fixture\n"
+        b" \n"
+        b" invalid-test-signature\n"
+        b" -----END PGP SIGNATURE-----"
+    )
+    signed = subprocess.run(
+        ["git", "-C", str(repo), "hash-object", "-t", "commit", "-w", "--stdin"],
+        input=header + signature + delimiter + message,
+        capture_output=True, check=True,
+    ).stdout.decode().strip()
+    assert len(signed) == 40
+    marker = tmp_path / "signature-executed"
+    program = tmp_path / "fixture-gpg"
+    program.write_text(
+        "#!/bin/sh\n"
+        f"printf 'invoked' > '{marker}'\n"
+        "exit 1\n",
+        encoding="utf-8",
+    )
+    program.chmod(0o700)
+    git(repo, "config", "log.showSignature", "true")
+    git(repo, "config", "gpg.program", str(program))
+
+    # Prove the test setup really can invoke gpg.program in ordinary Git.
+    subprocess.run(
+        ["git", "-C", str(repo), "show", "-s", "--format=%cI", signed],
+        capture_output=True, check=False, timeout=10,
+    )
+    assert marker.read_text(encoding="utf-8") == "invoked"
+    marker.unlink()
+
+    # RepoGround's read boundary must explicitly override repository settings.
+    snapshot = git_revision_view(repo, "fixture", signed)
+    assert snapshot["source_commit"] == signed
+    history = git_path_history(repo, "fixture", signed, "module.py")
+    assert history["history"][0]["commit"] == signed
+    assert not marker.exists()

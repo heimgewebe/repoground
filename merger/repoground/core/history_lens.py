@@ -180,7 +180,8 @@ def _git_read(repo: Path, *arguments: str, max_bytes: int = _MAX_GIT_BYTES) -> b
     })
     proc = subprocess.Popen(
         ["git", "--no-optional-locks", "-c", "core.hooksPath=/dev/null",
-         "-c", "diff.external=", "-C", str(repo), *arguments],
+         "-c", "diff.external=", "-c", "log.showSignature=false",
+         "-C", str(repo), *arguments],
         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL, env=env, start_new_session=True,
     )
