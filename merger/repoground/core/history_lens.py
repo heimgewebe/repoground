@@ -376,10 +376,12 @@ def git_revision_delta(repository: Path, repo_id: str, base: str, head: str) -> 
                 else "git_tree_mode_comparison"
             ),
         })
+    attempted_python_files = 0
     for p in (p for p in changed if p.endswith(".py") and before.get(p) != after.get(p)):
-        if len(symbol_changes) >= _MAX_SYMBOL_FILES:
+        if attempted_python_files >= _MAX_SYMBOL_FILES:
             gaps.append("python_ast_file_limit")
             break
+        attempted_python_files += 1
         old_names = _symbol_names(root, before[p]) if p in before else []
         new_names = _symbol_names(root, after[p]) if p in after else []
         if old_names is None or new_names is None:

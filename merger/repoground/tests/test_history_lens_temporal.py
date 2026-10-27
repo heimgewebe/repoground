@@ -316,3 +316,34 @@ def test_large_blob_stdout_budget_kills_and_reaps_git_process(tmp_path, monkeypa
     assert processes and processes[0].poll() is not None
     assert 250_000 < sum(bytes_read) <= 250_001
     assert sum(bytes_read) < 20 * 1024 * 1024
+
+
+def test_python_analysis_limit_counts_attempts_not_successful_symbols(tmp_path, monkeypatch):
+    from merger.repoground.core import history_lens
+
+    repo, revisions = create_repo(tmp_path)
+    base = revisions[-1]
+    for index in range(30):
+        (repo / f"bad_{index:02d}.py").write_text("def invalid(\n", encoding="utf-8")
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "30 invalid Python blob additions")
+    head = git(repo, "rev-parse", "HEAD")
+
+    attempted = []
+    original = history_lens._symbol_names
+
+    def track(root, oid):
+        attempted.append(oid)
+        return original(root, oid)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(history_lens, "_symbol_names", track)
+        result = git_revision_delta(repo, "fixture", base, head)
+
+    assert result["status"] == "partial"
+    assert result["changed_files_observed"] == 30
+    assert len(result["file_changes"]) == 30
+    assert result["python_symbol_changes"] == []
+    assert len(attempted) == history_lens._MAX_SYMBOL_FILES == 20
+    assert "python_ast_file_limit" in result["gaps"]
+    assert len([x for x in result["gaps"] if x.startswith("python_ast_unavailable:")]) == 20
