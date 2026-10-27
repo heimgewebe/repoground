@@ -104,6 +104,29 @@ class TestRelationshipProjection(unittest.TestCase):
         else:
             jsonschema.validate(actual, schema)
 
+    def test_product_impact_neighborhood_reuses_relation_graph(self):
+        from merger.repoground.core.agent_impact_context import compile_structure_neighborhood
+
+        result = compile_structure_neighborhood(
+            symbol_id="py:pkg:consumer.py:function:run",
+            **self.sources(),
+        )
+        self.assertEqual("repobrief.structure_neighborhood", result["kind"])
+        self.assertTrue(any(edge["relation"] == "calls"
+                            and edge["src"] == "py:pkg:consumer.py:function:run"
+                            for edge in result["outgoing"]))
+        self.assertTrue(any(edge["relation"] == "tests"
+                            and edge["dst"] == "py:pkg:consumer.py:function:run"
+                            for edge in result["incoming"]))
+        self.assertEqual(result["canonical_dump_index_sha256"], "a" * 64)
+        self.assertFalse(result["truncated"])
+        with self.assertRaisesRegex(ValueError, "max_items"):
+            compile_structure_neighborhood(
+                symbol_id="py:pkg:consumer.py:function:run",
+                max_items=0,
+                **self.sources(),
+            )
+
     def test_bounded_edges_and_invalid_ranges(self):
         docs = self.sources()
         result = project_relationships(**docs, max_edges=1)
