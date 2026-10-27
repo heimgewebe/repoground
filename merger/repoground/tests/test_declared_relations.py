@@ -141,6 +141,60 @@ class TestDeclaredRelations(unittest.TestCase):
         self.assertEqual({"declared-service:compose.yaml:api", "declared-service:compose.yaml:worker"},
                          {e["dst"] for e in compose})
 
+    def test_nix_import_does_not_promote_function_arguments_or_nested_attrs(self):
+        for name in ("gui", "config", "hidden"):
+            self.write(f"modules/{name}.nix", "{ ... }: {}\n")
+        self.write("flake.nix", (
+            "imports = [\n"
+            "  ./modules/gui.nix\n"
+            "  { path = ./modules/hidden.nix; }\n"
+            "];\n"
+            "value = import ./modules/config.nix { foo = ./modules/hidden.nix; };\n"
+            "other.imports = [ ./modules/hidden.nix ];\n"
+        ))
+        edges, _ = self.projection()
+        relations = [e for e in edges if e["src"] == "file:flake.nix"]
+        self.assertEqual({"file:modules/gui.nix", "file:modules/config.nix"},
+                         {e["dst"] for e in relations})
+        self.assertTrue(all(e["evidence_level"] == "S1" for e in relations))
+
+    def test_schema_bare_relative_filename_and_no_guessed_json_suffix(self):
+        self.write("schemas/base.json", '{"type":"object"}\n')
+        self.write("schemas/actual.json", '{"$ref":"base.json#/$defs/A"}\n')
+        self.write("schemas/without_extension.json", '{"$ref":"./base"}\n')
+        self.write("schemas/remote.json", '{"$ref":"https://example.com/base.json"}\n')
+        edges, _ = self.projection()
+        refs = {e["src"]: e for e in edges if e["relation"] == "declares_contract"}
+        self.assertEqual(("file:schemas/base.json", "S1"),
+                         (refs["file:schemas/actual.json"]["dst"],
+                          refs["file:schemas/actual.json"]["evidence_level"]))
+        self.assertEqual("S0", refs["file:schemas/without_extension.json"]["evidence_level"])
+        self.assertNotEqual("file:schemas/base.json",
+                            refs["file:schemas/without_extension.json"]["dst"])
+        self.assertEqual("S0", refs["file:schemas/remote.json"]["evidence_level"])
+
+    def test_escaped_multiline_js_string_does_not_define_or_import(self):
+        self.write("web/util.ts", "export const value = 1;\n")
+        self.write("web/main.ts", (
+            "const text = \"header\\\n"
+            "import './util';\\\n"
+            "function fake() { }\\\n"
+            "footer\";\n"
+            "export function real() { return 1; }\n"
+            "real();\n"
+            "import './util';\n"
+        ))
+        edges, _ = self.projection()
+        own = [edge for edge in edges if edge["src"] == "file:web/main.ts"]
+        definitions = [e for e in own if e["relation"] == "defines"]
+        imports = [e for e in own if e["relation"] == "imports"]
+        calls = [e for e in own if e["relation"] == "calls"]
+        self.assertEqual(["js:web/main.ts:function:real:L5"], [d["dst"] for d in definitions])
+        self.assertEqual(1, len(imports), imports)
+        self.assertEqual("file:web/util.ts", imports[0]["dst"])
+        self.assertEqual(1, len(calls))
+        self.assertEqual("S0", calls[0]["evidence_level"])
+
     def test_output_bytes_and_file_limits_deterministic(self):
         self.write("a.ts", "import './unknown';\n")
         self.write("b.ts", "import './unknown';\n")

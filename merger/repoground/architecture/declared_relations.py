@@ -66,13 +66,12 @@ def _resolve_local(
 
 
 def _js_edges(path: str, source: str, known: set[str]) -> list[dict[str, Any]]:
-    clean = _JS_TRIVIA.sub(_mask, source)
-    lines = clean.splitlines()
+    syntax_lines, source_lines = _js_sources(source)
     result: list[dict[str, Any]] = []
-    for ordinal, line in enumerate(lines):
+    for ordinal, line in enumerate(syntax_lines):
         if not line.lstrip().startswith(("import ", "export ")):
             continue
-        candidate = "\n".join(lines[ordinal : ordinal + 8])
+        candidate = "\n".join(source_lines[ordinal : ordinal + 8])
         match = _JS_DECLARATION.match(candidate)
         if match is None:
             continue
@@ -95,7 +94,19 @@ _JS_FUNCTION = re.compile(
     r"(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)\s*\("
 )
 _JS_CALL = re.compile(r"(?<![.\w$])(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)\s*\(")
-_JS_STRING = re.compile(r"""'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*" """ .strip())
+_JS_STRING = re.compile(r"""'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*" """ .strip(), re.DOTALL)
+
+
+def _js_sources(source: str) -> tuple[list[str], list[str]]:
+    """Separate syntax eligibility from import-specifier extraction.
+
+    A quoted continued string is not an import/function declaration, even when
+    its middle line begins with those tokens. Keep actual import string values
+    in the second projection only after a syntax-eligible line is established.
+    """
+    syntax = _JS_TRIVIA.sub(_mask, _JS_STRING.sub(_mask, source))
+    with_literals = _JS_TRIVIA.sub(_mask, source)
+    return syntax.splitlines(), with_literals.splitlines()
 
 
 def _js_function_edges(path: str, source: str) -> list[dict[str, Any]]:
@@ -104,8 +115,7 @@ def _js_function_edges(path: str, source: str) -> list[dict[str, Any]]:
     This conservative lexer does not model JS lexical scopes, overloads, dynamic
     dispatch or TypeScript type semantics; calls remain S0 even for one candidate.
     """
-    clean = _JS_TRIVIA.sub(_mask, source)
-    lines = clean.splitlines()
+    lines, _ = _js_sources(source)
     declarations: dict[str, list[str]] = {}
     declaration_lines: set[int] = set()
     edges: list[dict[str, Any]] = []
@@ -126,8 +136,7 @@ def _js_function_edges(path: str, source: str) -> list[dict[str, Any]]:
     for ordinal, line in enumerate(lines, 1):
         if ordinal in declaration_lines:
             continue
-        without_strings = _JS_STRING.sub(_mask, line)
-        for match in _JS_CALL.finditer(without_strings):
+        for match in _JS_CALL.finditer(line):
             name = match.group("name")
             candidates = declarations.get(name)
             if not candidates:
@@ -143,31 +152,88 @@ def _js_function_edges(path: str, source: str) -> list[dict[str, Any]]:
     return edges
 
 
+_NIX_DIRECT_IMPORT = re.compile(
+    r"(?<![\w.])import\s+(?P<ref>\.{1,2}/[A-Za-z0-9_./-]+\.nix)(?![\w])"
+)
+_NIX_IMPORTS_START = re.compile(r"^\s*imports\s*=\s*\[")
+_NIX_LIST_CONTENT = re.compile(r"\s*(?:(?:\.{1,2}/[A-Za-z0-9_./-]+\.nix)\s*)*")
+
+
+def _nix_literal_edge(
+    path: str, ref: str, ordinal: int, known: set[str],
+) -> dict[str, Any]:
+    target, status, options = _resolve_local(
+        path, ref, known, extensions=(".nix",),
+    )
+    return _edge(
+        "imports", "file:" + path, target, _source(path, ordinal, ordinal),
+        status, "S1" if status == "resolved" else "S0", "nix_literal_import",
+        candidates=options if status == "ambiguous" else None,
+    )
+
+
 def _nix_edges(path: str, source: str, known: set[str]) -> list[dict[str, Any]]:
+    """Only lexical import arguments and plain imports-list path items are S1.
+
+    Attribute values supplied to import, nested expressions and arbitrary
+    sibling paths are not themselves imports. Complex list expressions not
+    proven to consist solely of paths remain outside the S1 projection.
+    """
     clean = _NIX_TRIVIA.sub(_mask, source)
-    result: list[dict[str, Any]] = []
-    within_imports = False
-    lines_in_list = 0
+    edges: list[dict[str, Any]] = []
+    list_active = False
+    list_lines = 0
     for ordinal, line in enumerate(clean.splitlines(), 1):
-        if re.search(r"^\s*imports\s*=\s*\[", line):
-            within_imports = True
-            lines_in_list = 0
-        active = bool(re.search(r"\bimport\s+", line)) or within_imports
-        if active:
-            for match in _NIX_LITERAL.finditer(line):
-                target, status, options = _resolve_local(
-                    path, match.group("ref"), known, extensions=(".nix",),
-                )
-                result.append(_edge(
-                    "imports", "file:" + path, target, _source(path, ordinal, ordinal),
-                    status, "S1" if status == "resolved" else "S0", "nix_literal_import",
-                    candidates=options if status == "ambiguous" else None,
-                ))
-        if within_imports:
-            lines_in_list += 1
-            if "]" in line or lines_in_list >= 50:
-                within_imports = False
-    return result
+        for direct in _NIX_DIRECT_IMPORT.finditer(line):
+            edges.append(_nix_literal_edge(path, direct.group("ref"), ordinal, known))
+        start = _NIX_IMPORTS_START.search(line)
+        if start is not None:
+            list_active = True
+            list_lines = 0
+            content = line[start.end():]
+        elif list_active:
+            content = line
+        else:
+            continue
+        # A closing bracket ends the recognized lexical list. Expressions
+        # containing attribute sets, calls or nested brackets are not scanned
+        # for S1 imports merely because they mention a path.
+        element_text = content.split("]", 1)[0]
+        if _NIX_LIST_CONTENT.fullmatch(element_text):
+            for match in _NIX_LITERAL.finditer(element_text):
+                edges.append(_nix_literal_edge(path, match.group("ref"), ordinal, known))
+        list_lines += 1
+        if "]" in content or list_lines >= 50:
+            list_active = False
+    return list({edge["id"]: edge for edge in edges}.values())
+
+
+_URI_SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
+
+
+def _resolve_schema_ref(
+    source_path: str, ref: str, known: set[str],
+) -> tuple[str, str, list[str]]:
+    """Resolve exactly the URI path component, never JS extension search."""
+    filename = ref.split("#", 1)[0]
+    if not filename:
+        return "contract-pointer:" + source_path + ref, "unresolved", []
+    if (
+        _URI_SCHEME.match(filename)
+        or filename.startswith("/")
+        or "\\" in filename
+        or "\x00" in filename
+        or "?" in filename
+    ):
+        return "schema-ref:" + ref, "unresolved", []
+    basedir = str(PurePosixPath(source_path).parent)
+    resolved = posixpath.normpath(posixpath.join(basedir, filename))
+    if resolved.startswith(("../", "/")) or resolved == "..":
+        return "schema-ref:" + ref, "unresolved", []
+    candidate = "file:" + resolved
+    if candidate in known:
+        return candidate, "resolved", [candidate]
+    return "schema-ref:" + ref, "unresolved", []
 
 
 def _json_edges(path: str, source: str, known: set[str]) -> list[dict[str, Any]]:
@@ -184,9 +250,7 @@ def _json_edges(path: str, source: str, known: set[str]) -> list[dict[str, Any]]
         if not file_ref:
             target, status, candidates = "contract-pointer:" + path + ref, "unresolved", []
         else:
-            target, status, candidates = _resolve_local(
-                path, file_ref, known, extensions=(".json",),
-            )
+            target, status, candidates = _resolve_schema_ref(path, ref, known)
         line = source.count("\n", 0, match.start()) + 1
         result.append(_edge(
             "declares_contract", "file:" + path, target, _source(path, line, line),
