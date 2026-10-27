@@ -42,6 +42,27 @@ Example event **shape** only, not a verified real webhook (40 lowercase hex comm
 
 A `ci.completed` event additionally needs `check_id` and `ci_conclusion`. The CI conclusion is **publisher-supplied metadata, not independently verified status**. The Git SHA names actual local commit objects, and the handler fails closed when a commit is missing, an event has changed identity, or the diff/report exceeds limits.
 
+## Agent-visible read-only receipt lookup
+
+Once an authorized publisher has generated an event receipt and passed its
+SHA-256 `event_key`, any separately authorized local consumer can retrieve
+**exactly that receipt** without running Git, creating a lockfile, refreshing
+a bundle or writing to the outbox:
+
+```bash
+python scripts/repoground-event-handoff.py \
+  --outbox-root /absolute/managed/publisher/outbox \
+  --read-event-key <64-lowercase-hex-event-key>
+```
+
+The response includes the stored Evidence Pack, event source, SHA-256
+`receipt_sha256`, and explicit freshness and authorization limits. The
+reader validates event-key identity, input-event digest, stored Evidence Pack
+digest and the base/target revision binding. Unknown keys return unavailable;
+invalid or tampered receipts fail closed. The publisher alone owns writes.
+In the isolated source lane this behavior is covered by three additional tests;
+the updated focused combined event test suite passed **69 tests**.
+
 ## Dedup, concurrency and provenance
 
 A canonical SHA-256 event identity is formed from event type, delivery ID and declared repository. The complete input event has a separate SHA-256; reusing the same identity with different input is an explicit conflict. The same event replay returns the identical persisted receipt with status `deduplicated`. Different event IDs are different events; this layer does not infer semantic equivalence from Git commit or content.
@@ -70,7 +91,7 @@ The implementation uses two **clean isolated Git branches**, not main:
 - Complete repository pytest run in an initially incomplete ephemeral Nix test environment: **6077 passed, 47 failed, 12 skipped**. Of those, 43 of the failures disappeared when the exact missing format validator (`rfc3339-validator`), Python `ruff`, and other test dependencies were provisioned and the seven affected test files re-ran (**547 passed, 4 failed**).
 - The **remaining four failures also reproduce on clean unchanged main** with the same Nix test environment: one malformed-input symlink diagnostic, two fleet worktree smudge-filter fixtures whose subprocess PATH lacks `sed`, and one `latest_complete` symlink/validation error-category mismatch. These are baseline/environment failures, not demonstrated regressions introduced by this branch. **A completely green full suite and GitHub CI have not been established**.
 
-Publishing both feature branches was attempted through Grabowski's guarded `branch-publish` action. The default `origin` is HTTPS and is rejected by the SSH-only push policy. A same-repository SSH remote passed identity preflight, but the **explicit hardened Grabowski GitHub writer key** was rejected by GitHub (`Permission denied (publickey)`). The user's ordinary SSH identity authenticated, but **using that identity as a bypass is prohibited**. No branch was pushed, no PR was opened, no merge occurred. Repair or authorize the **dedicated writer-key trust** before publishing and running real PR CI. Avoid global SSH/Git policy relaxation. The temporary additional SSH remote is a shared-config artifact and must be reconciled under its current path lease without interfering with other parallel RepoGround lanes.
+Publishing both feature branches was attempted through Grabowski's guarded `branch-publish` action. The default `origin` is HTTPS and is rejected by the SSH-only push policy. A same-repository SSH remote passed identity preflight, but publication returned `Permission denied (publickey)`. **Subsequent primary-evidence checks contradicted the initial diagnosis that the dedicated key was unregistered:** GitHub's public account keys include the exact dedicated key fingerprint, the private key unlocks without a passphrase, and a direct probe using the complete hardened SSH flags authenticated successfully. A concurrently changing, shared `.git/config` with another lane's separately leased temporary SSH remote creates an unresolved publication/transport race; the failed receipt does **not** prove a credential defect. No Thread 3 branch has been verified published. Preserve the SSH-only security gate and repair the publication path using a separate stable exact remote lease after parallel publication work completes; do not reuse another lane's remote or weaken SSH.
 
 Großer Adler's read-only Git observation does not constitute a completed independent code review. Gegner's countercheck endpoint returned HTTP 429; no successful independent countercheck is claimed.
 

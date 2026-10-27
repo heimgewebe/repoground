@@ -19,6 +19,7 @@ from merger.repoground.core.event_handoff import (  # noqa: E402
     _check_event,
     MAX_EVENT_BYTES,
     publish_event,
+    read_event_receipt,
 )
 
 MAX_BATCH_EVENTS = 16
@@ -28,15 +29,30 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Publisher-only, bounded, idempotent Git/CI event evidence handoff",
     )
-    parser.add_argument("--repo-root", required=True)
+    parser.add_argument("--repo-root", help="Required only for authorized event publication")
     parser.add_argument("--outbox-root", required=True)
     parser.add_argument("--bundle-manifest", help="Existing published bundle, never refresh")
-    parser.add_argument("--event-file", required=True, help="UTF-8 JSON object or bounded JSONL")
+    operation = parser.add_mutually_exclusive_group(required=True)
+    operation.add_argument("--event-file", help="UTF-8 JSON object or bounded JSONL (write-side)")
+    operation.add_argument("--read-event-key", help="SHA-256 event receipt key (read-only)")
+
     parser.add_argument("--format", choices=("json", "jsonl"), default="json")
     parser.add_argument("--max-events", type=int, default=16)
     parser.add_argument("--budget-tokens", type=int, default=1200)
     args = parser.parse_args(argv)
 
+    if args.read_event_key is not None:
+        try:
+            result = read_event_receipt(
+                outbox_root=args.outbox_root, event_key=args.read_event_key,
+            )
+        except (EventInputError, OSError, ValueError) as exc:
+            print(json.dumps({"status": "invalid", "error": str(exc)}, sort_keys=True), file=sys.stderr)
+            return 2
+        print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+        return 0 if result.get("status") == "available" else 2
+    if args.repo_root is None:
+        parser.error("--repo-root required for publishing events")
     if not 1 <= args.max_events <= MAX_BATCH_EVENTS:
         parser.error("max-events must be between 1 and 16")
     path = Path(args.event_file)

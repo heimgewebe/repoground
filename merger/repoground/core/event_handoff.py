@@ -102,7 +102,50 @@ def _read_receipt(path: Path) -> dict[str, Any]:
     digest = receipt.get("evidence_pack_sha256")
     if not isinstance(embedded, dict) or hashlib.sha256(_canonical(embedded)).hexdigest() != digest:
         raise EventInputError("outbox_receipt_integrity_failure")
+    event = _check_event(receipt.get("event"))
+    identity = {key: event[key] for key in ("event_type", "event_id", "repository")}
+    if receipt.get("event_key") != hashlib.sha256(_canonical(identity)).hexdigest():
+        raise EventInputError("outbox_receipt_event_key_mismatch")
+    if receipt.get("event_payload_sha256") != hashlib.sha256(_canonical(event)).hexdigest():
+        raise EventInputError("outbox_receipt_event_payload_mismatch")
+    revision = embedded.get("revision")
+    if not isinstance(revision, dict) or any(
+        revision.get(field) != event[source]
+        for field, source in (("base", "base_revision"), ("target", "target_revision"))
+    ):
+        raise EventInputError("outbox_receipt_revision_mismatch")
     return receipt
+
+
+def read_event_receipt(
+    *, outbox_root: str | Path, event_key: str
+) -> dict[str, Any]:
+    """Bounded evidence consumer, never creates outbox, snapshot or lockfiles.
+
+    An event key is a SHA-256 from an authorized publisher receipt. It cannot
+    select a path outside the outbox; no event identifiers become path strings.
+    """
+    if not isinstance(event_key, str) or re.fullmatch(r"[0-9a-f]{64}", event_key) is None:
+        raise EventInputError("invalid_event_key")
+    root = Path(outbox_root).expanduser().absolute()
+    if root.is_symlink() or not root.is_dir():
+        return {"status": "unavailable", "reason": "outbox_not_available"}
+    path = root / f"event-{event_key}.json"
+    if not path.exists() and not path.is_symlink():
+        return {"status": "unavailable", "reason": "event_not_found", "event_key": event_key}
+    receipt = _read_receipt(path)
+    if receipt.get("event_key") != event_key:
+        raise EventInputError("outbox_receipt_event_key_mismatch")
+    return {
+        "kind": KIND, "version": VERSION, "status": "available",
+        "event_key": event_key, "receipt": receipt,
+        "receipt_sha256": hashlib.sha256(_canonical(receipt)).hexdigest(),
+        "read_only": True, "does_not_establish": [
+            "publisher_authenticity", "github_event_authenticity",
+            "ci_conclusion_authenticity", "current_git_freshness",
+            "review_verdict", "test_sufficiency", "merge_authorization",
+        ],
+    }
 
 
 def publish_event(

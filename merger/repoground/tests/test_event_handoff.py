@@ -12,6 +12,7 @@ from merger.repoground.core.event_handoff import (
     EventIdentityConflict,
     EventInputError,
     publish_event,
+    read_event_receipt,
 )
 from merger.repoground.tests.test_agent_evidence_pack import seeded_repo, git, manifest
 
@@ -168,3 +169,48 @@ def test_cli_invalid_later_event_does_not_publish_earlier(tmp_path):
     assert completed.returncode == 2
     assert "unsupported_event_fields" in completed.stderr
     assert not out.exists()
+
+
+def test_read_only_event_receipt_is_exact_and_no_new_files(tmp_path):
+    repo, base, head = seeded_repo(tmp_path)
+    out = tmp_path / "outbox"
+    published = publish_event(event=event(base, head), repo_root=repo, outbox_root=out)
+    assert published["status"] == "published"
+    prior = {p.name: p.read_bytes() for p in out.iterdir() if p.is_file()}
+    result = read_event_receipt(outbox_root=out, event_key=published["event_key"])
+    assert result["status"] == "available"
+    assert result["read_only"] is True
+    assert result["receipt"]["evidence_pack"]["revision"]["target"] == head
+    assert result["receipt_sha256"] == hashlib.sha256(
+        json.dumps(result["receipt"], sort_keys=True,
+                   separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+    assert {p.name: p.read_bytes() for p in out.iterdir() if p.is_file()} == prior
+    script = Path(__file__).resolve().parents[3] / "scripts" / "repoground-event-handoff.py"
+    command = [sys.executable, str(script), "--outbox-root", str(out),
+               "--read-event-key", published["event_key"]]
+    process = subprocess.run(command, capture_output=True, text=True, check=True)
+    payload = json.loads(process.stdout)
+    assert payload["receipt_sha256"] == result["receipt_sha256"]
+    assert {p.name: p.read_bytes() for p in out.iterdir() if p.is_file()} == prior
+
+
+def test_unavailable_event_read_does_not_create_outbox(tmp_path):
+    out = tmp_path / "absent-outbox"
+    result = read_event_receipt(outbox_root=out, event_key="f" * 64)
+    assert result["status"] == "unavailable"
+    assert not out.exists()
+    with pytest.raises(EventInputError, match="invalid_event_key"):
+        read_event_receipt(outbox_root=out, event_key="../passwd")
+
+
+def test_receipt_tamper_event_identity_rejected_even_if_pack_digest_unchanged(tmp_path):
+    repo, base, head = seeded_repo(tmp_path)
+    out = tmp_path / "outbox"
+    result = publish_event(event=event(base, head), repo_root=repo, outbox_root=out)
+    path = Path(result["receipt_path"])
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["event"]["event_id"] = "tampered-event"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(EventInputError, match="event_key_mismatch"):
+        read_event_receipt(outbox_root=out, event_key=result["event_key"])
