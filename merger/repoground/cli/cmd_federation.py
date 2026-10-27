@@ -124,6 +124,58 @@ def _parse_pinned_targets(values: list[str]) -> dict[str, tuple[Path, str]]:
     return targets
 
 
+
+_TEMPORAL_COMMANDS = frozenset({
+    "revision", "delta", "path-history", "relations", "relation-delta", "history-events",
+})
+
+
+def _temporal_federation_output(args: argparse.Namespace) -> dict:
+    """Read-only, commit-pinned Thread-2 operations; no Git refresh or publisher effects."""
+    if args.federation_command == "revision":
+        from merger.repoground.retrieval.federation_query import query_federation_revision
+
+        return query_federation_revision(Path(args.repo_root), args.repo_id, args.commit)
+    if args.federation_command == "delta":
+        from merger.repoground.retrieval.federation_query import query_federation_delta
+
+        return query_federation_delta(Path(args.repo_root), args.repo_id, args.base, args.head)
+    if args.federation_command == "path-history":
+        from merger.repoground.core.history_lens import git_path_history
+
+        return git_path_history(Path(args.repo_root), args.repo_id, args.commit, args.path, limit=args.limit)
+    if args.federation_command == "relations":
+        from merger.repoground.retrieval.federation_query import query_federation_relations
+
+        return query_federation_relations(Path(args.metarepo_root), args.metarepo_commit,
+                                          _parse_pinned_targets(args.target))
+    if args.federation_command == "relation-delta":
+        from merger.repoground.retrieval.federation_query import query_federation_relation_delta
+
+        return query_federation_relation_delta(
+            Path(args.metarepo_root), args.base_metarepo_commit, args.head_metarepo_commit,
+            _parse_pinned_targets(args.target_before), _parse_pinned_targets(args.target_after),
+        )
+    from merger.repoground.core.history_lens import bind_external_history
+
+    if len(args.events_json) > 50000:
+        raise ValueError("external evidence request exceeds limit")
+    events = json.loads(args.events_json)
+    if not isinstance(events, list):
+        raise ValueError("external evidence must be a JSON list")
+    return bind_external_history(Path(args.repo_root), args.repo_id, args.commit, events, path=args.path)
+
+
+def _handle_temporal_command(args: argparse.Namespace) -> int:
+    try:
+        output = _temporal_federation_output(args)
+        print(json.dumps(output, sort_keys=True, indent=2))
+        return 0
+    except (ValueError, OSError, RuntimeError, TypeError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+
 def handle_federation_command(args: argparse.Namespace) -> int:
     """Dispatches federation commands to their respective handlers."""
     from merger.repoground.core.federation import init_federation
@@ -132,46 +184,8 @@ def handle_federation_command(args: argparse.Namespace) -> int:
     from merger.repoground.core.federation import validate_federation
 
 
-    if args.federation_command in ("revision", "delta", "path-history", "relations", "relation-delta", "history-events"):
-        try:
-            if args.federation_command == "revision":
-                from merger.repoground.retrieval.federation_query import query_federation_revision
-                output = query_federation_revision(Path(args.repo_root), args.repo_id, args.commit)
-            elif args.federation_command == "delta":
-                from merger.repoground.retrieval.federation_query import query_federation_delta
-                output = query_federation_delta(Path(args.repo_root), args.repo_id, args.base, args.head)
-            elif args.federation_command == "path-history":
-                from merger.repoground.core.history_lens import git_path_history
-                output = git_path_history(Path(args.repo_root), args.repo_id, args.commit,
-                                          args.path, limit=args.limit)
-            elif args.federation_command == "relations":
-                from merger.repoground.retrieval.federation_query import query_federation_relations
-                output = query_federation_relations(
-                    Path(args.metarepo_root), args.metarepo_commit,
-                    _parse_pinned_targets(args.target),
-                )
-            elif args.federation_command == "relation-delta":
-                from merger.repoground.retrieval.federation_query import query_federation_relation_delta
-                output = query_federation_relation_delta(
-                    Path(args.metarepo_root), args.base_metarepo_commit,
-                    args.head_metarepo_commit,
-                    _parse_pinned_targets(args.target_before),
-                    _parse_pinned_targets(args.target_after),
-                )
-            else:
-                from merger.repoground.core.history_lens import bind_external_history
-                if len(args.events_json) > 50000:
-                    raise ValueError("external evidence request exceeds limit")
-                events = json.loads(args.events_json)
-                if not isinstance(events, list):
-                    raise ValueError("external evidence must be a JSON list")
-                output = bind_external_history(Path(args.repo_root), args.repo_id,
-                                               args.commit, events, path=args.path)
-            print(json.dumps(output, sort_keys=True, indent=2))
-            return 0
-        except (ValueError, OSError, RuntimeError, TypeError) as exc:
-            print(f"Error: {exc}", file=sys.stderr)
-            return 1
+    if args.federation_command in _TEMPORAL_COMMANDS:
+        return _handle_temporal_command(args)
 
     if args.federation_command == "init":
         out_path = Path(args.out)
@@ -206,13 +220,9 @@ def handle_federation_command(args: argparse.Namespace) -> int:
     elif args.federation_command == "validate":
         index_path = Path(args.index)
         try:
-            is_valid = validate_federation(index_path)
-            if is_valid:
-                print(f"Federation index at {index_path.as_posix()} is valid.")
-                return 0
-            else:
-                print(f"Federation index at {index_path.as_posix()} is invalid.", file=sys.stderr)
-                return 1
+            validate_federation(index_path)
+            print(f"Federation index at {index_path.as_posix()} is valid.")
+            return 0
         except Exception as e:
             print(f"Error: {e}", file=sys.stderr)
             return 1
