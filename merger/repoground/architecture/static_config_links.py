@@ -27,6 +27,10 @@ _YAML_BLOCK = re.compile(
 _YAML_PARENT = re.compile(
     r"^[ \t]*(?P<key>[A-Za-z_][\w.-]*):[ \t]*(?:#.*)?$"
 )
+_YAML_QUOTED_VALUE = re.compile(
+    r"""^[ \t]*(?:-[ \t]+)?[A-Za-z_][\w.-]*:[ \t]*(?P<quote>["'])"""
+)
+
 _SHELL_SOURCE = re.compile(
     r"""^\s*(?:source|\.)\s+(?P<ref>\.{1,2}/[A-Za-z0-9_./+-]+)(?:\s*(?:#.*)?)?$"""
 )
@@ -98,26 +102,29 @@ def _unproven(
     )
 
 
-def _without_inline_code(line: str) -> str:
-    """Mask paired Markdown inline code; unclosed spans suppress the whole line."""
-    output = list(line)
+def _without_inline_code(
+    line: str, open_width: int | None = None,
+) -> tuple[str, int | None]:
+    """Mask exact backtick runs across lines, retaining multiline span state."""
+    visible: list[str] = []
     marker = chr(96)
     index = 0
     while index < len(line):
         if line[index] != marker:
+            visible.append(" " if open_width is not None else line[index])
             index += 1
             continue
-        width = 1
-        while index + width < len(line) and line[index + width] == marker:
-            width += 1
-        terminator = marker * width
-        close = line.find(terminator, index + width)
-        if close < 0:
-            return ""
-        stop = close + width
-        output[index:stop] = list(_mask_span(line[index:stop]))
-        index = stop
-    return "".join(output)
+        end = index + 1
+        while end < len(line) and line[end] == marker:
+            end += 1
+        width = end - index
+        visible.extend(" " * width)
+        if open_width is None:
+            open_width = width
+        elif width == open_width:
+            open_width = None
+        index = end
+    return "".join(visible), open_width
 
 
 def _markdown_indented_code(line: str) -> bool:
@@ -144,6 +151,7 @@ def _markdown_edges(path: str, source: str, known: set[str]) -> list[dict[str, A
     edges: list[dict[str, Any]] = []
     fenced: tuple[str, int] | None = None
     in_html_code = False
+    inline_code_width: int | None = None
     for ordinal, line in enumerate(sanitized.splitlines(), 1):
         if _markdown_indented_code(line):
             continue
@@ -164,7 +172,7 @@ def _markdown_edges(path: str, source: str, known: set[str]) -> list[dict[str, A
             marks = fence.group("marks")
             fenced = marks[0], len(marks)
             continue
-        visible = _without_inline_code(line)
+        visible, inline_code_width = _without_inline_code(line, inline_code_width)
         for match in _MD_LINK.finditer(visible):
             ref = match.group("ref").removeprefix("<").removesuffix(">")
             if ref.startswith(("#", "/", "//")) or _URL_SCHEME.match(ref):
@@ -173,6 +181,22 @@ def _markdown_edges(path: str, source: str, known: set[str]) -> list[dict[str, A
                 path, ref, ordinal, known, artifact="markdown_literal_link",
             ))
     return edges
+
+
+def _yaml_quote_continues(line: str, quote: str, start: int = 0) -> bool:
+    """Detect a YAML quoted scalar that has not yet closed on this line."""
+    index = start
+    while index < len(line):
+        if quote == '"' and line[index] == "\\":
+            index += 2
+        elif line[index] == quote:
+            if quote == "'" and line[index:index + 2] == "''":
+                index += 2
+            else:
+                return False
+        else:
+            index += 1
+    return True
 
 
 def _yaml_uses_edges(path: str, source: str, known: set[str]) -> list[dict[str, Any]]:
@@ -184,8 +208,13 @@ def _yaml_uses_edges(path: str, source: str, known: set[str]) -> list[dict[str, 
         return []
     edges: list[dict[str, Any]] = []
     blocked_indent: int | None = None
+    quoted_scalar: str | None = None
     context: list[tuple[int, str]] = []
     for ordinal, line in enumerate(source.splitlines(), 1):
+        if quoted_scalar is not None:
+            if not _yaml_quote_continues(line, quoted_scalar):
+                quoted_scalar = None
+            continue
         if not line.strip() or line.lstrip().startswith("#"):
             continue
         indent = len(line) - len(line.lstrip(" \t"))
@@ -193,11 +222,23 @@ def _yaml_uses_edges(path: str, source: str, known: set[str]) -> list[dict[str, 
             if indent > blocked_indent:
                 continue
             blocked_indent = None
-        while context and context[-1][0] >= indent:
+        indentless_step = line.lstrip().startswith(("- ", "-\t"))
+        while context and (
+            context[-1][0] > indent
+            or (context[-1][0] == indent and not (
+                indentless_step and context[-1][1] == "steps"
+            ))
+        ):
             context.pop()
         block = _YAML_BLOCK.match(line)
         if block is not None:
             blocked_indent = len(block.group("indent"))
+            continue
+        quoted = _YAML_QUOTED_VALUE.match(line)
+        if quoted is not None and _yaml_quote_continues(
+            line, quoted.group("quote"), quoted.end(),
+        ):
+            quoted_scalar = quoted.group("quote")
             continue
         parent = _YAML_PARENT.match(line)
         if parent is not None:
