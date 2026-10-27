@@ -15,6 +15,7 @@ Git-Historie nachvollziehbar; die verbindliche Grenzentscheidung steht in
 - 📖 [Glossar](docs/glossary.md) · [FAQ](docs/FAQ.md)
 - 🗺️ [Systemkarte](docs/architecture/system-map.repoground.md) – Modul-Zusammenspiel
 - 🧭 [Master-Roadmap](docs/roadmap/repoground-master-roadmap.md) – Reihenfolge & Tracks
+- 🎯 [Vision und Agentenadoption](docs/roadmap/repoground-vision-and-agent-adoption.md) – ausführbarer P0–P4-Plan, echte Nutzungsmessung
 - 🤝 [CONTRIBUTING](CONTRIBUTING.md) · [CHANGELOG](CHANGELOG.md)
 
 ## Frei, offen und gemeinschaftlich
