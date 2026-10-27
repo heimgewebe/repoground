@@ -224,6 +224,22 @@ class TestDeclaredRelations(unittest.TestCase):
         self.assertEqual("S1", imports[0]["evidence_level"])
         self.assertEqual(5, imports[0]["source"]["start_line"])
 
+    def test_nix_nested_quoted_interpolation_cannot_invent_s1_imports(self):
+        self.write("foo.nix", "{ ... }: {}\n")
+        self.write("flake.nix", (
+            '{ text = "outer ${"inner\n'
+            '  import ./foo.nix\n'
+            '"} end";\n'
+            '  real = import ./foo.nix;\n'
+            '}\n'
+        ))
+        edges, _ = self.projection()
+        imports = [e for e in edges if e["src"] == "file:flake.nix"]
+        self.assertEqual(1, len(imports), imports)
+        self.assertEqual("S1", imports[0]["evidence_level"])
+        self.assertEqual("file:foo.nix", imports[0]["dst"])
+        self.assertEqual(4, imports[0]["source"]["start_line"])
+
     def test_nix_literals_are_linked_but_strings_and_comments_skipped(self):
         self.write("modules/gui.nix", "{ ... }: { }\n")
         self.write("flake.nix", (
