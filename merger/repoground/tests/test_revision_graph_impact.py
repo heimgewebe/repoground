@@ -242,6 +242,56 @@ class TestRevisionGraphImpact(unittest.TestCase):
             {x["path"] for x in report["expected_checks"]},
         )
 
+    def test_subdirectory_must_not_shift_git_relative_symbol_paths(self):
+        with self.assertRaisesRegex(ValueError, "repository_root_must_be_worktree_toplevel"):
+            compile_revision_impact(
+                repo_root=self.root / "schemas",
+                base_sha=self.base, head_sha=self.head,
+            )
+        self.assertEqual(self.head, self.git("rev-parse", "HEAD").strip())
+
+    def test_deleted_function_must_not_claim_incoming_calls_absent(self):
+        self.write("mod.py", "")
+        self.git("add", "mod.py")
+        self.commit("delete function but retain referencing callers")
+        head = self.git("rev-parse", "HEAD").strip()
+        report = compile_revision_impact(
+            repo_root=self.root, base_sha=self.head, head_sha=head,
+        )
+        self.assertTrue(any(
+            item.get("symbol_id") == "py:mod.py:function:feature"
+            and item["basis"] == "base"
+            for item in report["directly_changed"]
+        ))
+        self.assertIn(
+            "deleted_symbol_incoming_relations_not_analyzed",
+            {gap["reason"] for gap in report["gaps"]},
+        )
+        self.assertIn("complete_blast_radius", report["does_not_establish"])
+
+    def test_oversized_unchanged_schema_truncation_propagates(self):
+        self.write(
+            "schemas/huge.json",
+            '{"$ref":"./core.json","padding":"' + "x" * 260_000 + '"}\n',
+        )
+        self.git("add", "schemas/huge.json")
+        self.commit("oversized but tracked schema source")
+        before = self.git("rev-parse", "HEAD").strip()
+        self.write("schemas/core.json", '{"type":"object","title":"Further edit"}\n')
+        self.git("add", "schemas/core.json")
+        self.commit("edit target referenced by oversized schema")
+        head = self.git("rev-parse", "HEAD").strip()
+        result = compile_revision_impact(
+            repo_root=self.root, base_sha=before, head_sha=head,
+        )
+        self.assertEqual("truncated", result["status"])
+        self.assertTrue(result["coverage"]["truncated"])
+        self.assertTrue(result["coverage"]["graph"]["declared_source_coverage"]["truncated"])
+        self.assertIn(
+            "producer_graph_coverage_truncated",
+            {gap["reason"] for gap in result["gaps"]},
+        )
+
     def test_bounded_impact_and_verified_report_contract(self):
         report = self.report(max_items=1)
         self.assertTrue(report["coverage"]["truncated"])

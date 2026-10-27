@@ -347,6 +347,9 @@ def compile_revision_graph_impact(
     root = Path(repo_root).resolve()
     if not root.is_dir():
         raise ValueError("repository_root_unavailable")
+    top_level = _git(root, ["rev-parse", "--show-toplevel"], max_bytes=4096)
+    if Path(top_level.decode("utf-8").strip()).resolve() != root:
+        raise ValueError("repository_root_must_be_worktree_toplevel")
     identity = _identity(root, base_sha, head_sha)
     _source_inventory_safe(root)
     diff = _git(
@@ -378,6 +381,20 @@ def compile_revision_graph_impact(
         max_edges=250_000,
     )
     proven, unresolved, relevant_tests = _impact_from_relations(context["edges"], ids, paths)
+    head_ids = {item["id"] for item in symbols}
+    removed_ids = ids - head_ids
+    if removed_ids:
+        gaps.append({
+            "reason": "deleted_symbol_incoming_relations_not_analyzed",
+            "count": len(removed_ids), "evidence_level": "S0",
+        })
+    graph_coverage = context["coverage"]
+    source_truncated = bool(
+        graph_coverage.get("producer_repository_truncated")
+        or graph_coverage.get("declared_source_coverage", {}).get("truncated")
+    )
+    if source_truncated:
+        gaps.append({"reason": "producer_graph_coverage_truncated", "evidence_level": "S0"})
     for message in symbol_errors:
         gaps.append({"reason": "symbol_parse_skipped", "detail": message, "evidence_level": "S0"})
     if symbol_skip_count > len(symbol_errors):
@@ -394,6 +411,7 @@ def compile_revision_graph_impact(
     truncated = (
         any(len(records) > max_items for records in (direct, proven, unresolved, gaps, relevant_tests))
         or bool(context["coverage"]["truncated"])
+        or source_truncated
     )
     return {
         "kind": KIND, "version": VERSION,
