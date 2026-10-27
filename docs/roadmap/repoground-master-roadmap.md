@@ -9,17 +9,18 @@ Leitlinien:
 - Keine Implementierung in diesem PR.
 - Keine Blaupausen-Megafusion.
 
-## Strategische Anschlussplanung ab 27.10.2026
+## Verbindlicher Ausbau-Beschluss ab 27.10.2026
 
-Der [ausführbare RepoGround-Vision- und Agentenadoptionsplan](repoground-vision-and-agent-adoption.md)
-ordnet die nächsten **praktischen** Arbeiten: P0 echte Bündelverfügbarkeit und nachweisbare
-Nutzung durch Grabowski/Claude/Codex, P1 vorhandenes deterministisches Retrieval wirksam
-machen, danach revisionsgebundene Change Intelligence, Föderation und Zeitgeschichte.
+Die [massive RepoGround-Ausbau-Roadmap](repoground-massive-expansion-program.md) ist **ab jetzt die maßgebliche strategische Arbeitsreihenfolge**. Der Nutzer beauftragt die weitreichende Weiterentwicklung des deterministischen Struktur-, Veränderungs-, Zeit- und Föderationskerns **vor** einer abschließenden, groß angelegten Agenten-Nutzenbewertung.
 
-Er ist **kein** Ersatz für die Phasen-/Contract-Arbeit dieses Dokuments und
-**keine** alternative Statusautorität. Priorität, Freigaben und Done-Zustände
-werden bei der tatsächlichen Abarbeitung anhand der jeweils aktuellen Primärquellen,
-Tests und kanonischen Task-ID bestätigt. Keine breite Feature-Arbeit vor P0-/Nutzennachweis.
+Die bisherige Empfehlung „erst P0-Produktivität / 20 A/B-Aufgaben beweisen, dann breit implementieren“ aus der [älteren Vision und Agentenadoption](repoground-vision-and-agent-adoption.md) ist **als Prioritäts- und Start-Gate abgelöst**. Messungen und frühere Befunde bleiben historische Daten, keine neue Statuswahrheit. Unverändert gelten lokale Tests, Sicherheits-, CI-, Review-, PR-/Captain- und produktive Freigabeprüfungen.
+
+Genau drei disjunkte, branchisolierte Ausführungs-Threads:
+1. [Strukturgraph und Veränderungskern](repoground-expansion-thread-1-graph.md)
+2. [Föderation und technische Zeitgeschichte](repoground-expansion-thread-2-federation-time.md)
+3. [Agentenprodukt und Ereignisfluss](repoground-expansion-thread-3-consumers.md)
+
+Sie starten parallel mit bestehender Codebasis und Tests. Grabowski bleibt alleiniger Writer/Integrator, Großer Adler read-only. Nach der breiten Funktionsintegration folgt die große Wirksamkeitsmessung und gezielte Optimierung. Die strategische Roadmap ersetzt **keine** kanonischen Task-, GitHub-, CI- oder Runtimebelege.
 
 ## Statuswahrheit
 
