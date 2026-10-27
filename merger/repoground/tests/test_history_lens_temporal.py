@@ -347,3 +347,31 @@ def test_python_analysis_limit_counts_attempts_not_successful_symbols(tmp_path, 
     assert len(attempted) == history_lens._MAX_SYMBOL_FILES == 20
     assert "python_ast_file_limit" in result["gaps"]
     assert len([x for x in result["gaps"] if x.startswith("python_ast_unavailable:")]) == 20
+
+
+def test_inherited_git_environment_cannot_write_traces_or_inject_settings(tmp_path, monkeypatch):
+    from merger.repoground.core import history_lens
+
+    repo, commits = create_repo(tmp_path)
+    trace = tmp_path / "git-trace2.json"
+    spy = []
+    original = history_lens.subprocess.Popen
+
+    def tracked(*args, **kwargs):
+        spy.append(kwargs["env"])
+        return original(*args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setenv("GIT_TRACE2_EVENT", str(trace))
+        patch.setenv("GIT_CONFIG_COUNT", "1")
+        patch.setenv("GIT_CONFIG_KEY_0", "core.quotePath")
+        patch.setenv("GIT_CONFIG_VALUE_0", "false")
+        patch.setattr(history_lens.subprocess, "Popen", tracked)
+        result = git_revision_view(repo, "fixture", commits[-1])
+
+    assert result["status"] == "ok"
+    assert not trace.exists()
+    assert spy
+    assert all("GIT_TRACE2_EVENT" not in env for env in spy)
+    assert all("GIT_CONFIG_COUNT" not in env for env in spy)
+    assert all(env["GIT_NO_LAZY_FETCH"] == "1" for env in spy)

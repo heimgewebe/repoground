@@ -165,7 +165,10 @@ def _git_read(repo: Path, *arguments: str, max_bytes: int = _MAX_GIT_BYTES) -> b
     """Strictly bounded local Git read: no lazy fetch, unbounded pipe or shell."""
     if not isinstance(max_bytes, int) or not 1 <= max_bytes <= _MAX_GIT_BYTES:
         raise ValueError("Git read output budget is invalid")
-    env = os.environ.copy()
+    # Ignore inherited Git settings: GIT_TRACE2_EVENT can otherwise write a
+    # trace file during an allegedly effect-free read. GIT_CONFIG_* may also
+    # replace the intended deterministic source/configuration boundaries.
+    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
     env.update({
         "GIT_OPTIONAL_LOCKS": "0",
         "GIT_NO_REPLACE_OBJECTS": "1",
