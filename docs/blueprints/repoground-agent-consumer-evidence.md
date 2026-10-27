@@ -75,3 +75,26 @@ The first command must use the merge's **first parent**, not its second parent (
 ## Tests / still outstanding
 
 Focused pytest with Nix-provisioned Python packages: **67 passed** for new evidence including tracked test candidates, Git-only MCP fallback, project launcher, and unchanged MCP/context compiler cases. Ruff: **all checks passed**. Independent review, PR integration and live consumer-client acceptance are separate gates. Later Thread 3 waves will add explicit publisher-owned idempotent Git/CI event receipts; **the read-only evidence endpoint is not an event watcher**. Extensions from Threads 1 and 2 must consume their versioned response contracts rather than editing their internal modules.
+### Additional checks on the consumer branch
+
+On the updated consumer head after Git-based test matching and MCP fallback
+code changes, the **full RepoGround Python test suite** ran with an isolated
+Nix Python dependency environment and four documented main-baseline failures
+deselected. Result: **6115 passed, 12 skipped, 4 deselected**, 249.26 s.
+The four excluded cases had failed identically on unchanged clean `main`.
+This does not claim that every test passes without exceptions.
+
+A real subprocess invocation of the **project MCP launcher** (referenced by
+the tracked `.mcp.json` for Claude Code) completed JSON-RPC
+`initialize` -> `tools/list` -> `tools/call` against the existing
+RepoGround bundle and the actual merged PR #1351 Git diff. It advertised
+`change_evidence_pack` with `readOnlyHint=true`, returned five changed
+files, no write authority and `live_freshness=stale` for the newer checkout.
+This verifies the actual MCP protocol, not autonomous Claude Code model usage.
+
+The currently installed user Codex config points to an older RepoGround runtime
+but **does not pass `--repo-root`**, so it does not advertise the new
+Git-based evidence tool. The tracked Claude project launcher already passes
+the required argument. No shared user config or runtime was modified here;
+an authorized separate revision-bound consumer rollout remains necessary.
+Actual Codex and Claude model-invocation traces are still unverified.
