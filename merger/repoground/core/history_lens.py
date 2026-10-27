@@ -267,6 +267,26 @@ def git_revision_delta(repository: Path, repo_id: str, base: str, head: str) -> 
     old_sha, new_sha = _revision(root, base), _revision(root, head)
     before, limited_before = _git_tree(root, old_sha)
     after, limited_after = _git_tree(root, new_sha)
+    # An incomplete tree cannot prove that an absent path was removed. Do not
+    # emit fabricated added/removed edges from two truncated inventories.
+    if limited_before or limited_after:
+        return {
+            "kind": _TIMELINE_KIND, "version": "1", "operation": "delta",
+            "status": "partial", "repo_id": repo_id,
+            "base_commit": old_sha, "head_commit": new_sha,
+            "source_revision_time": {
+                "base_committer_reported": _git_read(root, "show", "-s", "--format=%cI", old_sha).decode().strip(),
+                "head_committer_reported": _git_read(root, "show", "-s", "--format=%cI", new_sha).decode().strip(),
+            },
+            "observation_time": None, "publication_time": None,
+            "changed_files_observed": None,
+            "file_changes": [], "python_symbol_changes": [],
+            "gaps": ["git_tree_incomplete_delta_omitted"],
+            "does_not_establish": [
+                "any_file_change", "absence_of_changes", "runtime_impact",
+                "canonical_dependency_resolution", "test_result", "causality"
+            ],
+        }
     changed = [
         p for p in sorted(before.keys() | after.keys()) if before.get(p) != after.get(p)
     ]

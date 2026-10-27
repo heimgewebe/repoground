@@ -112,3 +112,24 @@ def test_path_traversal_rejected_and_non_regular_entries_not_followed(tmp_path):
     assert result["status"] == "partial"
     assert "linked-secret" not in [x["path"] for x in result["artifacts"]]
     assert "NEVER_EXPOSE_ME" not in str(result)
+
+
+def test_incomplete_git_tree_does_not_claim_additions_or_deletions(tmp_path, monkeypatch):
+    from merger.repoground.core import history_lens
+
+    repo, commits = create_repo(tmp_path)
+    original = history_lens._git_tree
+
+    def incomplete(root, sha):
+        tree, _ = original(root, sha)
+        # Simulate an unseen suffix; no missing entry is proven absent.
+        return tree, True
+
+    monkeypatch.setattr(history_lens, "_git_tree", incomplete)
+    output = git_revision_delta(repo, "fixture", commits[0], commits[-1])
+    assert output["status"] == "partial"
+    assert output["changed_files_observed"] is None
+    assert output["file_changes"] == []
+    assert output["python_symbol_changes"] == []
+    assert "git_tree_incomplete_delta_omitted" in output["gaps"]
+    assert "absence_of_changes" in output["does_not_establish"]
