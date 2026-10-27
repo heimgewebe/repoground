@@ -167,3 +167,35 @@ these optional additive fields. No second clock, scheduler or registry is
 introduced. Targeted updated event/MCP tests: **76 passed**; Ruff PASS.
 Full-suite and GitHub CI validation remain tied to the eventual latest
 source/published revision.
+### Verified event timing source head and operator rehearsal
+
+Source commit `380aeb36` adds the optional delivery-timing and bundle
+revision-alignment projections. Against that exact source commit, the
+whole RepoGround Python suite passed **6130 tests**, with twelve skipped
+and the same four independently reproduced clean-main failures deselected,
+exit 0 in 256.30 seconds. The focused event/MCP/context tests passed
+**76 cases** and Ruff passed before the commit.
+
+Using read-only primary GitHub metadata for a real `pytest-full` check run
+ID `122076895109` (success, target
+`bf2ad72785c47ede4b8b94ce2215b07e4773877e`, completed
+`2026-10-27T08:06:54Z`), the operator manually submitted that exact
+check identifier and the actual publisher-side observation time to the
+event adapter. A disposable outbox produced one receipt and a duplicate
+readback for the exact same payload:
+
+- Event key: `e79e22bf40214bc30ff7beaeae17999416a184addc92a1efa7f53a08dc04eba5`.
+- Source timestamp (UTC Unix): `1793088414`.
+- Publisher observation timestamp (UTC Unix): `1793111282`.
+- Deterministic reported delivery lag: `22868` seconds, explicitly
+  `caller_supplied_unverified_timestamps`.
+- Bundle alignment: `matches_target_revision`, five changed files.
+- Exact-key receipt SHA-256:
+  `fb2ae73836e21b1905133c68598c19c4f9c655303cb134c9902e3b002fd96987`.
+- First action `published`, replay `deduplicated`, readback `available`.
+
+This proves the optional timing contract and idempotent code handoff
+against real GitHub metadata, **not a live authenticated webhook**.
+The outbox was ephemeral and removed; no publisher timer or deployment
+was changed. Existing Release-R3 coordination in Grabowski issue #1635
+continues to block publication of the local Thread 3 branches.
