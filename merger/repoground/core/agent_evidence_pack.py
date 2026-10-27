@@ -64,12 +64,28 @@ def _invalid(reason: str) -> dict[str, Any]:
     }
 
 
-def _bounded_git(root: Path, args: list[str], *, max_bytes: int = 131072) -> tuple[str | None, str | None]:
-    """Use only Git builtins without hooks, network access or index locking.
+def _bounded_git_stdout(pipe: Any, *, max_bytes: int) -> tuple[bytes | None, str | None]:
+    """Stream a finite Git response without allowing unbounded memory use."""
+    chunks = bytearray()
+    with selectors.DefaultSelector() as selector:
+        selector.register(pipe, selectors.EVENT_READ)
+        deadline = time.monotonic() + 15.0
+        while True:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                return None, "git_timeout"
+            if not selector.select(min(left, 0.25)):
+                continue
+            data = os.read(pipe.fileno(), 65536)
+            if not data:
+                return bytes(chunks), None
+            chunks.extend(data)
+            if len(chunks) > max_bytes:
+                return None, "git_output_limit"
 
-    Bounded pipe reads stop very large diffs without materializing them or writing
-    a temporary file. Commands are fixed by this module; no shell is involved.
-    """
+
+def _bounded_git(root: Path, args: list[str], *, max_bytes: int = 131072) -> tuple[str | None, str | None]:
+    """Use only fixed Git builtins without hooks, network, temporary files or index locks."""
     command = [
         "git", "-c", "core.hooksPath=/dev/null",
         "-c", "core.fsmonitor=false", "-c", "diff.external=",
@@ -77,38 +93,20 @@ def _bounded_git(root: Path, args: list[str], *, max_bytes: int = 131072) -> tup
     ]
     env = dict(os.environ, GIT_OPTIONAL_LOCKS="0", GIT_TERMINAL_PROMPT="0")
     process: subprocess.Popen[bytes] | None = None
-    chunks = bytearray()
-    error: str | None = None
     try:
         process = subprocess.Popen(
             command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             stdin=subprocess.DEVNULL, env=env,
         )
         assert process.stdout is not None
-        with selectors.DefaultSelector() as selector:
-            selector.register(process.stdout, selectors.EVENT_READ)
-            deadline = time.monotonic() + 15.0
-            while True:
-                left = deadline - time.monotonic()
-                if left <= 0:
-                    error = "git_timeout"
-                    break
-                ready = selector.select(min(left, 0.25))
-                if not ready:
-                    continue
-                data = os.read(process.stdout.fileno(), 65536)
-                if not data:
-                    break
-                chunks.extend(data)
-                if len(chunks) > max_bytes:
-                    error = "git_output_limit"
-                    break
+        raw, error = _bounded_git_stdout(process.stdout, max_bytes=max_bytes)
         if error:
             return None, error
         if process.wait(timeout=1) != 0:
             return None, "git_command_failed"
         try:
-            return bytes(chunks).decode("utf-8"), None
+            assert raw is not None
+            return raw.decode("utf-8"), None
         except UnicodeDecodeError:
             return None, "git_output_invalid_utf8"
     except (OSError, subprocess.TimeoutExpired):
@@ -159,33 +157,21 @@ MAX_TEST_CANDIDATES = 12
 MAX_TRACKED_PATHS_BYTES = 1_000_000
 
 
-def _test_candidates(
-    root: Path, target_revision: str, changed_paths: list[str],
-) -> tuple[list[dict[str, Any]], str | None]:
-    """Git-verified test filenames; naming correlation is NOT coverage evidence."""
-    source_paths = [
-        path for path in changed_paths
-        if path.endswith(".py")
-        and not Path(path).name.startswith("test_")
-        and not Path(path).name.endswith("_test.py")
-    ]
-    if not source_paths:
-        return [], None
-    tracked, error = _bounded_git(
-        root, ["ls-tree", "-r", "-z", "--name-only", target_revision, "--"],
-        max_bytes=MAX_TRACKED_PATHS_BYTES,
-    )
-    if error or tracked is None:
-        return [], "tracked_test_paths_unavailable"
+def _indexed_test_paths(tracked_paths: str) -> dict[str, list[str]]:
+    """Index only tracked Python test paths, never inferred filesystem files."""
     by_name: dict[str, list[str]] = {}
-    for relative in tracked.split("\0"):
+    for relative in tracked_paths.split("\0"):
         if not relative or relative.startswith("/") or ".." in Path(relative).parts:
             continue
         basename = Path(relative).name
-        if basename.startswith("test_") and basename.endswith(".py"):
+        if (basename.startswith("test_") and basename.endswith(".py")) or basename.endswith("_test.py"):
             by_name.setdefault(basename, []).append(relative)
-        elif basename.endswith("_test.py"):
-            by_name.setdefault(basename, []).append(relative)
+    return by_name
+
+
+def _matching_test_candidates(
+    source_paths: list[str], by_name: dict[str, list[str]],
+) -> tuple[list[dict[str, Any]], str | None]:
     candidates: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
     for changed in sorted(set(source_paths)):
@@ -208,6 +194,27 @@ def _test_candidates(
     return candidates, None
 
 
+def _test_candidates(
+    root: Path, target_revision: str, changed_paths: list[str],
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Git-verified test filenames; naming correlation is NOT coverage evidence."""
+    source_paths = [
+        path for path in changed_paths
+        if path.endswith(".py")
+        and not Path(path).name.startswith("test_")
+        and not Path(path).name.endswith("_test.py")
+    ]
+    if not source_paths:
+        return [], None
+    tracked, error = _bounded_git(
+        root, ["ls-tree", "-r", "-z", "--name-only", target_revision, "--"],
+        max_bytes=MAX_TRACKED_PATHS_BYTES,
+    )
+    if error or tracked is None:
+        return [], "tracked_test_paths_unavailable"
+    return _matching_test_candidates(source_paths, _indexed_test_paths(tracked))
+
+
 def _is_explicit_contract_path(path: str) -> bool:
     parts = Path(path).parts
     return "contracts" in parts or path.endswith((
@@ -216,84 +223,117 @@ def _is_explicit_contract_path(path: str) -> bool:
     ))
 
 
-def build_evidence_pack(
-    *,
-    repo_root: str | Path,
-    base_revision: str,
-    target_revision: str,
-    bundle_manifest: str | Path | None = None,
-    use_case: str = "explain-change",
-    context_budget_tokens: int = 1_200,
-    expected_diff_sha256: str | None = None,
-) -> dict[str, Any]:
-    """Build deterministic hints, not an interpretation or an execution order."""
+def _request_error(
+    use_case: str, context_budget_tokens: int, base_revision: str,
+    target_revision: str, expected_diff_sha256: str | None,
+) -> str | None:
+    """Reject ambiguous selectors before running any Git subprocess."""
     if use_case not in USE_CASES:
-        return _invalid("unknown_use_case")
+        return "unknown_use_case"
     if not isinstance(context_budget_tokens, int) or isinstance(context_budget_tokens, bool) or not 1 <= context_budget_tokens <= MAX_CONTEXT_TOKENS:
-        return _invalid("invalid_budget")
+        return "invalid_budget"
     if not isinstance(base_revision, str) or not _SHA40.fullmatch(base_revision):
-        return _invalid("base_must_be_exact_commit_sha")
+        return "base_must_be_exact_commit_sha"
     if not isinstance(target_revision, str) or not _SHA40.fullmatch(target_revision):
-        return _invalid("target_must_be_exact_commit_sha")
+        return "target_must_be_exact_commit_sha"
     if expected_diff_sha256 is not None and (not isinstance(expected_diff_sha256, str) or not _SHA64.fullmatch(expected_diff_sha256)):
-        return _invalid("invalid_expected_diff_sha256")
-    root = Path(repo_root).expanduser().resolve()
-    if not root.is_dir():
-        return _invalid("repository_not_found")
+        return "invalid_expected_diff_sha256"
+    return None
+
+
+def _diff_inventory_problem(
+    root: Path, base_revision: str, target_revision: str, parsed: dict[str, Any],
+) -> str | None:
+    """Do not let textual Git quotePath parsing silently omit changed files."""
+    raw_names, error = _bounded_git(
+        root, ["diff", "--no-ext-diff", "--no-textconv", "--no-renames",
+               "--name-only", "-z", base_revision, target_revision, "--"],
+        max_bytes=MAX_DIFF_BYTES,
+    )
+    if error or raw_names is None:
+        return "diff_path_inventory_unavailable"
+    if raw_names and not raw_names.endswith("\0"):
+        return "diff_path_inventory_invalid"
+    names = sorted(name for name in raw_names.split("\0") if name)
+    reported_names = sorted(str(item.get("path")) for item in parsed["files"])
+    if names != reported_names:
+        return "diff_paths_unresolved"
+    return None
+
+
+def _read_git_delta(
+    root: Path, base_revision: str, target_revision: str,
+    expected_diff_sha256: str | None,
+) -> tuple[tuple[str, str, dict[str, Any]] | None, str | None]:
     top, error = _bounded_git(root, ["rev-parse", "--show-toplevel"])
     if error or top is None or Path(top.strip()).resolve() != root:
-        return _invalid("not_exact_git_root")
+        return None, "not_exact_git_root"
     for commit in (base_revision, target_revision):
         resolved, error = _bounded_git(root, ["rev-parse", "--verify", f"{commit}^{{commit}}"])
         if error or resolved is None or resolved.strip() != commit:
-            return _invalid("unavailable_commit")
+            return None, "unavailable_commit"
     diff, error = _bounded_git(
         root, ["diff", "--no-ext-diff", "--no-textconv", "--no-renames",
                "--unified=3", base_revision, target_revision, "--"],
         max_bytes=MAX_DIFF_BYTES,
     )
     if error or diff is None:
-        return _invalid(error or "diff_unavailable")
+        return None, error or "diff_unavailable"
     diff_sha = hashlib.sha256(diff.encode("utf-8")).hexdigest()
     if expected_diff_sha256 is not None and expected_diff_sha256 != diff_sha:
-        return _invalid("diff_sha256_mismatch")
-
-    # The textual diff parser cannot reliably decode quoted Git path names
-    # (newlines, control characters, non-ASCII quotePath). Compare it with
-    # Git's NUL-delimited authoritative path inventory before making claims.
-    # Otherwise a mixed diff could silently omit a changed file.
-    raw_names, names_error = _bounded_git(
-        root, ["diff", "--no-ext-diff", "--no-textconv", "--no-renames",
-               "--name-only", "-z", base_revision, target_revision, "--"],
-        max_bytes=MAX_DIFF_BYTES,
-    )
-    if names_error or raw_names is None:
-        return _invalid("diff_path_inventory_unavailable")
-    if raw_names and not raw_names.endswith("\0"):
-        return _invalid("diff_path_inventory_invalid")
-    names = sorted(name for name in raw_names.split("\0") if name)
+        return None, "diff_sha256_mismatch"
     parsed = parse_unified_diff(diff)
     if not parsed["file_count"] or parsed.get("truncated"):
-        return _invalid("empty_or_truncated_diff")
-    reported_names = sorted(
-        str(item.get("path")) for item in parsed["files"]
-    )
-    if names != reported_names:
-        return _invalid("diff_paths_unresolved")
-    dirty, dirty_error = _bounded_git(root, ["status", "--porcelain", "--untracked-files=normal"])
-    worktree_state = "unknown" if dirty_error else ("dirty" if dirty else "clean")
-    bundle, gap_codes = _bundle_identity(bundle_manifest)
+        return None, "empty_or_truncated_diff"
+    problem = _diff_inventory_problem(root, base_revision, target_revision, parsed)
+    if problem:
+        return None, problem
+    return (diff, diff_sha, parsed), None
+
+
+def _bundle_revision_gaps(
+    bundle: dict[str, Any], worktree_state: str,
+    base_revision: str, target_revision: str,
+) -> list[str]:
+    codes: list[str] = []
     if worktree_state != "clean":
-        gap_codes.append("worktree_" + worktree_state)
+        codes.append("worktree_" + worktree_state)
     source_commit = bundle.get("source_commit")
     if source_commit is not None and source_commit not in {base_revision, target_revision}:
-        gap_codes.append("bundle_revision_not_in_diff")
+        codes.append("bundle_revision_not_in_diff")
     if source_commit is None and bundle.get("status") == "available":
-        gap_codes.append("bundle_revision_unverified")
+        codes.append("bundle_revision_unverified")
+    return codes
 
-    # The existing delta compiler is the single source of retrieval hints.
-    # Source text itself is not returned; these are navigational hints only.
+
+def _navigation_hint(item: Any) -> dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
+    source = item.get("source")
+    if source == "diff":
+        return None
+    path = item.get("path")
+    if not isinstance(path, str) or not path or path.startswith("/") or ".." in path.split("/"):
+        return None
+    hint = {"path": path[:500], "source": str(source)[:64],
+            "claim_level": "bundle_navigation_hint_not_verified_impact"}
+    for key in ("line_range", "source_range", "range"):
+        candidate = item.get(key)
+        if isinstance(candidate, dict):
+            a, b = candidate.get("start_line"), candidate.get("end_line")
+            if type(a) is int and type(b) is int and 0 < a <= b:
+                hint["range"] = {"start_line": a, "end_line": b}
+                break
+    return hint
+
+
+def _bundle_navigation_hints(
+    diff: str, bundle_manifest: str | Path | None, bundle: dict[str, Any],
+    use_case: str, context_budget_tokens: int,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Existing delta compiler supplies suggestions, never impact truth."""
     hints: list[dict[str, Any]] = []
+    gap_codes: list[str] = []
     try:
         delta = compile_delta_context(
             diff_text=diff, bundle_manifest=bundle_manifest if bundle["status"] == "available" else None,
@@ -303,23 +343,9 @@ def build_evidence_pack(
         if delta.get("status") == "invalid":
             gap_codes.append("delta_compiler_invalid")
         for item in delta.get("review_context", [])[:MAX_EVIDENCE_ITEMS * 4]:
-            if not isinstance(item, dict):
+            hint = _navigation_hint(item)
+            if hint is None:
                 continue
-            source = item.get("source")
-            if source == "diff":
-                continue
-            path = item.get("path")
-            if not isinstance(path, str) or not path or path.startswith("/") or ".." in path.split("/"):
-                continue
-            hint = {"path": path[:500], "source": str(source)[:64],
-                    "claim_level": "bundle_navigation_hint_not_verified_impact"}
-            for key in ("line_range", "source_range", "range"):
-                candidate = item.get(key)
-                if isinstance(candidate, dict):
-                    a, b = candidate.get("start_line"), candidate.get("end_line")
-                    if type(a) is int and type(b) is int and 0 < a <= b:
-                        hint["range"] = {"start_line": a, "end_line": b}
-                        break
             hints.append(hint)
             if len(hints) >= MAX_EVIDENCE_ITEMS:
                 break
@@ -329,8 +355,11 @@ def build_evidence_pack(
             gap_codes.append("bundle_signal_degraded")
     except (OSError, TypeError, ValueError):
         gap_codes.append("bundle_hint_compiler_unavailable")
+    return hints, gap_codes
 
-    changed = []
+
+def _changed_git_rows(parsed: dict[str, Any]) -> list[dict[str, Any]]:
+    changed: list[dict[str, Any]] = []
     for item in parsed["files"][:MAX_CHANGED_FILES]:
         path = item.get("path")
         if not isinstance(path, str):
@@ -349,13 +378,15 @@ def build_evidence_pack(
             "path": path, "change_status": item.get("change_status"),
             "ranges": ranges, "claim_level": "direct_git_diff",
         })
-    if parsed["file_count"] > MAX_CHANGED_FILES:
-        gap_codes.append("changed_file_display_limit")
-    changed_contracts = [
-        {"path": item["path"], "claim_level": "direct_git_diff"}
-        for item in changed if _is_explicit_contract_path(item["path"])
-    ]
+    return changed
+
+
+def _case_candidates_and_gaps(
+    root: Path, target_revision: str, use_case: str,
+    changed: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[str]]:
     test_candidates: list[dict[str, Any]] = []
+    gap_codes: list[str] = []
     if use_case in {"explain-change", "find-related-tests"}:
         test_candidates, test_gap = _test_candidates(
             root, target_revision, [item["path"] for item in changed],
@@ -363,12 +394,58 @@ def build_evidence_pack(
         if test_gap:
             gap_codes.append(test_gap)
     if use_case == "find-related-tests":
-        # Even matching *tracked* test file names do not establish test coverage.
         gap_codes.append("test_coverage_unverified")
     if use_case == "contract-impact":
         gap_codes.append("contract_consumer_relations_unverified")
     if use_case == "cross-repo-impact":
         gap_codes.append("cross_repository_relations_unverified")
+    return test_candidates, gap_codes
+
+
+def build_evidence_pack(
+    *,
+    repo_root: str | Path,
+    base_revision: str,
+    target_revision: str,
+    bundle_manifest: str | Path | None = None,
+    use_case: str = "explain-change",
+    context_budget_tokens: int = 1_200,
+    expected_diff_sha256: str | None = None,
+) -> dict[str, Any]:
+    """Build deterministic hints, not an interpretation or an execution order."""
+    problem = _request_error(
+        use_case, context_budget_tokens, base_revision,
+        target_revision, expected_diff_sha256,
+    )
+    if problem:
+        return _invalid(problem)
+    root = Path(repo_root).expanduser().resolve()
+    if not root.is_dir():
+        return _invalid("repository_not_found")
+    delta, problem = _read_git_delta(root, base_revision, target_revision, expected_diff_sha256)
+    if problem or delta is None:
+        return _invalid(problem or "diff_unavailable")
+    diff, diff_sha, parsed = delta
+
+    dirty, dirty_error = _bounded_git(root, ["status", "--porcelain", "--untracked-files=normal"])
+    worktree_state = "unknown" if dirty_error else ("dirty" if dirty else "clean")
+    bundle, gap_codes = _bundle_identity(bundle_manifest)
+    gap_codes.extend(_bundle_revision_gaps(bundle, worktree_state, base_revision, target_revision))
+    hints, hint_gaps = _bundle_navigation_hints(
+        diff, bundle_manifest, bundle, use_case, context_budget_tokens,
+    )
+    gap_codes.extend(hint_gaps)
+    changed = _changed_git_rows(parsed)
+    if parsed["file_count"] > MAX_CHANGED_FILES:
+        gap_codes.append("changed_file_display_limit")
+    changed_contracts = [
+        {"path": item["path"], "claim_level": "direct_git_diff"}
+        for item in changed if _is_explicit_contract_path(item["path"])
+    ]
+    test_candidates, case_gaps = _case_candidates_and_gaps(
+        root, target_revision, use_case, changed,
+    )
+    gap_codes.extend(case_gaps)
 
     result = {
         "kind": KIND, "version": VERSION, "status": "warn" if gap_codes else "pass",
@@ -396,6 +473,16 @@ def build_evidence_pack(
     return result
 
 
+def _append_markdown_section(
+    lines: list[str], heading: str, rows: list[str], empty_note: str,
+) -> None:
+    lines.extend(["", heading])
+    if rows:
+        lines.extend(rows)
+    else:
+        lines.append(empty_note)
+
+
 def render_evidence_markdown(pack: dict[str, Any]) -> str:
     """Render only the canonical JSON fields; no extra retrieval or side effects."""
     if pack.get("status") == "invalid":
@@ -417,26 +504,26 @@ def render_evidence_markdown(pack: dict[str, Any]) -> str:
     for item in pack["changed_files"]:
         spans = ", ".join(f"{r['start_line']}-{r['end_line']}" for r in item["ranges"])
         lines.append(f"- {item['path']} ({item['change_status']}; lines: {spans or 'unknown'})")
-    lines.extend(["", "## Tracked test-path candidates (not coverage evidence)"])
-    for item in pack["test_candidates"]:
-        lines.append(f"- {item['path']} (name matches {item['source_path']})")
-    if not pack["test_candidates"]:
-        lines.append("- No tracked exact-name candidates found")
-    lines.extend(["", "## Directly changed contract paths"])
-    for item in pack["changed_contracts"]:
-        lines.append(f"- {item['path']} (direct Git diff)")
-    if not pack["changed_contracts"]:
-        lines.append("- No explicit contract paths in displayed changes")
-    lines.extend(["", "## Existing bundle navigation hints (not verified impact)"])
-    for item in pack["hints"]:
-        lines.append(f"- {item['path']} ({item['source']})")
-    if not pack["hints"]:
-        lines.append("- No supported relationship candidates")
-    lines.extend(["", "## Gaps / limits"])
-    for item in pack["gaps"]:
-        lines.append(f"- {item['code']}")
-    if not pack["gaps"]:
-        lines.append("- No reported processing gaps; completeness is not established")
+    _append_markdown_section(
+        lines, "## Tracked test-path candidates (not coverage evidence)",
+        [f"- {item['path']} (name matches {item['source_path']})" for item in pack["test_candidates"]],
+        "- No tracked exact-name candidates found",
+    )
+    _append_markdown_section(
+        lines, "## Directly changed contract paths",
+        [f"- {item['path']} (direct Git diff)" for item in pack["changed_contracts"]],
+        "- No explicit contract paths in displayed changes",
+    )
+    _append_markdown_section(
+        lines, "## Existing bundle navigation hints (not verified impact)",
+        [f"- {item['path']} ({item['source']})" for item in pack["hints"]],
+        "- No supported relationship candidates",
+    )
+    _append_markdown_section(
+        lines, "## Gaps / limits",
+        [f"- {item['code']}" for item in pack["gaps"]],
+        "- No reported processing gaps; completeness is not established",
+    )
     lines.extend(["", pack["fallback"],
                   "No review verdict, patch, merge permission or test sufficiency is established.",
                   f"Response SHA-256: {pack['response_sha256']}", ""])
