@@ -104,6 +104,18 @@ class TestRelationshipProjection(unittest.TestCase):
         else:
             jsonschema.validate(actual, schema)
 
+    def test_nested_tests_and_work_test_filename_follow_repository_classifier(self):
+        self.write("pkg/tests/check_work.py", "from pkg.one import work\nwork()\n")
+        self.write("pkg/work_test.py", "from pkg.one import work\nwork()\n")
+        edges = project_relationships(**self.sources())["edges"]
+        tests = [e for e in edges if e["relation"] == "tests"
+                 and e["dst"] == "py:pkg:one.py:function:work"]
+        self.assertEqual(
+            {"file:pkg/tests/check_work.py", "file:pkg/work_test.py"},
+            {e["src"] for e in tests},
+        )
+        self.assertTrue(all(e["evidence_level"] == "S1" for e in tests))
+
     def test_product_impact_neighborhood_reuses_relation_graph(self):
         from merger.repoground.core.agent_impact_context import compile_structure_neighborhood
 

@@ -11,6 +11,8 @@ import json
 import re
 from collections import Counter
 from pathlib import PurePosixPath
+from merger.repoground.architecture.path_classification import is_test_path
+
 from typing import Any, Mapping
 
 KIND = "lenskit.relationship_projection"
@@ -151,7 +153,7 @@ def _call_edges(
             candidates=candidate if level == "S0" and isinstance(candidate, list) else None,
         ))
         # A syntactic test call is not evidence of test coverage/sufficiency.
-        if level == "S1" and (path.startswith("tests/") or path.rsplit("/", 1)[-1].startswith("test_")):
+        if level == "S1" and is_test_path(path):
             edges.append(_edge("tests", "file:" + path, dst, source, status, level, "python_call_graph_json"))
     return edges
 
