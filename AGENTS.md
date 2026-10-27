@@ -50,8 +50,7 @@ Stop without mutation when the current revision, task/claim, lease ownership, or
 
 ## Using RepoGround as an actual agent tool (phased adoption)
 
-The [RepoGround vision and agent adoption plan](docs/roadmap/repoground-vision-and-agent-adoption.md)
-prioritizes an **operationally available, measurable** consumer path before expanding feature breadth.
+The [massive expansion program](docs/roadmap/repoground-massive-expansion-program.md) is the binding **build-first** priority from 27 October 2026. The earlier [vision and agent adoption plan](docs/roadmap/repoground-vision-and-agent-adoption.md) remains historical guidance: productivity gains, 20-task A/B benchmarking and voluntary-agent-use counts are **not prerequisites for implementing the expansion**. The three disjoint execution briefs own graph/change, time/federation, and agent/event integration. Existing source-identity, review, testing, safety and merge gates remain intact.
 For suitable code navigation, PR review, test selection, change-impact or source-grounding tasks:
 
 1. Bind the actual repository revision and worktree state from Git. Check that a unique,
