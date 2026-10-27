@@ -278,6 +278,39 @@ class TestDeclaredRelations(unittest.TestCase):
         ))
         self.assertEqual(1, len([row for row in own if row["relation"] == "calls"]))
 
+    def test_nested_js_template_never_promotes_inner_text_to_s1(self):
+        self.write("web/util.js", "export const x = 1;\n")
+        tick = chr(96)
+        source = (
+            "const x = " + tick + "outer " + "$" + "{wrap(" + tick
+            + 'inner\nimport "./util";\nfunction fake() {}\n'
+            + tick + ")} end" + tick + ";\n"
+            + "export function real() {}\n"
+            + 'import "./util";\n'
+        )
+        self.write("web/main.js", source)
+        edges, _ = self.projection()
+        own = [e for e in edges if e["src"] == "file:web/main.js"]
+        definitions = [e["dst"] for e in own if e["relation"] == "defines"]
+        imports = [e for e in own if e["relation"] == "imports"]
+        self.assertEqual(["js:web/main.js:function:real:L5"], definitions)
+        self.assertEqual(1, len(imports))
+        self.assertEqual("file:web/util.js", imports[0]["dst"])
+
+    def test_nix_identifier_with_import_suffix_must_not_be_builtin(self):
+        self.write("foo.nix", "{ ... }: {}\n")
+        self.write("bar.nix", "{ ... }: {}\n")
+        self.write("flake.nix", (
+            "let my-import = path: path;\n"
+            "    my'import = path: path;\n"
+            "in { ignored = my-import ./foo.nix;\n"
+            "     ignored2 = my'import ./foo.nix;\n"
+            "     actual = import ./bar.nix; }\n"
+        ))
+        edges, _ = self.projection()
+        refs = [e for e in edges if e["src"] == "file:flake.nix"]
+        self.assertEqual(["file:bar.nix"], [e["dst"] for e in refs])
+
     def test_output_bytes_and_file_limits_deterministic(self):
         self.write("a.ts", "import './unknown';\n")
         self.write("b.ts", "import './unknown';\n")

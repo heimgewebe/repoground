@@ -130,6 +130,77 @@ def _js_regex_end(source: str, start: int) -> int | None:
     return None
 
 
+def _js_quoted_end(source: str, start: int) -> int:
+    quote = source[start]
+    index = start + 1
+    while index < len(source):
+        if source[index] == "\\":
+            index = min(index + 2, len(source))
+        elif source[index] == quote:
+            return index + 1
+        else:
+            index += 1
+    return len(source)
+
+
+def _js_comment_end(source: str, start: int) -> int | None:
+    if source.startswith("//", start):
+        newline = source.find("\n", start + 2)
+        return len(source) if newline < 0 else newline
+    if source.startswith("/*", start):
+        end = source.find("*/", start + 2)
+        return len(source) if end < 0 else end + 2
+    return None
+
+
+def _js_template_end(source: str, start: int, *, depth: int = 0) -> int:
+    """Mask all template text, including recursively nested interpolations."""
+    if depth > 24:
+        return len(source)
+    index = start + 1
+    while index < len(source):
+        if source[index] == "\\":
+            index = min(index + 2, len(source))
+        elif source.startswith("$" + "{", index):
+            index = _js_template_expr_end(source, index + 2, depth=depth + 1)
+        elif source[index] == chr(96):
+            return index + 1
+        else:
+            index += 1
+    return len(source)
+
+
+def _js_template_expr_end(source: str, start: int, *, depth: int) -> int:
+    """Skip JS-like interpolation expression to the balanced closing brace."""
+    braces = 1
+    index = start
+    while index < len(source):
+        comment_end = _js_comment_end(source, index)
+        if comment_end is not None:
+            index = comment_end
+            continue
+        character = source[index]
+        if character in ("'", '"'):
+            index = _js_quoted_end(source, index)
+            continue
+        if character == chr(96):
+            index = _js_template_end(source, index, depth=depth)
+            continue
+        if character == "/":
+            regex_end = _js_regex_end(source, index)
+            if regex_end is not None:
+                index = regex_end
+                continue
+        if character == "{":
+            braces += 1
+        elif character == "}":
+            braces -= 1
+            if braces == 0:
+                return index + 1
+        index += 1
+    return len(source)
+
+
 def _js_sources(source: str) -> tuple[list[str], list[str]]:
     """Mask comments and strings in one ordered lexical pass.
 
@@ -143,13 +214,7 @@ def _js_sources(source: str) -> tuple[list[str], list[str]]:
     length = len(source)
     index = 0
     while index < length:
-        comment_end = None
-        if source.startswith("//", index):
-            newline = source.find("\n", index + 2)
-            comment_end = length if newline < 0 else newline
-        elif source.startswith("/*", index):
-            closing = source.find("*/", index + 2)
-            comment_end = length if closing < 0 else closing + 2
+        comment_end = _js_comment_end(source, index)
         if comment_end is not None:
             syntax[index:comment_end] = _masked(source[index:comment_end])
             literals[index:comment_end] = _masked(source[index:comment_end])
@@ -164,15 +229,10 @@ def _js_sources(source: str) -> tuple[list[str], list[str]]:
                 continue
         quote = source[index]
         if quote in ("'", '"', chr(96)):
-            end = index + 1
-            while end < length:
-                if source[end] == "\\":
-                    end = min(end + 2, length)
-                    continue
-                if source[end] == quote:
-                    end += 1
-                    break
-                end += 1
+            end = (
+                _js_template_end(source, index) if quote == chr(96)
+                else _js_quoted_end(source, index)
+            )
             syntax[index:end] = _masked(source[index:end])
             if quote == chr(96):
                 literals[index:end] = _masked(source[index:end])
@@ -226,7 +286,7 @@ def _js_function_edges(path: str, source: str) -> list[dict[str, Any]]:
 
 
 _NIX_DIRECT_IMPORT = re.compile(
-    r"(?<![\w.])import\s+(?P<ref>\.{1,2}/[A-Za-z0-9_./-]+\.nix)(?=$|[\s;,\)\]\}])"
+    r"(?<![\w.'-])import\s+(?P<ref>\.{1,2}/[A-Za-z0-9_./-]+\.nix)(?=$|[\s;,\)\]\}])"
 )
 _NIX_IMPORTS_START = re.compile(r"^\s*imports\s*=\s*\[")
 _NIX_LIST_CONTENT = re.compile(r"\s*(?:(?:\.{1,2}/[A-Za-z0-9_./-]+\.nix)\s*)*")
