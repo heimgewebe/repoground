@@ -450,6 +450,29 @@ def _edges_for_source(path: str, source: str, known: set[str]) -> list[dict[str,
     return []
 
 
+
+def _read_declared_source(
+    repo_root: Path,
+    name: str,
+    root_resolved: Path,
+    bytes_read: int,
+    max_total_bytes: int,
+) -> tuple[str | None, int, str | None]:
+    """Read one inventory file with the existing symlink and byte-budget guards."""
+    target = repo_root / name
+    try:
+        if target.is_symlink() or not target.resolve().is_relative_to(root_resolved):
+            return None, 0, "symlink_or_outside_repo"
+        size = target.stat().st_size
+        if size > MAX_SOURCE_BYTES or bytes_read + size > max_total_bytes:
+            return None, 0, "source_byte_limit"
+        data = target.read_bytes()
+        if len(data) != size:
+            return None, 0, "source_changed_during_read"
+        return data.decode("utf-8"), size, None
+    except (OSError, UnicodeDecodeError):
+        return None, 0, "unreadable_source"
+
 def extract_declared_relations(
     repo_root: Path,
     architecture_graph: Mapping[str, Any],
@@ -493,24 +516,14 @@ def extract_declared_relations(
         if ordinal >= max_files:
             skipped["file_count_limit"] += 1
             continue
-        target = repo_root / name
-        try:
-            if target.is_symlink() or not target.resolve().is_relative_to(root_resolved):
-                skipped["symlink_or_outside_repo"] += 1
-                continue
-            size = target.stat().st_size
-            if size > MAX_SOURCE_BYTES or bytes_read + size > max_total_bytes:
-                skipped["source_byte_limit"] += 1
-                continue
-            data = target.read_bytes()
-            if len(data) != size:
-                skipped["source_changed_during_read"] += 1
-                continue
-            source = data.decode("utf-8")
-        except (OSError, UnicodeDecodeError):
-            skipped["unreadable_source"] += 1
+        source, source_size, skip_reason = _read_declared_source(
+            repo_root, name, root_resolved, bytes_read, max_total_bytes,
+        )
+        if skip_reason is not None:
+            skipped[skip_reason] += 1
             continue
-        bytes_read += len(data)
+        assert source is not None
+        bytes_read += source_size
         parsed += 1
         found = _edges_for_source(name, source, known)
         remaining = max_relation_edges - len(emitted)
