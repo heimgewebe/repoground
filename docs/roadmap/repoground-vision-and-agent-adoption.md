@@ -4,6 +4,8 @@
 
 **Rolle:** Strategischer Ausführungsplan, kein Nachweis für Implementierung, Produktionsreife oder abgeschlossene Aufgaben.
 
+**Vorrangbeschluss vom 27.10.2026:** Die [massive Ausbau-Roadmap](repoground-massive-expansion-program.md) ersetzt die Reihenfolge „erst allgemeinen Agentennutzen belegen, danach breite Features“. Der Nutzer beauftragt den umfassenden deterministischen Ausbau **vor** der abschließenden Nutzenbewertung. Dieser frühere Plan bleibt historische Diagnose; Sicherheits-, Wahrheits- und Merge-Regeln bleiben gültig. Der 20-Aufgaben-A/B-Benchmark ist **kein Ausbau-Startgate**.
+
 **Bezug:** [Master-Roadmap](repoground-master-roadmap.md) · [Agent Operationalization](lenskit-agent-operationalization-roadmap.md) · [Deterministic Core](../architecture/deterministic-repoground-core.md)
 
 ## 1. Auftrag
@@ -51,7 +53,7 @@ Langfristig entsteht eine **temporale Veränderungslandkarte**: Was existiert? W
 - Ein datiertes Heim-PC-Readback vom 27.10.2026 ergab für Grabowskis RepoGround-Frontdoor `publication_unavailable` / `no_bundle_available`. Beim Beginn des ersten Arbeitspakets **frisch neu prüfen**; dieser historische Check ist kein dauerhafter Betriebsstatus.
 - Die bisherigen Claude-A/B-Läufe belegen gezielt die Nutzung von Snapshot-Freshness, **nicht** eine generelle Verbesserung von Coding-Agenten. Der ursprüngliche Codex-Benchmark bleibt getrennt.
 
-**Folgerung:** Zuerst aktuelle Publikation, echter Agentenkonsum und funktionierende Suche. Erst danach weitere Artefakte und neue Systemebenen.
+**Neuer Beschluss:** Die damaligen Messungen bleiben historisch; ab jetzt werden Veränderungskern, Föderation/Zeitgeschichte und Agentenprodukt nach der [massiven Ausbau-Roadmap](repoground-massive-expansion-program.md) parallel erweitert. Die spätere Gesamtbewertung blockiert neue Features nicht.
 
 ## 3. Produktstufen
 
@@ -171,16 +173,12 @@ Für die genannten passenden Aufgaben wird diese *nicht blockierende* Disziplin 
 
 Konkrete Default-Schwellen für jede Aufgabenklasse werden **vor** der jeweiligen Messung im Goldstandard festgelegt (etwa Aufgabenerfolg, tolerierbare Mehrkosten und Vermeidung wesentlicher Regressionen). Ein hoher Recall-Wert allein beweist keine allgemeine Agentenqualität.
 
-## 7. Der erste auszuführende Auftrag nach Integration
+## 7. Neue Ausführungsreihenfolge ab 27.10.2026
 
-**Starte mit RG-P0-01. Nicht gleichzeitig die gesamte Roadmap implementieren.**
+Die frühere Reihenfolge „P0-Verfügbarkeit → P0-Adoption → Benchmark → Features“ ist **nicht mehr verbindlich**. Es gelten drei parallele, branchisolierte Ausbau-Threads aus der [massiven Ausbau-Roadmap](repoground-massive-expansion-program.md):
 
-- **Writer:** Grabowski; bestehende Captain-/Review-/CI-/Release-Verträge einhalten.
-- **Unabhängige Kontrolle:** Großer Adler lesend, Nixer nur für NixOS-Fragen, Same-Thread-Gegenprobe bei tragenden Architekturfestlegungen.
-- **Auftrag:** aktuellen Git-, Heim-PC-, Publisher- und Bundle-Zustand lesen, Ursache der fehlenden Agentenverfügbarkeit beheben, *einen* echten RepoGround-Bundle-Consumerweg für Grabowski demonstrieren.
-- **Abnahmequittung:** tatsächliches Bundle/Manifest, Git-Bindung, `discover → preflight → query`, echtes Agenten-`tool_use`, nachvollziehbarer Fallback und explizite unerledigte Punkte.
-- **Dann:** RG-P0-02 mit realer Grabowski-Adoption und anschließend Claude/Codex beginnen. Kein Feature-Großumbau aufgrund einer unverifizierten Annahme.
+1. [Strukturgraph und Veränderungskern](repoground-expansion-thread-1-graph.md)
+2. [Föderation und Zeitgeschichte](repoground-expansion-thread-2-federation-time.md)
+3. [Agentenprodukt und Ereignisfluss](repoground-expansion-thread-3-consumers.md)
 
-Die Plan-IDs ersetzen **nicht** die kanonischen Taskstatus in `docs/tasks/index.json` beziehungsweise Bureau. Jede Implementierung erhält beim Beginn einen eigenen begrenzten Task und PR mit Ist-Zustand, Tests, STOP-Scope und nachgewiesenem Merge-/Produktions-Readback.
-
-**Entscheidung:** RepoGround muss als deterministisches Werkzeug die **Agenten** besser machen, nicht den Bedarf an seinen eigenen Snapshots vergrößern.
+Das ursprüngliche 20-Aufgaben-A/B-Ziel wird zur **nachgelagerten** Bewertung. Source-Bindung, lokale Tests, CI, Sicherheit, Review und Captain-Gates bleiben gültig. Strategische Pläne sind keine alternative Task-/Runtime-Statusautorität.
