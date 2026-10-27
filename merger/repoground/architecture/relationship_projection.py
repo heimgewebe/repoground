@@ -72,6 +72,90 @@ def _edge(kind: str, src: str, dst: str, evidence: dict[str, Any],
     record["id"] = "rel:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
     return record
 
+
+def _definition_edges(
+    symbols: list[dict[str, Any]], known_files: set[str], gaps: Counter[str]
+) -> list[dict[str, Any]]:
+    edges: list[dict[str, Any]] = []
+    for symbol in symbols:
+        src = "file:" + _safe_path(symbol["path"])
+        if src not in known_files:
+            gaps["symbol_file_not_in_import_graph"] += 1
+            continue
+        edges.append(_edge(
+            "defines", src, symbol["id"],
+            _source(symbol["path"], symbol["start_line"], symbol["end_line"]),
+            "resolved", "S1", "python_symbol_index_json",
+        ))
+    return edges
+
+
+def _import_edges(
+    imports: list[dict[str, Any]], known_files: set[str], gaps: Counter[str]
+) -> list[dict[str, Any]]:
+    edges: list[dict[str, Any]] = []
+    for entry in imports:
+        if entry.get("edge_type") != "import":
+            continue
+        src, dst = entry["src"], entry["dst"]
+        evidence = entry["evidence"]
+        if not isinstance(src, str) or src not in known_files or not isinstance(dst, str):
+            gaps["import_missing_source_or_target"] += 1
+            continue
+        status = "resolved" if dst.startswith("file:") and dst in known_files else "unresolved"
+        if status == "unresolved":
+            gaps["import_external_or_ambiguous"] += 1
+        edges.append(_edge(
+            "imports", src, dst,
+            _source(evidence["source_path"], evidence["start_line"], evidence["end_line"]),
+            status, "S1" if status == "resolved" else "S0", "architecture_graph_json",
+        ))
+    return edges
+
+
+def _call_target(
+    call: dict[str, Any], known_symbols: set[str], gaps: Counter[str]
+) -> tuple[str, str, str]:
+    status = call.get("resolution_status", "unresolved")
+    resolved = call.get("resolved_target_ids", [])
+    if (status == "resolved" and isinstance(resolved, list) and len(resolved) == 1
+            and resolved[0] in known_symbols
+            and call.get("evidence_level") == "S1"):
+        return resolved[0], "resolved", "S1"
+    if status == "resolved":
+        gaps["call_target_not_in_symbol_index"] += 1
+        status = "unresolved"
+    else:
+        gaps["call_" + str(status)] += 1
+    site = f"{call['path']}:{call['start_line']}:{call.get('start_col', 0)}:{call['callee_expression']}"
+    dst = "unresolved-call:" + hashlib.sha256(site.encode("utf-8")).hexdigest()
+    return dst, status, "S0"
+
+
+def _call_edges(
+    calls: list[dict[str, Any]], known_files: set[str],
+    known_symbols: set[str], gaps: Counter[str],
+) -> list[dict[str, Any]]:
+    edges: list[dict[str, Any]] = []
+    for call in calls:
+        path = _safe_path(call["path"])
+        src = call.get("caller_symbol_id") or ("file:" + path)
+        if src not in known_symbols and src not in known_files:
+            gaps["call_caller_not_in_graph"] += 1
+            continue
+        source = _source(path, call["start_line"], call["end_line"])
+        dst, status, level = _call_target(call, known_symbols, gaps)
+        candidate = call.get("candidate_target_ids", [])
+        edges.append(_edge(
+            "calls", src, dst, source, status, level, "python_call_graph_json",
+            candidates=candidate if level == "S0" and isinstance(candidate, list) else None,
+        ))
+        # A syntactic test call is not evidence of test coverage/sufficiency.
+        if level == "S1" and (path.startswith("tests/") or path.rsplit("/", 1)[-1].startswith("test_")):
+            edges.append(_edge("tests", "file:" + path, dst, source, status, level, "python_call_graph_json"))
+    return edges
+
+
 def project_relationships(
     *, symbol_index: Mapping[str, Any],
     call_graph: Mapping[str, Any],
@@ -110,67 +194,9 @@ def project_relationships(
     edges: list[dict[str, Any]] = []
     gaps: Counter[str] = Counter()
 
-    for symbol in symbols:
-        src = "file:" + _safe_path(symbol["path"])
-        if src not in known_files:
-            gaps["symbol_file_not_in_import_graph"] += 1
-            continue
-        edges.append(_edge(
-            "defines", src, symbol["id"],
-            _source(symbol["path"], symbol["start_line"], symbol["end_line"]),
-            "resolved", "S1", "python_symbol_index_json",
-        ))
-
-    for entry in imports:
-        if entry.get("edge_type") != "import":
-            continue
-        src, dst = entry["src"], entry["dst"]
-        evidence = entry["evidence"]
-        if not isinstance(src, str) or src not in known_files or not isinstance(dst, str):
-            gaps["import_missing_source_or_target"] += 1
-            continue
-        status = "resolved" if dst.startswith("file:") and dst in known_files else "unresolved"
-        if status == "unresolved":
-            gaps["import_external_or_ambiguous"] += 1
-        edges.append(_edge(
-            "imports", src, dst,
-            _source(evidence["source_path"], evidence["start_line"], evidence["end_line"]),
-            status, "S1" if status == "resolved" else "S0", "architecture_graph_json",
-        ))
-
-    for call in calls:
-        path = _safe_path(call["path"])
-        src = call.get("caller_symbol_id") or ("file:" + path)
-        if src not in known_symbols and src not in known_files:
-            gaps["call_caller_not_in_graph"] += 1
-            continue
-        source = _source(path, call["start_line"], call["end_line"])
-        resolved = call.get("resolved_target_ids", [])
-        candidate = call.get("candidate_target_ids", [])
-        status = call.get("resolution_status", "unresolved")
-        if (status == "resolved" and isinstance(resolved, list) and len(resolved) == 1
-                and resolved[0] in known_symbols
-                and call.get("evidence_level") == "S1"):
-            dst = resolved[0]
-            level = "S1"
-        else:
-            # Never expose an unverified candidate as an established call edge.
-            if status == "resolved":
-                gaps["call_target_not_in_symbol_index"] += 1
-                status = "unresolved"
-            else:
-                gaps["call_" + str(status)] += 1
-            level = "S0"
-            site = f"{path}:{call['start_line']}:{call.get('start_col', 0)}:{call['callee_expression']}"
-            dst = "unresolved-call:" + hashlib.sha256(site.encode("utf-8")).hexdigest()
-        edge = _edge(
-            "calls", src, dst, source, status, level, "python_call_graph_json",
-            candidates=candidate if level == "S0" and isinstance(candidate, list) else None,
-        )
-        edges.append(edge)
-        # This is a lexical test-to-target reference, not a test coverage claim.
-        if level == "S1" and (path.startswith("tests/") or path.rsplit("/", 1)[-1].startswith("test_")):
-            edges.append(_edge("tests", "file:" + path, dst, source, status, level, "python_call_graph_json"))
+    edges.extend(_definition_edges(symbols, known_files, gaps))
+    edges.extend(_import_edges(imports, known_files, gaps))
+    edges.extend(_call_edges(calls, known_files, known_symbols, gaps))
 
     unique = {edge["id"]: edge for edge in edges}
     ordered = sorted(unique.values(), key=lambda item: (
