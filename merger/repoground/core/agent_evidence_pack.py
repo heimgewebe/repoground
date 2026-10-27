@@ -24,6 +24,7 @@ MAX_MANIFEST_BYTES = 4_000_000
 MAX_CONTEXT_TOKENS = 4_000
 MAX_CHANGED_FILES = 30
 MAX_EVIDENCE_ITEMS = 12
+MAX_HUNKS_PER_FILE = 16
 _SHA40 = re.compile(r"^[0-9a-f]{40}$")
 _SHA64 = re.compile(r"^[0-9a-f]{64}$")
 USE_CASES = (
@@ -87,7 +88,7 @@ def _bounded_git_stdout(pipe: Any, *, max_bytes: int) -> tuple[bytes | None, str
 def _bounded_git(root: Path, args: list[str], *, max_bytes: int = 131072) -> tuple[str | None, str | None]:
     """Use only fixed Git builtins without hooks, network, temporary files or index locks."""
     command = [
-        "git", "-c", "core.hooksPath=/dev/null",
+        "git", "-c", "core.hooksPath=/dev/null", "-c", "color.ui=never",
         "-c", "core.fsmonitor=false", "-c", "diff.external=",
         "-c", "protocol.file.allow=never", "-C", str(root), *args,
     ]
@@ -274,7 +275,7 @@ def _read_git_delta(
             return None, "unavailable_commit"
     diff, error = _bounded_git(
         root, ["diff", "--no-ext-diff", "--no-textconv", "--no-renames",
-               "--unified=3", base_revision, target_revision, "--"],
+               "--no-color", "--unified=3", base_revision, target_revision, "--"],
         max_bytes=MAX_DIFF_BYTES,
     )
     if error or diff is None:
@@ -306,15 +307,36 @@ def _bundle_revision_gaps(
     return codes
 
 
-def _navigation_hint(item: Any) -> dict[str, Any] | None:
-    if not isinstance(item, dict):
-        return None
+def _valid_navigation_path(path: Any) -> bool:
+    return (
+        isinstance(path, str) and bool(path)
+        and not path.startswith("/") and ".." not in path.split("/")
+    )
+
+
+def _navigation_path(item: dict[str, Any]) -> str | None:
+    """Normalize actual delta-context source shapes, never trust bundle impact."""
     source = item.get("source")
-    if source == "diff":
+    if source == "python_symbol_index_json":
+        symbol = item.get("symbol")
+        path = symbol.get("path") if isinstance(symbol, dict) else None
+        return path if _valid_navigation_path(path) else None
+    if source == "relation_cards_jsonl":
+        for path in (item.get("source_path"), item.get("target_path")):
+            if _valid_navigation_path(path):
+                return path
         return None
     path = item.get("path")
-    if not isinstance(path, str) or not path or path.startswith("/") or ".." in path.split("/"):
+    return path if _valid_navigation_path(path) else None
+
+
+def _navigation_hint(item: Any) -> dict[str, Any] | None:
+    if not isinstance(item, dict) or item.get("source") == "diff":
         return None
+    path = _navigation_path(item)
+    if path is None:
+        return None
+    source = item.get("source")
     hint = {"path": path[:500], "source": str(source)[:64],
             "claim_level": "bundle_navigation_hint_not_verified_impact"}
     for key in ("line_range", "source_range", "range"):
@@ -325,7 +347,6 @@ def _navigation_hint(item: Any) -> dict[str, Any] | None:
                 hint["range"] = {"start_line": a, "end_line": b}
                 break
     return hint
-
 
 def _bundle_navigation_hints(
     diff: str, bundle_manifest: str | Path | None, bundle: dict[str, Any],
@@ -358,14 +379,18 @@ def _bundle_navigation_hints(
     return hints, gap_codes
 
 
-def _changed_git_rows(parsed: dict[str, Any]) -> list[dict[str, Any]]:
+def _changed_git_rows(parsed: dict[str, Any]) -> tuple[list[dict[str, Any]], bool]:
     changed: list[dict[str, Any]] = []
+    hunks_truncated = False
     for item in parsed["files"][:MAX_CHANGED_FILES]:
         path = item.get("path")
         if not isinstance(path, str):
             continue
         ranges = []
-        for hunk in item.get("hunks", [])[:16]:
+        hunks = item.get("hunks", [])
+        if len(hunks) > MAX_HUNKS_PER_FILE:
+            hunks_truncated = True
+        for hunk in hunks[:MAX_HUNKS_PER_FILE]:
             if not isinstance(hunk, dict):
                 continue
             candidate = hunk.get("new_range")
@@ -378,7 +403,7 @@ def _changed_git_rows(parsed: dict[str, Any]) -> list[dict[str, Any]]:
             "path": path, "change_status": item.get("change_status"),
             "ranges": ranges, "claim_level": "direct_git_diff",
         })
-    return changed
+    return changed, hunks_truncated
 
 
 def _case_candidates_and_gaps(
@@ -435,7 +460,9 @@ def build_evidence_pack(
         diff, bundle_manifest, bundle, use_case, context_budget_tokens,
     )
     gap_codes.extend(hint_gaps)
-    changed = _changed_git_rows(parsed)
+    changed, hunks_truncated = _changed_git_rows(parsed)
+    if hunks_truncated:
+        gap_codes.append("hunk_range_display_limit")
     if parsed["file_count"] > MAX_CHANGED_FILES:
         gap_codes.append("changed_file_display_limit")
     changed_contracts = [
@@ -463,6 +490,7 @@ def build_evidence_pack(
         "gaps": [{"code": code} for code in sorted(set(gap_codes))],
         "limits": {"max_diff_bytes": MAX_DIFF_BYTES,
                    "max_changed_files": MAX_CHANGED_FILES,
+                   "max_hunks_per_file": MAX_HUNKS_PER_FILE,
                    "max_hints": MAX_EVIDENCE_ITEMS,
                    "max_test_candidates": MAX_TEST_CANDIDATES,
                    "context_budget_tokens": context_budget_tokens},

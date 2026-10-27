@@ -222,3 +222,80 @@ def test_mixed_git_quoted_paths_never_silently_omits_changes(tmp_path):
     assert result["changed_files"] == []
     assert result["mutation_boundary"]["writes"] == []
     assert git(repo, "status", "--porcelain") == ""
+
+
+def test_git_color_always_does_not_corrupt_parsed_diff(tmp_path):
+    repo, base, head = seeded_repo(tmp_path)
+    git(repo, "config", "color.ui", "always")
+    result = build_evidence_pack(
+        repo_root=repo, base_revision=base, target_revision=head
+    )
+    assert result["status"] in {"pass", "warn"}
+    assert result["changed_files"][0]["path"] == "alpha.py"
+    assert result["revision"]["diff_sha256"]
+    assert result["revision"]["worktree"] == "clean"
+
+
+def test_selected_symbol_and_relation_hints_retain_safe_navigation_paths(tmp_path, monkeypatch):
+    from merger.repoground.core import agent_evidence_pack
+
+    repo, base, head = seeded_repo(tmp_path)
+    selected = [
+        {"source": "python_symbol_index_json", "symbol": {"path": "pkg/symbol.py"}},
+        {"source": "relation_cards_jsonl",
+         "source_path": "src/alpha.py", "target_path": "tests/test_alpha.py"},
+        {"source": "relation_cards_jsonl",
+         "source_path": "../unsafe.py", "target_path": "src/safe.py"},
+        {"source": "python_symbol_index_json", "symbol": {"path": "/private/key"}},
+        {"source": "relation_cards_jsonl",
+         "source_path": "../unsafe.py", "target_path": "/private/key"},
+        {"source": "resolved_evidence", "path": "docs/proof.md",
+         "source_range": {"start_line": 4, "end_line": 9}},
+    ]
+    monkeypatch.setattr(
+        agent_evidence_pack, "compile_delta_context",
+        lambda **_kwargs: {
+            "status": "pass",
+            "review_context": selected,
+            "omitted_context": [],
+            "signal_quality": "complete_or_not_requested",
+        },
+    )
+    pack = build_evidence_pack(
+        repo_root=repo, base_revision=base, target_revision=head,
+        bundle_manifest=manifest(tmp_path, base), context_budget_tokens=4000,
+    )
+    assert [(h["source"], h["path"]) for h in pack["hints"]] == [
+        ("python_symbol_index_json", "pkg/symbol.py"),
+        ("relation_cards_jsonl", "src/alpha.py"),
+        ("relation_cards_jsonl", "src/safe.py"),
+        ("resolved_evidence", "docs/proof.md"),
+    ]
+    assert pack["hints"][-1]["range"] == {"start_line": 4, "end_line": 9}
+    assert all(h["claim_level"] == "bundle_navigation_hint_not_verified_impact"
+               for h in pack["hints"])
+
+
+def test_more_than_sixteen_separate_hunks_reports_range_display_limit(tmp_path):
+    repo, _base, _head = seeded_repo(tmp_path)
+    rows = [f"value_{i:03d} = 0\n" for i in range(240)]
+    (repo / "spaced.py").write_text("".join(rows), encoding="utf-8")
+    git(repo, "add", "spaced.py")
+    git(repo, "commit", "-qm", "long initial source")
+    base = git(repo, "rev-parse", "HEAD")
+    for offset in range(0, 240, 12):
+        rows[offset] = f"value_{offset:03d} = 1\n"
+    (repo / "spaced.py").write_text("".join(rows), encoding="utf-8")
+    git(repo, "add", "spaced.py")
+    git(repo, "commit", "-qm", "twenty separated small hunks")
+    head = git(repo, "rev-parse", "HEAD")
+    pack = build_evidence_pack(
+        repo_root=repo, base_revision=base, target_revision=head,
+        context_budget_tokens=4000,
+    )
+    assert pack["changed_file_count"] == 1
+    assert pack["changed_files"][0]["path"] == "spaced.py"
+    assert len(pack["changed_files"][0]["ranges"]) == 16
+    assert pack["limits"]["max_hunks_per_file"] == 16
+    assert "hunk_range_display_limit" in {gap["code"] for gap in pack["gaps"]}
+    assert pack["status"] == "warn"
