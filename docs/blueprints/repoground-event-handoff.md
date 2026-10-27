@@ -136,3 +136,34 @@ and receipt SHA-256
 The handler correctly continues to report `ci_conclusion_authenticity`
 **not established** because it did not authenticate a live webhook.
 No production GitHub/CI hook or fleet timer was changed.
+## Deterministic delivery timing and revision alignment
+
+The optional `source_occurred_at_unix` and `publisher_observed_at_unix`
+event fields must be supplied **together** as non-negative integer seconds,
+never booleans, with the publisher observation not earlier than the source.
+They are part of the input payload hash: on replay the same delivery ID must
+carry **identical** timestamps. The writer never substitutes its wall clock,
+so repeating a valid event is byte-stable.
+
+The stored `delivery_timing` projection is either
+`status=unknown, lag_seconds=null` (no timing supplied), or
+`status=reported` with the integer source-to-publisher difference.
+Its basis is expressly `caller_supplied_unverified_timestamps`: neither
+the CI provider's clock nor a signed event envelope has been authenticated
+by RepoGround. A negative lag, missing counterpart or malformed value
+fails *before* any outbox is written.
+
+The stored `bundle_revision_alignment` reports one of
+`matches_target_revision`, `matches_base_revision_only`,
+`bundle_revision_not_in_range_or_ambiguous` or `bundle_unavailable`.
+It compares immutable bundle-provenance and Git input revision identities;
+it **does not** claim latest remote state, runtime freshness or completeness.
+`consumer_handoff.analysis_status` exposes the nested report state without
+promoting RepoGround into a CI/review authority.
+
+The read-only exact-key receipt consumer checks these derived projections
+when present, rejecting tampering and accepting earlier v1 receipts without
+these optional additive fields. No second clock, scheduler or registry is
+introduced. Targeted updated event/MCP tests: **76 passed**; Ruff PASS.
+Full-suite and GitHub CI validation remain tied to the eventual latest
+source/published revision.

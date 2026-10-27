@@ -45,6 +45,7 @@ def _check_event(event: Mapping[str, Any]) -> dict[str, Any]:
     unknown = set(event) - {
         "event_type", "event_id", "repository",
         "base_revision", "target_revision", "check_id", "ci_conclusion",
+        "source_occurred_at_unix", "publisher_observed_at_unix",
     }
     if unknown:
         raise EventInputError("unsupported_event_fields")
@@ -74,7 +75,45 @@ def _check_event(event: Mapping[str, Any]) -> dict[str, Any]:
             raise EventInputError("invalid_ci_conclusion")
     elif "check_id" in event or "ci_conclusion" in event:
         raise EventInputError("ci_fields_require_ci_event")
+    time_fields = ("source_occurred_at_unix", "publisher_observed_at_unix")
+    supplied = [name in event for name in time_fields]
+    if any(supplied) and not all(supplied):
+        raise EventInputError("event_timing_requires_both_fields")
+    if all(supplied):
+        for name in time_fields:
+            when = event[name]
+            if type(when) is not int or not 0 <= when <= (2**53 - 1):
+                raise EventInputError("invalid_" + name)
+        if event["publisher_observed_at_unix"] < event["source_occurred_at_unix"]:
+            raise EventInputError("publisher_observed_before_source")
     return dict(event)
+
+
+def _delivery_timing(event: Mapping[str, Any]) -> dict[str, Any]:
+    if "source_occurred_at_unix" not in event:
+        return {
+            "status": "unknown", "lag_seconds": None,
+            "basis": "not_reported_by_publisher",
+        }
+    return {
+        "status": "reported",
+        "lag_seconds": (
+            event["publisher_observed_at_unix"] - event["source_occurred_at_unix"]
+        ),
+        "basis": "caller_supplied_unverified_timestamps",
+    }
+
+
+def _bundle_revision_alignment(pack: Mapping[str, Any], event: Mapping[str, Any]) -> str:
+    bundle = pack.get("bundle")
+    if not isinstance(bundle, dict) or bundle.get("status") != "available":
+        return "bundle_unavailable"
+    source_commit = bundle.get("source_commit")
+    if source_commit == event["target_revision"]:
+        return "matches_target_revision"
+    if source_commit == event["base_revision"]:
+        return "matches_base_revision_only"
+    return "bundle_revision_not_in_range_or_ambiguous"
 
 
 def _target(outbox_root: Path, repo_root: Path) -> Path:
@@ -114,6 +153,16 @@ def _read_receipt(path: Path) -> dict[str, Any]:
         for field, source in (("base", "base_revision"), ("target", "target_revision"))
     ):
         raise EventInputError("outbox_receipt_revision_mismatch")
+    if (
+        "delivery_timing" in receipt
+        and receipt["delivery_timing"] != _delivery_timing(event)
+    ):
+        raise EventInputError("outbox_receipt_timing_mismatch")
+    if (
+        "bundle_revision_alignment" in receipt
+        and receipt["bundle_revision_alignment"] != _bundle_revision_alignment(embedded, event)
+    ):
+        raise EventInputError("outbox_receipt_bundle_alignment_mismatch")
     return receipt
 
 
@@ -217,6 +266,8 @@ def publish_event(
                 "input_authority": "caller_assertion_not_verified_remote_event",
                 "git_authority": "existing_local_git_objects",
                 "bundle_source": "existing_snapshot_only",
+                "delivery_timing": _delivery_timing(item),
+                "bundle_revision_alignment": _bundle_revision_alignment(pack, item),
                 "evidence_pack": pack,
                 "evidence_pack_sha256": hashlib.sha256(_canonical(pack)).hexdigest(),
                 "consumer_handoff": {
@@ -225,9 +276,11 @@ def publish_event(
                     "review_authority": "none",
                     "effect": "read_only_evidence",
                     "automatic_agent_invocation": False,
+                    "analysis_status": pack.get("status"),
                 },
                 "does_not_establish": [
                     "github_event_authenticity", "ci_conclusion_authenticity",
+                    "publisher_timestamp_authenticity", "current_remote_freshness",
                     *_FORBIDDEN_APPROVAL,
                 ],
             }

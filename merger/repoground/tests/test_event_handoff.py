@@ -214,3 +214,94 @@ def test_receipt_tamper_event_identity_rejected_even_if_pack_digest_unchanged(tm
     path.write_text(json.dumps(data), encoding="utf-8")
     with pytest.raises(EventInputError, match="event_key_mismatch"):
         read_event_receipt(outbox_root=out, event_key=result["event_key"])
+
+
+def test_declared_delivery_lag_and_bundle_revision_binding(tmp_path):
+    repo, base, head = seeded_repo(tmp_path)
+    out = tmp_path / "timing-outbox"
+    input_event = {
+        **event(base, head, kind="ci.completed"),
+        "source_occurred_at_unix": 1_793_100_000,
+        "publisher_observed_at_unix": 1_793_100_095,
+    }
+    saved = publish_event(
+        event=input_event, repo_root=repo, outbox_root=out,
+        bundle_manifest=manifest(tmp_path, base),
+    )
+    assert saved["status"] == "published"
+    receipt = saved["receipt"]
+    assert receipt["delivery_timing"] == {
+        "status": "reported",
+        "lag_seconds": 95,
+        "basis": "caller_supplied_unverified_timestamps",
+    }
+    assert receipt["bundle_revision_alignment"] == "matches_base_revision_only"
+    assert receipt["consumer_handoff"]["analysis_status"] in {"pass", "warn"}
+    assert "publisher_timestamp_authenticity" in receipt["does_not_establish"]
+    before = Path(saved["receipt_path"]).read_bytes()
+    again = publish_event(
+        event=input_event, repo_root=repo, outbox_root=out,
+        bundle_manifest=manifest(tmp_path, base),
+    )
+    assert again["status"] == "deduplicated"
+    assert Path(saved["receipt_path"]).read_bytes() == before
+    readback = read_event_receipt(outbox_root=out, event_key=saved["event_key"])
+    assert readback["status"] == "available"
+    assert readback["receipt"]["delivery_timing"]["lag_seconds"] == 95
+
+
+def test_timing_absence_reports_unknown_not_inferred(tmp_path):
+    repo, base, head = seeded_repo(tmp_path)
+    receipt = publish_event(
+        event=event(base, head), repo_root=repo, outbox_root=tmp_path / "outbox"
+    )["receipt"]
+    assert receipt["delivery_timing"] == {
+        "status": "unknown", "lag_seconds": None,
+        "basis": "not_reported_by_publisher",
+    }
+    assert receipt["bundle_revision_alignment"] == "bundle_unavailable"
+
+
+@pytest.mark.parametrize(
+    "timing,error",
+    [
+        ({"source_occurred_at_unix": 100}, "event_timing_requires_both_fields"),
+        ({"publisher_observed_at_unix": 110}, "event_timing_requires_both_fields"),
+        (
+            {"source_occurred_at_unix": True, "publisher_observed_at_unix": 200},
+            "invalid_source_occurred_at_unix",
+        ),
+        (
+            {"source_occurred_at_unix": 200, "publisher_observed_at_unix": 199},
+            "publisher_observed_before_source",
+        ),
+    ],
+)
+def test_invalid_delivery_timing_has_no_writer_effect(tmp_path, timing, error):
+    repo, base, head = seeded_repo(tmp_path)
+    out = tmp_path / "no-writes"
+    with pytest.raises(EventInputError, match=error):
+        publish_event(
+            event={**event(base, head), **timing},
+            repo_root=repo, outbox_root=out,
+        )
+    assert not out.exists()
+
+
+def test_timing_tamper_is_rejected_on_consumer_read(tmp_path):
+    repo, base, head = seeded_repo(tmp_path)
+    out = tmp_path / "outbox"
+    made = publish_event(
+        event={
+            **event(base, head),
+            "source_occurred_at_unix": 200,
+            "publisher_observed_at_unix": 210,
+        },
+        repo_root=repo, outbox_root=out,
+    )
+    path = Path(made["receipt_path"])
+    forged = json.loads(path.read_text(encoding="utf-8"))
+    forged["delivery_timing"]["lag_seconds"] = 11
+    path.write_text(json.dumps(forged), encoding="utf-8")
+    with pytest.raises(EventInputError, match="outbox_receipt_timing_mismatch"):
+        read_event_receipt(outbox_root=out, event_key=made["event_key"])
