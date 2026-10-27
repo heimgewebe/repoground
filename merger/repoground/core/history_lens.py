@@ -233,7 +233,7 @@ def _symbol_names(root: Path, oid: str) -> list[str] | None:
     try:
         raw = _git_read(root, "cat-file", "blob", oid, max_bytes=250_000)
         source = ast.parse(raw.decode("utf-8"))
-    except (ValueError, UnicodeDecodeError, SyntaxError):
+    except (ValueError, UnicodeDecodeError, SyntaxError, RecursionError):
         return None
     names = set()
     def visit(node: ast.AST, prefix: str = "") -> None:
@@ -244,8 +244,16 @@ def _symbol_names(root: Path, oid: str) -> list[str] | None:
                 visit(child, name + ".")
             else:
                 visit(child, prefix)
-    visit(source)
-    return sorted(names)[:1000]
+    try:
+        visit(source)
+    except RecursionError:
+        # A valid but deeply nested AST must not abort the entire Git delta.
+        return None
+    if len(names) > 1000:
+        # Truncated before/after sets can manufacture symbol removals. Withhold
+        # symbol comparisons rather than claiming a complete inventory.
+        return None
+    return sorted(names)
 
 
 def git_revision_view(repository: Path, repo_id: str, commit: str) -> dict[str, Any]:

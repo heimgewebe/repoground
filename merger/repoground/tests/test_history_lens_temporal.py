@@ -238,3 +238,44 @@ def test_missing_partial_clone_blobs_do_not_trigger_fetch(tmp_path):
     assert before == after
     assert any(item.startswith("python_ast_unavailable:") for item in result["gaps"])
     assert os.path.isdir(clone / ".git" / "objects")
+
+
+def test_more_than_thousand_python_symbols_is_partial_not_false_removal(tmp_path):
+    repo, _ = create_repo(tmp_path)
+    symbols = repo / "symbols.py"
+    existing = "".join(f"def f{i:04d}():\n    pass\n" for i in range(1001))
+    symbols.write_text(existing, encoding="utf-8")
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "1011? no: 1001 actual top-level function names")
+    before = git(repo, "rev-parse", "HEAD")
+
+    symbols.write_text("def a():\n    pass\n" + existing, encoding="utf-8")
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "insert earlier-sorting name before 1001 functions")
+    after = git(repo, "rev-parse", "HEAD")
+    delta = git_revision_delta(repo, "fixture", before, after)
+    assert delta["status"] == "partial"
+    assert delta["changed_files_observed"] == 1
+    assert delta["file_changes"][0]["path"] == "symbols.py"
+    assert delta["python_symbol_changes"] == []
+    assert "python_ast_unavailable:symbols.py" in delta["gaps"]
+    assert delta == git_revision_delta(repo, "fixture", before, after)
+
+
+def test_deep_python_ast_is_partial_instead_of_crashing_delta(tmp_path):
+    repo, _ = create_repo(tmp_path)
+    source = repo / "deep.py"
+    source.write_text("value = 0\n", encoding="utf-8")
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "simple AST")
+    before = git(repo, "rev-parse", "HEAD")
+    source.write_text("value = " + " + ".join(["1"] * 1200) + "\n", encoding="utf-8")
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "deep but short AST")
+    after = git(repo, "rev-parse", "HEAD")
+    result = git_revision_delta(repo, "fixture", before, after)
+    assert result["status"] == "partial"
+    assert len(result["file_changes"]) == 1
+    assert result["file_changes"][0]["path"] == "deep.py"
+    assert result["python_symbol_changes"] == []
+    assert "python_ast_unavailable:deep.py" in result["gaps"]
