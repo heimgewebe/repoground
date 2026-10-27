@@ -121,3 +121,18 @@ The first consumer branch subsequently advanced to
 event branch was created. Do **not** claim the event branch already contains
 that later first-branch change: rebase this second branch onto the
 first integrated consumer head and rerun all admission tests before merging.
+### Real GitHub CI check-run input, manually handed to the adapter
+
+A read-only authenticated GitHub API request for RepoGround commit
+`bf2ad72785c47ede4b8b94ce2215b07e4773877e` returned an actual
+completed successful `pytest-full` check-run, ID `122076895109`.
+The operator then manually supplied that ID, `ci_conclusion=success`,
+and the real first-parent Git revision range to the bounded event handler.
+Result: one `published` receipt, replay `deduplicated`, exact-key
+readback `available`, five changed files, event key
+`3f84cb542e26c5529867b28963f93aafd2c86c37766374fd2f8ccf6b5ffe699a`,
+and receipt SHA-256
+`47ae0239125303588f2bfa4ca467d6d0fe3ccc5ded67f5f122c04b223308ccb8`.
+The handler correctly continues to report `ci_conclusion_authenticity`
+**not established** because it did not authenticate a live webhook.
+No production GitHub/CI hook or fleet timer was changed.
