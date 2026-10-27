@@ -57,6 +57,19 @@ class TestDeclaredRelations(unittest.TestCase):
         self.assertFalse(any("missing" in e["dst"] or "dynamic" in e["dst"] for e in imports))
         self.assertEqual(3, coverage["edge_counts"]["imports"])
 
+
+    def test_explicit_non_js_import_suffix_never_resolves_guessed_js_file(self):
+        self.write("web/config.json", '{"type":"object"}\n')
+        self.write("web/config.json.js", "export const unrelated = 1;\n")
+        self.write("web/app.mjs", (
+            'import config from "./config.json" with { type: "json" };\n'
+        ))
+        edges, _ = self.projection()
+        own = [e for e in edges if e["src"] == "file:web/app.mjs"]
+        self.assertEqual(1, len(own), own)
+        self.assertEqual("S0", own[0]["evidence_level"])
+        self.assertNotEqual("file:web/config.json.js", own[0]["dst"])
+
     def test_unqualified_js_import_collision_must_stay_s0(self):
         self.write("js/a.ts", "export const x = 1;\n")
         self.write("js/a.js", "export const x = 2;\n")
