@@ -25,7 +25,7 @@ _YAML_BLOCK = re.compile(
     r"^(?P<indent>[ \t]*)(?:-[ \t]+)?[a-zA-Z_][\w.-]*:[ \t]*[|>](?:[-+][1-9]?|[1-9][-+]?)?[ \t]*(?:#.*)?$"
 )
 _YAML_PARENT = re.compile(
-    r"^[ \t]*(?P<key>[A-Za-z_][\w.-]*):[ \t]*(?:#.*)?$"
+    r"^[ \t]*(?:-[ \t]+)?(?P<key>[A-Za-z_][\w.-]*):[ \t]*(?:#.*)?$"
 )
 _YAML_QUOTED_VALUE = re.compile(
     r"""^[ \t]*(?:-[ \t]+)?[A-Za-z_][\w.-]*:[ \t]*(?P<quote>["'])"""
@@ -165,7 +165,8 @@ def _markdown_edges(path: str, source: str, known: set[str]) -> list[dict[str, A
         if fenced is not None:
             if fence is not None:
                 marks = fence.group("marks")
-                if marks[0] == fenced[0] and len(marks) >= fenced[1]:
+                if (marks[0] == fenced[0] and len(marks) >= fenced[1]
+                        and not line[fence.end("marks"):].strip()):
                     fenced = None
             continue
         if fence is not None:
@@ -203,7 +204,7 @@ def _yaml_uses_edges(path: str, source: str, known: set[str]) -> list[dict[str, 
     """Parse explicit workflow/action metadata use fields, not YAML scalar text."""
     if not (
         path.startswith(".github/workflows/")
-        or path.endswith("/action.yml") or path.endswith("/action.yaml")
+        or PurePosixPath(path).name in {"action.yml", "action.yaml"}
     ):
         return []
     edges: list[dict[str, Any]] = []
@@ -262,7 +263,7 @@ def _yaml_uses_edges(path: str, source: str, known: set[str]) -> list[dict[str, 
         composite_step = (
             len(context) == 2 and context[0][1] == "runs"
             and context[-1][1] == "steps"
-            and path.endswith(("/action.yml", "/action.yaml"))
+            and PurePosixPath(path).name in {"action.yml", "action.yaml"}
         )
         if not (job_use or workflow_step or composite_step):
             continue
