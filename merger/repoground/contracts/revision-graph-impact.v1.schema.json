@@ -1,0 +1,345 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:lenskit:schema:revision-graph-impact.v1.schema.json",
+  "title": "Revision-bound static graph impact (no review verdict)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "version",
+    "status",
+    "base_sha",
+    "head_sha",
+    "diff_sha256",
+    "diff_bytes",
+    "source_provenance",
+    "directly_changed",
+    "potentially_affected",
+    "unresolved",
+    "gaps",
+    "expected_checks",
+    "coverage",
+    "does_not_establish"
+  ],
+  "properties": {
+    "kind": {
+      "const": "repobrief.revision_graph_impact"
+    },
+    "version": {
+      "const": "1.0"
+    },
+    "status": {
+      "enum": [
+        "bounded",
+        "truncated"
+      ]
+    },
+    "base_sha": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}$"
+    },
+    "head_sha": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}$"
+    },
+    "diff_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "diff_bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 5000000
+    },
+    "source_provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_commit",
+        "source_tree",
+        "manifest_identity"
+      ],
+      "properties": {
+        "source_commit": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{40}$"
+        },
+        "source_tree": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{40}$"
+        },
+        "manifest_identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "sha256",
+            "status",
+            "is_bundle_manifest"
+          ],
+          "properties": {
+            "kind": {
+              "const": "derived_clean_git_tree"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "status": {
+              "const": "derived_not_published"
+            },
+            "is_bundle_manifest": {
+              "const": false
+            }
+          }
+        }
+      }
+    },
+    "directly_changed": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "object",
+        "required": [
+          "category",
+          "basis",
+          "path"
+        ],
+        "properties": {
+          "category": {
+            "enum": [
+              "directly_changed_file",
+              "directly_changed_symbol"
+            ]
+          },
+          "basis": {
+            "enum": [
+              "head",
+              "base"
+            ]
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "symbol_id": {
+            "type": "string"
+          },
+          "range_ref": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "change_status": {
+            "type": "string"
+          },
+          "hunks": {
+            "type": "array"
+          }
+        }
+      }
+    },
+    "potentially_affected": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "$ref": "#/$defs/relation"
+      }
+    },
+    "unresolved": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "$ref": "#/$defs/relation"
+      }
+    },
+    "gaps": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "object",
+        "required": [
+          "reason",
+          "evidence_level"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "evidence_level": {
+            "const": "S0"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "expected_checks": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "path",
+          "authority"
+        ],
+        "properties": {
+          "kind": {
+            "const": "inspect_test"
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "authority": {
+            "const": "S1_lexical_reference"
+          }
+        }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "changed_files",
+        "changed_symbols",
+        "direct_count",
+        "proven_relation_count",
+        "unresolved_relation_count",
+        "symbol_parser_skipped_files",
+        "graph",
+        "truncated"
+      ],
+      "properties": {
+        "changed_files": {
+          "$ref": "#/$defs/nonnegative"
+        },
+        "changed_symbols": {
+          "$ref": "#/$defs/nonnegative"
+        },
+        "direct_count": {
+          "$ref": "#/$defs/nonnegative"
+        },
+        "proven_relation_count": {
+          "$ref": "#/$defs/nonnegative"
+        },
+        "unresolved_relation_count": {
+          "$ref": "#/$defs/nonnegative"
+        },
+        "symbol_parser_skipped_files": {
+          "$ref": "#/$defs/nonnegative"
+        },
+        "graph": {
+          "type": "object"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "does_not_establish": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "$defs": {
+    "nonnegative": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "relation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "relation_id",
+        "relation",
+        "source",
+        "source_id",
+        "target_id",
+        "evidence_level",
+        "resolution_status",
+        "direction"
+      ],
+      "properties": {
+        "relation_id": {
+          "type": "string",
+          "pattern": "^rel:[a-f0-9]{64}$"
+        },
+        "relation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source": {
+          "type": "object",
+          "required": [
+            "path",
+            "start_line",
+            "end_line",
+            "range_ref"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "start_line": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "end_line": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "range_ref": {
+              "type": "string"
+            }
+          }
+        },
+        "source_id": {
+          "type": "string"
+        },
+        "target_id": {
+          "type": "string"
+        },
+        "evidence_level": {
+          "enum": [
+            "S0",
+            "S1"
+          ]
+        },
+        "resolution_status": {
+          "enum": [
+            "resolved",
+            "candidate",
+            "ambiguous",
+            "unresolved"
+          ]
+        },
+        "direction": {
+          "enum": [
+            "incoming",
+            "outgoing"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}
