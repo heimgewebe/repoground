@@ -299,3 +299,45 @@ def test_more_than_sixteen_separate_hunks_reports_range_display_limit(tmp_path):
     assert pack["limits"]["max_hunks_per_file"] == 16
     assert "hunk_range_display_limit" in {gap["code"] for gap in pack["gaps"]}
     assert pack["status"] == "warn"
+
+
+def test_request_pinned_manifest_identity_survives_selected_symlink_retarget(tmp_path, monkeypatch):
+    from merger.repoground.core import agent_evidence_pack
+    from merger.repoground.core.manifest_snapshot import (
+        capture_manifest_snapshot, use_manifest_binding,
+    )
+
+    repo, base, head = seeded_repo(tmp_path)
+    gen_a, gen_b = tmp_path / "generation-a", tmp_path / "generation-b"
+    gen_a.mkdir()
+    gen_b.mkdir()
+    manifest_a, manifest_b = manifest(gen_a, base), manifest(gen_b, head)
+    selected = tmp_path / "current.bundle.manifest.json"
+    selected.symlink_to(manifest_a)
+    binding = capture_manifest_snapshot(selected).binding
+    original_git = agent_evidence_pack._read_git_delta
+
+    def switch_generation_during_diff(*args, **kwargs):
+        selected.unlink()
+        selected.symlink_to(manifest_b)
+        return original_git(*args, **kwargs)
+
+    monkeypatch.setattr(
+        agent_evidence_pack, "_read_git_delta", switch_generation_during_diff
+    )
+    with use_manifest_binding(binding):
+        result = agent_evidence_pack.build_evidence_pack(
+            repo_root=repo, base_revision=base, target_revision=head,
+            bundle_manifest=selected,
+        )
+    assert selected.resolve() == manifest_b.resolve()
+    assert result["status"] in {"pass", "warn"}
+    assert result["bundle"]["source_commit"] == base
+    assert result["bundle"]["manifest_sha256"] == hashlib.sha256(
+        manifest_a.read_bytes()
+    ).hexdigest()
+    assert result["bundle"]["manifest_sha256"] != hashlib.sha256(
+        manifest_b.read_bytes()
+    ).hexdigest()
+    assert result["changed_files"][0]["path"] == "alpha.py"
+    assert result["mutation_boundary"]["writes"] == []

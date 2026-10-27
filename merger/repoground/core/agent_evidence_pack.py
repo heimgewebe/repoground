@@ -16,6 +16,7 @@ import time
 from typing import Any
 
 from merger.repoground.core.delta_context import compile_delta_context, parse_unified_diff
+from merger.repoground.core.manifest_snapshot import ManifestBindingError, manifest_snapshot
 
 KIND = "repoground.agent_change_evidence"
 VERSION = 1
@@ -125,20 +126,24 @@ def _bounded_git(root: Path, args: list[str], *, max_bytes: int = 131072) -> tup
 
 
 def _bundle_identity(path: str | Path | None) -> tuple[dict[str, Any], list[str]]:
+    """Read exactly the request-pinned snapshot, not a freshly resolved pointer.
+
+    MCP tool dispatch pins one publication generation for the whole request;
+    re-resolving its selected symlink could mislabel old hints with new SHA.
+    The same bounded capture API also protects direct CLI metadata reads.
+    """
     if path is None:
         return {"status": "unavailable", "reason": "no_bundle_supplied"}, ["no_bundle_supplied"]
-    manifest = Path(path).expanduser().resolve()
-    if not manifest.name.endswith(".bundle.manifest.json") or not manifest.is_file():
-        return {"status": "invalid", "reason": "invalid_manifest"}, ["invalid_manifest"]
-    if manifest.stat().st_size > MAX_MANIFEST_BYTES:
-        return {"status": "invalid", "reason": "manifest_too_large"}, ["manifest_too_large"]
     try:
-        raw = manifest.read_bytes()
-        data = json.loads(raw)
-        if not isinstance(data, dict):
-            raise ValueError("not a manifest object")
-    except (OSError, UnicodeError, ValueError):
+        snapshot = manifest_snapshot(path)
+    except (ManifestBindingError, OSError, ValueError):
         return {"status": "invalid", "reason": "manifest_not_readable"}, ["manifest_not_readable"]
+    if not snapshot.resolved_path.name.endswith(".bundle.manifest.json"):
+        return {"status": "invalid", "reason": "invalid_manifest"}, ["invalid_manifest"]
+    raw = snapshot.raw
+    if len(raw) > MAX_MANIFEST_BYTES:
+        return {"status": "invalid", "reason": "manifest_too_large"}, ["manifest_too_large"]
+    data = snapshot.json_object()
     provenance = data.get("snapshot_provenance") or {}
     repositories = provenance.get("repositories", []) if isinstance(provenance, dict) else []
     commits = sorted({
@@ -148,7 +153,7 @@ def _bundle_identity(path: str | Path | None) -> tuple[dict[str, Any], list[str]
     }) if isinstance(repositories, list) else []
     return {
         "status": "available",
-        "manifest_sha256": hashlib.sha256(raw).hexdigest(),
+        "manifest_sha256": snapshot.binding.sha256,
         "source_commit": commits[0] if len(commits) == 1 else None,
         "source_commit_binding": "unique" if len(commits) == 1 else "unknown_or_ambiguous",
     }, [] if len(commits) == 1 else ["bundle_source_revision_unknown"]
