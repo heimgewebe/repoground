@@ -277,7 +277,7 @@ def _artifact_evidence(repo_id: str, commit: str, path: str,
 def _declaration_line(contents: str, key: str, *, mapping: bool = False) -> int | None:
     """Return a unique exact source line; ambiguous declarations remain unresolved."""
     if mapping:
-        pattern = _re.compile(r"^\s{2}" + _re.escape(key) + r":\s*(?:#.*)?$")
+        pattern = _re.compile(r"^\s{2,}[\'\"]?" + _re.escape(key) + r"[\'\"]?:\s*(?:#.*)?$")
     else:
         pattern = _re.compile(r"^\s*-\s*name:\s*['\"]?" + _re.escape(key) + r"['\"]?\s*(?:#.*)?$")
     found = [n for n, line in enumerate(contents.splitlines(), 1) if pattern.fullmatch(line)]
@@ -367,7 +367,9 @@ def _declared_target_relations(name: str, target_sha: str, ctx: dict[str, Any]) 
     metadata_blob = ctx["metadata_blob"]
     if annotation and metadata_blob is not None:
         metadata_line = _declaration_line(metadata_blob.decode("utf-8"), name, mapping=True)
-        if metadata_line is not None:
+        if metadata_line is None:
+            gaps.append("fleet_metadata_declaration_unresolved:" + name)
+        else:
             relations.append({
                 "relation_type": "fleet_metadata", "direction": "metarepo_to_target",
                 "confidence": "declared", "asserts_runtime_dependency": False,

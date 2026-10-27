@@ -254,3 +254,49 @@ def test_unreadable_existing_optional_metadata_is_explicit_partial(tmp_path):
     assert comparison["status"] == "partial"
     assert comparison["relation_deltas"] == []
     assert "after:fleet_metadata_unavailable" in comparison["gaps"]
+
+
+def test_reindented_metadata_declaration_preserves_same_relation(tmp_path):
+    metarepo, original_sha, service, target_sha = create_pair(tmp_path)
+    metadata = metarepo / "fleet" / "repo-metadata.yml"
+    metadata.write_text(
+        'schema_version: 1\nrepositories:\n    "service":\n'
+        '      domain: local\n      scope: config\n',
+        encoding="utf-8",
+    )
+    new_sha = commit(metarepo)
+    before = fleet_revision_relations(metarepo, original_sha, {
+        "service": (service, target_sha),
+    })
+    after = fleet_revision_relations(metarepo, new_sha, {
+        "service": (service, target_sha),
+    })
+    assert before["status"] == after["status"] == "ok"
+    assert any(row["relation_type"] == "fleet_metadata" for row in after["relations"])
+    compared = fleet_relation_delta(metarepo, original_sha, new_sha,
+                                    {"service": (service, target_sha)},
+                                    {"service": (service, target_sha)})
+    assert compared["status"] == "ok"
+    assert compared["relation_deltas"] == []
+    assert compared["unchanged_relations_count"] == 3
+
+
+def test_valid_flow_yaml_without_unique_metadata_line_is_partial_not_removed(tmp_path):
+    metarepo, original_sha, service, target_sha = create_pair(tmp_path)
+    metadata = metarepo / "fleet" / "repo-metadata.yml"
+    metadata.write_text(
+        "schema_version: 1\nrepositories: {service: {domain: local, scope: config}}\n",
+        encoding="utf-8",
+    )
+    changed_sha = commit(metarepo)
+    current = fleet_revision_relations(metarepo, changed_sha, {
+        "service": (service, target_sha),
+    })
+    assert current["status"] == "partial"
+    assert "fleet_metadata_declaration_unresolved:service" in current["gaps"]
+    compared = fleet_relation_delta(metarepo, original_sha, changed_sha,
+                                    {"service": (service, target_sha)},
+                                    {"service": (service, target_sha)})
+    assert compared["status"] == "partial"
+    assert compared["relation_deltas"] == []
+    assert "after:fleet_metadata_declaration_unresolved:service" in compared["gaps"]
