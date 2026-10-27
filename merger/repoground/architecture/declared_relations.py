@@ -369,6 +369,7 @@ def _resolve_schema_ref(
         _URI_SCHEME.match(filename)
         or filename.startswith("/")
         or "\\" in filename
+        or "%" in filename
         or "\x00" in filename
         or "?" in filename
     ):
