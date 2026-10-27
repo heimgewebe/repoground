@@ -93,6 +93,62 @@ class TestDeclaredRelations(unittest.TestCase):
         self.assertEqual("file:web/logic.ts#L4-L4", calls[0]["source"]["range_ref"])
         self.assertEqual(1, coverage["edge_counts"]["defines"])
 
+
+    def test_json_schema_instance_data_cannot_become_proven_contract_ref(self):
+        self.write("schemas/base.json", '{"type":"object"}\n')
+        self.write("schemas/default.json", (
+            '{"type":"object","default":{"$ref":"./base.json"}}\n'
+        ))
+        self.write("schemas/ambiguous.json", (
+            '{"allOf":[{"$ref":"./base.json"}],'
+            '"default":{"$ref":"./base.json"}}\n'
+        ))
+        self.write("schemas/legitimate.json", (
+            '{"properties":{"item":{"$ref":"./base.json"}}}\n'
+        ))
+        edges, _ = self.projection()
+        for name in ("default", "ambiguous"):
+            own = [
+                e for e in edges
+                if e["src"] == f"file:schemas/{name}.json"
+            ]
+            self.assertFalse(
+                any(e["evidence_level"] == "S1" for e in own),
+                own,
+            )
+        legitimate = [
+            e for e in edges
+            if e["src"] == "file:schemas/legitimate.json"
+        ]
+        self.assertEqual(1, len(legitimate), legitimate)
+        self.assertEqual("file:schemas/base.json", legitimate[0]["dst"])
+        self.assertEqual("S1", legitimate[0]["evidence_level"])
+
+    def test_jsx_child_text_cannot_become_s1_function_or_import(self):
+        self.write("web/util.js", "export const value = 1;\n")
+        for suffix in ("jsx", "tsx"):
+            relative = f"web/page.{suffix}"
+            self.write(relative, (
+                'import "./util";\n'
+                "const ui = <pre>\n"
+                "function fake() {}\n"
+                'import "./util";\n'
+                "</pre>;\n"
+                "export function real() {}\n"
+            ))
+        edges, _ = self.projection()
+        for suffix in ("jsx", "tsx"):
+            own = [e for e in edges if e["src"] == f"file:web/page.{suffix}"]
+            definitions = [e for e in own if e["relation"] == "defines"]
+            imports = [e for e in own if e["relation"] == "imports"]
+            self.assertEqual(
+                [f"js:web/page.{suffix}:function:real:L6"],
+                [e["dst"] for e in definitions],
+            )
+            self.assertEqual(1, len(imports), imports)
+            self.assertEqual("file:web/util.js", imports[0]["dst"])
+            self.assertEqual("S1", imports[0]["evidence_level"])
+
     def test_nix_literals_are_linked_but_strings_and_comments_skipped(self):
         self.write("modules/gui.nix", "{ ... }: { }\n")
         self.write("flake.nix", (
