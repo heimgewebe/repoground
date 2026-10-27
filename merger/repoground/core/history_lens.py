@@ -5,7 +5,10 @@ import ast
 import os
 from pathlib import Path
 import re
+import selectors
+import signal
 import subprocess
+import time
 from typing import Any, Iterable, Mapping
 
 KIND = "repobrief.history_lens"
@@ -138,30 +141,74 @@ _MAX_PUBLIC_ROWS = 256
 _MAX_SYMBOL_FILES = 20
 
 
+def _read_bounded_git_stdout(proc: subprocess.Popen[bytes], max_bytes: int, deadline: float) -> bytes:
+    """Drain at most max_bytes+1 bytes directly from the pipe, never buffering more."""
+    assert proc.stdout is not None
+    chunks: list[bytes] = []
+    used = 0
+    with selectors.DefaultSelector() as selector:
+        selector.register(proc.stdout, selectors.EVENT_READ)
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not selector.select(remaining):
+                raise ValueError("Git read timed out")
+            chunk = os.read(proc.stdout.fileno(), min(65_536, max_bytes + 1 - used))
+            if not chunk:
+                return b"".join(chunks)
+            used += len(chunk)
+            if used > max_bytes:
+                raise ValueError("Git evidence exceeds bounded read limit")
+            chunks.append(chunk)
+
+
 def _git_read(repo: Path, *arguments: str, max_bytes: int = _MAX_GIT_BYTES) -> bytes:
-    """Bounded, network-free, effect-free Git object read; never uses a shell."""
+    """Strictly bounded local Git read: no lazy fetch, unbounded pipe or shell."""
+    if not isinstance(max_bytes, int) or not 1 <= max_bytes <= _MAX_GIT_BYTES:
+        raise ValueError("Git read output budget is invalid")
     env = os.environ.copy()
     env.update({
         "GIT_OPTIONAL_LOCKS": "0",
         "GIT_NO_REPLACE_OBJECTS": "1",
-        # Prevent promisor-object retrieval in partial clones; a read must never fetch.
         "GIT_NO_LAZY_FETCH": "1",
-        # File history must not interpret brackets, stars or pathspec magic.
         "GIT_LITERAL_PATHSPECS": "1",
         "GIT_CONFIG_NOSYSTEM": "1",
         "GIT_CONFIG_GLOBAL": os.devnull,
         "GIT_TERMINAL_PROMPT": "0",
     })
-    result = subprocess.run(
+    proc = subprocess.Popen(
         ["git", "--no-optional-locks", "-c", "core.hooksPath=/dev/null",
          "-c", "diff.external=", "-C", str(repo), *arguments],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15, env=env, check=False,
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL, env=env, start_new_session=True,
     )
-    if result.returncode:
-        raise ValueError("Git source unavailable or revision could not be verified")
-    if len(result.stdout) > max_bytes:
-        raise ValueError("Git evidence exceeds bounded read limit")
-    return result.stdout
+    complete = False
+    deadline = time.monotonic() + 15
+    try:
+        output = _read_bounded_git_stdout(proc, max_bytes, deadline)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ValueError("Git read timed out")
+        try:
+            code = proc.wait(timeout=remaining)
+        except subprocess.TimeoutExpired as exc:
+            raise ValueError("Git read timed out") from exc
+        if code:
+            raise ValueError("Git source unavailable or revision could not be verified")
+        complete = True
+        return output
+    finally:
+        if not complete:
+            # The Git process is in its own session so spawned children are
+            # terminated as well. Reap the leader on every error path.
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        try:
+            proc.wait(timeout=2)
+        finally:
+            if proc.stdout is not None:
+                proc.stdout.close()
 
 
 def _repo_root(repo: Path) -> Path:

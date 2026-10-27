@@ -197,7 +197,7 @@ def test_git_reader_explicitly_disables_lazy_fetch_and_pathspec_magic(tmp_path, 
     from merger.repoground.core import history_lens
 
     repo, commits = create_repo(tmp_path)
-    original = history_lens.subprocess.run
+    original = history_lens.subprocess.Popen
     observed: list[tuple[str, str]] = []
 
     def instrumented(*args, **kwargs):
@@ -205,7 +205,7 @@ def test_git_reader_explicitly_disables_lazy_fetch_and_pathspec_magic(tmp_path, 
         observed.append((env.get("GIT_NO_LAZY_FETCH"), env.get("GIT_LITERAL_PATHSPECS")))
         return original(*args, **kwargs)
 
-    monkeypatch.setattr(history_lens.subprocess, "run", instrumented)
+    monkeypatch.setattr(history_lens.subprocess, "Popen", instrumented)
     git_revision_delta(repo, "fixture", commits[0], commits[-1])
     assert observed
     assert set(observed) == {("1", "1")}
@@ -279,3 +279,40 @@ def test_deep_python_ast_is_partial_instead_of_crashing_delta(tmp_path):
     assert result["file_changes"][0]["path"] == "deep.py"
     assert result["python_symbol_changes"] == []
     assert "python_ast_unavailable:deep.py" in result["gaps"]
+
+
+def test_large_blob_stdout_budget_kills_and_reaps_git_process(tmp_path, monkeypatch):
+    from merger.repoground.core import history_lens
+
+    repo, _ = create_repo(tmp_path)
+    big = repo / "big.py"
+    big.write_bytes(b"x" * (20 * 1024 * 1024))
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "large but valid blob")
+    blob_oid = git(repo, "rev-parse", "HEAD:big.py")
+
+    original_popen = history_lens.subprocess.Popen
+    original_read = history_lens.os.read
+    processes = []
+    bytes_read = []
+
+    def tracked_popen(*args, **kwargs):
+        process = original_popen(*args, **kwargs)
+        processes.append(process)
+        return process
+
+    def tracked_read(fd, requested):
+        data = original_read(fd, requested)
+        bytes_read.append(len(data))
+        return data
+
+    with monkeypatch.context() as patch:
+        patch.setattr(history_lens.subprocess, "Popen", tracked_popen)
+        patch.setattr(history_lens.os, "read", tracked_read)
+        with pytest.raises(ValueError, match="bounded read limit"):
+            history_lens._git_read(
+                repo, "cat-file", "blob", blob_oid, max_bytes=250_000,
+            )
+    assert processes and processes[0].poll() is not None
+    assert 250_000 < sum(bytes_read) <= 250_001
+    assert sum(bytes_read) < 20 * 1024 * 1024
