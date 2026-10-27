@@ -63,7 +63,7 @@ def _resolve_local(
 
 
 def _js_edges(path: str, source: str, known: set[str]) -> list[dict[str, Any]]:
-    syntax_lines, source_lines = _js_sources(source)
+    syntax_lines, source_lines = _js_sources(source, jsx=path.endswith((".jsx", ".tsx")))
     result: list[dict[str, Any]] = []
     for ordinal, line in enumerate(syntax_lines):
         if not line.lstrip().startswith(("import ", "export ")):
@@ -94,6 +94,11 @@ _JS_CALL = re.compile(r"(?<![.\w$])(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)\s*\(")
 def _masked(text: str) -> list[str]:
     return ["\n" if char == "\n" else " " for char in text]
 
+
+_JSX_ELEMENT = re.compile(
+    r"<(?P<tag>[A-Za-z][A-Za-z0-9_.:-]*)\b[^<>]*>[\s\S]*?</(?P=tag)\s*>"
+)
+_JSX_FRAGMENT = re.compile(r"<>[\s\S]*?</>")
 
 _JS_REGEX_CONTEXT = re.compile(r"\b(?:return|throw|case|yield)\s*$")
 
@@ -201,7 +206,7 @@ def _js_template_expr_end(source: str, start: int, *, depth: int) -> int:
     return len(source)
 
 
-def _js_sources(source: str) -> tuple[list[str], list[str]]:
+def _js_sources(source: str, *, jsx: bool = False) -> tuple[list[str], list[str]]:
     """Mask comments and strings in one ordered lexical pass.
 
     Only the literal-preserving view supplies an import specifier after
@@ -239,6 +244,15 @@ def _js_sources(source: str) -> tuple[list[str], list[str]]:
             index = end
             continue
         index += 1
+    if jsx:
+        # JSX child text is not executable JS. Mask entire balanced elements
+        # rather than claiming lexically observed imports/functions inside them.
+        text = "".join(syntax)
+        for pattern in (_JSX_ELEMENT, _JSX_FRAGMENT):
+            for match in pattern.finditer(text):
+                masked = _masked(source[match.start():match.end()])
+                syntax[match.start():match.end()] = masked
+                literals[match.start():match.end()] = masked
     return "".join(syntax).splitlines(), "".join(literals).splitlines()
 
 
@@ -248,7 +262,7 @@ def _js_function_edges(path: str, source: str) -> list[dict[str, Any]]:
     This conservative lexer does not model JS lexical scopes, overloads, dynamic
     dispatch or TypeScript type semantics; calls remain S0 even for one candidate.
     """
-    lines, _ = _js_sources(source)
+    lines, _ = _js_sources(source, jsx=path.endswith((".jsx", ".tsx")))
     declarations: dict[str, list[str]] = {}
     declaration_lines: set[int] = set()
     edges: list[dict[str, Any]] = []
@@ -383,15 +397,56 @@ def _schema_has_id_scope(value: Any) -> bool:
     return False
 
 
+_SCHEMA_SINGLE = frozenset({
+    "not", "items", "additionalItems", "additionalProperties", "contains",
+    "propertyNames", "if", "then", "else", "unevaluatedItems",
+    "unevaluatedProperties", "contentSchema",
+})
+_SCHEMA_MAP = frozenset({
+    "properties", "patternProperties", "$defs", "definitions", "dependentSchemas",
+})
+_SCHEMA_LIST = frozenset({"allOf", "anyOf", "oneOf", "prefixItems"})
+
+
+def _schema_ref_counts(schema: Any) -> Counter[str]:
+    """Only schema-valued locations can prove a JSON Schema $ref declaration."""
+    refs: Counter[str] = Counter()
+    pending = [schema]
+    seen = 0
+    while pending and seen < 10000:
+        entry = pending.pop()
+        seen += 1
+        if not isinstance(entry, dict):
+            continue
+        ref = entry.get("$ref")
+        if isinstance(ref, str):
+            refs[ref] += 1
+        for key, value in entry.items():
+            if key in _SCHEMA_SINGLE:
+                pending.append(value)
+            elif key in _SCHEMA_LIST and isinstance(value, list):
+                pending.extend(value)
+            elif key in _SCHEMA_MAP and isinstance(value, dict):
+                pending.extend(value.values())
+    return refs if not pending else Counter()
+
+
 def _json_edges(path: str, source: str, known: set[str]) -> list[dict[str, Any]]:
     try:
         schema = json.loads(source)
     except (ValueError, RecursionError):
         return []
     has_id_scope = _schema_has_id_scope(schema)
+    # A textual $ref inside default/const/examples is instance data, not
+    # a schema declaration. Ambiguous repeated spellings stay S0.
+    lexical = [
+        (match, json.loads('"' + match.group("ref") + '"'))
+        for match in _JSON_REF.finditer(source)
+    ]
+    counts = Counter(ref for _, ref in lexical)
+    schema_counts = _schema_ref_counts(schema)
     result: list[dict[str, Any]] = []
-    for match in _JSON_REF.finditer(source):
-        ref = json.loads('"' + match.group("ref") + '"')
+    for match, ref in lexical:
         if not isinstance(ref, str) or not ref:
             continue
         file_ref = ref.split("#", 1)[0]
@@ -399,14 +454,17 @@ def _json_edges(path: str, source: str, known: set[str]) -> list[dict[str, Any]]
             target, status, candidates = "contract-pointer:" + path + ref, "unresolved", []
         else:
             target, status, candidates = _resolve_schema_ref(path, ref, known)
-        if has_id_scope and status == "resolved":
+        proven_location = (
+            schema_counts[ref] > 0 and schema_counts[ref] == counts[ref]
+        )
+        if status == "resolved" and (has_id_scope or not proven_location):
             candidates = [target]
             target, status = "schema-ref:" + ref, "unresolved"
         line = source.count("\n", 0, match.start()) + 1
         result.append(_edge(
             "declares_contract", "file:" + path, target, _source(path, line, line),
             status, "S1" if status == "resolved" else "S0", "json_schema_declared_ref",
-            candidates=candidates if status in {"ambiguous", "unresolved"} and has_id_scope else None,
+            candidates=candidates if status in {"ambiguous", "unresolved"} else None,
         ))
     return result
 
