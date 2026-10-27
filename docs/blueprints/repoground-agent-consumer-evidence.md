@@ -118,3 +118,28 @@ the fail-closed behavior without mutating the source worktree.
 The focused first-branch evidence/MCP/context tests after this change:
 **62 passed**, Ruff **all checks passed**. Prior whole-repository counts
 refer to an earlier commit and must be re-run on the eventual PR head.
+### Verified source head after Git path inventory fix
+
+Commit `1bb4d849b03e72ee1375a33e8468d47f4a2555cd`: the new
+NUL-delimited path inventory check and mixed-normal/quoted-path regression
+were committed on the dedicated first consumer branch. Against this exact
+commit the complete local Python suite ran with the **same four separately
+reproduced clean-main baseline failures explicitly deselected**:
+**6116 passed, 12 skipped, 4 deselected**, exit code 0 in 258.52 s.
+The focused evidence/MCP/context suite passed **62**, and Ruff passed.
+These numbers are bounded to this tested source revision and are not CI.
+
+Grabowski's already installed read-only RepoGround consumer was exercised on
+`bf2ad72785c47ede4b8b94ce2215b07e4773877e..1bb4d849b03e72ee1375a33e8468d47f4a2555cd`.
+It returned `available=true`, all seven directly changed paths,
+`diff_binding_verified=true`, and Git diff SHA-256
+`7b699b2f84bdbbf32dcdf453f145881fe346218e5fd587038e64e6df845abdbc`.
+The overall context status was **degraded** (not a review or
+merge authorization); graph/history/new source and test sufficiency are
+not established by that query.
+
+Serving Grabowski's SSH-only publisher remains on an older NixOS runtime
+and rejects this branch's GitHub push. The source guard already includes
+the dedicated key selection, but its production activation is owned by
+the separate Release-R3 workflow. This consumer branch is still local:
+no PR or GitHub CI is claimed.
