@@ -23,6 +23,19 @@ class TestRevisionGraphImpact(unittest.TestCase):
         self.write("schemas/core.json", '{"type":"object"}\n')
         self.write("schemas/consumer.json", '{"$ref":"./core.json"}\n')
         self.write("untouched.py", "def untouched():\n    pass\n")
+        self.write("decorated.py", (
+            "def first(fn):\n    return fn\n"
+            "def second(fn):\n    return fn\n"
+            "@first\ndef decorated():\n    return 1\n"
+        ))
+        self.write("decor_consumer.py", (
+            "from decorated import decorated\n"
+            "def call_it():\n    return decorated()\n"
+        ))
+        self.write("tests/test_decorated.py", (
+            "from decorated import decorated\n"
+            "def test_decorated():\n    return decorated()\n"
+        ))
         self.git("add", ".")
         self.commit("base")
         self.base = self.git("rev-parse", "HEAD").strip()
@@ -146,6 +159,88 @@ class TestRevisionGraphImpact(unittest.TestCase):
             compile_revision_impact(repo_root=self.root, base_sha=future, head_sha=self.head)
         with self.assertRaisesRegex(ValueError, "max_items"):
             self.report(max_items=False)
+
+    def test_ignored_python_caller_does_not_get_revision_provenance(self):
+        info_exclude = self.root / ".git" / "info" / "exclude"
+        info_exclude.write_text("local/\n", encoding="utf-8")
+        self.write("local/test_injected.py", "from mod import feature\nfeature()\n")
+        self.assertEqual("", self.git("status", "--porcelain").strip())
+        with self.assertRaisesRegex(ValueError, "ignored_source_not_in_head"):
+            self.report()
+
+    def test_ignored_schema_source_does_not_change_revision_graph(self):
+        exclude = self.root / ".git" / "info" / "exclude"
+        exclude.write_text("local/\n", encoding="utf-8")
+        self.write("local/evil.json", '{"$ref":"../schemas/core.json"}\n')
+        with self.assertRaisesRegex(ValueError, "ignored_source_not_in_head"):
+            self.report()
+
+    def test_tracked_symlink_is_not_a_git_blob_python_source(self):
+        external = self.root.parent / f"{self.root.name}-exfil.py"
+        external.write_text("def injected():\n    return 0\n", encoding="utf-8")
+        self.addCleanup(external.unlink)
+        link = self.root / "linked.py"
+        try:
+            link.symlink_to(external)
+        except OSError as exc:
+            self.skipTest(str(exc))
+        self.git("add", "linked.py")
+        self.commit("tracked symlink")
+        new_head = self.git("rev-parse", "HEAD").strip()
+        with self.assertRaisesRegex(ValueError, "tracked_source_symlink_untrusted"):
+            compile_revision_impact(
+                repo_root=self.root, base_sha=self.head, head_sha=new_head,
+            )
+
+    def test_s0_candidate_call_involving_changed_symbol_is_reported(self):
+        from merger.repoground.core.revision_graph_impact import _impact_from_relations
+
+        symbol = "py:mod.py:function:feature"
+        edge = {
+            "id": "rel:" + "b" * 64,
+            "relation": "calls",
+            "src": "py:consumer.py:function:invoke",
+            "dst": "unresolved-call:" + "a" * 64,
+            "resolution_status": "ambiguous",
+            "evidence_level": "S0",
+            "candidate_target_ids": [symbol, "py:other.py:function:feature"],
+            "source": {
+                "path": "consumer.py", "start_line": 3, "end_line": 3,
+                "range_ref": "file:consumer.py#L3-L3",
+            },
+        }
+        proven, ambiguous, tests = _impact_from_relations([edge], {symbol}, {"mod.py"})
+        self.assertEqual([], proven)
+        self.assertEqual([], tests)
+        self.assertEqual(1, len(ambiguous))
+        self.assertIn(symbol, ambiguous[0]["candidate_target_ids"])
+        self.assertEqual("S0", ambiguous[0]["evidence_level"])
+
+    def test_decorator_only_diff_marks_symbol_and_known_tests(self):
+        self.write("decorated.py", (
+            "def first(fn):\n    return fn\n"
+            "def second(fn):\n    return fn\n"
+            "@second\ndef decorated():\n    return 1\n"
+        ))
+        self.git("add", "decorated.py")
+        self.commit("change decorator only")
+        new_head = self.git("rev-parse", "HEAD").strip()
+        report = compile_revision_impact(
+            repo_root=self.root, base_sha=self.head, head_sha=new_head,
+        )
+        self.assertTrue(any(
+            d.get("symbol_id") == "py:decorated.py:function:decorated"
+            and d["range_ref"] == "file:decorated.py#L5-L7"
+            for d in report["directly_changed"]
+        ), report["directly_changed"])
+        self.assertTrue(any(
+            item["relation"] == "calls" and item["source"]["path"] == "decor_consumer.py"
+            for item in report["potentially_affected"]
+        ))
+        self.assertIn(
+            "tests/test_decorated.py",
+            {x["path"] for x in report["expected_checks"]},
+        )
 
     def test_bounded_impact_and_verified_report_contract(self):
         report = self.report(max_items=1)

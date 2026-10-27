@@ -13,9 +13,11 @@ import json
 import re
 import subprocess
 import tempfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
+from merger.repoground.architecture.import_graph import _GRAPH_FILE_LANGUAGES, _SKIP_DIRECTORIES
+from merger.repoground.architecture.symbol_index import EXCLUDED_DIRS
 from merger.repoground.architecture.relationship_projection import (
     generate_relationship_document,
 )
@@ -110,6 +112,84 @@ def _identity(repo: Path, base: str, head: str) -> dict[str, Any]:
     }
 
 
+def _is_graph_source_path(path: str) -> bool:
+    """Mirror the producer traversal eligibility, excluding generated caches."""
+    parts = PurePosixPath(path).parts
+    if not parts or path.startswith("/") or ".." in parts:
+        return True  # Invalid names must never be silently trusted.
+    parent = parts[:-1]
+    suffix = PurePosixPath(path).suffix.lower()
+    if suffix == ".py":
+        return not any(part in EXCLUDED_DIRS for part in parent)
+    if any(part in _SKIP_DIRECTORIES or (part.startswith(".") and part != ".github") for part in parent):
+        return False
+    if path.endswith(".graph.json"):
+        return False
+    return suffix in _GRAPH_FILE_LANGUAGES
+
+
+def _source_inventory_safe(repo: Path) -> None:
+    """Fail closed when a producer could read bytes absent from Git HEAD.
+
+    Normal cleanliness checks ignore files by design. Existing source producers
+    walk the checkout; even ignored source can otherwise become falsely
+    revision-bound S1 evidence. Do not alter those producers or assume that a
+    clean porcelain result establishes source inventory equality.
+    """
+    ignored = _git(
+        repo, ["ls-files", "--others", "--ignored", "--exclude-standard", "-z"],
+        max_bytes=8_000_000,
+    )
+    for raw in ignored.split(b"\x00"):
+        if raw and _is_graph_source_path(raw.decode("utf-8")):
+            raise ValueError("ignored_source_not_in_head")
+    stage = _git(repo, ["ls-files", "--stage", "-z"], max_bytes=8_000_000)
+    for raw in stage.split(b"\x00"):
+        if not raw:
+            continue
+        header, separator, name = raw.partition(b"\t")
+        if separator != b"\t":
+            raise ValueError("tracked_source_inventory_invalid")
+        if header.split(b" ", 1)[0] == b"120000" and _is_graph_source_path(name.decode("utf-8")):
+            raise ValueError("tracked_source_symlink_untrusted")
+
+
+def _include_decorators(
+    symbols: list[dict[str, Any]], tree: ast.AST
+) -> list[dict[str, Any]]:
+    """Expand change-intersection ranges, keeping producer symbol identities."""
+    starts: dict[tuple[int, str], int] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            starts[(node.lineno, node.name)] = min(
+                [node.lineno, *(dec.lineno for dec in node.decorator_list)]
+            )
+    projected: list[dict[str, Any]] = []
+    for symbol in symbols:
+        first = starts.get((symbol["start_line"], symbol["name"]), symbol["start_line"])
+        if first < symbol["start_line"]:
+            updated = dict(symbol)
+            updated["start_line"] = first
+            updated["range_ref"] = f"file:{symbol['path']}#L{first}-L{symbol['end_line']}"
+            projected.append(updated)
+        else:
+            projected.append(symbol)
+    return projected
+
+
+def _head_symbols_for_changes(
+    repo: Path, head: str, path: str, symbols: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], str | None]:
+    if not symbols or not path.endswith(".py"):
+        return symbols, None
+    try:
+        content = _git(repo, ["show", f"{head}:{path}"], max_bytes=MAX_SOURCE_BYTES)
+        parsed = ast.parse(content.decode("utf-8"), filename=path)
+    except (ValueError, UnicodeDecodeError, SyntaxError):
+        return symbols, "head_decorator_range_unavailable"
+    return _include_decorators(symbols, parsed), None
+
+
 def _old_symbols(repo: Path, base: str, path: str) -> tuple[list[dict[str, Any]], str | None]:
     """Parse only changed base-side Python files, not a second repository graph."""
     if not path.endswith(".py"):
@@ -127,7 +207,7 @@ def _old_symbols(repo: Path, base: str, path: str) -> tuple[list[dict[str, Any]]
         return [], "base_python_parse_failed"
     visitor = _SymbolVisitor(path)
     visitor.visit(tree)
-    return visitor.symbols, None
+    return _include_decorators(visitor.symbols, tree), None
 
 
 def _intersects(record: Mapping[str, Any], hunks: list[dict[str, Any]], basis: str) -> bool:
@@ -141,7 +221,7 @@ def _intersects(record: Mapping[str, Any], hunks: list[dict[str, Any]], basis: s
 
 
 def _changes(
-    repo: Path, base: str, diff_files: list[dict[str, Any]],
+    repo: Path, base: str, head: str, diff_files: list[dict[str, Any]],
     head_symbols: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], set[str], set[str]]:
     by_path: dict[str, list[dict[str, Any]]] = {}
@@ -158,8 +238,13 @@ def _changes(
             continue
         changed_paths.add(new_path)
         hunks = file.get("hunks", [])
+        head_candidates, head_error = _head_symbols_for_changes(
+            repo, head, new_path, by_path.get(new_path, []),
+        )
+        if head_error:
+            gaps.append({"path": new_path, "reason": head_error, "evidence_level": "S0"})
         new_symbols = [
-            symbol for symbol in by_path.get(new_path, [])
+            symbol for symbol in head_candidates
             if _intersects(symbol, hunks, "new")
         ]
         old_symbols, error = _old_symbols(repo, base, old_path)
@@ -210,7 +295,13 @@ def _impact_from_relations(
         src, dst = edge["src"], edge["dst"]
         if edge["relation"] == "defines":
             continue
-        touching = src in targets or dst in targets
+        candidates = edge.get("candidate_target_ids", [])
+        candidate_hit = (
+            edge["resolution_status"] != "resolved"
+            and isinstance(candidates, list)
+            and bool(targets.intersection(candidates))
+        )
+        touching = src in targets or dst in targets or candidate_hit
         if not touching:
             continue
         record = {
@@ -225,6 +316,8 @@ def _impact_from_relations(
                 tests.add(edge["source"]["path"])
         else:
             record["reason"] = "static_target_not_proven"
+            if candidate_hit:
+                record["candidate_target_ids"] = sorted(set(candidates))[:20]
             uncertain.append(record)
     sort_key = lambda row: (
         row["source"]["path"], row["source"]["start_line"],
@@ -255,6 +348,7 @@ def compile_revision_graph_impact(
     if not root.is_dir():
         raise ValueError("repository_root_unavailable")
     identity = _identity(root, base_sha, head_sha)
+    _source_inventory_safe(root)
     diff = _git(
         root, ["diff", "--no-ext-diff", "--no-textconv", "--no-color",
                "--unified=0", base_sha, head_sha, "--"],
@@ -277,7 +371,7 @@ def compile_revision_graph_impact(
     from merger.repoground.architecture.symbol_index import extract_python_symbols
 
     symbols, symbol_skip_count, symbol_errors = extract_python_symbols(root)
-    direct, gaps, ids, paths = _changes(root, base_sha, parsed["files"], symbols)
+    direct, gaps, ids, paths = _changes(root, base_sha, head_sha, parsed["files"], symbols)
     context = generate_relationship_document(
         root, "revision-impact:" + head_sha,
         identity["manifest_identity"]["sha256"],
@@ -294,6 +388,7 @@ def compile_revision_graph_impact(
     if context["coverage"]["truncated"]:
         gaps.append({"reason": "relationship_projection_truncated", "evidence_level": "S0"})
     # Reject a race between source reads and git HEAD/working tree changes.
+    _source_inventory_safe(root)
     if _identity(root, base_sha, head_sha) != identity:
         raise ValueError("source_changed_during_analysis")
     truncated = (
