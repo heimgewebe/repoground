@@ -174,6 +174,24 @@ class TestDeclaredRelations(unittest.TestCase):
             self.assertEqual("file:web/util.js", imports[0]["dst"])
             self.assertEqual("S1", imports[0]["evidence_level"])
 
+
+    def test_nix_indented_string_interpolation_escape_stays_unproven(self):
+        self.write("foo.nix", "{ ... }: {}\n")
+        self.write("flake.nix", (
+            "{ text = ''\n"
+            "  echo ''${HOME}\n"
+            "  import ./foo.nix\n"
+            "'';\n"
+            "actual = import ./foo.nix;\n"
+            "}\n"
+        ))
+        edges, _ = self.projection()
+        imports = [e for e in edges if e["src"] == "file:flake.nix"]
+        self.assertEqual(1, len(imports), imports)
+        self.assertEqual("file:foo.nix", imports[0]["dst"])
+        self.assertEqual("S1", imports[0]["evidence_level"])
+        self.assertEqual(5, imports[0]["source"]["start_line"])
+
     def test_nix_literals_are_linked_but_strings_and_comments_skipped(self):
         self.write("modules/gui.nix", "{ ... }: { }\n")
         self.write("flake.nix", (
