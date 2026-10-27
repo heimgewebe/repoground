@@ -155,6 +155,21 @@ class TestDeclaredRelations(unittest.TestCase):
         self.assertEqual("S1", legitimate[0]["evidence_level"])
 
 
+    def test_json_schema_lone_surrogate_is_s0_not_projection_abort(self):
+        self.write("schemas/base.json", '{"type":"object"}\n')
+        self.write("schemas/broken.json", (
+            r'{"$ref":"\ud800","allOf":[{"$ref":"./base.json"}]}' + "\n"
+        ))
+        edges, _ = self.projection()
+        own = [e for e in edges if e["src"] == "file:schemas/broken.json"]
+        self.assertEqual(2, len(own), own)
+        s0 = [e for e in own if e["evidence_level"] == "S0"]
+        s1 = [e for e in own if e["evidence_level"] == "S1"]
+        self.assertEqual(1, len(s0), own)
+        self.assertEqual("unresolved", s0[0]["resolution_status"])
+        self.assertTrue(s0[0]["dst"].startswith("schema-ref:invalid-unicode:"))
+        self.assertEqual(["file:schemas/base.json"], [e["dst"] for e in s1])
+
     def test_percent_encoded_schema_path_remains_unproven(self):
         self.write("schemas/base schema.json", '{"type":"object"}\n')
         self.write("schemas/base%20schema.json", '{"type":"object"}\n')
