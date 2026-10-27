@@ -1,0 +1,215 @@
+"""Publisher-invoked, idempotent RepoGround Git/CI event evidence outbox.
+
+This is an explicit write-side operation. It is not a daemon, Git hook,
+background watcher, PR reviewer, patcher or build trigger. Readers never call it.
+"""
+from __future__ import annotations
+
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import tempfile
+from typing import Any, Mapping
+
+from merger.repoground.core.agent_evidence_pack import build_evidence_pack
+
+KIND = "repoground.publisher_event_handoff"
+VERSION = 1
+MAX_EVENT_BYTES = 8192
+MAX_RECEIPT_BYTES = 96 * 1024
+_EVENT_ID = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._:@/-]{0,127}$")
+_REPO_ID = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+_ALLOWED_EVENTS = {"git.commit", "ci.completed"}
+_CI_CONCLUSIONS = {"success", "failure", "cancelled", "skipped", "timed_out", "neutral", "action_required"}
+_FORBIDDEN_APPROVAL = ("approval", "merge", "patch", "review_verdict", "test_sufficiency")
+
+
+class EventInputError(ValueError):
+    """Malformed or unsafe explicit publisher event."""
+
+
+class EventIdentityConflict(EventInputError):
+    """An event identifier was previously bound to a different payload."""
+
+
+def _canonical(value: Any) -> bytes:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+
+
+def _check_event(event: Mapping[str, Any]) -> dict[str, Any]:
+    if not isinstance(event, dict):
+        raise EventInputError("event_must_be_object")
+    unknown = set(event) - {
+        "event_type", "event_id", "repository",
+        "base_revision", "target_revision", "check_id", "ci_conclusion",
+    }
+    if unknown:
+        raise EventInputError("unsupported_event_fields")
+    if len(_canonical(event)) > MAX_EVENT_BYTES:
+        raise EventInputError("event_too_large")
+    kind, event_id, repo = (
+        event.get("event_type"), event.get("event_id"), event.get("repository")
+    )
+    if not isinstance(kind, str) or kind not in _ALLOWED_EVENTS:
+        raise EventInputError("invalid_event_type")
+    if not isinstance(event_id, str) or _EVENT_ID.fullmatch(event_id) is None:
+        raise EventInputError("invalid_event_id")
+    if not isinstance(repo, str) or _REPO_ID.fullmatch(repo) is None:
+        raise EventInputError("invalid_repository")
+    for key in ("base_revision", "target_revision"):
+        sha = event.get(key)
+        if not isinstance(sha, str) or len(sha) != 40 or not re.fullmatch("[0-9a-f]{40}", sha):
+            raise EventInputError("invalid_" + key)
+    if event["base_revision"] == event["target_revision"]:
+        raise EventInputError("empty_revision_range")
+    if kind == "ci.completed":
+        check_id = event.get("check_id")
+        conclusion = event.get("ci_conclusion")
+        if not isinstance(check_id, str) or not _EVENT_ID.fullmatch(check_id):
+            raise EventInputError("missing_ci_check_id")
+        if not isinstance(conclusion, str) or conclusion not in _CI_CONCLUSIONS:
+            raise EventInputError("invalid_ci_conclusion")
+    elif "check_id" in event or "ci_conclusion" in event:
+        raise EventInputError("ci_fields_require_ci_event")
+    return dict(event)
+
+
+def _target(outbox_root: Path, repo_root: Path) -> Path:
+    supplied = outbox_root.expanduser().absolute()
+    if supplied.is_symlink():
+        raise EventInputError("outbox_root_symlink")
+    root = supplied.resolve(strict=False)
+    if root == repo_root or root in repo_root.parents or repo_root in root.parents:
+        raise EventInputError("outbox_must_not_overlap_repository")
+    if root.exists() and not root.is_dir():
+        raise EventInputError("outbox_not_directory")
+    return root
+
+
+def _read_receipt(path: Path) -> dict[str, Any]:
+    if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_RECEIPT_BYTES:
+        raise EventInputError("outbox_receipt_unsafe")
+    try:
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+    except (UnicodeError, ValueError, OSError):
+        raise EventInputError("outbox_receipt_invalid") from None
+    if not isinstance(receipt, dict) or receipt.get("kind") != KIND or receipt.get("version") != VERSION:
+        raise EventInputError("outbox_receipt_wrong_contract")
+    embedded = receipt.get("evidence_pack")
+    digest = receipt.get("evidence_pack_sha256")
+    if not isinstance(embedded, dict) or hashlib.sha256(_canonical(embedded)).hexdigest() != digest:
+        raise EventInputError("outbox_receipt_integrity_failure")
+    return receipt
+
+
+def publish_event(
+    *,
+    event: Mapping[str, Any],
+    repo_root: str | Path,
+    outbox_root: str | Path,
+    bundle_manifest: str | Path | None = None,
+    context_budget_tokens: int = 1200,
+    max_records: int = 1,
+) -> dict[str, Any]:
+    """Persist exactly one completed evidence handoff per source event identity.
+
+    Caller is the *already authorized* publisher, never a retrieval/client path.
+    Global flock covers checks, evidence build and atomic JSON publication.
+    An existing identical source event is read back without rebuilding anything.
+    """
+    item = _check_event(event)
+    if type(max_records) is not int or max_records != 1:
+        raise EventInputError("one_event_per_invocation")
+    repo = Path(repo_root).expanduser().resolve()
+    if not repo.is_dir():
+        raise EventInputError("repository_not_found")
+    out = _target(Path(outbox_root), repo)
+    if not out.exists():
+        out.mkdir(parents=True, mode=0o700)
+    if out.is_symlink():
+        raise EventInputError("outbox_root_symlink")
+    key_material = {
+        "event_type": item["event_type"],
+        "event_id": item["event_id"],
+        "repository": item["repository"],
+    }
+    key = hashlib.sha256(_canonical(key_material)).hexdigest()
+    input_sha = hashlib.sha256(_canonical(item)).hexdigest()
+    path = out / f"event-{key}.json"
+
+    # A single bounded file lock reuses the operator's outbox as the authority:
+    # no job database, out-of-band registry or second queue is introduced.
+    lock_descriptor = os.open(out / ".handoff.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    try:
+        with os.fdopen(lock_descriptor, "rb") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            if path.exists() or path.is_symlink():
+                receipt = _read_receipt(path)
+                if receipt.get("event_key") != key or receipt.get("event_payload_sha256") != input_sha:
+                    raise EventIdentityConflict("event_identity_reused_with_new_payload")
+                return {"status": "deduplicated", "receipt_path": str(path),
+                        "event_key": key, "receipt": receipt}
+            use_case = "explain-change" if item["event_type"] == "git.commit" else "find-related-tests"
+            pack = build_evidence_pack(
+                repo_root=repo,
+                base_revision=item["base_revision"],
+                target_revision=item["target_revision"],
+                bundle_manifest=bundle_manifest,
+                use_case=use_case,
+                context_budget_tokens=context_budget_tokens,
+            )
+            if pack.get("status") == "invalid":
+                # A failed analysis is never committed as a completed handoff.
+                return {
+                    "status": "blocked", "event_key": key,
+                    "reason": pack.get("reason"), "receipt_path": None,
+                }
+            receipt = {
+                "kind": KIND, "version": VERSION,
+                "event_key": key, "event_payload_sha256": input_sha,
+                "event": item,
+                "input_authority": "caller_assertion_not_verified_remote_event",
+                "git_authority": "existing_local_git_objects",
+                "bundle_source": "existing_snapshot_only",
+                "evidence_pack": pack,
+                "evidence_pack_sha256": hashlib.sha256(_canonical(pack)).hexdigest(),
+                "consumer_handoff": {
+                    "recommended_tool": "change_evidence_pack",
+                    "use_case": use_case,
+                    "review_authority": "none",
+                    "effect": "read_only_evidence",
+                    "automatic_agent_invocation": False,
+                },
+                "does_not_establish": [
+                    "github_event_authenticity", "ci_conclusion_authenticity",
+                    *_FORBIDDEN_APPROVAL,
+                ],
+            }
+            raw = _canonical(receipt)
+            if len(raw) > MAX_RECEIPT_BYTES:
+                return {"status": "blocked", "event_key": key,
+                        "reason": "receipt_size_limit", "receipt_path": None}
+            name = None
+            try:
+                fd, name = tempfile.mkstemp(prefix=f".event-{key[:12]}-", suffix=".tmp", dir=out)
+                with os.fdopen(fd, "wb") as handle:
+                    os.fchmod(handle.fileno(), 0o600)
+                    handle.write(raw)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.replace(name, path)
+                directory_fd = os.open(out, os.O_RDONLY | os.O_DIRECTORY)
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
+            finally:
+                if name is not None and os.path.exists(name):
+                    os.unlink(name)
+            return {"status": "published", "receipt_path": str(path), "event_key": key, "receipt": receipt}
+    finally:
+        # fd ownership transferred to fdopen and automatically closed
+        pass
