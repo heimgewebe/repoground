@@ -241,6 +241,43 @@ class TestStaticConfigLinks(unittest.TestCase):
         self.assertEqual([1, 3], [e["source"]["start_line"] for e in own], own)
         self.assertTrue(all(e["evidence_level"] == "S1" for e in own))
 
+    def test_markdown_inline_and_fenced_html_examples_do_not_swallow_links(self):
+        self.write("docs/target.md", "# target\n")
+        self.write("docs/inline-html.md", (
+            "Use `<code>` to start a code span.\n"
+            "[real](./target.md)\n"
+        ))
+        self.write("docs/fenced-html.md", (
+            "~~~html\n"
+            "<pre>\n"
+            "~~~\n"
+            "[real](./target.md)\n"
+        ))
+        edges, _, _ = self.edges()
+        for name, expected_line in (("inline-html", 2), ("fenced-html", 4)):
+            own = [e for e in edges if e["src"] == f"file:docs/{name}.md"]
+            self.assertEqual([expected_line], [
+                e["source"]["start_line"] for e in own
+            ], own)
+
+    def test_markdown_list_item_fence_does_not_invent_dependencies(self):
+        self.write("docs/target.md", "# target\n")
+        self.write("docs/list-fences.md", (
+            "- ~~~markdown\n"
+            "  [example](./target.md)\n"
+            "  ~~~\n"
+            "[real](./target.md)\n"
+            "10000. ~~~md\n"
+            "       [example2](./target.md)\n"
+            "       ~~~\n"
+            "[after](./target.md)\n"
+        ))
+        edges, _, _ = self.edges()
+        own = [e for e in edges if e["src"] == "file:docs/list-fences.md"]
+        self.assertEqual([4, 8], [
+            e["source"]["start_line"] for e in own
+        ], own)
+
     def test_yaml_step_env_mapping_does_not_emit_action_edge(self):
         self.write("actions/local/action.yml", "name: local\n")
         self.write(".github/workflows/env.yml", (
