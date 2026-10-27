@@ -201,6 +201,46 @@ class TestStaticConfigLinks(unittest.TestCase):
         )
 
 
+    def test_markdown_blockquote_fence_masks_links_but_keeps_prose(self):
+        self.write("docs/target.md", "# target\n")
+        self.write("docs/quoted.md", (
+            "> ~~~markdown\n"
+            "> [example](./target.md)\n"
+            "> ~~~\n"
+            "> [real](./target.md)\n"
+            "> > ~~~md\n"
+            "> > [nested-code](./target.md)\n"
+            "> > ~~~\n"
+        ))
+        edges, _, _ = self.edges()
+        own = [e for e in edges if e["src"] == "file:docs/quoted.md"]
+        self.assertEqual([4], [e["source"]["start_line"] for e in own], own)
+        self.assertEqual("S1", own[0]["evidence_level"])
+
+    def test_markdown_tab_quote_fence_is_not_prose(self):
+        self.write("docs/target.md", "# target\n")
+        self.write("docs/tabbed.md", (
+            ">\t~~~markdown\n"
+            ">\t[not-a-link](./target.md)\n"
+            ">\t~~~\n"
+            "[real](./target.md)\n"
+        ))
+        edges, _, _ = self.edges()
+        own = [e for e in edges if e["src"] == "file:docs/tabbed.md"]
+        self.assertEqual([4], [e["source"]["start_line"] for e in own], own)
+
+    def test_markdown_unmatched_backtick_does_not_hide_real_links(self):
+        self.write("docs/target.md", "# target\n")
+        self.write("docs/unmatched.md", (
+            "Text with unmatched ` and [same](./target.md)\n"
+            "\n"
+            "[after](./target.md)\n"
+        ))
+        edges, _, _ = self.edges()
+        own = [e for e in edges if e["src"] == "file:docs/unmatched.md"]
+        self.assertEqual([1, 3], [e["source"]["start_line"] for e in own], own)
+        self.assertTrue(all(e["evidence_level"] == "S1" for e in own))
+
     def test_yaml_step_env_mapping_does_not_emit_action_edge(self):
         self.write("actions/local/action.yml", "name: local\n")
         self.write(".github/workflows/env.yml", (
