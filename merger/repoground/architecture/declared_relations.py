@@ -325,6 +325,66 @@ def _nix_literal_edge(
     )
 
 
+def _nix_quoted_end(source: str, start: int, depth: int) -> int:
+    """Mask outer Nix strings through nested interpolation expressions."""
+    if depth > 24:
+        return len(source)
+    index = start + 1
+    while index < len(source):
+        if source[index] == "\\":
+            index += 2
+        elif source.startswith("${", index):
+            index = _nix_interpolation_end(source, index + 2, depth + 1)
+        elif source[index] == '"':
+            return index + 1
+        else:
+            index += 1
+    return len(source)
+
+
+def _nix_lexeme_end(source: str, start: int, depth: int) -> int | None:
+    if source[start] == '"':
+        return _nix_quoted_end(source, start, depth)
+    if source.startswith(("''", "/*"), start) or source[start] == "#":
+        trivia = _NIX_TRIVIA.match(source, start)
+        # A malformed unterminated string/comment cannot prove an import.
+        return trivia.end() if trivia is not None else len(source)
+    return None
+
+
+def _nix_interpolation_end(source: str, start: int, depth: int) -> int:
+    """Skip nested string literals and brace groups inside a ${...} expression."""
+    braces = 1
+    index = start
+    while index < len(source):
+        end = _nix_lexeme_end(source, index, depth)
+        if end is not None:
+            index = end
+            continue
+        if source[index] == "{":
+            braces += 1
+        elif source[index] == "}":
+            braces -= 1
+            if braces == 0:
+                return index + 1
+        index += 1
+    return len(source)
+
+
+def _nix_without_trivia(source: str) -> str:
+    """Ordered lexical masking prevents quotes in interpolation from leaking S1."""
+    clean = list(source)
+    index = 0
+    while index < len(source):
+        end = _nix_lexeme_end(source, index, 0)
+        if end is None:
+            index += 1
+            continue
+        clean[index:end] = _masked(source[index:end])
+        index = end
+    return "".join(clean)
+
+
 def _nix_edges(path: str, source: str, known: set[str]) -> list[dict[str, Any]]:
     """Only lexical import arguments and plain imports-list path items are S1.
 
@@ -332,7 +392,7 @@ def _nix_edges(path: str, source: str, known: set[str]) -> list[dict[str, Any]]:
     sibling paths are not themselves imports. Complex list expressions not
     proven to consist solely of paths remain outside the S1 projection.
     """
-    clean = _NIX_TRIVIA.sub(_mask, source)
+    clean = _nix_without_trivia(source)
     edges: list[dict[str, Any]] = []
     list_active = False
     list_lines = 0
