@@ -200,6 +200,58 @@ class TestStaticConfigLinks(unittest.TestCase):
             [e["source"]["start_line"] for e in own if e["evidence_level"] == "S1"],
         )
 
+
+    def test_yaml_step_env_mapping_does_not_emit_action_edge(self):
+        self.write("actions/local/action.yml", "name: local\n")
+        self.write(".github/workflows/env.yml", (
+            "jobs:\n"
+            "  build:\n"
+            "    steps:\n"
+            "      - env:\n"
+            "          uses: ./actions/local\n"
+            "      - uses: ./actions/local\n"
+        ))
+        edges, _, _ = self.edges()
+        own = [e for e in edges if e["src"] == "file:.github/workflows/env.yml"]
+        self.assertEqual(1, len(own), own)
+        self.assertEqual("S1", own[0]["evidence_level"])
+        self.assertEqual("file:actions/local/action.yml", own[0]["dst"])
+        self.assertEqual(6, own[0]["source"]["start_line"])
+
+    def test_markdown_info_fence_is_not_a_closing_fence(self):
+        self.write("docs/target.md", "# target\n")
+        ticks = chr(96) * 3
+        self.write("docs/fences.md", (
+            ticks + "markdown\n"
+            + ticks + "bash\n"
+            "[not-link](./target.md)\n"
+            + ticks + "\n"
+            "[real](./target.md)\n"
+        ))
+        edges, _, _ = self.edges()
+        own = [e for e in edges if e["src"] == "file:docs/fences.md"]
+        self.assertEqual([5], [
+            e["source"]["start_line"] for e in own if e["evidence_level"] == "S1"
+        ])
+
+    def test_repository_root_composite_action_uses_metadata(self):
+        self.write("actions/local/action.yml", "name: local\n")
+        for filename in ("action.yml", "action.yaml"):
+            self.write(filename, (
+                "name: root\n"
+                "runs:\n"
+                "  using: composite\n"
+                "  steps:\n"
+                "    - uses: ./actions/local\n"
+            ))
+        edges, _, _ = self.edges()
+        for filename in ("action.yml", "action.yaml"):
+            own = [e for e in edges if e["src"] == "file:" + filename]
+            self.assertEqual(1, len(own), own)
+            self.assertEqual("file:actions/local/action.yml", own[0]["dst"])
+            self.assertEqual("S1", own[0]["evidence_level"])
+            self.assertEqual(5, own[0]["source"]["start_line"])
+
     def test_systemd_shell_caddy_relations_all_remain_s0(self):
         self.write("units/app.service", (
             "[Unit]\n"
