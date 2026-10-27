@@ -57,6 +57,19 @@ class TestDeclaredRelations(unittest.TestCase):
         self.assertFalse(any("missing" in e["dst"] or "dynamic" in e["dst"] for e in imports))
         self.assertEqual(3, coverage["edge_counts"]["imports"])
 
+
+    def test_explicit_non_js_import_suffix_never_resolves_guessed_js_file(self):
+        self.write("web/config.json", '{"type":"object"}\n')
+        self.write("web/config.json.js", "export const unrelated = 1;\n")
+        self.write("web/app.mjs", (
+            'import config from "./config.json" with { type: "json" };\n'
+        ))
+        edges, _ = self.projection()
+        own = [e for e in edges if e["src"] == "file:web/app.mjs"]
+        self.assertEqual(1, len(own), own)
+        self.assertEqual("S0", own[0]["evidence_level"])
+        self.assertNotEqual("file:web/config.json.js", own[0]["dst"])
+
     def test_unqualified_js_import_collision_must_stay_s0(self):
         self.write("js/a.ts", "export const x = 1;\n")
         self.write("js/a.js", "export const x = 2;\n")
@@ -92,6 +105,140 @@ class TestDeclaredRelations(unittest.TestCase):
         self.assertEqual([definition["dst"]], calls[0]["candidate_target_ids"])
         self.assertEqual("file:web/logic.ts#L4-L4", calls[0]["source"]["range_ref"])
         self.assertEqual(1, coverage["edge_counts"]["defines"])
+
+
+    def test_javascript_inline_declarations_do_not_hide_body_calls(self):
+        self.write("web/inline.ts", (
+            "function helper() {}\n"
+            "function main() { helper(); }\n"
+            "function recursive() { recursive(); }\n"
+        ))
+        edges, _ = self.projection()
+        definitions = [e for e in edges if e["relation"] == "defines"]
+        calls = [e for e in edges if e["relation"] == "calls"]
+        self.assertEqual(3, len(definitions))
+        self.assertEqual(2, len(calls), calls)
+        self.assertEqual([2, 3], sorted(e["source"]["start_line"] for e in calls))
+        self.assertTrue(all(e["evidence_level"] == "S0" for e in calls))
+        candidates = [e["candidate_target_ids"] for e in calls]
+        self.assertIn(["js:web/inline.ts:function:helper:L1"], candidates)
+        self.assertIn(["js:web/inline.ts:function:recursive:L3"], candidates)
+
+    def test_json_schema_instance_data_cannot_become_proven_contract_ref(self):
+        self.write("schemas/base.json", '{"type":"object"}\n')
+        self.write("schemas/default.json", (
+            '{"type":"object","default":{"$ref":"./base.json"}}\n'
+        ))
+        self.write("schemas/ambiguous.json", (
+            '{"allOf":[{"$ref":"./base.json"}],'
+            '"default":{"$ref":"./base.json"}}\n'
+        ))
+        self.write("schemas/legitimate.json", (
+            '{"properties":{"item":{"$ref":"./base.json"}}}\n'
+        ))
+        edges, _ = self.projection()
+        for name in ("default", "ambiguous"):
+            own = [
+                e for e in edges
+                if e["src"] == f"file:schemas/{name}.json"
+            ]
+            self.assertFalse(
+                any(e["evidence_level"] == "S1" for e in own),
+                own,
+            )
+        legitimate = [
+            e for e in edges
+            if e["src"] == "file:schemas/legitimate.json"
+        ]
+        self.assertEqual(1, len(legitimate), legitimate)
+        self.assertEqual("file:schemas/base.json", legitimate[0]["dst"])
+        self.assertEqual("S1", legitimate[0]["evidence_level"])
+
+
+    def test_json_schema_lone_surrogate_is_s0_not_projection_abort(self):
+        self.write("schemas/base.json", '{"type":"object"}\n')
+        self.write("schemas/broken.json", (
+            r'{"$ref":"\ud800","allOf":[{"$ref":"./base.json"}]}' + "\n"
+        ))
+        edges, _ = self.projection()
+        own = [e for e in edges if e["src"] == "file:schemas/broken.json"]
+        self.assertEqual(2, len(own), own)
+        s0 = [e for e in own if e["evidence_level"] == "S0"]
+        s1 = [e for e in own if e["evidence_level"] == "S1"]
+        self.assertEqual(1, len(s0), own)
+        self.assertEqual("unresolved", s0[0]["resolution_status"])
+        self.assertTrue(s0[0]["dst"].startswith("schema-ref:invalid-unicode:"))
+        self.assertEqual(["file:schemas/base.json"], [e["dst"] for e in s1])
+
+    def test_percent_encoded_schema_path_remains_unproven(self):
+        self.write("schemas/base schema.json", '{"type":"object"}\n')
+        self.write("schemas/base%20schema.json", '{"type":"object"}\n')
+        self.write("schemas/encoded.json", '{"$ref":"base%20schema.json"}\n')
+        edges, _ = self.projection()
+        own = [e for e in edges if e["src"] == "file:schemas/encoded.json"]
+        self.assertEqual(1, len(own), own)
+        self.assertEqual("S0", own[0]["evidence_level"])
+        self.assertEqual("unresolved", own[0]["resolution_status"])
+        self.assertNotEqual("file:schemas/base%20schema.json", own[0]["dst"])
+
+    def test_jsx_child_text_cannot_become_s1_function_or_import(self):
+        self.write("web/util.js", "export const value = 1;\n")
+        for suffix in ("jsx", "tsx"):
+            relative = f"web/page.{suffix}"
+            self.write(relative, (
+                'import "./util";\n'
+                "const ui = <pre>\n"
+                "function fake() {}\n"
+                'import "./util";\n'
+                "</pre>;\n"
+                "export function real() {}\n"
+            ))
+        edges, _ = self.projection()
+        for suffix in ("jsx", "tsx"):
+            own = [e for e in edges if e["src"] == f"file:web/page.{suffix}"]
+            definitions = [e for e in own if e["relation"] == "defines"]
+            imports = [e for e in own if e["relation"] == "imports"]
+            self.assertEqual(
+                [f"js:web/page.{suffix}:function:real:L6"],
+                [e["dst"] for e in definitions],
+            )
+            self.assertEqual(1, len(imports), imports)
+            self.assertEqual("file:web/util.js", imports[0]["dst"])
+            self.assertEqual("S1", imports[0]["evidence_level"])
+
+
+    def test_nix_indented_string_interpolation_escape_stays_unproven(self):
+        self.write("foo.nix", "{ ... }: {}\n")
+        self.write("flake.nix", (
+            "{ text = ''\n"
+            "  echo ''${HOME}\n"
+            "  import ./foo.nix\n"
+            "'';\n"
+            "actual = import ./foo.nix;\n"
+            "}\n"
+        ))
+        edges, _ = self.projection()
+        imports = [e for e in edges if e["src"] == "file:flake.nix"]
+        self.assertEqual(1, len(imports), imports)
+        self.assertEqual("file:foo.nix", imports[0]["dst"])
+        self.assertEqual("S1", imports[0]["evidence_level"])
+        self.assertEqual(5, imports[0]["source"]["start_line"])
+
+    def test_nix_nested_quoted_interpolation_cannot_invent_s1_imports(self):
+        self.write("foo.nix", "{ ... }: {}\n")
+        self.write("flake.nix", (
+            '{ text = "outer ${"inner\n'
+            '  import ./foo.nix\n'
+            '"} end";\n'
+            '  real = import ./foo.nix;\n'
+            '}\n'
+        ))
+        edges, _ = self.projection()
+        imports = [e for e in edges if e["src"] == "file:flake.nix"]
+        self.assertEqual(1, len(imports), imports)
+        self.assertEqual("S1", imports[0]["evidence_level"])
+        self.assertEqual("file:foo.nix", imports[0]["dst"])
+        self.assertEqual(4, imports[0]["source"]["start_line"])
 
     def test_nix_literals_are_linked_but_strings_and_comments_skipped(self):
         self.write("modules/gui.nix", "{ ... }: { }\n")
