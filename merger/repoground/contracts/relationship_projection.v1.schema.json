@@ -1,0 +1,212 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:lenskit:schema:relationship_projection.v1.schema.json",
+  "title": "Deterministic structure relations over producer artifacts",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "version",
+    "run_id",
+    "canonical_dump_index_sha256",
+    "edges",
+    "coverage",
+    "does_not_establish"
+  ],
+  "properties": {
+    "kind": {
+      "const": "lenskit.relationship_projection"
+    },
+    "version": {
+      "const": "1.0"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "canonical_dump_index_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "edges": {
+      "type": "array",
+      "maxItems": 250000,
+      "items": {
+        "$ref": "#/$defs/edge"
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "relation_counts",
+        "resolution_counts",
+        "total_edges",
+        "emitted_edges",
+        "truncated",
+        "symbol_records_seen",
+        "call_records_seen",
+        "import_records_seen",
+        "producer_skipped_python_symbol_files",
+        "producer_skipped_python_call_files",
+        "producer_repository_truncated",
+        "gaps"
+      ],
+      "properties": {
+        "relation_counts": {
+          "$ref": "#/$defs/counts"
+        },
+        "resolution_counts": {
+          "$ref": "#/$defs/counts"
+        },
+        "total_edges": {
+          "$ref": "#/$defs/nonnegative"
+        },
+        "emitted_edges": {
+          "$ref": "#/$defs/nonnegative"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "symbol_records_seen": {
+          "$ref": "#/$defs/nonnegative"
+        },
+        "call_records_seen": {
+          "$ref": "#/$defs/nonnegative"
+        },
+        "import_records_seen": {
+          "$ref": "#/$defs/nonnegative"
+        },
+        "producer_skipped_python_symbol_files": {
+          "$ref": "#/$defs/nonnegative"
+        },
+        "producer_skipped_python_call_files": {
+          "$ref": "#/$defs/nonnegative"
+        },
+        "producer_repository_truncated": {
+          "type": "boolean"
+        },
+        "gaps": {
+          "$ref": "#/$defs/counts"
+        }
+      }
+    },
+    "does_not_establish": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "$defs": {
+    "nonnegative": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/nonnegative"
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "start_line",
+        "end_line",
+        "range_ref"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "start_line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "end_line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "range_ref": {
+          "type": "string",
+          "pattern": "^file:.+#L[0-9]+-L[0-9]+$"
+        }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "relation",
+        "src",
+        "dst",
+        "resolution_status",
+        "evidence_level",
+        "source",
+        "origin_artifact"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^rel:[a-f0-9]{64}$"
+        },
+        "relation": {
+          "enum": [
+            "defines",
+            "imports",
+            "calls",
+            "tests",
+            "references",
+            "declares_contract",
+            "configures_service"
+          ]
+        },
+        "src": {
+          "type": "string",
+          "minLength": 1
+        },
+        "dst": {
+          "type": "string",
+          "minLength": 1
+        },
+        "resolution_status": {
+          "enum": [
+            "resolved",
+            "ambiguous",
+            "unresolved",
+            "candidate"
+          ]
+        },
+        "evidence_level": {
+          "enum": [
+            "S0",
+            "S1"
+          ]
+        },
+        "source": {
+          "$ref": "#/$defs/source"
+        },
+        "origin_artifact": {
+          "type": "string",
+          "minLength": 1
+        },
+        "candidate_target_ids": {
+          "type": "array",
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}
