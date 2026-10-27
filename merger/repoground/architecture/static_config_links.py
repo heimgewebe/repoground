@@ -203,41 +203,71 @@ def _markdown_prose_edges(
     return edges
 
 
+_MD_LIST_FENCE_PREFIX = re.compile(
+    r"^ {0,3}(?:[-+*]|[0-9]{1,9}[.)])[ \\t]{1,4}(?![ \\t])"
+)
+
+
+def _markdown_fence_text(
+    content: str, list_indent: int | None = None,
+) -> tuple[str, int | None]:
+    """Remove only a real list-item marker or matching container indentation."""
+    if list_indent is not None:
+        return (
+            content[list_indent:] if content.startswith(" " * list_indent) else content,
+            list_indent,
+        )
+    match = _MD_LIST_FENCE_PREFIX.match(content)
+    if match is not None:
+        return content[match.end():], match.end()
+    return content, None
+
+
 def _markdown_edges(path: str, source: str, known: set[str]) -> list[dict[str, Any]]:
     sanitized = _MD_COMMENT.sub(lambda m: _mask_span(m.group(0)), source)
     edges: list[dict[str, Any]] = []
-    fenced: tuple[str, int] | None = None
+    fenced: tuple[str, int, int | None] | None = None
     in_html_code = False
     paragraph: list[tuple[int, str]] = []
     for ordinal, line in enumerate(sanitized.splitlines(), 1):
         content = _markdown_quote_content(line)
+        if fenced is not None:
+            edges.extend(_markdown_prose_edges(path, paragraph, known))
+            paragraph.clear()
+            candidate, _ = _markdown_fence_text(content, fenced[2])
+            closing = _MD_FENCE.match(candidate)
+            if closing is not None:
+                marks = closing.group("marks")
+                if (marks[0] == fenced[0] and len(marks) >= fenced[1]
+                        and not candidate[closing.end("marks"):].strip()):
+                    fenced = None
+            continue
         if _markdown_indented_code(line) or _markdown_indented_code(content):
             edges.extend(_markdown_prose_edges(path, paragraph, known))
             paragraph.clear()
             continue
-        if "<pre" in content or "<code" in content:
-            in_html_code = True
         if in_html_code:
             edges.extend(_markdown_prose_edges(path, paragraph, known))
             paragraph.clear()
             if "</pre>" in content or "</code>" in content:
                 in_html_code = False
             continue
-        fence = _MD_FENCE.match(content)
-        if fenced is not None:
+        candidate, list_indent = _markdown_fence_text(content)
+        opener = _MD_FENCE.match(candidate)
+        if opener is not None:
             edges.extend(_markdown_prose_edges(path, paragraph, known))
             paragraph.clear()
-            if fence is not None:
-                marks = fence.group("marks")
-                if (marks[0] == fenced[0] and len(marks) >= fenced[1]
-                        and not content[fence.end("marks"):].strip()):
-                    fenced = None
+            marks = opener.group("marks")
+            fenced = marks[0], len(marks), list_indent
             continue
-        if fence is not None:
+        # Inline `<code>` examples are prose, not HTML code regions.
+        visible = _without_inline_code(content)
+        if "<pre" in visible or "<code" in visible:
+            in_html_code = True
             edges.extend(_markdown_prose_edges(path, paragraph, known))
             paragraph.clear()
-            marks = fence.group("marks")
-            fenced = marks[0], len(marks)
+            if "</pre>" in visible or "</code>" in visible:
+                in_html_code = False
             continue
         if not content.strip():
             edges.extend(_markdown_prose_edges(path, paragraph, known))
