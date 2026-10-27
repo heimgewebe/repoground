@@ -40,6 +40,10 @@ class TestStaticConfigLinks(unittest.TestCase):
             + tick * 3 + "md\n[code](./detail.md)\n" + tick * 3 + "\n"
             "<!-- [comment](./detail.md) -->\n"
             "<pre>\n[htmlcode](./detail.md)\n</pre>\n"
+            "Example:\n\n"
+            "    [indented](./detail.md)\n"
+            "\t[tabbed](./detail.md)\n"
+            "  \t[two-spaces-tab](./detail.md)\n"
         ))
         edges, coverage, graph = self.edges()
         self.assertEqual("markdown", next(
@@ -74,6 +78,14 @@ class TestStaticConfigLinks(unittest.TestCase):
             "          uses: ./.github/workflows/reusable.yml\n"
             "      - run: |\n"
             "          uses: ./.github/workflows/fake.yml\n"
+            "      - run: |2\n"
+            "          uses: ./actions/local\n"
+            "      - run: >2-\n"
+            "          uses: ./actions/local\n"
+            "      - run: >-2\n"
+            "          uses: ./actions/local\n"
+            "      - run: |+2\n"
+            "          uses: ./actions/local\n"
             "      - uses: $/actions/local\n"
             "      - uses: ./.github/workflows/reusable.yml\n"
             "      - run: echo uses: ./.github/workflows/fake.yml\n"

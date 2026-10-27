@@ -22,7 +22,7 @@ _YAML_USES = re.compile(
     r"""^[ \t]*(?:-[ \t]+)?uses:[ \t]*(?P<value>"[^"\n]+"|'[^'\n]+'|[^\s#]+)[ \t]*(?:#.*)?$"""
 )
 _YAML_BLOCK = re.compile(
-    r"^(?P<indent>[ \t]*)(?:-[ \t]+)?[a-zA-Z_][\w.-]*:[ \t]*[|>][-+]?[ \t]*(?:#.*)?$"
+    r"^(?P<indent>[ \t]*)(?:-[ \t]+)?[a-zA-Z_][\w.-]*:[ \t]*[|>](?:[-+][1-9]?|[1-9][-+]?)?[ \t]*(?:#.*)?$"
 )
 _YAML_PARENT = re.compile(
     r"^[ \t]*(?P<key>[A-Za-z_][\w.-]*):[ \t]*(?:#.*)?$"
@@ -120,12 +120,33 @@ def _without_inline_code(line: str) -> str:
     return "".join(output)
 
 
+def _markdown_indented_code(line: str) -> bool:
+    """Exclude possible CommonMark indented code, even in ambiguous lists.
+
+    A tab stops at the next multiple of four columns; skipping ambiguous
+    nested-list content favors a missed link over a false proven S1 edge.
+    """
+    columns = 0
+    for char in line:
+        if char == " ":
+            columns += 1
+        elif char == "\t":
+            columns += 4 - columns % 4
+        else:
+            break
+        if columns >= 4:
+            return True
+    return False
+
+
 def _markdown_edges(path: str, source: str, known: set[str]) -> list[dict[str, Any]]:
     sanitized = _MD_COMMENT.sub(lambda m: _mask_span(m.group(0)), source)
     edges: list[dict[str, Any]] = []
     fenced: tuple[str, int] | None = None
     in_html_code = False
     for ordinal, line in enumerate(sanitized.splitlines(), 1):
+        if _markdown_indented_code(line):
+            continue
         if "<pre" in line or "<code" in line:
             in_html_code = True
         if in_html_code:
