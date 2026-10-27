@@ -28,7 +28,7 @@ _JS_DECLARATION = re.compile(
     re.DOTALL,
 )
 _NIX_TRIVIA = re.compile(
-    r"/\*[\s\S]*?\*/|''[\s\S]*?''|\"(?:\\.|[^\"\\])*\"|#[^\n]*"
+    r"/\*[\s\S]*?\*/|''(?:''(?:\$\{|\\|')|(?!'')[\s\S])*''|\"(?:\\.|[^\"\\])*\"|#[^\n]*"
 )
 _NIX_LITERAL = re.compile(r"(?<![\w./])(?P<ref>\.{1,2}/[a-zA-Z0-9_./-]+\.nix)(?![\w])")
 _JSON_REF = re.compile(r'"\$ref"\s*:\s*"(?P<ref>(?:\\.|[^"\\])*)"')
