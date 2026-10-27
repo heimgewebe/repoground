@@ -199,3 +199,40 @@ against real GitHub metadata, **not a live authenticated webhook**.
 The outbox was ephemeral and removed; no publisher timer or deployment
 was changed. Existing Release-R3 coordination in Grabowski issue #1635
 continues to block publication of the local Thread 3 branches.
+## Zusammengeführter Agenten- und Ereignisstand (27.10.2026)
+
+Der isolierte Ereignisbranch enthält den exakt geprüften und auf GitHub
+veröffentlichten Agentenbranch `856dbf292575c92a51b50babcc92d19c59596139`
+als nachgewiesenen Git-Vorfahren; der Stack-Merge erzeugte
+`5a2098e32d408e4dde70a4efcdd7e112a59ec016` ohne Konflikte.
+Event-spezifische Komplexitätsüberschreitungen wurden durch getrennte
+Validierungs-, Einlese- und Ausgabefunktionen behoben. Die ursprünglichen
+eventseitigen JSON-, Fallback-, Replay- und Sicherheitsverträge bleiben erhalten.
+
+- Exakte CI-Maintainability-Policy: `status=pass`, keine Findings.
+- Planungskontrolle: `0` Findings, keine Ausnahmen und keine Änderung des Ratchets.
+- Fokussierte Agenten-/Ereignis-/MCP-Tests: **80 bestanden**.
+- Vollständige lokale RepoGround-Python-Suite: **6134 bestanden,
+  12 übersprungen, 4 zuvor unabhängig auf unverändertem `main` reproduzierte
+  Baselinefehler ausgenommen**, Exit 0 in 252,71 Sekunden.
+
+**Realitätsprobe nach dem Stack-Merge:** Das tatsächlich über GitHub
+ausgelesene erfolgreiche `pytest-full`-Check-Run
+`122282644444` zu Agentencommit `856dbf29` (abgeschlossen um
+`2026-10-27T15:29:01Z`) wurde als **manuell übermittelte** CI-Ereignisnachricht
+in einem isolierten temporären Outbox-Verzeichnis verarbeitet.
+Ein Publisher-Aufruf lieferte `published`, Wiederholung desselben Inputs
+`deduplicated`, unabhängiger lesender Lookup `available`, genau eine
+Receiptdatei und **sieben** Git-Änderungen. Ereignisschlüssel:
+`8f2ba6e954148327a4e75dce11abdf1bf8873465a305cf7a24ab67f51aae9d0d`;
+Receipt-SHA256: `d76e146f0374a7052daf25a708866f5ecf858ef81942c7d095411845dc9457da`.
+Gemeldeter Zeitabstand: 349 Sekunden, ausdrücklich
+`caller_supplied_unverified_timestamps`. Der verwendete Bundle-Status war
+`bundle_unavailable`, die Gesamtanalyse deshalb `warn`, nicht ein
+vollständiger Freshness-Beweis.
+
+**Grenze:** Dies war kein authentifizierter Webhook oder produktiver
+Fleet-Publisher-Hook. CI-Fazit und Event-Lieferung bleiben
+vom aufrufenden Operator behauptete Metadaten. Automatischer Agentenaufruf:
+`false`. Keine neue systemd-Unit, kein Scheduler, kein Merge, Patch oder
+Deployment wurde ausgelöst. Der temporäre Outbox wurde nach Prüfung gelöscht.
