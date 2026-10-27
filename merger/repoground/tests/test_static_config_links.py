@@ -278,6 +278,48 @@ class TestStaticConfigLinks(unittest.TestCase):
             e["source"]["start_line"] for e in own
         ], own)
 
+    def test_yaml_anchored_env_mapping_does_not_fake_local_action(self):
+        self.write("actions/local/action.yml", "name: local\n")
+        self.write(".github/workflows/anchor.yml", (
+            "jobs:\n"
+            "  build:\n"
+            "    steps:\n"
+            "      - env: &shared\n"
+            "          uses: ./actions/local\n"
+            "        run: echo hello\n"
+            "      - uses: ./actions/local\n"
+        ))
+        edges, _, _ = self.edges()
+        own = [e for e in edges if e["src"] == "file:.github/workflows/anchor.yml"]
+        self.assertEqual([7], [e["source"]["start_line"] for e in own], own)
+
+    def test_markdown_html_comment_opened_inside_fence_cannot_hide_real_links(self):
+        self.write("docs/target.md", "# target\n")
+        self.write("docs/commented-fence.md", (
+            "~~~html\n"
+            "<!--\n"
+            "~~~\n"
+            "\n"
+            "[real](./target.md)\n"
+        ))
+        edges, _, _ = self.edges()
+        own = [e for e in edges if e["src"] == "file:docs/commented-fence.md"]
+        self.assertEqual([5], [e["source"]["start_line"] for e in own], own)
+
+    def test_markdown_backslash_before_code_span_closer_is_still_closing(self):
+        self.write("docs/fake.md", "# must be masked\n")
+        self.write("docs/real.md", "# real target\n")
+        tick = chr(96)
+        slash = chr(92)
+        self.write("docs/backslash-closer.md", (
+            tick + "[fake](./fake.md)" + slash + tick
+            + " [real](./real.md)\n"
+        ))
+        edges, _, _ = self.edges()
+        own = [e for e in edges if e["src"] == "file:docs/backslash-closer.md"]
+        self.assertEqual(["file:docs/real.md"], [e["dst"] for e in own], own)
+        self.assertEqual("S1", own[0]["evidence_level"])
+
     def test_yaml_step_env_mapping_does_not_emit_action_edge(self):
         self.write("actions/local/action.yml", "name: local\n")
         self.write(".github/workflows/env.yml", (
