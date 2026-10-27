@@ -252,6 +252,53 @@ class TestStaticConfigLinks(unittest.TestCase):
             self.assertEqual("S1", own[0]["evidence_level"])
             self.assertEqual(5, own[0]["source"]["start_line"])
 
+
+    def test_yaml_sequence_mapping_sibling_action_uses_is_extracted(self):
+        self.write("actions/local/action.yml", "name: local\n")
+        self.write("actions/decoy/action.yml", "name: decoy\n")
+        self.write(".github/workflows/sibling.yml", (
+            "jobs:\n"
+            "  build:\n"
+            "    steps:\n"
+            "      - env:\n"
+            "          uses: ./actions/decoy\n"
+            "        uses: ./actions/local\n"
+        ))
+        edges, _, _ = self.edges()
+        own = [e for e in edges if e["src"] == "file:.github/workflows/sibling.yml"]
+        self.assertEqual(1, len(own), own)
+        self.assertEqual("file:actions/local/action.yml", own[0]["dst"])
+        self.assertEqual("S1", own[0]["evidence_level"])
+        self.assertEqual(6, own[0]["source"]["start_line"])
+
+    def test_workflow_root_local_action_directory_is_resolved(self):
+        self.write("action.yml", "name: repository root\n")
+        self.write(".github/workflows/root.yml", (
+            "jobs:\n"
+            "  build:\n"
+            "    steps:\n"
+            "      - uses: ./\n"
+        ))
+        edges, _, _ = self.edges()
+        own = [e for e in edges if e["src"] == "file:.github/workflows/root.yml"]
+        self.assertEqual(1, len(own), own)
+        self.assertEqual("file:action.yml", own[0]["dst"])
+        self.assertEqual("S1", own[0]["evidence_level"])
+
+    def test_escaped_markdown_link_openers_do_not_claim_s1(self):
+        self.write("docs/target.md", "# target\n")
+        self.write("docs/escape.md", (
+            "\\" + "[not-a-link](./target.md)\n"
+            + "\\\\" + "[escaped-backslash-then-link](./target.md)\n"
+            + "[actual](./target.md)\n"
+        ))
+        edges, _, _ = self.edges()
+        own = [e for e in edges if e["src"] == "file:docs/escape.md"]
+        self.assertEqual(
+            [2, 3],
+            [e["source"]["start_line"] for e in own if e["evidence_level"] == "S1"],
+        )
+
     def test_systemd_shell_caddy_relations_all_remain_s0(self):
         self.write("units/app.service", (
             "[Unit]\n"
