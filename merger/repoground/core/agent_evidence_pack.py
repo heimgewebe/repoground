@@ -16,7 +16,9 @@ import time
 from typing import Any
 
 from merger.repoground.core.delta_context import compile_delta_context, parse_unified_diff
-from merger.repoground.core.manifest_snapshot import ManifestBindingError, manifest_snapshot
+from merger.repoground.core.manifest_snapshot import (
+    ManifestBindingError, manifest_snapshot, use_manifest_binding,
+)
 
 KIND = "repoground.agent_change_evidence"
 VERSION = 1
@@ -432,7 +434,7 @@ def _case_candidates_and_gaps(
     return test_candidates, gap_codes
 
 
-def build_evidence_pack(
+def _build_evidence_pack_bound(
     *,
     repo_root: str | Path,
     base_revision: str,
@@ -504,6 +506,38 @@ def build_evidence_pack(
     }
     result["response_sha256"] = hashlib.sha256(_json_bytes(result)).hexdigest()
     return result
+
+
+def build_evidence_pack(
+    *,
+    repo_root: str | Path,
+    base_revision: str,
+    target_revision: str,
+    bundle_manifest: str | Path | None = None,
+    use_case: str = "explain-change",
+    context_budget_tokens: int = 1_200,
+    expected_diff_sha256: str | None = None,
+) -> dict[str, Any]:
+    """Pin one manifest for the complete CLI/core invocation, not only MCP.
+
+    Both manifest metadata and delta navigation must share the same request
+    snapshot even if a mutable selected symlink moves while Git is read.
+    The explicit no-bundle Git-only fallback remains available.
+    """
+    kwargs = {
+        "repo_root": repo_root, "base_revision": base_revision,
+        "target_revision": target_revision, "bundle_manifest": bundle_manifest,
+        "use_case": use_case, "context_budget_tokens": context_budget_tokens,
+        "expected_diff_sha256": expected_diff_sha256,
+    }
+    if bundle_manifest is None:
+        return _build_evidence_pack_bound(**kwargs)
+    try:
+        snapshot = manifest_snapshot(bundle_manifest)
+        with use_manifest_binding(snapshot.binding):
+            return _build_evidence_pack_bound(**kwargs)
+    except (ManifestBindingError, OSError, ValueError):
+        return _invalid("manifest_not_readable")
 
 
 def _append_markdown_section(

@@ -341,3 +341,47 @@ def test_request_pinned_manifest_identity_survives_selected_symlink_retarget(tmp
     ).hexdigest()
     assert result["changed_files"][0]["path"] == "alpha.py"
     assert result["mutation_boundary"]["writes"] == []
+
+
+def test_direct_cli_pins_initial_manifest_generation_without_outer_binding(
+    tmp_path, monkeypatch,
+):
+    """Direct core/CLI callers must not mix two generations on a pointer race."""
+    from merger.repoground.core import agent_evidence_pack
+
+    repo, base, head = seeded_repo(tmp_path)
+    gen_a, gen_b = tmp_path / "direct-generation-a", tmp_path / "direct-generation-b"
+    gen_a.mkdir()
+    gen_b.mkdir()
+    manifest_a = manifest(gen_a, base)
+    manifest_b = manifest(gen_b, head)
+    selected = tmp_path / "direct.bundle.manifest.json"
+    selected.symlink_to(manifest_a)
+    original_git = agent_evidence_pack._read_git_delta
+
+    def switch_pointer_after_request_begins(*args, **kwargs):
+        selected.unlink()
+        selected.symlink_to(manifest_b)
+        return original_git(*args, **kwargs)
+
+    monkeypatch.setattr(
+        agent_evidence_pack, "_read_git_delta",
+        switch_pointer_after_request_begins,
+    )
+    # No external use_manifest_binding context: this matches normal CLI use.
+    pack = agent_evidence_pack.build_evidence_pack(
+        repo_root=repo,
+        base_revision=base,
+        target_revision=head,
+        bundle_manifest=selected,
+    )
+    assert selected.resolve() == manifest_b.resolve()
+    assert pack["status"] in {"warn", "pass"}
+    assert pack["bundle"]["source_commit"] == base
+    assert pack["bundle"]["manifest_sha256"] == hashlib.sha256(
+        manifest_a.read_bytes()
+    ).hexdigest()
+    assert pack["bundle"]["manifest_sha256"] != hashlib.sha256(
+        manifest_b.read_bytes()
+    ).hexdigest()
+    assert pack["changed_files"][0]["path"] == "alpha.py"
