@@ -74,3 +74,27 @@ def test_mcp_manifest_boundary_and_invalid_revision(tmp_path):
         },
     })
     assert invalid["result"]["structuredContent"]["status"] == "invalid"
+
+
+def test_mcp_no_healthy_bundle_still_reports_exact_git_diff(tmp_path):
+    repo, base, head = seeded_repo(tmp_path)
+    empty = tmp_path / "no-publications"
+    empty.mkdir()
+    server = RepoGroundMcpStdioServer(bundle_root=empty, repo_root=repo)
+    rpc(server, 1, "initialize", {"protocolVersion": PROTOCOL_VERSION})
+    call = rpc(server, 2, "tools/call", {
+        "name": "change_evidence_pack",
+        "arguments": {"repo": "heimgewebe/demorepo",
+                      "base_revision": base, "target_revision": head,
+                      "use_case": "find-related-tests"},
+    })
+    assert call["result"]["isError"] is False
+    pack = call["result"]["structuredContent"]
+    assert pack["status"] == "warn"
+    assert pack["bundle"]["status"] == "unavailable"
+    assert pack["revision"]["target"] == head
+    assert pack["changed_files"][0]["path"] == "alpha.py"
+    assert pack["live_freshness"]["status"] == "not_comparable"
+    assert pack["live_freshness"]["implicit_refresh"] is False
+    assert not list(empty.iterdir())
+    assert git(repo, "status", "--porcelain") == ""
