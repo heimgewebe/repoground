@@ -25,7 +25,7 @@ _YAML_BLOCK = re.compile(
     r"^(?P<indent>[ \t]*)(?:-[ \t]+)?[a-zA-Z_][\w.-]*:[ \t]*[|>](?:[-+][1-9]?|[1-9][-+]?)?[ \t]*(?:#.*)?$"
 )
 _YAML_PARENT = re.compile(
-    r"^[ \t]*(?:-[ \t]+)?(?P<key>[A-Za-z_][\w.-]*):[ \t]*(?:#.*)?$"
+    r"^[ \t]*(?P<prefix>-[ \t]+)?(?P<key>[A-Za-z_][\w.-]*):[ \t]*(?:#.*)?$"
 )
 _YAML_QUOTED_VALUE = re.compile(
     r"""^[ \t]*(?:-[ \t]+)?[A-Za-z_][\w.-]*:[ \t]*(?P<quote>["'])"""
@@ -146,6 +146,14 @@ def _markdown_indented_code(line: str) -> bool:
     return False
 
 
+def _escaped_markdown_opener(text: str, start: int) -> bool:
+    """Odd backslash parity escapes Markdown links or image openers."""
+    count = 0
+    while start > count and text[start - count - 1] == "\\":
+        count += 1
+    return count % 2 == 1
+
+
 def _markdown_edges(path: str, source: str, known: set[str]) -> list[dict[str, Any]]:
     sanitized = _MD_COMMENT.sub(lambda m: _mask_span(m.group(0)), source)
     edges: list[dict[str, Any]] = []
@@ -175,6 +183,8 @@ def _markdown_edges(path: str, source: str, known: set[str]) -> list[dict[str, A
             continue
         visible, inline_code_width = _without_inline_code(line, inline_code_width)
         for match in _MD_LINK.finditer(visible):
+            if _escaped_markdown_opener(visible, match.start()):
+                continue
             ref = match.group("ref").removeprefix("<").removesuffix(">")
             if ref.startswith(("#", "/", "//")) or _URL_SCHEME.match(ref):
                 continue
@@ -243,7 +253,7 @@ def _yaml_uses_edges(path: str, source: str, known: set[str]) -> list[dict[str, 
             continue
         parent = _YAML_PARENT.match(line)
         if parent is not None:
-            context.append((indent, parent.group("key")))
+            context.append((indent + len(parent.group("prefix") or ""), parent.group("key")))
             continue
         match = _YAML_USES.match(line)
         if match is None:
@@ -298,10 +308,11 @@ def _yaml_uses_edges(path: str, source: str, known: set[str]) -> list[dict[str, 
             # Pointing directly at a workflow .yml is not a proven action
             # dependency, even when that YAML file exists in the inventory.
             directory = ref[2:].rstrip("/")
+            metadata_prefix = directory + "/" if directory else ""
             metadata = [
-                "file:" + directory + "/" + suffix
+                "file:" + metadata_prefix + suffix
                 for suffix in ("action.yml", "action.yaml")
-                if "file:" + directory + "/" + suffix in known
+                if "file:" + metadata_prefix + suffix in known
             ]
             if len(metadata) == 1:
                 edges.append(_edge(
