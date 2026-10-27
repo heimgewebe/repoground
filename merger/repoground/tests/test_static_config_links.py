@@ -148,6 +148,58 @@ class TestStaticConfigLinks(unittest.TestCase):
             "file:actions/first/action.yml", "file:actions/first/action.yaml",
         }, set(own[0]["candidate_target_ids"]))
 
+
+    def test_indentless_yaml_steps_keep_action_context(self):
+        self.write("actions/local/action.yml", "name: local\n")
+        self.write(".github/workflows/indentless.yml", (
+            "jobs:\n"
+            "  build:\n"
+            "    steps:\n"
+            "    - uses: ./actions/local\n"
+        ))
+        edges, _, _ = self.edges()
+        own = [e for e in edges if e["src"] == "file:.github/workflows/indentless.yml"]
+        self.assertEqual(
+            [("file:actions/local/action.yml", "S1")],
+            [(e["dst"], e["evidence_level"]) for e in own],
+        )
+
+    def test_multiline_yaml_quoted_scalar_does_not_invent_uses(self):
+        self.write("actions/local/action.yml", "name: local\n")
+        self.write(".github/workflows/quoted.yml", (
+            "jobs:\n"
+            "  build:\n"
+            "    steps:\n"
+            '      - run: "echo starts\n'
+            "          uses: ./actions/local\n"
+            '        done"\n'
+            "      - run: 'start\n"
+            "          uses: ./actions/local\n"
+            "        it''s done'\n"
+            "      - uses: ./actions/local\n"
+        ))
+        edges, _, _ = self.edges()
+        own = [e for e in edges if e["src"] == "file:.github/workflows/quoted.yml"]
+        self.assertEqual(1, len(own), own)
+        self.assertEqual("file:actions/local/action.yml", own[0]["dst"])
+        self.assertEqual("S1", own[0]["evidence_level"])
+        self.assertEqual(10, own[0]["source"]["start_line"])
+
+    def test_multiline_markdown_code_span_excludes_only_code_links(self):
+        self.write("docs/target.md", "# real target\n")
+        tick = chr(96)
+        self.write("docs/inline.md", (
+            "[before](./target.md)\n" + tick + "\n"
+            "[not-a-link](./target.md)\n" + tick + "\n"
+            "[after](./target.md)\n"
+        ))
+        edges, _, _ = self.edges()
+        own = [e for e in edges if e["src"] == "file:docs/inline.md"]
+        self.assertEqual(
+            [1, 5],
+            [e["source"]["start_line"] for e in own if e["evidence_level"] == "S1"],
+        )
+
     def test_systemd_shell_caddy_relations_all_remain_s0(self):
         self.write("units/app.service", (
             "[Unit]\n"
