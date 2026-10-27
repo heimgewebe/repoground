@@ -47,6 +47,7 @@ def checked_setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         )
 
     values = {
+        "user": {"login": "fixture-login", "id": 456},
         "commit": {
             "sha": head,
             "parents": [{"sha": base}],
@@ -63,6 +64,8 @@ def checked_setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     }
 
     def fake_api(endpoint: str):
+        if endpoint == "/user":
+            return values["user"], "c" * 64
         if endpoint.endswith("/git/commits/" + head):
             return values["commit"], "a" * 64
         if "/check-runs?" in endpoint:
@@ -201,3 +204,73 @@ def test_invalid_authenticated_time_rejected() -> None:
         m._github_event_unix("2026-10-27T18:00:00")
     with pytest.raises(RuntimeError, match="github_event_time"):
         m._github_event_unix("not-a-date")
+
+
+def test_isolated_runtime_bootstraps_trusted_repo_modules(
+    tmp_path: Path,
+) -> None:
+    """The managed Fleet launcher uses python -I, which drops cwd and PYTHONPATH."""
+    script = (
+        "import importlib.machinery, importlib.util, sys\n"
+        f"script = {str(PUBLISHER)!r}\n"
+        "loader = importlib.machinery.SourceFileLoader('fleet_isolated_probe', script)\n"
+        "spec = importlib.util.spec_from_loader('fleet_isolated_probe', loader)\n"
+        "assert spec is not None\n"
+        "module = importlib.util.module_from_spec(spec)\n"
+        "sys.modules['fleet_isolated_probe'] = module\n"
+        "loader.exec_module(module)\n"
+        "from merger.repoground.core.event_handoff import publish_event\n"
+        "assert callable(publish_event)\n"
+        "print('isolated_module_import_pass')\n"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", script],
+        cwd=tmp_path, check=False, capture_output=True, text=True, timeout=30,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "isolated_module_import_pass"
+
+
+def test_new_manifest_generation_never_relabels_old_receipts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    m, entry, repo, _base, head, manifest_path, _data = checked_setup(
+        tmp_path, monkeypatch
+    )
+    first = emit(m, entry, repo, head, manifest_path)
+    assert first["status"] == "ok"
+    old = {row["event_key"]: row for row in first["events"]}
+    current = json.loads(manifest_path.read_text(encoding="utf-8"))
+    current["run_id"] = "same_revision_republished_new_bundle_generation"
+    manifest_path.write_text(json.dumps(current), encoding="utf-8")
+    second = emit(m, entry, repo, head, manifest_path)
+    assert second["status"] == "ok"
+    assert all(row["status"] == "deduplicated" for row in second["events"])
+    for row in second["events"]:
+        previous = old[row["event_key"]]
+        assert row["receipt_sha256"] == previous["receipt_sha256"]
+        assert row["bundle_manifest_sha256"] == previous["bundle_manifest_sha256"]
+        assert row["observed_manifest_sha256"] != previous["bundle_manifest_sha256"]
+        assert row["bundle_generation_binding"] == "existing_receipt_generation"
+        readback = read_event_receipt(
+            outbox_root=outbox(m, entry), event_key=row["event_key"],
+        )
+        assert (
+            readback["receipt"]["evidence_pack"]["bundle"]["manifest_sha256"]
+            == row["bundle_manifest_sha256"]
+        )
+
+
+def test_anonymous_or_invalid_identity_fails_before_event_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    m, entry, repo, _base, head, bundle, data = checked_setup(
+        tmp_path, monkeypatch
+    )
+    data["user"] = {"login": "", "id": 0}
+    result = m._attempt_authenticated_fleet_handoff(
+        entry, source_sha=head, source_wt=repo, manifest_path=str(bundle),
+    )
+    assert result["status"] == "blocked"
+    assert result["reason"] == "authenticated_github_principal_invalid"
+    assert not outbox(m, entry).exists()

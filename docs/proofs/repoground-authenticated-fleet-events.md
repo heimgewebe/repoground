@@ -81,3 +81,77 @@ the complete refreshed CI/reviews, prove two distinct real agent consumers,
 and obtain the installed Fleet timer's *own* authenticated event creation
 and readback. Longer CI-history replay and safe retention at capacity need
 an explicit review, not an implicit success claim.
+
+## Review findings corrected before final head
+
+The first published stacked PR #1360 head
+`7bfbd14a8d3c79c5482fb12e0e1032c62a345a86` received two substantive Codex review findings.
+Both were corrected in the same original PR branch before merge:
+
+1. P1: the managed wrapper launches Python in isolated `-I` mode.
+   The Fleet source script now bootstraps **only its own resolved
+   release/source root**, allowing the read-only `merger` event modules
+   to be imported without trusting current cwd or PYTHONPATH. An isolated
+   subprocess test proves the imported event entrypoint.
+2. P2: deduplication of an existing receipt after a new same-revision bundle
+   generation **does not re-label the stored event with the new manifest SHA**.
+   `bundle_manifest_sha256` now comes from the integrity-checked
+   original receipt; `observed_manifest_sha256` and
+   `bundle_generation_binding` separately disclose the newly
+   observed publication. The regression explicitly changes the bundle
+   manifest's run ID and checks both generations.
+
+A further authentication hardening rejects **anonymous GitHub API polling**.
+Each authorized polling iteration now first completes authenticated GET
+`/user` and validates the returned login and numeric GitHub user ID.
+The publisher persists only SHA-256 principal binding in the bounded
+per-event summary, never a credential. The underlying event adapter
+still honestly labels its caller-supplied event data as unverified.
+
+Post-fix checks on the isolated checkout:
+- Focused source/event regression: **30 passed**, exit 0.
+- Ruff: **all checks passed**, exit 0.
+- Whole RepoGround Python suite, now also under `python -I -B -m pytest`:
+  **6150 passed, 12 skipped, 4 deliberately deselected unchanged-main
+  environment failures**, exit 0. Grabowski task
+  `3755fbc1881e4a7e96f843f1`, output SHA-256
+  `387ec10b940f35052c93401283bab37f1ed56dbf756503f66993a67e283d935a`.
+
+A second real, logged-in GitHub REST probe with the fixed isolated
+Python `-I` runtime was performed in Grabowski task
+`2b99f8b6dda249e1a908503c`, output SHA-256
+`f3e1c0860b972cf15a03472f65bc75ce2577a03bf31a4a045a656ec4bd62e274`.
+It produced one real Git commit + 16 real completed CI-event receipts,
+with 17/17 duplicate deliveries deduplicated, verified bundle alignment
+and authenticated GH principal binding. Status remained `partial`
+because of the deliberate first-page check-run limit; this is still a
+**temporary functional demonstration**, not productive timer delivery.
+
+## Second real coding-agent consumer: Codex CLI
+
+Separately from the Grabowski RepoGround MCP caller, an actual
+`codex exec --sandbox read-only --skip-git-repo-check --ephemeral --json`
+session (task `c842e31e6dda4c8f84fe5322`) loaded the pre-existing
+`~/.codex/config.toml` RepoGround MCP server. The actual Codex
+JSONL trace, SHA-256
+`4c16d0234c2f6f41b79bcf237b9159ed6740be36a2c73b2566360c53e60b23a8`,
+includes successful `repoground.query_existing_index` and
+`repoground.ask_context` MCP tool calls with the exact
+published manifest SHA-256
+`3cb05bc19c98662eb4a4104adbe1317e18d002883b055a7fac99f097bbf0452f`
+(RepoGround base commit
+`bf2ad72785c47ede4b8b94ce2215b07e4773877e`).
+
+The tool responses returned real MCP source locations and tests, including
+`merger/repoground/cli/mcp_stdio.py`,
+`merger/repoground/core/mcp_tools.py`,
+`merger/repoground/tests/test_mcp_stdio.py`,
+`test_mcp_stdio_e2e.py` and `test_mcp_query_routing.py`.
+Codex explicitly reported `live_freshness=not_comparable`
+because this global stdio configuration has no `--repo-root`,
+and no assertion of PR-head completeness, review approval, coverage,
+merge readiness or deployed code was made.
+
+The two real consumers have now been exercised independently, but
+**they have not yet consumed the final merged #1357/#1358/#1360 code**.
+Fresh post-Captain readbacks remain mandatory.

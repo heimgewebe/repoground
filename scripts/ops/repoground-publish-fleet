@@ -36,6 +36,14 @@ from typing import Any, Iterable
 
 import yaml
 
+# The installed Fleet wrapper launches Python with -I: the source tree is not
+# on sys.path unless the exact executing script binds its own trusted root.
+# Resolve this file, never cwd/PYTHONPATH, so event imports use the managed
+# release source rather than an unrelated installed merger package.
+_PUBLISHER_SOURCE_ROOT = Path(__file__).resolve(strict=True).parents[2]
+if str(_PUBLISHER_SOURCE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PUBLISHER_SOURCE_ROOT))
+
 
 REPOS_ROOT = Path(
     os.environ.get("REPOGROUND_REPOS_ROOT") or "/home/alex/repos"
@@ -6103,6 +6111,24 @@ def _authenticated_fleet_event_handoff(
     )
     results: list[dict[str, object]] = []
     with use_manifest_binding(snapshot.binding):
+        # Public GitHub resources may be readable anonymously. GET /user must
+        # succeed under the same gh credential context before the bridge
+        # claims an authenticated provider API observation.
+        principal, principal_response_sha = _github_event_api_get("/user")
+        principal_login = principal.get("login")
+        principal_id = principal.get("id")
+        if (
+            not isinstance(principal_login, str)
+            or not re.fullmatch(r"[A-Za-z0-9-]{1,39}", principal_login)
+            or type(principal_id) is not int or principal_id <= 0
+        ):
+            raise RuntimeError("authenticated_github_principal_invalid")
+        principal_sha256 = hashlib.sha256(
+            json.dumps(
+                {"login": principal_login, "id": principal_id},
+                sort_keys=True, separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
         bundle, _gaps = _bundle_identity(manifest_path)
         if bundle.get("status") != "available" or bundle.get("source_commit") != source_sha:
             raise RuntimeError("event_bundle_source_revision_mismatch")
@@ -6144,6 +6170,16 @@ def _authenticated_fleet_event_handoff(
             receipt = readback["receipt"]
             if receipt.get("bundle_revision_alignment") != "matches_target_revision":
                 raise RuntimeError("event_receipt_bundle_source_mismatch")
+            receipt_bundle = receipt.get("evidence_pack", {}).get("bundle")
+            receipt_manifest_sha = (
+                receipt_bundle.get("manifest_sha256")
+                if isinstance(receipt_bundle, dict) else None
+            )
+            if (
+                not isinstance(receipt_manifest_sha, str)
+                or re.fullmatch(r"[0-9a-f]{64}", receipt_manifest_sha) is None
+            ):
+                raise RuntimeError("event_receipt_manifest_binding_missing")
             results.append({
                 "kind": event["event_type"], "event_key": key,
                 "status": outcome["status"],
@@ -6151,7 +6187,17 @@ def _authenticated_fleet_event_handoff(
                 "provider_authority": authority,
                 "provider_response_sha256": provider_sha,
                 "source_revision": source_sha,
-                "bundle_manifest_sha256": snapshot.binding.sha256,
+                # A duplicate returns the original immutable receipt, which
+                # may predate today's manifest generation at the same commit.
+                # Never relabel it with a later publication's SHA.
+                "bundle_manifest_sha256": receipt_manifest_sha,
+                "observed_manifest_sha256": snapshot.binding.sha256,
+                "bundle_generation_binding": (
+                    "current" if receipt_manifest_sha == snapshot.binding.sha256
+                    else "existing_receipt_generation"
+                ),
+                "authenticated_principal_sha256": principal_sha256,
+                "authenticated_principal_response_sha256": principal_response_sha,
                 "lag_seconds": receipt["delivery_timing"].get("lag_seconds"),
             })
 
