@@ -144,6 +144,10 @@ def _git_read(repo: Path, *arguments: str, max_bytes: int = _MAX_GIT_BYTES) -> b
     env.update({
         "GIT_OPTIONAL_LOCKS": "0",
         "GIT_NO_REPLACE_OBJECTS": "1",
+        # Prevent promisor-object retrieval in partial clones; a read must never fetch.
+        "GIT_NO_LAZY_FETCH": "1",
+        # File history must not interpret brackets, stars or pathspec magic.
+        "GIT_LITERAL_PATHSPECS": "1",
         "GIT_CONFIG_NOSYSTEM": "1",
         "GIT_CONFIG_GLOBAL": os.devnull,
         "GIT_TERMINAL_PROMPT": "0",
@@ -183,9 +187,17 @@ def _revision(root: Path, revision: str) -> str:
                      f"{revision}^{{commit}}").decode().strip()
 
 
-def _git_tree(root: Path, commit: str) -> tuple[dict[str, str], bool]:
+class _GitBlobTree(dict[str, str]):
+    """Git blob OIDs with Git tree modes kept together for exact deltas."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.modes: dict[str, str] = {}
+
+
+def _git_tree(root: Path, commit: str) -> tuple[_GitBlobTree, bool]:
     raw = _git_read(root, "ls-tree", "-r", "-z", commit)
-    tree: dict[str, str] = {}
+    tree = _GitBlobTree()
     skipped = False
     for index, row in enumerate(raw.split(b"\0")):
         if not row:
@@ -205,6 +217,7 @@ def _git_tree(root: Path, commit: str) -> tuple[dict[str, str], bool]:
         if path.startswith(".git/"):
             continue
         tree[path] = parts[2]
+        tree.modes[path] = parts[0]
     return tree, skipped
 
 
@@ -250,7 +263,8 @@ def git_revision_view(repository: Path, repo_id: str, commit: str) -> dict[str, 
         "observation_time": None, "publication_time": None,
         "files_total_observed": len(paths),
         "artifacts": [
-            {"path": p, "blob_oid": tree[p], "artifact_type": _artifact_type(p),
+            {"path": p, "blob_oid": tree[p], "mode": tree.modes[p],
+             "artifact_type": _artifact_type(p),
              "source_commit": sha, "origin": "git_tree", "confidence": "observed"}
             for p in paths[:_MAX_PUBLIC_ROWS]
         ],
@@ -288,7 +302,8 @@ def git_revision_delta(repository: Path, repo_id: str, base: str, head: str) -> 
             ],
         }
     changed = [
-        p for p in sorted(before.keys() | after.keys()) if before.get(p) != after.get(p)
+        p for p in sorted(before.keys() | after.keys())
+        if (before.get(p), before.modes.get(p)) != (after.get(p), after.modes.get(p))
     ]
     file_changes = []
     symbol_changes = []
@@ -299,10 +314,14 @@ def git_revision_delta(repository: Path, repo_id: str, base: str, head: str) -> 
         file_changes.append({
             "path": p, "action": action, "artifact_type": _artifact_type(p),
             "before_blob_oid": original, "after_blob_oid": current,
+            "before_mode": before.modes.get(p), "after_mode": after.modes.get(p),
             "before_commit": old_sha, "after_commit": new_sha,
-            "evidence_type": "git_tree_oid_comparison",
+            "evidence_type": (
+                "git_tree_oid_comparison" if original != current
+                else "git_tree_mode_comparison"
+            ),
         })
-    for p in (p for p in changed if p.endswith(".py")):
+    for p in (p for p in changed if p.endswith(".py") and before.get(p) != after.get(p)):
         if len(symbol_changes) >= _MAX_SYMBOL_FILES:
             gaps.append("python_ast_file_limit")
             break

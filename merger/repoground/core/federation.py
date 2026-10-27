@@ -417,13 +417,21 @@ def _sync_entry_relations(entry: Any, name: str, sha: str, target_root: Path,
     source_bytes = _git_object_bytes(ctx["source_root"], ctx["source_tree"], source_path)
     if source_bytes is None:
         return [], ["sync_source_unavailable:" + entry_id]
-    found = [
-        _copy_target_evidence(name, sha, target_tree, path, source_path,
-                              source_bytes, entry_id, ctx, target_root)
-        for path in paths[:8]
-    ]
     gaps = ["sync_targets_capped:" + entry_id] if len(paths) > 8 else []
-    return [link for link in found if link is not None], gaps
+    links: list[dict[str, Any]] = []
+    for path in paths[:8]:
+        link = _copy_target_evidence(
+            name, sha, target_tree, path, source_path, source_bytes,
+            entry_id, ctx, target_root,
+        )
+        if link is not None:
+            links.append(link)
+        elif isinstance(path, str) and path in target_tree:
+            # Its OID was observed in Git, but the blob could not be read
+            # within limits (or is missing in a partial clone). This is not
+            # proof of removal; relation-delta must withhold that verdict.
+            gaps.append("sync_target_unavailable:" + entry_id + ":" + path)
+    return links, gaps
 
 
 def _sync_target_relations(name: str, sha: str, target_root: Path, target_tree: dict[str, str],
@@ -515,6 +523,8 @@ def fleet_revision_relations(metarepo: Path, metarepo_commit: str,
     }
     relations: list[dict[str, Any]] = []
     gaps = ["git_tree_capped"] if limited else []
+    if metadata_blob is None and metadata_path in tree:
+        gaps.append("fleet_metadata_unavailable")
     for name in sorted(targets):
         found, problems = _one_fleet_target(name, targets[name], ctx, _MAX_RELATIONS - len(relations))
         relations.extend(found[:max(0, _MAX_RELATIONS - len(relations))])

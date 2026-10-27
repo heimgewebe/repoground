@@ -133,3 +133,108 @@ def test_incomplete_git_tree_does_not_claim_additions_or_deletions(tmp_path, mon
     assert output["python_symbol_changes"] == []
     assert "git_tree_incomplete_delta_omitted" in output["gaps"]
     assert "absence_of_changes" in output["does_not_establish"]
+
+
+def test_executable_mode_only_change_is_reported_without_blob_delta(tmp_path):
+    import os
+
+    repo, commits = create_repo(tmp_path)
+    script = repo / "script.sh"
+    script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    script.chmod(0o644)
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "non-executable script")
+    before = git(repo, "rev-parse", "HEAD")
+
+    script.chmod(0o755)
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "make script executable")
+    after = git(repo, "rev-parse", "HEAD")
+    result = git_revision_delta(repo, "fixture", before, after)
+    changes = [entry for entry in result["file_changes"] if entry["path"] == "script.sh"]
+    assert result["status"] == "ok"
+    assert len(changes) == 1
+    change = changes[0]
+    assert change["action"] == "modified"
+    assert change["before_blob_oid"] == change["after_blob_oid"]
+    assert change["before_mode"] == "100644"
+    assert change["after_mode"] == "100755"
+    assert change["evidence_type"] == "git_tree_mode_comparison"
+    assert [entry for entry in result["python_symbol_changes"] if entry["path"] == "script.sh"] == []
+    assert git_revision_view(repo, "fixture", after)["artifacts"][-1]["mode"] == "100755"
+    assert os.stat(script).st_mode & 0o111
+
+
+def test_literal_git_filename_does_not_link_glob_match_history(tmp_path):
+    repo, commits = create_repo(tmp_path)
+    (repo / "a[1].py").write_text("VALUE = 1\n", encoding="utf-8")
+    (repo / "a1.py").write_text("VALUE = 1\n", encoding="utf-8")
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "create literal-bracket and glob-matched files")
+    literal_created = git(repo, "rev-parse", "HEAD")
+
+    (repo / "a1.py").write_text("VALUE = 2\n", encoding="utf-8")
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "edit only unrelated glob-matched filename")
+    unrelated_sha = git(repo, "rev-parse", "HEAD")
+
+    (repo / "module.py").write_text("VALUE = 3\n", encoding="utf-8")
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "another unrelated edit")
+    current = git(repo, "rev-parse", "HEAD")
+
+    history = git_path_history(repo, "fixture", current, "a[1].py")
+    assert [entry["commit"] for entry in history["history"]] == [literal_created]
+    linked = bind_external_history(repo, "fixture", current, [{
+        "repo_id": "fixture", "commit": unrelated_sha, "event_kind": "ci",
+        "evidence_ref": "ci:unrelated/123",
+    }], path="a[1].py")
+    assert linked["events"] == []
+    assert "event_sha_outside_explicit_history" in linked["gaps"]
+
+
+def test_git_reader_explicitly_disables_lazy_fetch_and_pathspec_magic(tmp_path, monkeypatch):
+    from merger.repoground.core import history_lens
+
+    repo, commits = create_repo(tmp_path)
+    original = history_lens.subprocess.run
+    observed: list[tuple[str, str]] = []
+
+    def instrumented(*args, **kwargs):
+        env = kwargs["env"]
+        observed.append((env.get("GIT_NO_LAZY_FETCH"), env.get("GIT_LITERAL_PATHSPECS")))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(history_lens.subprocess, "run", instrumented)
+    git_revision_delta(repo, "fixture", commits[0], commits[-1])
+    assert observed
+    assert set(observed) == {("1", "1")}
+
+
+def test_missing_partial_clone_blobs_do_not_trigger_fetch(tmp_path):
+    import os
+
+    source_parent = tmp_path / "source"
+    source_parent.mkdir()
+    source, commits = create_repo(source_parent)
+    git(source, "config", "uploadpack.allowFilter", "true")
+    clone = tmp_path / "partial"
+    subprocess.run([
+        "git", "-c", "protocol.file.allow=always", "clone", "--quiet",
+        "--filter=blob:none", "--no-checkout", source.as_uri(), str(clone),
+    ], check=True, capture_output=True)
+    assert clone.is_dir()
+    # Confirm the test actually contains promisor objects, rather than an
+    # ordinary full clone where this safety guarantee would be untested.
+    promisor = list((clone / ".git" / "objects" / "pack").glob("*.promisor"))
+    assert promisor
+    before = sorted(p.name for p in (clone / ".git" / "objects" / "pack").iterdir())
+    # A non-existent remote makes any accidental read-side lazy fetch fail
+    # loudly rather than loading new objects from the producer.
+    git(clone, "remote", "set-url", "origin", "file:///nonexistent/repoground-promisor")
+    result = git_revision_delta(clone, "fixture", commits[0], commits[-1])
+    after = sorted(p.name for p in (clone / ".git" / "objects" / "pack").iterdir())
+    assert result["status"] == "partial"
+    assert before == after
+    assert any(item.startswith("python_ast_unavailable:") for item in result["gaps"])
+    assert os.path.isdir(clone / ".git" / "objects")

@@ -191,3 +191,66 @@ def test_malformed_yaml_is_rejected_and_unavailable_fleet_remains_explicit(tmp_p
     assert unknown["status"] == "partial"
     assert unknown["relation_deltas"] == []
     assert "relation_delta_requires_two_complete_source_views" in unknown["gaps"]
+
+
+def test_unreadable_existing_target_blob_is_not_a_removed_relation(tmp_path):
+    metarepo, source_sha, service, old_target_sha = create_pair(tmp_path)
+    target_file = service / "docs" / "ci" / "README.md"
+    # The target still has a Git tree blob OID, but exceeds the reader cap.
+    target_file.write_text("x" * 250_001, encoding="utf-8")
+    new_target_sha = commit(service)
+
+    view = fleet_revision_relations(metarepo, source_sha, {
+        "service": (service, new_target_sha),
+    })
+    assert view["status"] == "partial"
+    assert "sync_target_unavailable:ci-doc:docs/ci/README.md" in view["gaps"]
+    assert not any(row["relation_type"] == "declared_copy_target" for row in view["relations"])
+    assert any(row["relation_type"] == "fleet_core" for row in view["relations"])
+
+    delta = fleet_relation_delta(
+        metarepo, source_sha, source_sha,
+        {"service": (service, old_target_sha)},
+        {"service": (service, new_target_sha)},
+    )
+    assert delta["status"] == "partial"
+    assert delta["relation_deltas"] == []
+    assert "after:sync_target_unavailable:ci-doc:docs/ci/README.md" in delta["gaps"]
+    assert "relation_delta_requires_two_complete_source_views" in delta["gaps"]
+
+
+def test_sync_targets_capped_cannot_fabricate_relation_removal(tmp_path):
+    metarepo, old_sha, service, target_sha = create_pair(tmp_path)
+    manifest = metarepo / "sync" / "metarepo-sync.yml"
+    entries = [f"      - docs/ci/unused-{i}.md\n" for i in range(8)]
+    entries.append("      - docs/ci/README.md\n")
+    manifest.write_text(
+        "entries:\n  - id: ci-doc\n    source: docs/ci/README.md\n"
+        "    targets:\n" + "".join(entries),
+        encoding="utf-8",
+    )
+    after_sha = commit(metarepo)
+    result = fleet_relation_delta(metarepo, old_sha, after_sha,
+                                  {"service": (service, target_sha)},
+                                  {"service": (service, target_sha)})
+    assert result["status"] == "partial"
+    assert result["relation_deltas"] == []
+    assert "after:sync_targets_capped:ci-doc" in result["gaps"]
+
+
+def test_unreadable_existing_optional_metadata_is_explicit_partial(tmp_path):
+    metarepo, old_meta_sha, service, target_sha = create_pair(tmp_path)
+    metadata = metarepo / "fleet" / "repo-metadata.yml"
+    metadata.write_text("schema_version: 1\n" + "#" + "x" * 250_000, encoding="utf-8")
+    unreadable_sha = commit(metarepo)
+    observation = fleet_revision_relations(metarepo, unreadable_sha, {
+        "service": (service, target_sha),
+    })
+    assert observation["status"] == "partial"
+    assert "fleet_metadata_unavailable" in observation["gaps"]
+    comparison = fleet_relation_delta(metarepo, old_meta_sha, unreadable_sha,
+                                      {"service": (service, target_sha)},
+                                      {"service": (service, target_sha)})
+    assert comparison["status"] == "partial"
+    assert comparison["relation_deltas"] == []
+    assert "after:fleet_metadata_unavailable" in comparison["gaps"]

@@ -60,3 +60,15 @@ Die Vergleichsfunktion verwendet keinen zusätzlichen Index: Vorher und Nachher 
 Thread 3 darf die neuen read-only CLI/API-Methoden in Evidence Packs und MCP integrieren, ohne die bestehenden Dateien core/mcp_tools.py, cli/mcp_stdio.py oder core/context_compiler.py aus diesem Thread heraus zu verändern. Dabei SHA, status, source_type, gaps und does_not_establish unverändert weitergeben. Externe PR/CI/Chronik/Operator-Receipts sind nur per expliziter autorisierter Leseoberfläche aufzunehmen.
 
 CI, Review und regulärer Merge sind eigene revisionsgebundene Gates. Ein Grün einer alten PR oder ein lokaler Beispielaufruf ersetzt nicht die Prüfung der veröffentlichten Implementierung.
+
+## P1/P2-Reviewhärtung für PR #1355
+
+Das revisionsgebundene Codex-Review am Head \`82c92db03f7a52973f03c2300dbe98d24a9e0d68\` ergab konkrete Gegenbeispiele; für den nachfolgenden Korrekturstand wurden diese ohne neue persistente Datenbank und ohne Änderungen an Thread 1 oder 3 behoben:
+
+- Der gemeinsame Git-Reader setzt \`GIT_NO_LAZY_FETCH=1\`: In einem echten \`blob:none\`-Teilklon können fehlende Objekte daher nicht automatisch vom Promisor-Remote nachgeladen werden. Der Test benutzt ein lokal gefiltertes Repository, kappt dessen Remote und bestätigt \`partial\` ohne zusätzliche Packdateien.
+- Für Git-Historienpfade gilt \`GIT_LITERAL_PATHSPECS=1\`. Insbesondere \`a[1].py\` darf nicht fälschlich Ereignisse von \`a1.py\` übernehmen. Der Negativtest bindet ausdrücklich eine fremde CI-Referenz und weist deren vermeintliche Dateihistorie zurück.
+- Git-Bäume erhalten die Dateimodi der Blobs. \`100644\` → \`100755\` wird auch bei identischem Blob-OID als nachgewiesene Modusänderung gemeldet; der neue, abwärtskompatible Wert \`git_tree_mode_comparison\` steht im JSON-Vertrag.
+- Ein im Git-Baum vorhandenes, aufgrund der Bytegrenze oder eines fehlenden Objekts nicht lesbares Sync-Ziel wird mit \`sync_target_unavailable\` als Lücke gemeldet. Die Folgeabfrage darf daraus keine entfernte Beziehung folgern.
+- Bei mehr als acht Sync-Zielen und bei vorhandenen, aber nicht lesbaren Metadaten verbleiben \`sync_targets_capped\` bzw. \`fleet_metadata_unavailable\` und ein \`partial\`-Status. Ein unvollständiger Stand kann damit keine scheinbare Relation-Löschung begründen.
+
+Der gemeinsame Federation-/History-/Delta-/API-Testlauf erreichte anschließend **135 bestandene Tests** (NixOS Python 3.12); Ruff und das bestehende Maintainability-Ratchet waren erfolgreich. Diese lokalen Befunde gelten für die jeweils getesteten Dateien; GitHub-CI und die reguläre Captain-Integration müssen zusätzlich am publizierten Head bestätigt werden.

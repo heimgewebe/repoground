@@ -113,7 +113,24 @@
             "$ref": "#/definitions/commit"
           },
           "evidence_type": {
-            "const": "git_tree_oid_comparison"
+            "enum": [
+              "git_tree_oid_comparison",
+              "git_tree_mode_comparison"
+            ]
+          },
+          "before_mode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]{6}$"
+          },
+          "after_mode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]{6}$"
           }
         }
       }
