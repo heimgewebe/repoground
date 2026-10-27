@@ -21,3 +21,4 @@ Die folgenden Planungsartefakte sind aktiv und in Task-Control registriert:
 - `docs/blueprints/agent-query-session-v1-v2-consolidation-decision.md`
 - `docs/blueprints/lenskit-agent-front-door-hardening.md`
 - `docs/blueprints/repobrief-agent-frontdoor-grounding-verifier-v1.md`
+- `docs/roadmap/repoground-vision-and-agent-adoption.md`
