@@ -39,6 +39,41 @@ def _canonical(value: Any) -> bytes:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
 
 
+def _validate_revision_fields(event: Mapping[str, Any]) -> None:
+    for key in ("base_revision", "target_revision"):
+        sha = event.get(key)
+        if not isinstance(sha, str) or len(sha) != 40 or not re.fullmatch("[0-9a-f]{40}", sha):
+            raise EventInputError("invalid_" + key)
+    if event["base_revision"] == event["target_revision"]:
+        raise EventInputError("empty_revision_range")
+
+
+def _validate_event_kind_fields(event: Mapping[str, Any], kind: str) -> None:
+    if kind == "ci.completed":
+        check_id = event.get("check_id")
+        conclusion = event.get("ci_conclusion")
+        if not isinstance(check_id, str) or not _EVENT_ID.fullmatch(check_id):
+            raise EventInputError("missing_ci_check_id")
+        if not isinstance(conclusion, str) or conclusion not in _CI_CONCLUSIONS:
+            raise EventInputError("invalid_ci_conclusion")
+    elif "check_id" in event or "ci_conclusion" in event:
+        raise EventInputError("ci_fields_require_ci_event")
+
+
+def _validate_event_timing_fields(event: Mapping[str, Any]) -> None:
+    time_fields = ("source_occurred_at_unix", "publisher_observed_at_unix")
+    supplied = [name in event for name in time_fields]
+    if any(supplied) and not all(supplied):
+        raise EventInputError("event_timing_requires_both_fields")
+    if all(supplied):
+        for name in time_fields:
+            when = event[name]
+            if type(when) is not int or not 0 <= when <= (2**53 - 1):
+                raise EventInputError("invalid_" + name)
+        if event["publisher_observed_at_unix"] < event["source_occurred_at_unix"]:
+            raise EventInputError("publisher_observed_before_source")
+
+
 def _check_event(event: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(event, dict):
         raise EventInputError("event_must_be_object")
@@ -60,32 +95,9 @@ def _check_event(event: Mapping[str, Any]) -> dict[str, Any]:
         raise EventInputError("invalid_event_id")
     if not isinstance(repo, str) or _REPO_ID.fullmatch(repo) is None:
         raise EventInputError("invalid_repository")
-    for key in ("base_revision", "target_revision"):
-        sha = event.get(key)
-        if not isinstance(sha, str) or len(sha) != 40 or not re.fullmatch("[0-9a-f]{40}", sha):
-            raise EventInputError("invalid_" + key)
-    if event["base_revision"] == event["target_revision"]:
-        raise EventInputError("empty_revision_range")
-    if kind == "ci.completed":
-        check_id = event.get("check_id")
-        conclusion = event.get("ci_conclusion")
-        if not isinstance(check_id, str) or not _EVENT_ID.fullmatch(check_id):
-            raise EventInputError("missing_ci_check_id")
-        if not isinstance(conclusion, str) or conclusion not in _CI_CONCLUSIONS:
-            raise EventInputError("invalid_ci_conclusion")
-    elif "check_id" in event or "ci_conclusion" in event:
-        raise EventInputError("ci_fields_require_ci_event")
-    time_fields = ("source_occurred_at_unix", "publisher_observed_at_unix")
-    supplied = [name in event for name in time_fields]
-    if any(supplied) and not all(supplied):
-        raise EventInputError("event_timing_requires_both_fields")
-    if all(supplied):
-        for name in time_fields:
-            when = event[name]
-            if type(when) is not int or not 0 <= when <= (2**53 - 1):
-                raise EventInputError("invalid_" + name)
-        if event["publisher_observed_at_unix"] < event["source_occurred_at_unix"]:
-            raise EventInputError("publisher_observed_before_source")
+    _validate_revision_fields(event)
+    _validate_event_kind_fields(event, kind)
+    _validate_event_timing_fields(event)
     return dict(event)
 
 
