@@ -298,6 +298,125 @@
       "items": {
         "type": "string"
       }
+    },
+    "operation": {
+      "type": "string",
+      "enum": [
+        "delta"
+      ]
+    },
+    "base_commit": {
+      "type": "string",
+      "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+    },
+    "head_commit": {
+      "type": "string",
+      "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+    },
+    "unchanged_relations_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "relation_deltas": {
+      "type": "array",
+      "maxItems": 512,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "relation_type",
+          "target_repo",
+          "source_path",
+          "target_path",
+          "transition",
+          "before",
+          "after",
+          "comparison",
+          "causality"
+        ],
+        "properties": {
+          "relation_type": {
+            "type": "string",
+            "enum": [
+              "fleet_core",
+              "fleet_related",
+              "fleet_metadata",
+              "declared_copy_target"
+            ]
+          },
+          "target_repo": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source_path": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "target_path": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "transition": {
+            "enum": [
+              "introduced",
+              "removed",
+              "modified"
+            ]
+          },
+          "before": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object"
+              }
+            ]
+          },
+          "after": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object"
+              }
+            ]
+          },
+          "comparison": {
+            "const": "git_blob_evidence_only"
+          },
+          "causality": {
+            "const": "unknown"
+          }
+        }
+      }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "operation": {
+            "const": "delta"
+          }
+        },
+        "required": [
+          "operation"
+        ]
+      },
+      "then": {
+        "required": [
+          "base_commit",
+          "head_commit",
+          "relation_deltas",
+          "unchanged_relations_count"
+        ]
+      }
+    }
+  ]
 }

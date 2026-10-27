@@ -2,7 +2,7 @@
 import json
 
 from merger.repoground.cli.main import main
-from merger.repoground.tests.test_federation_relations import create_pair
+from merger.repoground.tests.test_federation_relations import commit, create_pair
 from merger.repoground.tests.test_history_lens_temporal import create_repo
 
 
@@ -36,3 +36,26 @@ def test_cross_repo_relation_cli_exact_two_commits(tmp_path, capsys):
     assert main(["federation", "relations", "--metarepo-root", str(metarepo),
                  "--metarepo-commit", meta_sha, "--target", "garbled"]) == 1
     assert "REPO_ID=" in capsys.readouterr().err
+
+
+def test_relation_delta_cli_two_pinned_repositories(tmp_path, capsys):
+    metarepo, meta_sha, target_repo, target_base = create_pair(tmp_path)
+    (target_repo / "docs" / "ci" / "README.md").write_text(
+        "later content\n", encoding="utf-8"
+    )
+    target_head = commit(target_repo)
+    args = [
+        "federation", "relation-delta",
+        "--metarepo-root", str(metarepo),
+        "--base-metarepo-commit", meta_sha,
+        "--head-metarepo-commit", meta_sha,
+        "--target-before", f"service={target_repo}@{target_base}",
+        "--target-after", f"service={target_repo}@{target_head}",
+    ]
+    assert main(args) == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["kind"] == "repoground.federation-evidence"
+    assert output["status"] == "ok"
+    assert output["relation_deltas"][0]["transition"] == "modified"
+    assert output["relation_deltas"][0]["target_repo"] == "service"
+    assert output["relation_deltas"][0]["after"]["target"]["commit"] == target_head

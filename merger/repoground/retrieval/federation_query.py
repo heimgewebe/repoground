@@ -515,3 +515,14 @@ def query_federation_relations(metarepo_root: Path, metarepo_commit: str,
                                targets: Dict[str, tuple[Path, str]]) -> Dict[str, Any]:
     from ..core.federation import fleet_revision_relations
     return fleet_revision_relations(metarepo_root, metarepo_commit, targets)
+
+
+def query_federation_relation_delta(
+    metarepo_root: Path, base_metarepo_commit: str, head_metarepo_commit: str,
+    base_targets: Dict[str, tuple[Path, str]], head_targets: Dict[str, tuple[Path, str]],
+) -> Dict[str, Any]:
+    from ..core.federation import fleet_relation_delta
+    return fleet_relation_delta(
+        metarepo_root, base_metarepo_commit, head_metarepo_commit,
+        base_targets, head_targets,
+    )

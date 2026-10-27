@@ -77,6 +77,16 @@ def register_federation_commands(subparsers) -> None:
     relations_parser.add_argument("--metarepo-commit", required=True)
     relations_parser.add_argument("--target", action="append", required=True,
                                   metavar="REPO_ID=LOCAL_REPO_ROOT@FULL_SHA")
+    relation_delta_parser = federation_subparsers.add_parser(
+        "relation-delta", help="Compare two pinned Fleet and target repository snapshots"
+    )
+    relation_delta_parser.add_argument("--metarepo-root", required=True)
+    relation_delta_parser.add_argument("--base-metarepo-commit", required=True)
+    relation_delta_parser.add_argument("--head-metarepo-commit", required=True)
+    relation_delta_parser.add_argument("--target-before", action="append", required=True,
+                                      metavar="REPO_ID=LOCAL_REPO_ROOT@FULL_SHA")
+    relation_delta_parser.add_argument("--target-after", action="append", required=True,
+                                     metavar="REPO_ID=LOCAL_REPO_ROOT@FULL_SHA")
 
     events_parser = federation_subparsers.add_parser("history-events", help="Bind explicit external evidence references to Git history")
     events_parser.add_argument("--repo-root", required=True)
@@ -101,6 +111,19 @@ def _parse_inline_bundle_specs(bundle_args: list[str]) -> list[dict[str, str]]:
         specs.append({"repo_id": repo_id, "bundle_path": bundle_path})
     return specs
 
+def _parse_pinned_targets(values: list[str]) -> dict[str, tuple[Path, str]]:
+    targets: dict[str, tuple[Path, str]] = {}
+    for raw in values:
+        if "=" not in raw or "@" not in raw:
+            raise ValueError("--target requires REPO_ID=LOCAL_REPO_ROOT@FULL_SHA")
+        repo_id, path_and_commit = raw.split("=", 1)
+        root, commit = path_and_commit.rsplit("@", 1)
+        if not repo_id or not root or repo_id in targets:
+            raise ValueError("invalid or duplicate target")
+        targets[repo_id] = (Path(root), commit)
+    return targets
+
+
 def handle_federation_command(args: argparse.Namespace) -> int:
     """Dispatches federation commands to their respective handlers."""
     from merger.repoground.core.federation import init_federation
@@ -109,7 +132,7 @@ def handle_federation_command(args: argparse.Namespace) -> int:
     from merger.repoground.core.federation import validate_federation
 
 
-    if args.federation_command in ("revision", "delta", "path-history", "relations", "history-events"):
+    if args.federation_command in ("revision", "delta", "path-history", "relations", "relation-delta", "history-events"):
         try:
             if args.federation_command == "revision":
                 from merger.repoground.retrieval.federation_query import query_federation_revision
@@ -123,17 +146,18 @@ def handle_federation_command(args: argparse.Namespace) -> int:
                                           args.path, limit=args.limit)
             elif args.federation_command == "relations":
                 from merger.repoground.retrieval.federation_query import query_federation_relations
-                targets = {}
-                for raw in args.target:
-                    if "=" not in raw or "@" not in raw:
-                        raise ValueError("--target requires REPO_ID=LOCAL_REPO_ROOT@FULL_SHA")
-                    repo_id, target = raw.split("=", 1)
-                    local_root, sha = target.rsplit("@", 1)
-                    if repo_id in targets or not repo_id or not local_root:
-                        raise ValueError("duplicate or invalid target repository")
-                    targets[repo_id] = (Path(local_root), sha)
-                output = query_federation_relations(Path(args.metarepo_root),
-                                                    args.metarepo_commit, targets)
+                output = query_federation_relations(
+                    Path(args.metarepo_root), args.metarepo_commit,
+                    _parse_pinned_targets(args.target),
+                )
+            elif args.federation_command == "relation-delta":
+                from merger.repoground.retrieval.federation_query import query_federation_relation_delta
+                output = query_federation_relation_delta(
+                    Path(args.metarepo_root), args.base_metarepo_commit,
+                    args.head_metarepo_commit,
+                    _parse_pinned_targets(args.target_before),
+                    _parse_pinned_targets(args.target_after),
+                )
             else:
                 from merger.repoground.core.history_lens import bind_external_history
                 if len(args.events_json) > 50000:

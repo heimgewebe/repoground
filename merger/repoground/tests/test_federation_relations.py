@@ -2,7 +2,7 @@
 from pathlib import Path
 import subprocess
 
-from merger.repoground.core.federation import fleet_revision_relations
+from merger.repoground.core.federation import fleet_relation_delta, fleet_revision_relations
 
 
 def git(repo: Path, *args: str) -> str:
@@ -113,3 +113,81 @@ def test_unsafe_manifest_source_path_is_never_read_from_disk(tmp_path):
     result = fleet_revision_relations(metarepo, new_meta_sha, {"service": (service, sha)})
     assert not any(r["relation_type"] == "declared_copy_target" for r in result["relations"])
     assert "sync_source_unavailable:unsafe" in result["gaps"]
+
+
+def test_relation_delta_reports_digest_change_not_unrelated_membership(tmp_path):
+    metarepo, meta_sha, service, before_service = create_pair(tmp_path)
+    content = service / "docs" / "ci" / "README.md"
+    content.write_text("changed target\n", encoding="utf-8")
+    after_service = commit(service)
+    before = {"service": (service, before_service)}
+    after = {"service": (service, after_service)}
+    result = fleet_relation_delta(metarepo, meta_sha, meta_sha, before, after)
+    assert result["status"] == "ok"
+    assert result["base_commit"] == result["head_commit"] == meta_sha
+    assert len(result["relation_deltas"]) == 1
+    delta = result["relation_deltas"][0]
+    assert delta["transition"] == "modified"
+    assert delta["relation_type"] == "declared_copy_target"
+    assert delta["before"]["status"] == "identical_content"
+    assert delta["after"]["status"] == "diverged_at_revisions"
+    assert delta["before"]["target"]["commit"] == before_service
+    assert delta["after"]["target"]["commit"] == after_service
+    assert result["unchanged_relations_count"] == 2
+    assert result == fleet_relation_delta(metarepo, meta_sha, meta_sha, before, after)
+
+    # Editing the normative manifest for an *unrelated* repository should not
+    # manufacture a material change to the observed service relationship.
+    fleet_file = metarepo / "fleet" / "repos.yml"
+    fleet_file.write_text(fleet_file.read_text().replace("static:\n", "  - name: unrelated\nstatic:\n"), encoding="utf-8")
+    newer_meta = commit(metarepo)
+    unrelated = fleet_relation_delta(metarepo, meta_sha, newer_meta, before, before)
+    assert unrelated["status"] == "ok"
+    assert unrelated["relation_deltas"] == []
+    assert unrelated["unchanged_relations_count"] == 3
+
+
+def test_relation_removed_only_after_valid_authoritative_membership_read(tmp_path):
+    metarepo, old_meta, service, target_sha = create_pair(tmp_path)
+    fleet_file = metarepo / "fleet" / "repos.yml"
+    fleet_file.write_text("repos:\n  - name: metarepo\n", encoding="utf-8")
+    new_meta = commit(metarepo)
+    before = {"service": (service, target_sha)}
+    removed = fleet_relation_delta(metarepo, old_meta, new_meta, before, before)
+    assert removed["status"] == "ok"
+    assert {x["transition"] for x in removed["relation_deltas"]} == {"removed"}
+    assert {x["relation_type"] for x in removed["relation_deltas"]} == {
+        "fleet_core", "fleet_metadata", "declared_copy_target"
+    }
+    assert all(x["after"] is None for x in removed["relation_deltas"])
+    try:
+        fleet_relation_delta(metarepo, old_meta, new_meta, before, {})
+    except ValueError as exc:
+        assert "identical named target" in str(exc)
+    else:
+        raise AssertionError("mismatched target IDs accepted")
+
+
+def test_malformed_yaml_is_rejected_and_unavailable_fleet_remains_explicit(tmp_path):
+    metarepo, sha, service, target = create_pair(tmp_path)
+    fleet_file = metarepo / "fleet" / "repos.yml"
+    fleet_file.write_text("!!python/object/apply:os.system ['id']\n", encoding="utf-8")
+    malicious_sha = commit(metarepo)
+    try:
+        fleet_revision_relations(metarepo, malicious_sha, {"service": (service, target)})
+    except ValueError as exc:
+        assert "invalid YAML" in str(exc)
+    else:
+        raise AssertionError("unsafe YAML tag was accepted")
+    fleet_file.unlink()
+    missing_sha = commit(metarepo)
+    unavailable = fleet_revision_relations(metarepo, missing_sha, {"service": (service, target)})
+    assert unavailable["status"] == "unavailable"
+    assert unavailable["source_commit"] == missing_sha
+    assert unavailable["observation_time"] is None
+    assert unavailable["authoritative_membership_source"] == "fleet/repos.yml"
+    unknown = fleet_relation_delta(metarepo, sha, missing_sha,
+                                   {"service": (service, target)}, {"service": (service, target)})
+    assert unknown["status"] == "partial"
+    assert unknown["relation_deltas"] == []
+    assert "relation_delta_requires_two_complete_source_views" in unknown["gaps"]

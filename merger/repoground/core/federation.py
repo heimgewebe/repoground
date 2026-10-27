@@ -480,3 +480,115 @@ def fleet_revision_relations(metarepo: Path, metarepo_commit: str,
         "authoritative_membership_source": fleet_path,
         "supplementary_sources": [metadata_path, sync_path],
     }
+
+
+def fleet_relation_delta(
+    metarepo: Path,
+    base_metarepo_commit: str,
+    head_metarepo_commit: str,
+    base_targets: dict[str, tuple[Path, str]],
+    head_targets: dict[str, tuple[Path, str]],
+) -> dict[str, Any]:
+    """Compare *two* independently pinned Fleet observations; no new state store.
+
+    A missing/partial side is not interpreted as removal or introduction.
+    This is a material before/after change description, not a causal verdict.
+    """
+    if not isinstance(base_targets, dict) or not isinstance(head_targets, dict):
+        raise ValueError("both target sets must be mappings")
+    if set(base_targets) != set(head_targets):
+        raise ValueError("comparison requires identical named target repository sets")
+    before = fleet_revision_relations(metarepo, base_metarepo_commit, base_targets)
+    after = fleet_revision_relations(metarepo, head_metarepo_commit, head_targets)
+    shared = {
+        "kind": _FEDERATION_EVIDENCE_KIND, "version": "1", "operation": "delta",
+        "source_repo": "metarepo", "source_commit": after["source_commit"],
+        "base_commit": before["source_commit"], "head_commit": after["source_commit"],
+        "relations": after["relations"], "relation_deltas": [],
+        "unchanged_relations_count": 0,
+        "authoritative_membership_source": "fleet/repos.yml",
+        "supplementary_sources": ["fleet/repo-metadata.yml", "sync/metarepo-sync.yml"],
+        "observation_time": None, "publication_time": None,
+        "does_not_establish": [
+            "runtime_dependency", "successful_sync", "deployed_version",
+            "real_time_ci", "causal_relation", "absence_from_incomplete_sources",
+        ],
+    }
+    def complete_membership_observation(view: dict[str, Any]) -> bool:
+        return (
+            view["status"] == "ok"
+            or (
+                view["status"] == "partial"
+                and bool(view["gaps"])
+                and all(gap.startswith("target_not_listed_in_authoritative_fleet:")
+                        for gap in view["gaps"])
+            )
+        )
+
+    if not (complete_membership_observation(before)
+            and complete_membership_observation(after)):
+        return {
+            **shared, "status": "partial",
+            "gaps": sorted(set(
+                ["relation_delta_requires_two_complete_source_views"]
+                + ["before:" + x for x in before["gaps"]]
+                + ["after:" + x for x in after["gaps"]]
+            )),
+        }
+
+    def stable_key(relation: dict[str, Any]) -> tuple[str, str, str, str]:
+        return (
+            relation["relation_type"], relation["target"]["repo_id"],
+            relation["source"].get("path") or "", relation["target"].get("path") or "",
+        )
+
+    previous = {stable_key(row): row for row in before["relations"]}
+    current = {stable_key(row): row for row in after["relations"]}
+    deltas = []
+    unchanged = 0
+    for key in sorted(set(previous) | set(current)):
+        a, b = previous.get(key), current.get(key)
+        if a is None:
+            transition = "introduced"
+        elif b is None:
+            transition = "removed"
+        elif a == b:
+            # Different commit IDs are *not* proof of a change to the relation.
+            # Strip per-revision source identities before comparing.
+            unchanged += 1
+            continue
+        elif (
+            a["status"] == b["status"]
+            and a["relation_type"] in {"fleet_core", "fleet_related"}
+        ):
+            # Fleet membership is a specific declaration, not the hash of the
+            # entire manifest which may change for unrelated repositories.
+            unchanged += 1
+            continue
+        elif (
+            a["status"] == b["status"]
+            and a["relation_type"] == "fleet_metadata"
+            and a.get("metadata") == b.get("metadata")
+        ):
+            unchanged += 1
+            continue
+        elif (
+            a["status"] == b["status"]
+            and a["source"].get("sha256") == b["source"].get("sha256")
+            and a["target"].get("sha256") == b["target"].get("sha256")
+            and a.get("metadata") == b.get("metadata")
+        ):
+            unchanged += 1
+            continue
+        else:
+            transition = "modified"
+        deltas.append({
+            "relation_type": key[0], "target_repo": key[1],
+            "source_path": key[2] or None, "target_path": key[3] or None,
+            "transition": transition,
+            "before": a, "after": b,
+            "comparison": "git_blob_evidence_only",
+            "causality": "unknown",
+        })
+    return {**shared, "status": "ok", "gaps": [],
+            "relation_deltas": deltas, "unchanged_relations_count": unchanged}

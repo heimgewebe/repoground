@@ -19,6 +19,7 @@ Alle Git-Revisionen müssen vollständige 40- bzw. 64-stellige kleingeschriebene
     repoground federation delta --repo-root /home/alex/repos/repoground --repo-id repoground --base dc4e0e6c5897c108933cc575eb2b3372329fb616 --head 274274ded84a94bc4c0af6a525b3485ba17e3b79
     repoground federation path-history --repo-root /home/alex/repos/repoground --repo-id repoground --commit bf2ad72785c47ede4b8b94ce2215b07e4773877e --path docs/roadmap/repoground-vision-and-agent-adoption.md
     repoground federation relations --metarepo-root /home/alex/repos/metarepo --metarepo-commit 0d27ec763c6e2b4973df8c065950c8b2734414d2 --target heim-pc=/home/alex/repos/heim-pc@34bfa51c80c1dedac1dd38ce48ef687d5ee778e3
+    repoground federation relation-delta --metarepo-root /home/alex/repos/metarepo --base-metarepo-commit 0d27ec763c6e2b4973df8c065950c8b2734414d2 --head-metarepo-commit 0d27ec763c6e2b4973df8c065950c8b2734414d2 --target-before heim-pc=/home/alex/repos/heim-pc@34bfa51c80c1dedac1dd38ce48ef687d5ee778e3 --target-after heim-pc=/home/alex/repos/heim-pc@34bfa51c80c1dedac1dd38ce48ef687d5ee778e3
 
 Programmgesteuerte Aufrufe: core.history_lens.git_revision_view / git_revision_delta / git_path_history / bind_external_history und retrieval.federation_query.query_federation_relations. Neue JSON-Schemata federation-timeline.v1 und federation-relation-evidence.v1. Für externe Belege zusätzlich federation history-events mit --events-json (JSON-Liste expliziter externer Nachweise; keine versteckte API-Abfrage).
 
@@ -39,6 +40,11 @@ A→B: docs/proofs/external-agent-usage-review-20261027.md hinzugefügt. B→C: 
 - fleet/repos.yml erklärt heim-pc zum Core-Fleet-Mitglied. Für drei im sync/metarepo-sync.yml deklarierte, auf beiden Git-Ständen vorhandene Ziel-Dateien wurden abweichende Inhalts-SHA256s gemessen. Status: diverged_at_revisions, nicht etwa successful_sync oder aktuelle Deployment-Drift.
 - Die Zielrepo-ID ist eine vom autorisierten Aufrufer gelieferte Bindung zu einem lokalen Git-Root, kein über Remote-Server beglaubigter Repositoryname. Ein unabhängiger Nachweis kann das Git-Remote/Repo-Identity zusätzlich überprüfen.
 
+## Föderations-Kantenänderungen
+
+Die neue read-only Operation relation-delta vergleicht für **beide Beobachtungszeitpunkte** je einen vollständigen Metarepo-Commit und einen vollständigen Git-Commit pro betroffenem Repository. Nur vollständig gelesene Manifest-Stände dürfen eingeführte und entfernte Beziehungen behaupten; bei einem nicht lesbaren Quellstand bleibt das Ergebnis partial ohne scheinbare Löschungen. Eine vollständig lesbare normative Fleet-Liste belegt dagegen ausdrücklich, dass ein früheres Mitglied heute in der gewählten Quellrevision fehlt.
+
+Die Vergleichsfunktion verwendet keinen zusätzlichen Index: Vorher und Nachher werden durch fleet_revision_relations gelesen und anhand stabiler gerichteter Kanten zu introduced, removed und modified verglichen. Eine Änderung an fremden Fleet-Mitgliedern darf keinen geänderten Beziehungseintrag für heim-pc erzeugen. Der neue Contract erweitert federation-relation-evidence.v1 um relation_deltas und die exakten SHA-Referenzen. Unterschiedliche Git-SHAs allein belegen noch keine materielle Beziehungänderung.
 ## Unsicherheit, Grenzen, Sicherheit
 
 - source_commit ist die verifizierte Git-Revisionsidentität. committer_time_reported ist die im Git-Objekt behauptete Zeit; observation_time und publication_time bleiben bei rein deterministischen Reads null. Ein später erfasster PR oder Test verändert nicht das früher entstandene Git-Objekt.
