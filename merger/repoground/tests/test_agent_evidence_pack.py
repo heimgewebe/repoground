@@ -385,3 +385,45 @@ def test_direct_cli_pins_initial_manifest_generation_without_outer_binding(
         manifest_b.read_bytes()
     ).hexdigest()
     assert pack["changed_files"][0]["path"] == "alpha.py"
+
+
+def test_configured_ignore_submodules_all_does_not_hide_gitlink_changes(tmp_path):
+    """A configured ignoreSubmodules=all must not erase committed gitlinks."""
+    repo, _base, first = seeded_repo(tmp_path)
+    # Index cacheinfo creates a Git *gitlink* (mode 160000) without a network
+    # clone or nested repository; only committed tree objects are inspected.
+    git(repo, "update-index", "--add", "--cacheinfo",
+        "160000," + "1" * 40 + ",vendor")
+    git(repo, "commit", "-qm", "record first dependency revision")
+    base = git(repo, "rev-parse", "HEAD")
+    (repo / "alpha.py").write_text("def old():\n    return 3\n", encoding="utf-8")
+    git(repo, "add", "alpha.py")
+    git(repo, "update-index", "--add", "--cacheinfo",
+        "160000," + "2" * 40 + ",vendor")
+    git(repo, "commit", "-qm", "update code and dependency revision")
+    target = git(repo, "rev-parse", "HEAD")
+    git(repo, "config", "diff.ignoreSubmodules", "all")
+
+    # Both the human-readable delta and the NUL-safe inventory must
+    # explicitly override this checkout-local setting.
+    report = build_evidence_pack(
+        repo_root=repo, base_revision=base, target_revision=target
+    )
+    assert report["status"] in {"warn", "pass"}
+    assert report["changed_file_count"] == 2
+    assert {item["path"] for item in report["changed_files"]} == {
+        "alpha.py", "vendor",
+    }
+    assert all(item["claim_level"] == "direct_git_diff"
+               for item in report["changed_files"])
+    expected = subprocess.run(
+        ["git", "-C", str(repo), "diff", "--no-ext-diff", "--no-textconv",
+         "--no-renames", "--no-color", "--ignore-submodules=none",
+         "--unified=3", base, target, "--"],
+        check=True, capture_output=True,
+    ).stdout
+    assert report["revision"]["diff_sha256"] == hashlib.sha256(expected).hexdigest()
+    assert not {gap["code"] for gap in report["gaps"]}.intersection({
+        "diff_paths_unresolved", "empty_or_truncated_diff",
+    })
+    assert git(repo, "status", "--porcelain") == ""

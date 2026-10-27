@@ -255,7 +255,7 @@ def _diff_inventory_problem(
     """Do not let textual Git quotePath parsing silently omit changed files."""
     raw_names, error = _bounded_git(
         root, ["diff", "--no-ext-diff", "--no-textconv", "--no-renames",
-               "--name-only", "-z", base_revision, target_revision, "--"],
+               "--ignore-submodules=none", "--name-only", "-z", base_revision, target_revision, "--"],
         max_bytes=MAX_DIFF_BYTES,
     )
     if error or raw_names is None:
@@ -282,7 +282,7 @@ def _read_git_delta(
             return None, "unavailable_commit"
     diff, error = _bounded_git(
         root, ["diff", "--no-ext-diff", "--no-textconv", "--no-renames",
-               "--no-color", "--unified=3", base_revision, target_revision, "--"],
+               "--ignore-submodules=none", "--no-color", "--unified=3", base_revision, target_revision, "--"],
         max_bytes=MAX_DIFF_BYTES,
     )
     if error or diff is None:
