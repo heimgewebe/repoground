@@ -39,7 +39,10 @@ _DEFAULT_MAX_GRAPH_FILES = _HARD_MAX_GRAPH_FILES
 _DEFAULT_MAX_GRAPH_SOURCE_BYTES = _HARD_MAX_GRAPH_SOURCE_BYTES
 
 _GRAPH_FILE_LANGUAGES = {
+    ".cjs": "javascript",
     ".js": "javascript",
+    ".mjs": "javascript",
+    ".nix": "nix",
     ".json": "json",
     ".jsx": "javascript",
     ".md": "markdown",

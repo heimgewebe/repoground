@@ -88,6 +88,47 @@
         },
         "gaps": {
           "$ref": "#/$defs/counts"
+        },
+        "declared_source_coverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "files_selected",
+            "files_parsed",
+            "bytes_read",
+            "edge_counts",
+            "skipped",
+            "does_not_establish",
+            "truncated"
+          ],
+          "properties": {
+            "files_selected": {
+              "$ref": "#/$defs/nonnegative"
+            },
+            "files_parsed": {
+              "$ref": "#/$defs/nonnegative"
+            },
+            "bytes_read": {
+              "$ref": "#/$defs/nonnegative"
+            },
+            "edge_counts": {
+              "$ref": "#/$defs/counts"
+            },
+            "skipped": {
+              "$ref": "#/$defs/counts"
+            },
+            "does_not_establish": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "truncated": {
+              "type": "boolean"
+            }
+          }
         }
       }
     },
