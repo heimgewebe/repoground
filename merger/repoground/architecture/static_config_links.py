@@ -102,29 +102,46 @@ def _unproven(
     )
 
 
-def _without_inline_code(
-    line: str, open_width: int | None = None,
-) -> tuple[str, int | None]:
-    """Mask exact backtick runs across lines, retaining multiline span state."""
-    visible: list[str] = []
+def _without_inline_code(paragraph: str) -> str:
+    """Mask only paired exact-width backtick spans within one prose paragraph.
+
+    An unmatched backtick is literal CommonMark text and must not hide links.
+    Matching positions are calculated backwards, bounded linearly by source size.
+    """
     marker = chr(96)
+    runs: list[tuple[int, int]] = []
     index = 0
-    while index < len(line):
-        if line[index] != marker:
-            visible.append(" " if open_width is not None else line[index])
+    while index < len(paragraph):
+        start = paragraph.find(marker, index)
+        if start < 0:
+            break
+        end = start + 1
+        while end < len(paragraph) and paragraph[end] == marker:
+            end += 1
+        if not _escaped_markdown_opener(paragraph, start):
+            runs.append((start, end))
+        index = end
+
+    next_run: list[int | None] = [None] * len(runs)
+    following: dict[int, int] = {}
+    for index in range(len(runs) - 1, -1, -1):
+        start, end = runs[index]
+        width = end - start
+        next_run[index] = following.get(width)
+        following[width] = index
+
+    visible = list(paragraph)
+    index = 0
+    while index < len(runs):
+        closing = next_run[index]
+        if closing is None:
             index += 1
             continue
-        end = index + 1
-        while end < len(line) and line[end] == marker:
-            end += 1
-        width = end - index
-        visible.extend(" " * width)
-        if open_width is None:
-            open_width = width
-        elif width == open_width:
-            open_width = None
-        index = end
-    return "".join(visible), open_width
+        for position in range(runs[index][0], runs[closing][1]):
+            if visible[position] != "\n":
+                visible[position] = " "
+        index = closing + 1
+    return "".join(visible)
 
 
 def _markdown_indented_code(line: str) -> bool:
@@ -154,36 +171,28 @@ def _escaped_markdown_opener(text: str, start: int) -> bool:
     return count % 2 == 1
 
 
-def _markdown_edges(path: str, source: str, known: set[str]) -> list[dict[str, Any]]:
-    sanitized = _MD_COMMENT.sub(lambda m: _mask_span(m.group(0)), source)
+_MD_QUOTE_PREFIX = re.compile(r"^ {0,3}>[ \\t]?")
+
+
+def _markdown_quote_content(line: str) -> str:
+    """Peel only actual leading CommonMark blockquote containers."""
+    content = line
+    while (prefix := _MD_QUOTE_PREFIX.match(content)) is not None:
+        content = content[prefix.end():]
+    return content
+
+
+def _markdown_prose_edges(
+    path: str, lines: list[tuple[int, str]], known: set[str],
+) -> list[dict[str, Any]]:
+    """Only this contiguous, unfenced paragraph can pair inline code markers."""
+    if not lines:
+        return []
+    visible = _without_inline_code("\n".join(line for _, line in lines))
     edges: list[dict[str, Any]] = []
-    fenced: tuple[str, int] | None = None
-    in_html_code = False
-    inline_code_width: int | None = None
-    for ordinal, line in enumerate(sanitized.splitlines(), 1):
-        if _markdown_indented_code(line):
-            continue
-        if "<pre" in line or "<code" in line:
-            in_html_code = True
-        if in_html_code:
-            if "</pre>" in line or "</code>" in line:
-                in_html_code = False
-            continue
-        fence = _MD_FENCE.match(line)
-        if fenced is not None:
-            if fence is not None:
-                marks = fence.group("marks")
-                if (marks[0] == fenced[0] and len(marks) >= fenced[1]
-                        and not line[fence.end("marks"):].strip()):
-                    fenced = None
-            continue
-        if fence is not None:
-            marks = fence.group("marks")
-            fenced = marks[0], len(marks)
-            continue
-        visible, inline_code_width = _without_inline_code(line, inline_code_width)
-        for match in _MD_LINK.finditer(visible):
-            if _escaped_markdown_opener(visible, match.start()):
+    for (ordinal, _), line in zip(lines, visible.split("\n"), strict=True):
+        for match in _MD_LINK.finditer(line):
+            if _escaped_markdown_opener(line, match.start()):
                 continue
             ref = match.group("ref").removeprefix("<").removesuffix(">")
             if ref.startswith(("#", "/", "//")) or _URL_SCHEME.match(ref):
@@ -191,6 +200,51 @@ def _markdown_edges(path: str, source: str, known: set[str]) -> list[dict[str, A
             edges.append(_reference(
                 path, ref, ordinal, known, artifact="markdown_literal_link",
             ))
+    return edges
+
+
+def _markdown_edges(path: str, source: str, known: set[str]) -> list[dict[str, Any]]:
+    sanitized = _MD_COMMENT.sub(lambda m: _mask_span(m.group(0)), source)
+    edges: list[dict[str, Any]] = []
+    fenced: tuple[str, int] | None = None
+    in_html_code = False
+    paragraph: list[tuple[int, str]] = []
+    for ordinal, line in enumerate(sanitized.splitlines(), 1):
+        content = _markdown_quote_content(line)
+        if _markdown_indented_code(line) or _markdown_indented_code(content):
+            edges.extend(_markdown_prose_edges(path, paragraph, known))
+            paragraph.clear()
+            continue
+        if "<pre" in content or "<code" in content:
+            in_html_code = True
+        if in_html_code:
+            edges.extend(_markdown_prose_edges(path, paragraph, known))
+            paragraph.clear()
+            if "</pre>" in content or "</code>" in content:
+                in_html_code = False
+            continue
+        fence = _MD_FENCE.match(content)
+        if fenced is not None:
+            edges.extend(_markdown_prose_edges(path, paragraph, known))
+            paragraph.clear()
+            if fence is not None:
+                marks = fence.group("marks")
+                if (marks[0] == fenced[0] and len(marks) >= fenced[1]
+                        and not content[fence.end("marks"):].strip()):
+                    fenced = None
+            continue
+        if fence is not None:
+            edges.extend(_markdown_prose_edges(path, paragraph, known))
+            paragraph.clear()
+            marks = fence.group("marks")
+            fenced = marks[0], len(marks)
+            continue
+        if not content.strip():
+            edges.extend(_markdown_prose_edges(path, paragraph, known))
+            paragraph.clear()
+            continue
+        paragraph.append((ordinal, line))
+    edges.extend(_markdown_prose_edges(path, paragraph, known))
     return edges
 
 
