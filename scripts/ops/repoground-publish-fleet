@@ -6030,6 +6030,219 @@ def build_refresh_command(
     return command
 
 
+
+# Events are derived from authenticated GitHub REST reads, never caller-supplied
+# webhook/CI identifiers.  The existing fleet timer and source snapshot remain
+# the only scheduler and publication authorities.
+AUTH_EVENT_MAX_PER_RUN = 16
+AUTH_EVENT_MAX_RECEIPTS = 512
+
+
+def _github_event_api_get(endpoint: str) -> tuple[dict[str, Any], str]:
+    """Read one bounded provider object through the operator's logged-in gh."""
+    try:
+        call = subprocess.run(
+            ["gh", "api", "--method", "GET", endpoint],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            check=False, timeout=35,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise RuntimeError("authenticated_github_rest_unavailable") from exc
+    if call.returncode != 0:
+        # Never disclose gh stderr; authentication diagnostics may contain secrets.
+        raise RuntimeError("authenticated_github_rest_read_failed")
+    if len(call.stdout) > 512 * 1024:
+        raise RuntimeError("github_rest_payload_limit")
+    try:
+        record = json.loads(call.stdout)
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("github_rest_invalid_json") from exc
+    if not isinstance(record, dict):
+        raise RuntimeError("github_rest_not_object")
+    return record, hashlib.sha256(call.stdout).hexdigest()
+
+
+def _github_event_unix(value: object) -> int:
+    if not isinstance(value, str):
+        raise RuntimeError("github_event_time_missing")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            raise ValueError("timezone missing")
+        stamp = int(parsed.timestamp())
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise RuntimeError("github_event_time_invalid") from exc
+    if stamp < 0 or stamp > int(time.time()):
+        raise RuntimeError("github_event_time_future_or_invalid")
+    return stamp
+
+
+def _authenticated_fleet_event_handoff(
+    entry: RepoEntry, *, source_sha: str, source_wt: Path,
+    manifest_path: str,
+) -> dict[str, object]:
+    """Derive bounded events from GH API; pin manifest for full write/read cycle.
+
+    This is publisher-authenticated API provenance, not signed-webhook evidence.
+    The event adapter independently labels its input caller-supplied.
+    """
+    from merger.repoground.core.agent_evidence_pack import _bundle_identity
+    from merger.repoground.core.event_handoff import publish_event, read_event_receipt
+    from merger.repoground.core.manifest_snapshot import (
+        manifest_snapshot, use_manifest_binding,
+    )
+
+    repo_slug = f"{entry.owner}/{entry.repo}"
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo_slug):
+        raise RuntimeError("invalid_github_repository_identity")
+    if not re.fullmatch(r"[0-9a-f]{40}", source_sha):
+        raise RuntimeError("invalid_observed_source_sha")
+    snapshot = manifest_snapshot(manifest_path)
+    outbox = STATE_ROOT / "authenticated-event-outbox" / (
+        safe_segment(entry.owner) + "__" + safe_segment(entry.repo)
+    )
+    results: list[dict[str, object]] = []
+    with use_manifest_binding(snapshot.binding):
+        bundle, _gaps = _bundle_identity(manifest_path)
+        if bundle.get("status") != "available" or bundle.get("source_commit") != source_sha:
+            raise RuntimeError("event_bundle_source_revision_mismatch")
+
+        def store(event: dict[str, object], authority: str, provider_sha: str) -> None:
+            identity = {
+                "event_type": event["event_type"], "event_id": event["event_id"],
+                "repository": event["repository"],
+            }
+            key = hashlib.sha256(
+                json.dumps(identity, sort_keys=True, separators=(",", ":"),
+                           ensure_ascii=False).encode("utf-8")
+            ).hexdigest()
+            existing = read_event_receipt(outbox_root=outbox, event_key=key)
+            if existing.get("status") == "available":
+                old_event = existing["receipt"]["event"]
+                # Preserve initial publisher-observed time across subsequent
+                # hourly polls. A changed remote payload remains a collision.
+                old_seen = old_event.get("publisher_observed_at_unix")
+                if type(old_seen) is int:
+                    event["publisher_observed_at_unix"] = old_seen
+            else:
+                if sum(
+                    1 for _ in outbox.glob("event-*.json")
+                ) >= AUTH_EVENT_MAX_RECEIPTS:
+                    raise RuntimeError("event_outbox_capacity_requires_operator_retention")
+                event["publisher_observed_at_unix"] = int(time.time())
+            if event["publisher_observed_at_unix"] < event["source_occurred_at_unix"]:
+                raise RuntimeError("event_timing_before_source")
+            outcome = publish_event(
+                event=event, repo_root=source_wt, outbox_root=outbox,
+                bundle_manifest=manifest_path,
+            )
+            if outcome["status"] not in {"published", "deduplicated"}:
+                raise RuntimeError("event_handoff_failed:" + str(outcome.get("reason")))
+            readback = read_event_receipt(outbox_root=outbox, event_key=key)
+            if readback.get("status") != "available":
+                raise RuntimeError("event_receipt_readback_failed")
+            receipt = readback["receipt"]
+            if receipt.get("bundle_revision_alignment") != "matches_target_revision":
+                raise RuntimeError("event_receipt_bundle_source_mismatch")
+            results.append({
+                "kind": event["event_type"], "event_key": key,
+                "status": outcome["status"],
+                "receipt_sha256": readback["receipt_sha256"],
+                "provider_authority": authority,
+                "provider_response_sha256": provider_sha,
+                "source_revision": source_sha,
+                "bundle_manifest_sha256": snapshot.binding.sha256,
+                "lag_seconds": receipt["delivery_timing"].get("lag_seconds"),
+            })
+
+        endpoint = f"/repos/{entry.owner}/{entry.repo}"
+        commit, commit_sha = _github_event_api_get(
+            f"{endpoint}/git/commits/{source_sha}"
+        )
+        if commit.get("sha") != source_sha:
+            raise RuntimeError("github_commit_source_identity_mismatch")
+        parents = commit.get("parents")
+        if not isinstance(parents, list) or not parents:
+            raise RuntimeError("github_commit_parent_unavailable")
+        parent_sha = parents[0].get("sha") if isinstance(parents[0], dict) else None
+        if not isinstance(parent_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", parent_sha):
+            raise RuntimeError("github_commit_parent_invalid")
+        committer = commit.get("committer")
+        occurred = _github_event_unix(
+            committer.get("date") if isinstance(committer, dict) else None
+        )
+        store({
+            "event_type": "git.commit", "event_id": "gh:commit:" + source_sha,
+            "repository": repo_slug, "base_revision": parent_sha,
+            "target_revision": source_sha,
+            "source_occurred_at_unix": occurred,
+        }, "authenticated_github_git_commit_rest", commit_sha)
+
+        checks, checks_sha = _github_event_api_get(
+            f"{endpoint}/commits/{source_sha}/check-runs?per_page={AUTH_EVENT_MAX_PER_RUN}"
+        )
+        check_runs = checks.get("check_runs")
+        total_count = checks.get("total_count")
+        if not isinstance(check_runs, list) or type(total_count) is not int:
+            raise RuntimeError("github_check_run_response_invalid")
+        if len(check_runs) > AUTH_EVENT_MAX_PER_RUN:
+            raise RuntimeError("github_check_run_batch_exceeded")
+        skipped = 0
+        for check in check_runs:
+            if not isinstance(check, dict) or check.get("head_sha") != source_sha:
+                raise RuntimeError("github_check_run_source_identity_mismatch")
+            if check.get("status") != "completed":
+                skipped += 1
+                continue
+            check_id = check.get("id")
+            conclusion = check.get("conclusion")
+            if type(check_id) is not int or check_id <= 0:
+                raise RuntimeError("github_check_run_id_invalid")
+            if conclusion not in {
+                "success", "failure", "cancelled", "skipped", "timed_out",
+                "neutral", "action_required",
+            }:
+                skipped += 1
+                continue
+            store({
+                "event_type": "ci.completed",
+                "event_id": f"gh:check-run:{check_id}",
+                "repository": repo_slug, "base_revision": parent_sha,
+                "target_revision": source_sha, "check_id": str(check_id),
+                "ci_conclusion": conclusion,
+                "source_occurred_at_unix": _github_event_unix(
+                    check.get("completed_at")
+                ),
+            }, "authenticated_github_check_runs_rest", checks_sha)
+    return {
+        "status": "partial" if total_count > AUTH_EVENT_MAX_PER_RUN or skipped else "ok",
+        "provider": "github_rest_via_authenticated_gh_cli",
+        "events": results, "check_runs_total": total_count,
+        "check_runs_skipped_or_unfinished": skipped,
+        "check_runs_truncated": total_count > AUTH_EVENT_MAX_PER_RUN,
+        "outbox": str(outbox),
+        "does_not_establish": [
+            "signed_webhook_receipt", "review_verdict", "test_sufficiency",
+            "automatic_merge_or_deploy", "full_check_run_history",
+        ],
+    }
+
+
+def _attempt_authenticated_fleet_handoff(
+    entry: RepoEntry, *, source_sha: str, source_wt: Path,
+    manifest_path: str | None,
+) -> dict[str, object]:
+    if not manifest_path:
+        return {"status": "blocked", "reason": "published_bundle_manifest_unavailable"}
+    try:
+        return _authenticated_fleet_event_handoff(
+            entry, source_sha=source_sha,
+            source_wt=source_wt, manifest_path=manifest_path,
+        )
+    except (RuntimeError, ValueError, OSError) as exc:
+        return {"status": "blocked", "reason": str(exc)[:200]}
+
+
 def publish(
     entry: RepoEntry,
     *,
@@ -6504,6 +6717,7 @@ def main(argv: list[str]) -> int:
             print(json.dumps(summary, indent=2, sort_keys=True))
             return 1
         changed = published = skipped = queued = retained = deferred = 0
+        event_blocked = 0
         failed = len(missing_fleet_members)
         prune_failed = 0
         details: list[dict[str, object]] = [
@@ -6552,15 +6766,27 @@ def main(argv: list[str]) -> int:
                         remote_ref=remote_ref,
                         published_now=False,
                     )
-                    details.append(
-                        {
-                            "repo": entry.key,
-                            "status": "unchanged",
-                            "source_sha": source_sha,
-                            "fingerprint": fingerprint,
-                            "freshness": "fresh",
-                        }
-                    )
+                    unchanged_detail: dict[str, object] = {
+                        "repo": entry.key,
+                        "status": "unchanged", "source_sha": source_sha,
+                        "fingerprint": fingerprint, "freshness": "fresh",
+                    }
+                    try:
+                        if not state or state.get("source_commit") != source_sha:
+                            raise RuntimeError("unchanged_event_source_not_current")
+                        source_wt = ensure_source_worktree(
+                            entry, ref_segment, source_sha
+                        )
+                        event_result = _attempt_authenticated_fleet_handoff(
+                            entry, source_sha=source_sha, source_wt=source_wt,
+                            manifest_path=state.get("manifest_path"),
+                        )
+                    except (RuntimeError, ValueError, OSError) as exc:
+                        event_result = {"status": "blocked", "reason": str(exc)[:200]}
+                    unchanged_detail["authenticated_events"] = event_result
+                    if event_result["status"] == "blocked":
+                        event_blocked += 1
+                    details.append(unchanged_detail)
                     continue
                 changed += 1
                 if args.limit and published >= args.limit:
@@ -6608,6 +6834,12 @@ def main(argv: list[str]) -> int:
                     published_now=True,
                 )
                 clear_active_publication_lease(active_lease)
+                event_result = _attempt_authenticated_fleet_handoff(
+                    entry, source_sha=source_sha, source_wt=source_wt,
+                    manifest_path=manifest_path,
+                )
+                if event_result["status"] == "blocked":
+                    event_blocked += 1
                 try:
                     source_prune_report = prune_obsolete_revision_source_worktrees(
                         entry, ref_segment, source_wt
@@ -6652,6 +6884,7 @@ def main(argv: list[str]) -> int:
                     "prune": prune_report,
                     "source_worktree": str(source_wt),
                     "source_worktree_prune": source_prune_report,
+                    "authenticated_events": event_result,
                 }
                 details.append(published_detail)
             except ManagedWorktreeDirtyError as exc:
@@ -6696,7 +6929,7 @@ def main(argv: list[str]) -> int:
                 details.append(failed_detail)
                 log(f"FAILED {entry.key}: {exc}")
         summary: dict[str, object] = {
-            "status": "warn" if failed or retained or deferred else "ok",
+            "status": "warn" if failed or retained or deferred or event_blocked else "ok",
             "mode": mode,
             "count": total_count,
             "changed": changed,
@@ -6707,6 +6940,7 @@ def main(argv: list[str]) -> int:
             "deferred": deferred,
             "failed": failed,
             "prune_failed": prune_failed,
+            "authenticated_event_blocked": event_blocked,
             "retention": args.retention,
             "tool_sha": tool_sha,
             "generator_inputs_sha": generator_sha,
