@@ -813,8 +813,36 @@ class RepoGroundMcpStdioServer:
             raise McpProtocolError(
                 -32602, "change_evidence_pack requires --repo-root at MCP startup"
             )
-        call_args, manifest, binding = self._selected_call_args(arguments)
         from merger.repoground.core.agent_evidence_pack import build_evidence_pack
+
+        try:
+            call_args, manifest, binding = self._selected_call_args(arguments)
+        except McpProtocolError as exc:
+            # A repo with no *healthy* published bundle still has meaningful
+            # Git diffs. Never turn an ambiguous selector, forbidden explicit
+            # manifest, or invalid selection into a silent fallback.
+            missing = (
+                arguments.get("bundle_manifest") is None
+                and isinstance(exc.data, Mapping)
+                and exc.data.get("status") == "missing"
+                and exc.data.get("reason") == "no_matching_healthy_bundle"
+            )
+            if not missing:
+                raise
+            call_args = {
+                key: value for key, value in arguments.items()
+                if key not in {"bundle_manifest", "repo", "stem"}
+            }
+            result = build_evidence_pack(
+                repo_root=self.repo_root, bundle_manifest=None, **call_args,
+            )
+            result["live_freshness"] = {
+                "kind": "repobrief.live_freshness",
+                "status": "not_comparable",
+                "reason": "no_healthy_bundle_available",
+                "implicit_refresh": False,
+            }
+            return result
 
         call_args["repo_root"] = self.repo_root
         return self._invoke_bound_tool(

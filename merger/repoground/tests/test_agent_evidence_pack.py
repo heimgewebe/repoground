@@ -143,3 +143,61 @@ def test_cli_json_and_markdown_share_core_digest(tmp_path, capsys):
     rendered = capsys.readouterr().out
     assert payload["response_sha256"] in rendered
     assert payload["revision"]["diff_sha256"] in rendered
+
+
+def test_related_test_candidates_require_tracked_exact_file_at_target(tmp_path):
+    repo, _first, last = seeded_repo(tmp_path)
+    (repo / "tests").mkdir()
+    (repo / "tests" / "test_alpha.py").write_text(
+        "def test_alpha():\n    assert True\n", encoding="utf-8",
+    )
+    (repo / "tests" / "test_unrelated.py").write_text(
+        "def test_unrelated():\n    assert True\n", encoding="utf-8",
+    )
+    git(repo, "add", "tests")
+    git(repo, "commit", "-qm", "add tracked tests")
+    base = git(repo, "rev-parse", "HEAD")
+    (repo / "alpha.py").write_text(
+        "def old():\n    return 3\n", encoding="utf-8",
+    )
+    git(repo, "add", "alpha.py")
+    git(repo, "commit", "-qm", "change implementation again")
+    head = git(repo, "rev-parse", "HEAD")
+    pack = build_evidence_pack(
+        repo_root=repo, base_revision=base, target_revision=head,
+        use_case="find-related-tests",
+    )
+    assert pack["test_candidates"] == [{
+        "path": "tests/test_alpha.py",
+        "source_path": "alpha.py",
+        "candidate_reason": "exact_module_basename_match",
+        "verified_fact": "test_path_tracked_at_target_commit",
+        "claim_level": "name_candidate_not_verified_coverage",
+    }]
+    assert "test_coverage_unverified" in {g["code"] for g in pack["gaps"]}
+    assert "test_unrelated.py" not in render_evidence_markdown(pack)
+    assert pack["revision"]["target"] == head
+    assert git(repo, "status", "--porcelain") == ""
+
+
+def test_contract_impact_reports_only_direct_changed_contract_paths(tmp_path):
+    repo, base, head = seeded_repo(tmp_path)
+    (repo / "contracts").mkdir()
+    (repo / "contracts" / "api.schema.json").write_text(
+        '{"type":"object"}', encoding="utf-8",
+    )
+    git(repo, "add", "contracts/api.schema.json")
+    git(repo, "commit", "-qm", "add contract")
+    target = git(repo, "rev-parse", "HEAD")
+    report = build_evidence_pack(
+        repo_root=repo, base_revision=head, target_revision=target,
+        use_case="contract-impact",
+    )
+    assert report["changed_contracts"] == [{
+        "path": "contracts/api.schema.json", "claim_level": "direct_git_diff",
+    }]
+    assert "contract_consumer_relations_unverified" in {
+        g["code"] for g in report["gaps"]
+    }
+    assert report["change_status_counts"]["added"] == 1
+    assert all("verified_contract_consumer" not in hint.values() for hint in report["hints"])

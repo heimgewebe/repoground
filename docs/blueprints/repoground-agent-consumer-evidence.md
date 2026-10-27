@@ -36,15 +36,29 @@ Diff generation uses `git diff --no-ext-diff --no-textconv --no-renames --unifie
 
 The existing stdio server advertises exactly one additional **read-only** tool, `change_evidence_pack`, **only when started with `--repo-root`**. Without `--repo-root`, the old MCP tool list remains unchanged. Its arguments include `base_revision`, `target_revision`, optional `use_case`, `context_budget_tokens` (1–4000), `expected_diff_sha256`, and the standard existing bundle selectors (`bundle_manifest` OR `repo`/`stem`). The existing manifest boundary and frozen-manifest handling apply. The result uses `structuredContent`; `live_freshness` is separately attached by the existing MCP server and is **not** included in the core `response_sha256`.
 
+If no **healthy** bundle matches and no explicit manifest path was requested, the
+MCP handler now returns **Git-only** evidence with `live_freshness.status=not_comparable`
+and `implicit_refresh=false`, rather than blocking source-diff reporting.
+Ambiguous selections and invalid/forbidden explicit manifests still fail
+closed. The project launcher must nevertheless point to an existing bundle
+root; it cannot create a missing publication directory from a reader.
+
 The tool does not fetch Git objects. Commit objects not available locally must be obtained by the authorized Git/operator workflow; client MCP requests never fetch them implicitly.
 
 ## Evidence levels and limits
 
 - `direct_git_diff`: Git reports the path and hunk range between the supplied commit objects.
+- `name_candidate_not_verified_coverage`: an **actual tracked test path**
+  at the target commit has exactly the expected `test_<module>.py` or
+  `<module>_test.py` basename. This is useful for test selection but is
+  **not proof the test exercises the changed implementation**.
+- `changed_contracts`: explicit changed `contracts/` or schema-named paths
+  from Git. Contract consumers and compatibility remain unknown.
+- `change_status_counts`: directly reported added, deleted and modified paths.
 - `bundle_navigation_hint_not_verified_impact`: An existing bundle artifact suggests navigation; this **does not establish a caller, contract, runtime effect or test obligation**.
 - `unknown`: Bundle unavailable, stale or unmatched; relation candidates absent; ambiguous bundle identity; no evidence from other repos.
 
-The output is limited to 2 MB Git diff, 30 changed-file display entries and 12 hints, with a 15-second built-in Git read timeout. These limits are per request; no global event scheduling or rate limit is asserted. The Git worktree and missing-source boundaries are explicit.
+The output is limited to 2 MB Git diff, 30 changed-file display entries, 12 exact-name test-path candidates and 12 bundle hints, with a 15-second built-in Git read timeout. These limits are per request; no global event scheduling or rate limit is asserted. The Git worktree and missing-source boundaries are explicit.
 
 ## Real reproducible check
 
@@ -60,4 +74,4 @@ The first command must use the merge's **first parent**, not its second parent (
 
 ## Tests / still outstanding
 
-Focused pytest with Nix-provisioned Python packages: **58 passed** for new evidence, MCP behavior, and unchanged MCP/context compiler cases. Ruff: **all checks passed**. Independent review, PR integration and live consumer-client acceptance are separate gates. Later Thread 3 waves will add explicit publisher-owned idempotent Git/CI event receipts; **the read-only evidence endpoint is not an event watcher**. Extensions from Threads 1 and 2 must consume their versioned response contracts rather than editing their internal modules.
+Focused pytest with Nix-provisioned Python packages: **67 passed** for new evidence including tracked test candidates, Git-only MCP fallback, project launcher, and unchanged MCP/context compiler cases. Ruff: **all checks passed**. Independent review, PR integration and live consumer-client acceptance are separate gates. Later Thread 3 waves will add explicit publisher-owned idempotent Git/CI event receipts; **the read-only evidence endpoint is not an event watcher**. Extensions from Threads 1 and 2 must consume their versioned response contracts rather than editing their internal modules.

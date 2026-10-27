@@ -155,6 +155,67 @@ def _bundle_identity(path: str | Path | None) -> tuple[dict[str, Any], list[str]
     }, [] if len(commits) == 1 else ["bundle_source_revision_unknown"]
 
 
+MAX_TEST_CANDIDATES = 12
+MAX_TRACKED_PATHS_BYTES = 1_000_000
+
+
+def _test_candidates(
+    root: Path, target_revision: str, changed_paths: list[str],
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Git-verified test filenames; naming correlation is NOT coverage evidence."""
+    source_paths = [
+        path for path in changed_paths
+        if path.endswith(".py")
+        and not Path(path).name.startswith("test_")
+        and not Path(path).name.endswith("_test.py")
+    ]
+    if not source_paths:
+        return [], None
+    tracked, error = _bounded_git(
+        root, ["ls-tree", "-r", "-z", "--name-only", target_revision, "--"],
+        max_bytes=MAX_TRACKED_PATHS_BYTES,
+    )
+    if error or tracked is None:
+        return [], "tracked_test_paths_unavailable"
+    by_name: dict[str, list[str]] = {}
+    for relative in tracked.split("\0"):
+        if not relative or relative.startswith("/") or ".." in Path(relative).parts:
+            continue
+        basename = Path(relative).name
+        if basename.startswith("test_") and basename.endswith(".py"):
+            by_name.setdefault(basename, []).append(relative)
+        elif basename.endswith("_test.py"):
+            by_name.setdefault(basename, []).append(relative)
+    candidates: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for changed in sorted(set(source_paths)):
+        module_name = Path(changed).stem
+        expected = (f"test_{module_name}.py", f"{module_name}_test.py")
+        for filename in expected:
+            for tracked_path in sorted(by_name.get(filename, [])):
+                if (changed, tracked_path) in seen:
+                    continue
+                seen.add((changed, tracked_path))
+                candidates.append({
+                    "path": tracked_path,
+                    "source_path": changed,
+                    "candidate_reason": "exact_module_basename_match",
+                    "verified_fact": "test_path_tracked_at_target_commit",
+                    "claim_level": "name_candidate_not_verified_coverage",
+                })
+                if len(candidates) == MAX_TEST_CANDIDATES:
+                    return candidates, "test_candidate_limit"
+    return candidates, None
+
+
+def _is_explicit_contract_path(path: str) -> bool:
+    parts = Path(path).parts
+    return "contracts" in parts or path.endswith((
+        ".schema.json", ".jsonschema", ".proto", ".graphql",
+        ".openapi.yaml", ".openapi.yml", ".openapi.json",
+    ))
+
+
 def build_evidence_pack(
     *,
     repo_root: str | Path,
@@ -271,9 +332,24 @@ def build_evidence_pack(
         })
     if parsed["file_count"] > MAX_CHANGED_FILES:
         gap_codes.append("changed_file_display_limit")
-    # No fabricated relationship: unrelated tests and other repos remain unknown.
-    if use_case in {"find-related-tests", "contract-impact", "cross-repo-impact"} and not hints:
-        gap_codes.append("no_supported_relation_candidates")
+    changed_contracts = [
+        {"path": item["path"], "claim_level": "direct_git_diff"}
+        for item in changed if _is_explicit_contract_path(item["path"])
+    ]
+    test_candidates: list[dict[str, Any]] = []
+    if use_case in {"explain-change", "find-related-tests"}:
+        test_candidates, test_gap = _test_candidates(
+            root, target_revision, [item["path"] for item in changed],
+        )
+        if test_gap:
+            gap_codes.append(test_gap)
+    if use_case == "find-related-tests":
+        # Even matching *tracked* test file names do not establish test coverage.
+        gap_codes.append("test_coverage_unverified")
+    if use_case == "contract-impact":
+        gap_codes.append("contract_consumer_relations_unverified")
+    if use_case == "cross-repo-impact":
+        gap_codes.append("cross_repository_relations_unverified")
 
     result = {
         "kind": KIND, "version": VERSION, "status": "warn" if gap_codes else "pass",
@@ -283,11 +359,16 @@ def build_evidence_pack(
             "worktree": worktree_state, "source": "local_git_read_only",
         },
         "bundle": bundle, "changed_files": changed,
-        "changed_file_count": parsed["file_count"], "hints": hints,
+        "changed_file_count": parsed["file_count"],
+        "change_status_counts": parsed["change_status_counts"],
+        "changed_contracts": changed_contracts,
+        "test_candidates": test_candidates,
+        "hints": hints,
         "gaps": [{"code": code} for code in sorted(set(gap_codes))],
         "limits": {"max_diff_bytes": MAX_DIFF_BYTES,
                    "max_changed_files": MAX_CHANGED_FILES,
                    "max_hints": MAX_EVIDENCE_ITEMS,
+                   "max_test_candidates": MAX_TEST_CANDIDATES,
                    "context_budget_tokens": context_budget_tokens},
         "mutation_boundary": BOUNDARY, "does_not_establish": NOT_ESTABLISHED,
         "fallback": "Use git diff, rg, tests and CI directly; no snapshot is refreshed.",
@@ -317,6 +398,16 @@ def render_evidence_markdown(pack: dict[str, Any]) -> str:
     for item in pack["changed_files"]:
         spans = ", ".join(f"{r['start_line']}-{r['end_line']}" for r in item["ranges"])
         lines.append(f"- {item['path']} ({item['change_status']}; lines: {spans or 'unknown'})")
+    lines.extend(["", "## Tracked test-path candidates (not coverage evidence)"])
+    for item in pack["test_candidates"]:
+        lines.append(f"- {item['path']} (name matches {item['source_path']})")
+    if not pack["test_candidates"]:
+        lines.append("- No tracked exact-name candidates found")
+    lines.extend(["", "## Directly changed contract paths"])
+    for item in pack["changed_contracts"]:
+        lines.append(f"- {item['path']} (direct Git diff)")
+    if not pack["changed_contracts"]:
+        lines.append("- No explicit contract paths in displayed changes")
     lines.extend(["", "## Existing bundle navigation hints (not verified impact)"])
     for item in pack["hints"]:
         lines.append(f"- {item['path']} ({item['source']})")
