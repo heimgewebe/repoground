@@ -269,7 +269,7 @@ def _js_function_edges(path: str, source: str) -> list[dict[str, Any]]:
     """
     lines, _ = _js_sources(source, jsx=path.endswith((".jsx", ".tsx")))
     declarations: dict[str, list[str]] = {}
-    declaration_lines: set[int] = set()
+    declaration_sites: set[tuple[int, int]] = set()
     edges: list[dict[str, Any]] = []
     for ordinal, line in enumerate(lines, 1):
         match = _JS_FUNCTION.match(line)
@@ -278,7 +278,7 @@ def _js_function_edges(path: str, source: str) -> list[dict[str, Any]]:
         name = match.group("name")
         symbol_id = f"js:{path}:function:{name}:L{ordinal}"
         declarations.setdefault(name, []).append(symbol_id)
-        declaration_lines.add(ordinal)
+        declaration_sites.add((ordinal, match.start("name")))
         edges.append(_edge(
             "defines", "file:" + path, symbol_id, _source(path, ordinal, ordinal),
             "resolved", "S1", "js_ts_named_function_syntax",
@@ -286,9 +286,10 @@ def _js_function_edges(path: str, source: str) -> list[dict[str, Any]]:
     if not declarations:
         return []
     for ordinal, line in enumerate(lines, 1):
-        if ordinal in declaration_lines:
-            continue
         for match in _JS_CALL.finditer(line):
+            # A declaration has call-like spelling; its body may contain real calls.
+            if (ordinal, match.start("name")) in declaration_sites:
+                continue
             name = match.group("name")
             candidates = declarations.get(name)
             if not candidates:
