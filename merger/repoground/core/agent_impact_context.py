@@ -2090,4 +2090,62 @@ __all__ = [
     "MUTATION_BOUNDARY",
     "VERSION",
     "build_agent_impact_context",
+    "compile_structure_neighborhood",
 ]
+
+
+def compile_structure_neighborhood(
+    *,
+    symbol_id: str,
+    symbol_index: Mapping[str, Any],
+    call_graph: Mapping[str, Any],
+    architecture_graph: Mapping[str, Any],
+    max_items: int = 50,
+) -> dict[str, Any]:
+    """Bounded read-only relation neighborhood, without a completeness verdict.
+
+    This opt-in core operation uses the existing verified producer artifacts.
+    The caller must first validate the bundle manifest and source freshness.
+    An unresolved S0 site is a risk hint, not an incoming proven edge.
+    """
+    from merger.repoground.architecture.relationship_projection import (
+        project_relationships,
+    )
+
+    if not isinstance(symbol_id, str) or not symbol_id or len(symbol_id) > 4096:
+        raise ValueError("symbol_id must be a bounded non-empty string")
+    if isinstance(max_items, bool) or not isinstance(max_items, int) or not 1 <= max_items <= 200:
+        raise ValueError("max_items must be between 1 and 200")
+    projection = project_relationships(
+        symbol_index=symbol_index,
+        call_graph=call_graph,
+        architecture_graph=architecture_graph,
+    )
+    edges = projection["edges"]
+    direct = [
+        edge for edge in edges
+        if edge["resolution_status"] == "resolved"
+        and (edge["src"] == symbol_id or edge["dst"] == symbol_id)
+    ]
+    uncertain = [
+        edge for edge in edges
+        if edge["src"] == symbol_id and edge["resolution_status"] != "resolved"
+    ]
+    return {
+        "kind": "repobrief.structure_neighborhood",
+        "version": "1.0",
+        "symbol_id": symbol_id,
+        "run_id": projection["run_id"],
+        "canonical_dump_index_sha256": projection["canonical_dump_index_sha256"],
+        "incoming": [edge for edge in direct if edge["dst"] == symbol_id][:max_items],
+        "outgoing": [edge for edge in direct if edge["src"] == symbol_id][:max_items],
+        "unresolved_from_symbol": uncertain[:max_items],
+        "truncated": (
+            projection["coverage"]["truncated"]
+            or len([edge for edge in direct if edge["dst"] == symbol_id]) > max_items
+            or len([edge for edge in direct if edge["src"] == symbol_id]) > max_items
+            or len(uncertain) > max_items
+        ),
+        "coverage": projection["coverage"],
+        "does_not_establish": projection["does_not_establish"],
+    }
