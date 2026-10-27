@@ -456,8 +456,15 @@ def _json_edges(path: str, source: str, known: set[str]) -> list[dict[str, Any]]
     for match, ref in lexical:
         if not isinstance(ref, str) or not ref:
             continue
+        # JSON permits lone escaped surrogates, but graph identities require
+        # UTF-8. Keep their evidence as S0 without aborting other declarations.
+        safe_ref = ref.encode("utf-8", errors="backslashreplace").decode("utf-8")
         file_ref = ref.split("#", 1)[0]
-        if not file_ref:
+        if safe_ref != ref:
+            target, status, candidates = (
+                "schema-ref:invalid-unicode:" + safe_ref, "unresolved", [],
+            )
+        elif not file_ref:
             target, status, candidates = "contract-pointer:" + path + ref, "unresolved", []
         else:
             target, status, candidates = _resolve_schema_ref(path, ref, known)
