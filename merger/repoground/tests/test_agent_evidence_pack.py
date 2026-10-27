@@ -476,3 +476,56 @@ def test_partial_clone_missing_blob_never_invokes_promisor_transport(
         str(p.relative_to(repo / ".git")) for p in (repo / ".git").rglob("*")
         if p.is_file()
     } == before_objects
+
+
+def test_configured_clean_filter_never_runs_during_worktree_status(tmp_path):
+    """A pure evidence read must not execute configured worktree filters."""
+    repo, base, head = seeded_repo(tmp_path)
+    (repo / ".gitattributes").write_text("alpha.py filter=probe\n", encoding="utf-8")
+    git(repo, "add", ".gitattributes")
+    git(repo, "commit", "-qm", "mark tracked path for filter")
+    target = git(repo, "rev-parse", "HEAD")
+    marker = tmp_path / "clean-filter-invoked"
+    program = tmp_path / "test-clean-filter"
+    program.write_text(
+        '#!/bin/sh\nprintf invoked > "' + str(marker) + '"\ncat\n',
+        encoding="utf-8",
+    )
+    program.chmod(0o700)
+    git(repo, "config", "filter.probe.clean", str(program))
+    # Git's stat cache would otherwise hide the unsafe clean-filter path.
+    alpha = repo / "alpha.py"
+    original = alpha.stat()
+    import os
+    os.utime(alpha, ns=(original.st_atime_ns, original.st_mtime_ns + 1_000_000_000))
+    result = build_evidence_pack(
+        repo_root=repo, base_revision=base, target_revision=target,
+    )
+    assert result["status"] in {"warn", "pass"}
+    assert result["revision"]["worktree"] == "unknown"
+    assert "worktree_unknown" in {gap["code"] for gap in result["gaps"]}
+    assert not marker.exists(), "read-only Git status executed an external filter"
+    assert not (repo / ".git" / "index.lock").exists()
+
+
+def test_diff_noprefix_config_keeps_real_a_directory_paths(tmp_path):
+    """Git's diff.noprefix presentation config must not corrupt file identity."""
+    repo, _base, head = seeded_repo(tmp_path)
+    (repo / "a").mkdir()
+    (repo / "a" / "x.py").write_text("value = 1\n", encoding="utf-8")
+    git(repo, "add", "a/x.py")
+    git(repo, "commit", "-qm", "introduce a namespace directory")
+    base = git(repo, "rev-parse", "HEAD")
+    (repo / "a" / "x.py").write_text("value = 2\n", encoding="utf-8")
+    git(repo, "add", "a/x.py")
+    git(repo, "commit", "-qm", "update prefixed path")
+    target = git(repo, "rev-parse", "HEAD")
+    git(repo, "config", "diff.noprefix", "true")
+    result = build_evidence_pack(
+        repo_root=repo, base_revision=base, target_revision=target,
+    )
+    assert result["status"] in {"pass", "warn"}
+    assert result["changed_file_count"] == 1
+    assert result["changed_files"][0]["path"] == "a/x.py"
+    assert result["revision"]["target"] == target
+    assert not any(g["code"] == "diff_paths_unresolved" for g in result["gaps"])

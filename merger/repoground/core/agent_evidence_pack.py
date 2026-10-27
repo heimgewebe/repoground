@@ -100,12 +100,15 @@ def _bounded_git(root: Path, args: list[str], *, max_bytes: int = 131072) -> tup
     # during an ordinary "diff". Explicitly prohibit all transports and
     # disable lazy fetch; read-only CLI/MCP must never mutate .git this way.
     # Override hostile inherited GIT_ALLOW_PROTOCOL/GIT_NO_LAZY_FETCH values.
-    env = dict(
-        os.environ,
-        GIT_OPTIONAL_LOCKS="0", GIT_TERMINAL_PROMPT="0",
-        GIT_NO_LAZY_FETCH="1", GIT_ALLOW_PROTOCOL="",
-        GIT_PROTOCOL_FROM_USER="0",
-    )
+    # Eliminate caller-controlled Git config, object-path, transport, and
+    # trace overrides; no ambient Git variable may redirect an evidence read.
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith("GIT_")}
+    env.update({
+        "GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0",
+        "GIT_NO_LAZY_FETCH": "1", "GIT_ALLOW_PROTOCOL": "",
+        "GIT_PROTOCOL_FROM_USER": "0",
+    })
     process: subprocess.Popen[bytes] | None = None
     try:
         process = subprocess.Popen(
@@ -292,7 +295,9 @@ def _read_git_delta(
             return None, "unavailable_commit"
     diff, error = _bounded_git(
         root, ["diff", "--no-ext-diff", "--no-textconv", "--no-renames",
-               "--ignore-submodules=none", "--no-color", "--unified=3", base_revision, target_revision, "--"],
+               "--ignore-submodules=none", "--no-color",
+               "--src-prefix=a/", "--dst-prefix=b/",
+               "--unified=3", base_revision, target_revision, "--"],
         max_bytes=MAX_DIFF_BYTES,
     )
     if error or diff is None:
@@ -469,8 +474,30 @@ def _build_evidence_pack_bound(
         return _invalid(problem or "diff_unavailable")
     diff, diff_sha, parsed = delta
 
-    dirty, dirty_error = _bounded_git(root, ["status", "--porcelain", "--untracked-files=normal"])
-    worktree_state = "unknown" if dirty_error else ("dirty" if dirty else "clean")
+    # git status may invoke filter.<driver>.clean/process on a stat-dirty file.
+    # First inspect the *effective* Git configuration using a builtin which
+    # does not touch worktree files. If any executable filter is configured,
+    # or configuration is unobservable, decline worktree classification rather
+    # than executing the configured program or claiming "clean".
+    config, config_problem = _bounded_git(
+        root, ["config", "--list", "--null"], max_bytes=MAX_DIFF_BYTES,
+    )
+    executable_filter = (
+        config_problem is not None
+        or config is None
+        or any(
+            entry.split("\n", 1)[0].casefold().startswith("filter.")
+            and entry.split("\n", 1)[0].casefold().endswith((".clean", ".process"))
+            for entry in (config or "").split("\0") if entry
+        )
+    )
+    if executable_filter:
+        worktree_state = "unknown"
+    else:
+        dirty, dirty_error = _bounded_git(
+            root, ["status", "--porcelain", "--untracked-files=normal"]
+        )
+        worktree_state = "unknown" if dirty_error else ("dirty" if dirty else "clean")
     bundle, gap_codes = _bundle_identity(bundle_manifest)
     gap_codes.extend(_bundle_revision_gaps(bundle, worktree_state, base_revision, target_revision))
     hints, hint_gaps = _bundle_navigation_hints(
