@@ -547,3 +547,23 @@ def test_diff_noprefix_config_keeps_real_a_directory_paths(tmp_path):
     assert result["changed_files"][0]["path"] == "a/x.py"
     assert result["revision"]["target"] == target
     assert not any(g["code"] == "diff_paths_unresolved" for g in result["gaps"])
+
+
+def test_git_replace_refs_do_not_relabel_exact_commit_evidence(tmp_path):
+    """A replacement ref must not substitute another tree for a pinned SHA."""
+    repo, base, target = seeded_repo(tmp_path)
+    git(repo, "switch", "--detach", "-q", base)
+    (repo / "beta.py").write_text("value = 5\n", encoding="utf-8")
+    git(repo, "add", "beta.py")
+    git(repo, "commit", "-qm", "make an unrelated replacement commit")
+    replacement = git(repo, "rev-parse", "HEAD")
+    assert replacement != target
+    git(repo, "replace", target, replacement)
+    # Plain Git uses the replacement tree while retaining the original SHA.
+    assert git(repo, "diff", "--name-only", base, target) == "beta.py"
+    report = build_evidence_pack(
+        repo_root=repo, base_revision=base, target_revision=target,
+    )
+    assert report["status"] in {"pass", "warn"}
+    assert report["revision"]["target"] == target
+    assert [item["path"] for item in report["changed_files"]] == ["alpha.py"]
