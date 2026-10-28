@@ -168,6 +168,24 @@ class TestRevisionGraphImpact(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "ignored_source_not_in_head"):
             self.report()
 
+    def test_ignored_nested_git_directory_cannot_hide_source_bytes(self):
+        # Git collapses an ignored nested repository to one "local/" entry.
+        # The graph producers still recursively traverse its Python files.
+        (self.root / ".git" / "info" / "exclude").write_text(
+            "local/\n", encoding="utf-8"
+        )
+        nested = self.root / "local"
+        nested.mkdir()
+        subprocess.run(["git", "-C", str(nested), "init", "-q"], check=True)
+        self.write("local/test_injected.py", "from mod import feature\nfeature()\n")
+        ignored = self.git(
+            "ls-files", "--others", "--ignored", "--exclude-standard", "-z"
+        )
+        self.assertIn("local/\x00", ignored)
+        self.assertEqual("", self.git("status", "--porcelain").strip())
+        with self.assertRaisesRegex(ValueError, "ignored_source_not_in_head"):
+            self.report()
+
     def test_tracked_source_index_trust_flags_cannot_hide_source_mutations(self):
         source = "tests/test_mod.py"
         for flag, reset in (

@@ -133,6 +133,20 @@ def _is_graph_source_path(path: str) -> bool:
     return suffix in _GRAPH_FILE_LANGUAGES
 
 
+def _producer_may_traverse_directory(path: str) -> bool:
+    """Reject opaque ignored directories only if a source producer walks them."""
+    parts = PurePosixPath(path).parts
+    if not parts or path.startswith("/") or ".." in parts:
+        return True
+    symbol_walk = not any(part in EXCLUDED_DIRS for part in parts)
+    import_walk = not any(
+        part in _SKIP_DIRECTORIES
+        or (part.startswith(".") and part != ".github")
+        for part in parts
+    )
+    return symbol_walk or import_walk
+
+
 def _reject_source_index_trust_flags(repo: Path) -> None:
     """Refuse Git index hints that conceal on-disk producer changes from status."""
     flagged = _git(repo, ["ls-files", "-v", "-z"], max_bytes=8_000_000)
@@ -159,7 +173,12 @@ def _source_inventory_safe(repo: Path) -> None:
         max_bytes=8_000_000,
     )
     for raw in ignored.split(b"\x00"):
-        if raw and _is_graph_source_path(raw.decode("utf-8")):
+        if not raw:
+            continue
+        path = raw.decode("utf-8")
+        if _is_graph_source_path(path) or (
+            path.endswith("/") and _producer_may_traverse_directory(path)
+        ):
             raise ValueError("ignored_source_not_in_head")
     _reject_source_index_trust_flags(repo)
     stage = _git(repo, ["ls-files", "--stage", "-z"], max_bytes=8_000_000)
