@@ -157,6 +157,7 @@ GENERATOR_INPUT_PATHS = (
     "merger/repoground/cli/__init__.py",
     "merger/repoground/cli/ground.py",
     "merger/repoground/cli/cmd_ground.py",
+    "merger/repoground/architecture",
     "merger/repoground/core",
     "merger/repoground/contracts",
     "merger/repoground/retrieval",

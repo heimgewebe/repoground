@@ -14,11 +14,7 @@ from merger.repoground.core.agent_evidence_pack import (
 
 @pytest.fixture(autouse=True)
 def isolate_global_git_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Isolate the caller's HOME; system Git filters may still be effective.
-
-    The reader intentionally reports unknown when executable filters are
-    configured. Assertions below honor this contract on every CI runner.
-    """
+    """Isolate fixtures; readers separately isolate ambient Git configuration."""
     home = tmp_path / "isolated-home"
     config = tmp_path / "isolated-config"
     home.mkdir()
@@ -36,7 +32,7 @@ def git(repo: Path, *args: str) -> str:
 def assert_worktree_with_effective_filter_policy(
     report: dict, repo: Path, unfiltered_state: str,
 ) -> None:
-    """A CI-wide filter configuration must produce an explicit unknown gap.
+    """An effective repository filter configuration produces an explicit unknown gap.
 
     The product's bounded, side-effect-free Git configuration read is the
     authority for whether status probing may run on this host.
@@ -357,6 +353,14 @@ def test_request_pinned_manifest_identity_survives_selected_symlink_retarget(tmp
     gen_b.mkdir()
     manifest_a, manifest_b = manifest(gen_a, base), manifest(gen_b, head)
     selected = tmp_path / "current.bundle.manifest.json"
+    for path, commit, run_id, dirty in (
+        (manifest_a, base, "generation-a", False),
+        (manifest_b, head, "generation-b", True),
+    ):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["run_id"] = run_id
+        data["generator"] = {"runtime": {"git_commit": commit, "git_dirty": dirty}}
+        path.write_text(json.dumps(data), encoding="utf-8")
     selected.symlink_to(manifest_a)
     binding = capture_manifest_snapshot(selected).binding
     original_git = agent_evidence_pack._read_git_delta
@@ -377,6 +381,10 @@ def test_request_pinned_manifest_identity_survives_selected_symlink_retarget(tmp
     assert selected.resolve() == manifest_b.resolve()
     assert result["status"] in {"pass", "warn"}
     assert result["bundle"]["source_commit"] == base
+    assert result["bundle"]["run_id"] == "generation-a"
+    assert result["bundle"]["generator_commit"] == base
+    assert result["bundle"]["generator_dirty"] is False
+    assert result["bundle"]["manifest_filename"] == manifest_a.name
     assert result["bundle"]["manifest_sha256"] == hashlib.sha256(
         manifest_a.read_bytes()
     ).hexdigest()
@@ -400,6 +408,14 @@ def test_direct_cli_pins_initial_manifest_generation_without_outer_binding(
     manifest_a = manifest(gen_a, base)
     manifest_b = manifest(gen_b, head)
     selected = tmp_path / "direct.bundle.manifest.json"
+    for path, commit, run_id, dirty in (
+        (manifest_a, base, "generation-a", False),
+        (manifest_b, head, "generation-b", True),
+    ):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["run_id"] = run_id
+        data["generator"] = {"runtime": {"git_commit": commit, "git_dirty": dirty}}
+        path.write_text(json.dumps(data), encoding="utf-8")
     selected.symlink_to(manifest_a)
     original_git = agent_evidence_pack._read_git_delta
 
@@ -422,6 +438,10 @@ def test_direct_cli_pins_initial_manifest_generation_without_outer_binding(
     assert selected.resolve() == manifest_b.resolve()
     assert pack["status"] in {"warn", "pass"}
     assert pack["bundle"]["source_commit"] == base
+    assert pack["bundle"]["run_id"] == "generation-a"
+    assert pack["bundle"]["generator_commit"] == base
+    assert pack["bundle"]["generator_dirty"] is False
+    assert pack["bundle"]["manifest_filename"] == manifest_a.name
     assert pack["bundle"]["manifest_sha256"] == hashlib.sha256(
         manifest_a.read_bytes()
     ).hexdigest()
@@ -496,6 +516,7 @@ def test_partial_clone_missing_blob_never_invokes_promisor_transport(
         encoding="utf-8",
     )
     fake_ssh.chmod(0o700)
+    git(repo, "config", "core.sshCommand", str(fake_ssh))
     monkeypatch.setenv("GIT_SSH_COMMAND", str(fake_ssh))
     monkeypatch.setenv("PROBE_MARKER", str(marker))
     # Deliberately hostile inherited values: _bounded_git must override
@@ -514,6 +535,9 @@ def test_partial_clone_missing_blob_never_invokes_promisor_transport(
     assert result["reason"] in {
         "git_command_failed", "diff_unavailable", "unavailable_commit",
     }
+    from merger.repoground.core.delta_context import compile_revision_impact
+    with pytest.raises(ValueError):
+        compile_revision_impact(repo_root=repo, base_sha=base, head_sha=head)
     assert not marker.exists(), "a Git evidence read attempted an SSH fetch"
     assert not loose_blob.exists(), "read-only operation restored an object"
     assert {

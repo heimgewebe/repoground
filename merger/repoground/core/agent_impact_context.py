@@ -2094,12 +2094,37 @@ __all__ = [
 ]
 
 
+def _neighborhood_projection(
+    projection: Mapping[str, Any] | None,
+    symbols: Mapping[str, Any] | None,
+    calls: Mapping[str, Any] | None,
+    architecture: Mapping[str, Any] | None,
+) -> Mapping[str, Any]:
+    from merger.repoground.architecture.relationship_projection import (
+        KIND, _require_document, project_relationships,
+    )
+
+    if projection is not None:
+        if any(value is not None for value in (symbols, calls, architecture)):
+            raise ValueError("select one verified relationship projection or the producer triple")
+        _require_document("relationships", projection, KIND)
+        if not isinstance(projection.get("edges"), list) or not isinstance(projection.get("coverage"), Mapping):
+            raise ValueError("relationship projection records are unavailable")
+        return projection
+    if any(value is None for value in (symbols, calls, architecture)):
+        raise ValueError("all three producer artifacts are required")
+    return project_relationships(
+        symbol_index=symbols, call_graph=calls, architecture_graph=architecture,
+    )
+
+
 def compile_structure_neighborhood(
     *,
     symbol_id: str,
-    symbol_index: Mapping[str, Any],
-    call_graph: Mapping[str, Any],
-    architecture_graph: Mapping[str, Any],
+    symbol_index: Mapping[str, Any] | None = None,
+    call_graph: Mapping[str, Any] | None = None,
+    architecture_graph: Mapping[str, Any] | None = None,
+    relationship_projection: Mapping[str, Any] | None = None,
     max_items: int = 50,
 ) -> dict[str, Any]:
     """Bounded read-only relation neighborhood, without a completeness verdict.
@@ -2108,18 +2133,12 @@ def compile_structure_neighborhood(
     The caller must first validate the bundle manifest and source freshness.
     An unresolved S0 site is a risk hint, not an incoming proven edge.
     """
-    from merger.repoground.architecture.relationship_projection import (
-        project_relationships,
-    )
-
     if not isinstance(symbol_id, str) or not symbol_id or len(symbol_id) > 4096:
         raise ValueError("symbol_id must be a bounded non-empty string")
     if isinstance(max_items, bool) or not isinstance(max_items, int) or not 1 <= max_items <= 200:
         raise ValueError("max_items must be between 1 and 200")
-    projection = project_relationships(
-        symbol_index=symbol_index,
-        call_graph=call_graph,
-        architecture_graph=architecture_graph,
+    projection = _neighborhood_projection(
+        relationship_projection, symbol_index, call_graph, architecture_graph,
     )
     edges = projection["edges"]
     direct = [

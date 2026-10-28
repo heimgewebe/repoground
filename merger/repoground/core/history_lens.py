@@ -136,6 +136,7 @@ _TIMELINE_KIND = "repoground.git-history"
 _SHA_RE = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 _REPO_RE = re.compile(r"[A-Za-z0-9_.-]{1,128}\Z")
 _MAX_GIT_BYTES = 2_000_000
+_MAX_GIT_READ_BYTES = 8_000_000
 _MAX_TREE_ROWS = 4096
 _MAX_PUBLIC_ROWS = 256
 _MAX_SYMBOL_FILES = 20
@@ -161,9 +162,9 @@ def _read_bounded_git_stdout(proc: subprocess.Popen[bytes], max_bytes: int, dead
             chunks.append(chunk)
 
 
-def _git_read(repo: Path, *arguments: str, max_bytes: int = _MAX_GIT_BYTES) -> bytes:
+def _bounded_git_read(repo: Path, *arguments: str, max_bytes: int = _MAX_GIT_BYTES) -> bytes:
     """Strictly bounded local Git read: no lazy fetch, unbounded pipe or shell."""
-    if not isinstance(max_bytes, int) or not 1 <= max_bytes <= _MAX_GIT_BYTES:
+    if type(max_bytes) is not int or not 1 <= max_bytes <= _MAX_GIT_READ_BYTES:
         raise ValueError("Git read output budget is invalid")
     # Ignore inherited Git settings: GIT_TRACE2_EVENT can otherwise write a
     # trace file during an allegedly effect-free read. GIT_CONFIG_* may also
@@ -177,10 +178,15 @@ def _git_read(repo: Path, *arguments: str, max_bytes: int = _MAX_GIT_BYTES) -> b
         "GIT_CONFIG_NOSYSTEM": "1",
         "GIT_CONFIG_GLOBAL": os.devnull,
         "GIT_TERMINAL_PROMPT": "0",
+        "GIT_ALLOW_PROTOCOL": "",
+        "GIT_PROTOCOL_FROM_USER": "0",
     })
     proc = subprocess.Popen(
-        ["git", "--no-optional-locks", "-c", "core.hooksPath=/dev/null",
+        ["git", "--no-optional-locks", "--no-replace-objects",
+         "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false",
          "-c", "diff.external=", "-c", "log.showSignature=false",
+         "-c", "color.ui=never", "-c", "protocol.allow=never",
+         "-c", "protocol.file.allow=never",
          "-C", str(repo), *arguments],
         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL, env=env, start_new_session=True,
@@ -213,6 +219,13 @@ def _git_read(repo: Path, *arguments: str, max_bytes: int = _MAX_GIT_BYTES) -> b
         finally:
             if proc.stdout is not None:
                 proc.stdout.close()
+
+
+def _git_read(repo: Path, *arguments: str, max_bytes: int = _MAX_GIT_BYTES) -> bytes:
+    """Keep the history API at its existing 2 MB evidence ceiling."""
+    if type(max_bytes) is not int or not 1 <= max_bytes <= _MAX_GIT_BYTES:
+        raise ValueError("Git read output budget is invalid")
+    return _bounded_git_read(repo, *arguments, max_bytes=max_bytes)
 
 
 def _repo_root(repo: Path) -> Path:

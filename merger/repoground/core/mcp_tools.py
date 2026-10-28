@@ -1320,3 +1320,18 @@ def get_callees(
         "repobrief.call_callees.v1",
         verbose=verbose,
     )
+
+
+def get_structure_neighborhood(
+    *, bundle_manifest: str | Path, target_id: str, max_items: int = 50,
+) -> dict[str, Any]:
+    """Read bounded cross-language S1/S0 relations from the published bundle."""
+    from merger.repoground.core.relationship_projection_access import read_structure_neighborhood
+
+    result = read_structure_neighborhood(
+        bundle_manifest, target_id=target_id, max_items=max_items,
+    )
+    return _call_navigation_result(
+        "get_structure_neighborhood", result.get("status", "invalid"), result,
+        "repobrief.structure_neighborhood.v1",
+    )

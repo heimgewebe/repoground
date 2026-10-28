@@ -259,6 +259,20 @@ def _tool_definitions(enable_snapshot_create: bool, enable_change_evidence: bool
                 "annotations": _read_annotations(),
             }
         )
+    tools.append({
+        "name": "get_structure_neighborhood",
+        "title": "RepoGround structure neighborhood",
+        "description": (
+            "Read incoming/outgoing proven S1 relations and unresolved S0 hints "
+            "for an exact file:PATH or symbol ID from a published bundle. "
+            "Includes cross-language declarations and coverage; never scans or refreshes sources."
+        ),
+        "inputSchema": schema({
+            "target_id": {"type": "string", "minLength": 1, "maxLength": 4096},
+            "max_items": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50},
+        }, ["target_id"]),
+        "annotations": _read_annotations(),
+    })
     if enable_change_evidence:
         tools.append(
             {
@@ -806,6 +820,20 @@ class RepoGroundMcpStdioServer:
             binding,
         )
 
+    def _call_structure_neighborhood(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        call_args, manifest, binding = self._selected_call_args(arguments)
+        target = call_args.get("target_id")
+        limit = call_args.get("max_items", 50)
+        if not isinstance(target, str) or not target.strip() or len(target) > 4096:
+            raise McpProtocolError(-32602, "target_id must be a bounded non-empty string")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 200:
+            raise McpProtocolError(-32602, "max_items must be between 1 and 200")
+        from merger.repoground.core import mcp_tools
+
+        return self._invoke_bound_tool(
+            mcp_tools.get_structure_neighborhood, call_args, manifest, binding,
+        )
+
     def _call_change_evidence_pack(
         self, arguments: Mapping[str, Any]
     ) -> dict[str, Any]:
@@ -875,6 +903,7 @@ class RepoGroundMcpStdioServer:
             "range_get": self._call_range_get,
             "grounding_verify": self._call_grounding_verify,
             "find_symbol": self._call_find_symbol,
+            "get_structure_neighborhood": self._call_structure_neighborhood,
             "snapshot_create": self._call_snapshot_create,
             "change_evidence_pack": self._call_change_evidence_pack,
         }

@@ -87,6 +87,17 @@ def load_source(path: Path, schema_name: str, source: str) -> dict[str, Any]:
             errors=[str(exc)],
         ) from exc
 
+    return validate_document(document, schema_name, source)
+
+
+def validate_document(document: Any, schema_name: str, source: str) -> dict[str, Any]:
+    """Validate already-bound JSON without reopening its artifact path."""
+    if jsonschema is None:
+        raise GraphIndexCompilationError(
+            "validation_unavailable",
+            "jsonschema is required for graph index compilation",
+            source=source,
+        )
     schema_path = Path(__file__).parent.parent / "contracts" / schema_name
     try:
         with schema_path.open(encoding="utf-8") as handle:

@@ -264,6 +264,7 @@ def generate_relationship_document(
     canonical_sha256: str,
     *,
     max_edges: int = MAX_EDGES,
+    architecture_graph: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Compose the existing producers, then project a coherent relation response.
 
@@ -275,7 +276,15 @@ def generate_relationship_document(
     from merger.repoground.architecture.import_graph import generate_import_graph_document
     from merger.repoground.architecture.symbol_index import generate_symbol_index_document
 
-    architecture = generate_import_graph_document(repo_root, run_id, canonical_sha256)
+    architecture = architecture_graph
+    if architecture is None:
+        architecture = generate_import_graph_document(repo_root, run_id, canonical_sha256)
+    _require_document("imports", architecture, "lenskit.architecture.graph")
+    if (
+        architecture["run_id"] != run_id
+        or architecture["canonical_dump_index_sha256"] != canonical_sha256
+    ):
+        raise ValueError("supplied architecture graph provenance mismatch")
     declared, coverage = extract_declared_relations(repo_root, architecture)
     return project_relationships(
         symbol_index=generate_symbol_index_document(repo_root, run_id, canonical_sha256),

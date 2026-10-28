@@ -149,7 +149,8 @@
               "pr_delta_cards_jsonl",
               "python_symbol_index_json",
               "python_call_graph_json",
-              "language_structure_json"
+              "language_structure_json",
+              "relationship_projection_json"
             ],
             "description": "Machine-readable enum role for this artifact."
           },
@@ -320,7 +321,8 @@
                     "snapshot_plan_json",
                     "python_symbol_index_json",
                     "python_call_graph_json",
-                    "language_structure_json"
+                    "language_structure_json",
+                    "relationship_projection_json"
                   ]
                 }
               },
@@ -1147,6 +1149,64 @@
                   "properties": {
                     "id": {
                       "const": "relation-card"
+                    },
+                    "version": {
+                      "const": "v1"
+                    }
+                  }
+                },
+                "authority": {
+                  "const": "navigation_index"
+                },
+                "canonicality": {
+                  "const": "derived"
+                },
+                "risk_class": {
+                  "const": "navigation"
+                },
+                "regenerable": {
+                  "const": true
+                },
+                "staleness_sensitive": {
+                  "const": true
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "role": {
+                  "const": "relationship_projection_json"
+                }
+              },
+              "required": [
+                "role"
+              ]
+            },
+            "then": {
+              "required": [
+                "content_type",
+                "contract",
+                "authority",
+                "canonicality",
+                "risk_class",
+                "regenerable",
+                "staleness_sensitive"
+              ],
+              "properties": {
+                "content_type": {
+                  "const": "application/json"
+                },
+                "contract": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "version"
+                  ],
+                  "properties": {
+                    "id": {
+                      "const": "relationship_projection"
                     },
                     "version": {
                       "const": "v1"

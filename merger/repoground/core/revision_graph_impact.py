@@ -11,8 +11,6 @@ import ast
 import hashlib
 import json
 import re
-import subprocess
-import tempfile
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
@@ -27,6 +25,7 @@ from merger.repoground.architecture.relationship_projection import (
 )
 from merger.repoground.architecture.symbol_index import _SymbolVisitor
 from merger.repoground.core.delta_context import parse_unified_diff
+from merger.repoground.core.history_lens import _bounded_git_read
 
 KIND = "repobrief.revision_graph_impact"
 VERSION = "1.0"
@@ -42,28 +41,11 @@ NONCLAIMS = (
 
 
 def _git(repo: Path, args: list[str], *, max_bytes: int = MAX_DIFF_BYTES) -> bytes:
-    """Execute fixed local read-only git commands with bounded result storage."""
-    command = [
-        "git", "--no-optional-locks", "-c", "core.hooksPath=/dev/null",
-        "-c", "core.fsmonitor=false", "-c", "diff.external=",
-        "-c", "pager.diff=false", "-c", "core.pager=cat",
-        "-C", str(repo), *args,
-    ]
-    with tempfile.TemporaryFile() as out:
-        try:
-            run = subprocess.run(
-                command, stdout=out, stderr=subprocess.PIPE,
-                check=False, timeout=30,
-            )
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            raise ValueError(f"git_source_unavailable:{type(exc).__name__}") from exc
-        if run.returncode != 0:
-            raise ValueError("git_command_failed:" + args[0])
-        size = out.tell()
-        if size > max_bytes:
-            raise ValueError("git_output_exceeds_limit")
-        out.seek(0)
-        return out.read(max_bytes + 1)
+    """Use the existing bounded, effect-free Git evidence reader."""
+    try:
+        return _bounded_git_read(repo, *args, max_bytes=max_bytes)
+    except OSError as exc:
+        raise ValueError(f"git_source_unavailable:{type(exc).__name__}") from exc
 
 
 def _sha(value: object, name: str) -> str:
@@ -83,23 +65,21 @@ def _identity(repo: Path, base: str, head: str) -> dict[str, Any]:
     checked_out = _git(repo, ["rev-parse", "--verify", "HEAD"], max_bytes=100)
     if checked_out.decode("ascii").strip() != head:
         raise ValueError("checkout_head_not_requested_revision")
+    # Status may run clean/process filters even though it is a read command.
+    config = _git(repo, ["config", "--list", "--null"]).decode("utf-8")
+    if any(
+        entry.split("\n", 1)[0].casefold().startswith("filter.")
+        and entry.split("\n", 1)[0].casefold().endswith((".clean", ".process"))
+        for entry in config.split("\0") if entry
+    ):
+        raise ValueError("executable_git_filter_configured")
     status = _git(
         repo, ["status", "--porcelain=v1", "--untracked-files=all"], max_bytes=100_000
     )
     if status:
         raise ValueError("checkout_dirty_or_untracked")
-    command = [
-        "git", "--no-optional-locks", "-C", str(repo),
-        "merge-base", "--is-ancestor", base, head,
-    ]
-    try:
-        result = subprocess.run(
-            command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-            check=False, timeout=15,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise ValueError("ancestry_check_unavailable") from exc
-    if result.returncode != 0:
+    ancestor = _git(repo, ["merge-base", base, head], max_bytes=100)
+    if ancestor.decode("ascii").strip() != base:
         raise ValueError("base_not_ancestor_of_head")
     tree = _git(repo, ["rev-parse", "--verify", f"{head}^{{tree}}"], max_bytes=100)
     tree_sha = tree.decode("ascii").strip()
@@ -381,6 +361,8 @@ def _validated_revision_diff(
     """Bound and compare both patch and raw Git path inventory."""
     diff = _git(
         root, ["diff", "--no-ext-diff", "--no-textconv", "--no-color",
+               "--ignore-submodules=none", "--find-renames=50%",
+               "--src-prefix=a/", "--dst-prefix=b/",
                "--unified=0", base_sha, head_sha, "--"],
         max_bytes=MAX_DIFF_BYTES,
     )
@@ -389,7 +371,8 @@ def _validated_revision_diff(
         raise ValueError("diff_file_limit_exceeded")
     # Raw NUL-delimited paths reject silently skipped Git-quoted filenames.
     raw_names = _git(
-        root, ["diff", "--name-only", "-z", base_sha, head_sha, "--"],
+        root, ["diff", "--no-ext-diff", "--no-textconv", "--ignore-submodules=none",
+               "--find-renames=50%", "--name-only", "-z", base_sha, head_sha, "--"],
         max_bytes=MAX_DIFF_BYTES,
     )
     names = {part.decode("utf-8") for part in raw_names.split(b"\x00") if part}
