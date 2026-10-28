@@ -380,7 +380,7 @@ def _yaml_uses_edges(
 ) -> list[dict[str, Any]]:
     """Read only real workflow/action mapping positions from composed YAML."""
     workflow = path.startswith(".github/workflows/")
-    composite = PurePosixPath(path).name in {"action.yml", "action.yaml"}
+    composite = not workflow and PurePosixPath(path).name in {"action.yml", "action.yaml"}
     if not (workflow or composite):
         return []
     root = _yaml_compose(source)

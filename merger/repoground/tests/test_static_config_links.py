@@ -1563,5 +1563,46 @@ class TestStaticConfigLinks(unittest.TestCase):
                 ], edges)
 
 
+    def test_workflow_named_action_yaml_keeps_jobs_context(self):
+        self.write("actions/local/action.yml", "name: local\n")
+        self.write(".github/workflows/reusable.yml", "on: workflow_call\n")
+        source = (
+            "jobs:\n"
+            "  build:\n"
+            "    steps:\n"
+            "      - uses: ./actions/local\n"
+            "  reusable:\n"
+            "    uses: ./.github/workflows/reusable.yml\n"
+        )
+        for name in ("action.yml", "action.yaml"):
+            self.write(".github/workflows/" + name, source)
+        self.write("actions/composite/action.yml", (
+            "runs:\n  using: composite\n  steps:\n"
+            "    - uses: ./actions/local\n"
+        ))
+        edges, _, _ = self.edges()
+        for name in ("action.yml", "action.yaml"):
+            with self.subTest(name=name):
+                own = [
+                    edge for edge in edges
+                    if edge["src"] == "file:.github/workflows/" + name
+                ]
+                self.assertEqual([
+                    ("file:actions/local/action.yml", 4, "S1"),
+                    ("file:.github/workflows/reusable.yml", 6, "S1"),
+                ], [
+                    (edge["dst"], edge["source"]["start_line"], edge["evidence_level"])
+                    for edge in own
+                ])
+        composite = [
+            edge for edge in edges
+            if edge["src"] == "file:actions/composite/action.yml"
+        ]
+        self.assertEqual(
+            [("file:actions/local/action.yml", "S1")],
+            [(edge["dst"], edge["evidence_level"]) for edge in composite],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
