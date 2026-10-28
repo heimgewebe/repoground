@@ -164,7 +164,12 @@ def _source_inventory_safe(repo: Path) -> None:
         header, separator, name = raw.partition(b"\t")
         if separator != b"\t":
             raise ValueError("tracked_source_inventory_invalid")
-        if header.split(b" ", 1)[0] == b"120000" and _is_graph_source_path(name.decode("utf-8")):
+        mode = header.split(b" ", 1)[0]
+        if mode == b"160000":
+            # Producers traverse Gitlink directories, whose contents do not
+            # belong to the superproject tree bound by the report.
+            raise ValueError("tracked_submodule_untrusted")
+        if mode == b"120000" and _is_graph_source_path(name.decode("utf-8")):
             raise ValueError("tracked_source_symlink_untrusted")
 
 
