@@ -16,7 +16,11 @@ import tempfile
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
-from merger.repoground.architecture.import_graph import _GRAPH_FILE_LANGUAGES, _SKIP_DIRECTORIES
+from merger.repoground.architecture.import_graph import (
+    _graph_inventory_language,
+    _GRAPH_SKIP_DIRECTORIES,
+    _SKIP_DIRECTORIES,
+)
 from merger.repoground.architecture.symbol_index import EXCLUDED_DIRS
 from merger.repoground.architecture.relationship_projection import (
     generate_relationship_document,
@@ -126,11 +130,11 @@ def _is_graph_source_path(path: str) -> bool:
             part in _SKIP_DIRECTORIES or part.startswith(".") for part in parent
         )
         return symbol_source or import_source
-    if any(part in _SKIP_DIRECTORIES or (part.startswith(".") and part != ".github") for part in parent):
+    if any(part in _GRAPH_SKIP_DIRECTORIES or (part.startswith(".") and part != ".github") for part in parent):
         return False
     if path.endswith(".graph.json"):
         return False
-    return suffix in _GRAPH_FILE_LANGUAGES
+    return _graph_inventory_language(PurePosixPath(path)) is not None
 
 
 def _producer_may_traverse_directory(path: str) -> bool:
