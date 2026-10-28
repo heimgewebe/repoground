@@ -90,8 +90,12 @@ def _bounded_git_stdout(pipe: Any, *, max_bytes: int) -> tuple[bytes | None, str
 
 def _bounded_git(root: Path, args: list[str], *, max_bytes: int = 131072) -> tuple[str | None, str | None]:
     """Use only fixed Git builtins without hooks, network, temporary files or index locks."""
+    # A Git refs/replace entry can silently substitute a different tree while
+    # rev-parse still labels the original commit SHA. Evidence must see the
+    # actual pinned objects across *every* Git command, not replacement refs.
     command = [
-        "git", "-c", "core.hooksPath=/dev/null", "-c", "color.ui=never",
+        "git", "--no-replace-objects",
+        "-c", "core.hooksPath=/dev/null", "-c", "color.ui=never",
         "-c", "core.fsmonitor=false", "-c", "diff.external=",
         "-c", "protocol.allow=never", "-c", "protocol.file.allow=never",
         "-C", str(root), *args,
