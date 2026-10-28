@@ -289,6 +289,7 @@ def test_unchanged_dirty_checkout_prunes_previous_clean_recovery(
     monkeypatch.setattr(m, "SOURCE_ROOT", tmp_path / "managed-sources")
     monkeypatch.setattr(m, "STATE_ROOT", tmp_path / "managed-fleet-state")
     monkeypatch.setattr(m, "LOG_ROOT", tmp_path / "fleet-logs")
+    monkeypatch.setattr(m, "FLEET_LOG", tmp_path / "fleet-logs" / "fleet.log")
     canonical = m.ensure_source_worktree(entry, "main", head)
     # Never reset or delete the canonical source with valuable dirty data.
     dirty = canonical / "operator-untracked.txt"
