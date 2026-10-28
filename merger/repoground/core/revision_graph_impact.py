@@ -352,6 +352,42 @@ def _validated_revision_diff(
     return diff, parsed
 
 
+def _unexamined_incoming_relation_gaps(
+    files: list[dict[str, Any]], changed_symbols: set[str],
+    head_symbols: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Report targets whose base-side incoming edges cannot be checked at HEAD."""
+    gaps: list[dict[str, Any]] = []
+    missing_symbols = changed_symbols - {item["id"] for item in head_symbols}
+    if missing_symbols:
+        gaps.append({
+            "reason": "deleted_symbol_incoming_relations_not_analyzed",
+            "count": len(missing_symbols), "evidence_level": "S0",
+        })
+    deleted_paths = {
+        file.get("old_path") or file.get("path")
+        for file in files if file.get("change_status") == "deleted"
+    }
+    if deleted_paths:
+        gaps.append({
+            "reason": "deleted_file_incoming_relations_not_analyzed",
+            "count": len(deleted_paths), "evidence_level": "S0",
+        })
+    renamed_away_paths = {
+        file.get("old_path")
+        for file in files
+        if file.get("change_status") == "renamed"
+        and isinstance(file.get("old_path"), str)
+        and file.get("old_path") != file.get("new_path")
+    }
+    if renamed_away_paths:
+        gaps.append({
+            "reason": "renamed_away_file_incoming_relations_not_analyzed",
+            "count": len(renamed_away_paths), "evidence_level": "S0",
+        })
+    return gaps
+
+
 def compile_revision_graph_impact(
     repo_root: Path,
     *,
@@ -388,23 +424,7 @@ def compile_revision_graph_impact(
         max_edges=250_000,
     )
     proven, unresolved, relevant_tests = _impact_from_relations(context["edges"], ids, paths)
-    head_ids = {item["id"] for item in symbols}
-    removed_ids = ids - head_ids
-    if removed_ids:
-        gaps.append({
-            "reason": "deleted_symbol_incoming_relations_not_analyzed",
-            "count": len(removed_ids), "evidence_level": "S0",
-        })
-    deleted_files = {
-        file.get("old_path") or file.get("path")
-        for file in parsed["files"]
-        if file.get("change_status") == "deleted"
-    }
-    if deleted_files:
-        gaps.append({
-            "reason": "deleted_file_incoming_relations_not_analyzed",
-            "count": len(deleted_files), "evidence_level": "S0",
-        })
+    gaps.extend(_unexamined_incoming_relation_gaps(parsed["files"], ids, symbols))
     graph_coverage = context["coverage"]
     source_truncated = bool(
         graph_coverage.get("producer_repository_truncated")

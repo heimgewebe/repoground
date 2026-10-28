@@ -269,6 +269,34 @@ class TestRevisionGraphImpact(unittest.TestCase):
         )
         self.assertIn("complete_blast_radius", report["does_not_establish"])
 
+    def test_deleted_schema_preserves_explicit_incoming_relation_gap(self):
+        self.git("rm", "schemas/core.json")
+        self.commit("delete referenced schema")
+        head = self.git("rev-parse", "HEAD").strip()
+        report = compile_revision_impact(
+            repo_root=self.root, base_sha=self.head, head_sha=head,
+        )
+        self.assertIn(
+            "deleted_file_incoming_relations_not_analyzed",
+            {gap["reason"] for gap in report["gaps"]},
+        )
+        self.assertEqual([], report["potentially_affected"])
+        self.assertIn("complete_blast_radius", report["does_not_establish"])
+
+    def test_renamed_schema_preserves_explicit_incoming_relation_gap(self):
+        self.git("mv", "schemas/core.json", "schemas/renamed.json")
+        self.commit("rename referenced schema, leave old reference")
+        head = self.git("rev-parse", "HEAD").strip()
+        report = compile_revision_impact(
+            repo_root=self.root, base_sha=self.head, head_sha=head,
+        )
+        self.assertIn(
+            "renamed_away_file_incoming_relations_not_analyzed",
+            {gap["reason"] for gap in report["gaps"]},
+        )
+        self.assertEqual([], report["potentially_affected"])
+        self.assertIn("complete_blast_radius", report["does_not_establish"])
+
     def test_oversized_unchanged_schema_truncation_propagates(self):
         self.write(
             "schemas/huge.json",
