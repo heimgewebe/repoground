@@ -407,6 +407,20 @@ def _mask_markdown_html_code(
     return " " * len(line) if raw_block else "".join(chars), active_tag
 
 
+def _markdown_close_fence(
+    content: str, fenced: tuple[str, int, int | None, int],
+) -> tuple[str, int, int | None, int] | None:
+    """Close only a matching fence with an otherwise empty suffix."""
+    candidate, _ = _markdown_fence_text(content, fenced[2])
+    closing = _MD_FENCE.match(candidate)
+    if closing is not None:
+        marks = closing.group("marks")
+        if (marks[0] == fenced[0] and len(marks) >= fenced[1]
+                and not candidate[closing.end("marks"):].strip()):
+            return None
+    return fenced
+
+
 def _markdown_edges(path: str, source: str, known: set[str]) -> list[dict[str, Any]]:
     sanitized = _markdown_mask_html_comments(source)
     edges: list[dict[str, Any]] = []
@@ -425,13 +439,7 @@ def _markdown_edges(path: str, source: str, known: set[str]) -> list[dict[str, A
         if fenced is not None:
             edges.extend(_markdown_prose_edges(path, paragraph, known))
             paragraph.clear()
-            candidate, _ = _markdown_fence_text(content, fenced[2])
-            closing = _MD_FENCE.match(candidate)
-            if closing is not None:
-                marks = closing.group("marks")
-                if (marks[0] == fenced[0] and len(marks) >= fenced[1]
-                        and not candidate[closing.end("marks"):].strip()):
-                    fenced = None
+            fenced = _markdown_close_fence(content, fenced)
             continue
         if html_code_tag is not None:
             # Raw HTML blocks may be indented, and Markdown backticks inside
@@ -486,6 +494,17 @@ def _yaml_quote_continues(line: str, quote: str, start: int = 0) -> bool:
     return True
 
 
+def _yaml_quoted_character(text: str, index: int, quote: str) -> tuple[int, str | None]:
+    """Consume one quoted character, including YAML escape pairs."""
+    if quote == '"' and text[index] == "\\":
+        return index + 2, quote
+    if text[index] == quote:
+        if quote == "'" and text[index:index + 2] == "''":
+            return index + 2, quote
+        return index + 1, None
+    return index + 1, quote
+
+
 def _yaml_flow_depth(
     line: str, depth: int = 0, quote: str | None = None,
 ) -> tuple[int, str | None]:
@@ -494,16 +513,10 @@ def _yaml_flow_depth(
     scalar_start = quote is None
     while index < len(line):
         char = line[index]
-        if quote == '"' and char == "\\":
-            index += 2
-            continue
         if quote is not None:
-            if char == quote:
-                if quote == "'" and line[index:index + 2] == "''":
-                    index += 2
-                    continue
-                quote = None
-        elif char in {"'", '"'} and scalar_start:
+            index, quote = _yaml_quoted_character(line, index, quote)
+            continue
+        if char in {"'", '"'} and scalar_start:
             quote = char
             scalar_start = False
         elif char == "#" and (index == 0 or line[index - 1].isspace()):
@@ -526,13 +539,32 @@ def _yaml_flow_depth(
     return depth, quote
 
 
-def _yaml_root_flow_uses(lines: list[tuple[int, str]]) -> list[tuple[int, str]]:
-    """Read direct scalar uses from a complete, conservative step flow map.
+def _yaml_close_flow_collection(text: str, index: int, stack: list[str]) -> list[str] | None:
+    """Validate a closing delimiter and require an empty root suffix."""
+    expected = "{" if text[index] == "}" else "["
+    if not stack or stack[-1] != expected:
+        return None
+    remaining = stack[:-1]
+    if not remaining and text[index + 1:].strip():
+        return None
+    return remaining
 
-    Split only on root commas, respecting quoted scalars and nested collections.
-    Unsupported or malformed entries invalidate the whole mapping.
-    """
-    text = "\n".join(line for _, line in lines)
+
+def _yaml_flow_quote_boundary(text: str, index: int) -> bool:
+    return index == 0 or text[index - 1].isspace() or text[index - 1] in ":,{["
+
+
+def _yaml_flow_result(
+    stack: list[str], quote: str | None, entries: list[tuple[int, str]], start: int,
+) -> tuple[list[tuple[int, str]], int] | None:
+    """Only complete collections with closed quotes have usable entries."""
+    if stack or quote is not None:
+        return None
+    return entries, start
+
+
+def _yaml_flow_entries(text: str) -> tuple[list[tuple[int, str]], int] | None:
+    """Split root entries while rejecting comments and unbalanced collections."""
     stack: list[str] = []
     quote: str | None = None
     start = 1
@@ -541,35 +573,40 @@ def _yaml_root_flow_uses(lines: list[tuple[int, str]]) -> list[tuple[int, str]]:
     while index < len(text):
         char = text[index]
         if quote is not None:
-            if quote == '"' and char == "\\":
-                index += 2
-                continue
-            if char == quote:
-                if quote == "'" and text[index:index + 2] == "''":
-                    index += 2
-                    continue
-                quote = None
-        elif char in "'\"":
+            index, quote = _yaml_quoted_character(text, index, quote)
+            continue
+        if char in "'\"":
             # Only accept quote openers at scalar boundaries.
-            if index == 0 or text[index - 1].isspace() or text[index - 1] in ":,{[":
-                quote = char
+            quote = char if _yaml_flow_quote_boundary(text, index) else None
         elif char == "#" and (index == 0 or text[index - 1].isspace()):
-            return []
+            return None
         elif char in "{[":
             stack.append(char)
         elif char in "}]":
-            if not stack or stack.pop() != ("{" if char == "}" else "["):
-                return []
+            closed = _yaml_close_flow_collection(text, index, stack)
+            if closed is None:
+                return None
+            stack = closed
             if not stack:
                 entries.append((start, text[start:index]))
-                if text[index + 1:].strip():
-                    return []
         elif char == "," and len(stack) == 1:
             entries.append((start, text[start:index]))
             start = index + 1
         index += 1
-    if stack or quote is not None:
+    return _yaml_flow_result(stack, quote, entries, start)
+
+
+def _yaml_root_flow_uses(lines: list[tuple[int, str]]) -> list[tuple[int, str]]:
+    """Read direct scalar uses from a complete, conservative step flow map.
+
+    Split only on root commas, respecting quoted scalars and nested collections.
+    Unsupported or malformed entries invalidate the whole mapping.
+    """
+    text = "\n".join(line for _, line in lines)
+    split = _yaml_flow_entries(text)
+    if split is None:
         return []
+    entries, start = split
     uses: list[tuple[int, str]] = []
     keys: set[str] = set()
     for offset, entry in entries:
@@ -597,6 +634,114 @@ def _yaml_root_flow_uses(lines: list[tuple[int, str]]) -> list[tuple[int, str]]:
     return uses
 
 
+def _yaml_parent_context(
+    context: list[tuple[int, str]], line: str, indent: int,
+) -> list[tuple[int, str]]:
+    """Retain parents, including a steps key before an indentless list."""
+    context = context[:]
+    indentless_step = line.lstrip().startswith(("- ", "-\t"))
+    while context and (
+        context[-1][0] > indent
+        or (context[-1][0] == indent and not (
+            indentless_step and context[-1][1] == "steps"
+        ))
+    ):
+        context.pop()
+    return context
+
+
+def _yaml_use_context(path: str, context: list[tuple[int, str]]) -> tuple[bool, bool]:
+    """Classify direct reusable-workflow and workflow/composite step positions."""
+    workflow = path.startswith(".github/workflows/")
+    job_use = len(context) == 2 and context[0][1] == "jobs" and workflow
+    workflow_step = (
+        len(context) == 3 and context[0][1] == "jobs"
+        and context[-1][1] == "steps" and workflow
+    )
+    composite_step = (
+        len(context) == 2 and context[0][1] == "runs"
+        and context[-1][1] == "steps"
+        and PurePosixPath(path).name in {"action.yml", "action.yaml"}
+    )
+    return job_use, workflow_step or composite_step
+
+
+def _yaml_flow_use_edges(
+    path: str, lines: list[tuple[int, str]], known: set[str],
+) -> list[dict[str, Any]]:
+    """Project validated root scalar uses with their original line evidence."""
+    return [
+        edge for ordinal, ref in _yaml_root_flow_uses(lines)
+        for edge in _yaml_use_edges(path, ref, ordinal, known)
+    ]
+
+
+def _yaml_continue_flow(
+    path: str, line: str, ordinal: int, known: set[str],
+    depth: int, quote: str | None, root_flow: list[tuple[int, str]],
+) -> tuple[int, str | None, list[tuple[int, str]], list[dict[str, Any]]]:
+    """Advance a flow collection and project only a completed root step map."""
+    if root_flow:
+        root_flow = [*root_flow, (ordinal, line)]
+    depth, quote = _yaml_flow_depth(line, depth, quote)
+    if not depth and root_flow:
+        return depth, quote, [], _yaml_flow_use_edges(path, root_flow, known)
+    return depth, quote, root_flow, []
+
+
+def _yaml_block_use_edges(
+    path: str, line: str, ordinal: int, indent: int,
+    context: list[tuple[int, str]], known: set[str],
+) -> tuple[list[tuple[int, str]], list[dict[str, Any]]]:
+    """Read a block parent or a use at a supported structural position."""
+    parent = _YAML_PARENT.match(line)
+    if parent is not None:
+        return [*context, (indent + len(parent.group("prefix") or ""), parent.group("key").strip("'\""))], []
+    match = _YAML_USES.match(line)
+    if match is None:
+        return context, []
+    job_use, step_use = _yaml_use_context(path, context)
+    if not (job_use or step_use):
+        return context, []
+    return context, _yaml_use_edges(
+        path, match.group("value"), ordinal, known, job_use=job_use,
+    )
+
+
+def _yaml_scalar_opener(line: str) -> tuple[int | None, str | None]:
+    """Identify block scalars and quoted scalars spanning following lines."""
+    block = _YAML_BLOCK.match(line)
+    if block is not None:
+        blocked_indent = len(block.group("indent")) + len(block.group("prefix") or "")
+        return blocked_indent, None
+    quoted = _YAML_QUOTED_VALUE.match(line)
+    if quoted is not None and _yaml_quote_continues(
+        line, quoted.group("quote"), quoted.end(),
+    ):
+        quoted_scalar = quoted.group("quote")
+        return None, quoted_scalar
+    return None, None
+
+
+def _yaml_start_flow(
+    path: str, line: str, ordinal: int, known: set[str],
+    context: list[tuple[int, str]], flow_start: re.Match[str],
+) -> tuple[int, str | None, list[tuple[int, str]], list[dict[str, Any]]]:
+    """Collect only direct step flow maps; track other flows for omission."""
+    root_flow: list[tuple[int, str]] = []
+    edges: list[dict[str, Any]] = []
+    flow_text = line[flow_start.start("flow"):]
+    flow_depth, flow_quote = _yaml_flow_depth(flow_text)
+    _, step_context = _yaml_use_context(path, context)
+    if (step_context and flow_text.startswith("{")
+            and re.fullmatch(r"[ \t]*-[ \t]+", line[:flow_start.start("flow")])):
+        root_flow = [(ordinal, flow_text)]
+        if not flow_depth:
+            edges.extend(_yaml_flow_use_edges(path, root_flow, known))
+            root_flow = []
+    return flow_depth, flow_quote, root_flow, edges
+
+
 def _yaml_uses_edges(path: str, source: str, known: set[str]) -> list[dict[str, Any]]:
     """Parse explicit workflow/action metadata use fields, not YAML scalar text."""
     if not (
@@ -613,17 +758,15 @@ def _yaml_uses_edges(path: str, source: str, known: set[str]) -> list[dict[str, 
     context: list[tuple[int, str]] = []
     for ordinal, line in enumerate(source.splitlines(), 1):
         if quoted_scalar is not None:
-            if not _yaml_quote_continues(line, quoted_scalar):
-                quoted_scalar = None
+            quoted_scalar = (
+                quoted_scalar if _yaml_quote_continues(line, quoted_scalar) else None
+            )
             continue
         if flow_depth:
-            if root_flow:
-                root_flow.append((ordinal, line))
-            flow_depth, flow_quote = _yaml_flow_depth(line, flow_depth, flow_quote)
-            if not flow_depth and root_flow:
-                for use_line, ref in _yaml_root_flow_uses(root_flow):
-                    edges.extend(_yaml_use_edges(path, ref, use_line, known))
-                root_flow = []
+            flow_depth, flow_quote, root_flow, flow_edges = _yaml_continue_flow(
+                path, line, ordinal, known, flow_depth, flow_quote, root_flow,
+            )
+            edges.extend(flow_edges)
             continue
         if not line.strip() or line.lstrip().startswith("#"):
             continue
@@ -632,74 +775,22 @@ def _yaml_uses_edges(path: str, source: str, known: set[str]) -> list[dict[str, 
             if indent > blocked_indent:
                 continue
             blocked_indent = None
-        indentless_step = line.lstrip().startswith(("- ", "-\t"))
-        while context and (
-            context[-1][0] > indent
-            or (context[-1][0] == indent and not (
-                indentless_step and context[-1][1] == "steps"
-            ))
-        ):
-            context.pop()
-        block = _YAML_BLOCK.match(line)
-        if block is not None:
-            blocked_indent = len(block.group("indent")) + len(block.group("prefix") or "")
-            continue
-        quoted = _YAML_QUOTED_VALUE.match(line)
-        if quoted is not None and _yaml_quote_continues(
-            line, quoted.group("quote"), quoted.end(),
-        ):
-            quoted_scalar = quoted.group("quote")
+        context = _yaml_parent_context(context, line, indent)
+        blocked_indent, quoted_scalar = _yaml_scalar_opener(line)
+        if blocked_indent is not None or quoted_scalar is not None:
             continue
         flow_start = re.match(
             rf"^[ \t]*(?:-[ \t]+)?(?:{_YAML_KEY}:[ \t]*{_YAML_SCALAR_PROPERTIES})?(?P<flow>[{{\[])",
             line,
         )
         if flow_start is not None:
-            flow_text = line[flow_start.start("flow"):]
-            flow_depth, flow_quote = _yaml_flow_depth(flow_text)
-            step_context = (
-                (len(context) == 3 and context[0][1] == "jobs"
-                 and path.startswith(".github/workflows/"))
-                or (len(context) == 2 and context[0][1] == "runs"
-                    and PurePosixPath(path).name in {"action.yml", "action.yaml"})
-            ) and context[-1][1] == "steps"
-            if (step_context and flow_text.startswith("{")
-                    and re.fullmatch(r"[ \t]*-[ \t]+", line[:flow_start.start("flow")])):
-                root_flow = [(ordinal, flow_text)]
-                if not flow_depth:
-                    for use_line, ref in _yaml_root_flow_uses(root_flow):
-                        edges.extend(_yaml_use_edges(path, ref, use_line, known))
-                    root_flow = []
+            flow_depth, flow_quote, root_flow, flow_edges = _yaml_start_flow(
+                path, line, ordinal, known, context, flow_start,
+            )
+            edges.extend(flow_edges)
             continue
-        parent = _YAML_PARENT.match(line)
-        if parent is not None:
-            context.append((indent + len(parent.group("prefix") or ""), parent.group("key").strip("'\"")))
-            continue
-        match = _YAML_USES.match(line)
-        if match is None:
-            continue
-        # A workflow job uses a reusable workflow directly under jobs.<id>.
-        # A step uses an action only under a literal steps list. We refuse
-        # env/with/metadata text that happens to contain a 'uses' mapping key.
-        job_use = (
-            len(context) == 2 and context[0][1] == "jobs"
-            and path.startswith(".github/workflows/")
-        )
-        workflow_step = (
-            len(context) == 3 and context[0][1] == "jobs"
-            and context[-1][1] == "steps"
-            and path.startswith(".github/workflows/")
-        )
-        composite_step = (
-            len(context) == 2 and context[0][1] == "runs"
-            and context[-1][1] == "steps"
-            and PurePosixPath(path).name in {"action.yml", "action.yaml"}
-        )
-        if not (job_use or workflow_step or composite_step):
-            continue
-        edges.extend(_yaml_use_edges(
-            path, match.group("value"), ordinal, known, job_use=job_use,
-        ))
+        context, use_edges = _yaml_block_use_edges(path, line, ordinal, indent, context, known)
+        edges.extend(use_edges)
     return edges
 
 
