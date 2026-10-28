@@ -432,15 +432,26 @@ def git_path_history(repository: Path, repo_id: str, commit: str,
         raise ValueError("history limit must be 1..50")
     output = _git_read(root, "log", f"--max-count={limit}", "--format=%H%x09%cI",
                        sha, "--", path).decode()
+    shallow = _git_read(root, "rev-parse", "--is-shallow-repository").strip() == b"true"
     entries = []
     for line in output.splitlines():
         event_sha, separator, reported_time = line.partition("\t")
-        if separator and _SHA_RE.fullmatch(event_sha):
-            entries.append({"commit": event_sha, "committer_time_reported": reported_time,
-                            "evidence": "git_path_history", "causality": "unknown"})
+        if not separator or not _SHA_RE.fullmatch(event_sha):
+            continue
+        if shallow:
+            # Git treats shallow boundary commits as roots, so 'log -- path'
+            # may claim a boundary changed an unrelated path. Such roots
+            # cannot establish a path-specific event without older history.
+            parents = _git_read(root, "rev-list", "--parents", "-n", "1", event_sha).decode().split()
+            if parents == [event_sha]:
+                continue
+        entries.append({"commit": event_sha, "committer_time_reported": reported_time,
+                        "evidence": "git_path_history", "causality": "unknown"})
     return {"kind": _TIMELINE_KIND, "version": "1", "operation": "path_history",
-            "status": "ok", "repo_id": repo_id, "source_commit": sha,
+            "status": "partial" if shallow else "ok",
+            "repo_id": repo_id, "source_commit": sha,
             "path": path, "history": entries, "history_limit": limit,
+            "gaps": ["shallow_history_incomplete"] if shallow else [],
             "observation_time": None, "does_not_establish": ["why_change_happened", "pr_or_ci_outcome"]}
 
 
@@ -456,13 +467,15 @@ def bind_external_history(repository: Path, repo_id: str, commit: str,
     repo_id = _repo_id(repo_id)
     sha = _revision(root, commit)
     relevant_commits = {sha}
+    gaps: list[str] = []
     if path is not None:
         history = git_path_history(root, repo_id, sha, path)
         relevant_commits.update(event["commit"] for event in history["history"])
+        if history["status"] != "ok":
+            gaps.append("path_history_incomplete")
     allowed = {"commit", "pr", "ci", "test", "chronik", "operator_receipt", "runtime_snapshot"}
     ref_pattern = re.compile(r"(?:https://github\.com/[A-Za-z0-9_./#-]+|(?:github|chronik|grabowski|ci):[A-Za-z0-9_./:#-]+)\Z")
     matched = []
-    gaps: list[str] = []
     for n, record in enumerate(records):
         if n >= 100:
             gaps.append("event_limit")

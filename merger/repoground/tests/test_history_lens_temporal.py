@@ -90,6 +90,53 @@ def test_history_events_only_bound_to_explicit_git_path(tmp_path):
     assert bind_external_history(repo, "fixture", c, [], path="module.py")["status"] == "unavailable"
 
 
+def test_shallow_boundary_commit_cannot_prove_path_history(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    git(source, "init", "-q")
+    git(source, "config", "user.name", "RepoGround fixture")
+    git(source, "config", "user.email", "fixture@localhost")
+    (source / "a.py").write_text("value = 1\n", encoding="utf-8")
+    git(source, "add", ".")
+    git(source, "commit", "-qm", "A changes a.py")
+    (source / "b.py").write_text("value = 2\n", encoding="utf-8")
+    git(source, "add", ".")
+    git(source, "commit", "-qm", "B changes only b.py")
+    unrelated = git(source, "rev-parse", "HEAD")
+    (source / "b.py").write_text("value = 3\n", encoding="utf-8")
+    git(source, "add", ".")
+    git(source, "commit", "-qm", "C changes only b.py")
+
+    clone = tmp_path / "shallow"
+    subprocess.run(
+        ["git", "-c", "protocol.file.allow=always", "clone", "--quiet",
+         "--depth=2", "--no-local", source.as_uri(), str(clone)],
+        check=True, capture_output=True,
+    )
+    assert git(clone, "rev-parse", "--is-shallow-repository") == "true"
+    current = git(clone, "rev-parse", "HEAD")
+    path_history = git_path_history(clone, "fixture", current, "a.py")
+    assert path_history["status"] == "partial"
+    assert path_history["history"] == []
+    assert "shallow_history_incomplete" in path_history["gaps"]
+    record = {"repo_id": "fixture", "commit": unrelated,
+              "event_kind": "ci", "evidence_ref": "ci:fixture/B"}
+    linked = bind_external_history(clone, "fixture", current, [record], path="a.py")
+    assert linked["events"] == []
+    assert "event_sha_outside_explicit_history" in linked["gaps"]
+    assert "path_history_incomplete" in linked["gaps"]
+
+    git(clone, "config", "user.name", "RepoGround fixture")
+    git(clone, "config", "user.email", "fixture@localhost")
+    (clone / "a.py").write_text("value = 4\n", encoding="utf-8")
+    git(clone, "add", "a.py")
+    git(clone, "commit", "-qm", "D really changes a.py")
+    verified = git(clone, "rev-parse", "HEAD")
+    later = git_path_history(clone, "fixture", verified, "a.py")
+    assert later["status"] == "partial"
+    assert [row["commit"] for row in later["history"]] == [verified]
+
+
 @pytest.mark.parametrize("bad", ["HEAD", "0" * 40, "../secrets", "a" * 7])
 def test_unknown_and_unacceptable_commits_fail_closed(tmp_path, bad):
     repo, commits = create_repo(tmp_path)
