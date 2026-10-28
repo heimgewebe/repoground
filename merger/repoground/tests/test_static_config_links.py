@@ -12,6 +12,7 @@ from merger.repoground.architecture.import_graph import generate_import_graph_do
 from merger.repoground.architecture.relationship_projection import (
     generate_relationship_document,
 )
+from merger.repoground.architecture.static_config_links import config_reference_edges
 
 
 class TestStaticConfigLinks(unittest.TestCase):
@@ -792,6 +793,38 @@ class TestStaticConfigLinks(unittest.TestCase):
                     for edge in own
                 ], own)
 
+    def test_pre_whole_line_mask_requires_html_block_start(self):
+        for prefix in ("", "   ", "> ", "> > ", "- ", "> - "):
+            for inline in (False, True):
+                with self.subTest(prefix=prefix, inline=inline):
+                    before = "[before](./target.md) " if inline else ""
+                    source = (
+                        prefix + before + "<pre>hidden</pre> [after](./target.md)\n"
+                        "[real](./target.md)\n"
+                    )
+                    own = config_reference_edges(
+                        "docs/pre-start.md", source, {"file:docs/target.md"},
+                    )
+                    expected = [(1, "S1"), (1, "S1")] if inline else []
+                    self.assertEqual(expected + [(2, "S1")], [
+                        (edge["source"]["start_line"], edge["evidence_level"])
+                        for edge in own
+                    ], own)
+
+    def test_inline_pre_continuation_preserves_closing_line_suffix(self):
+        self.write("docs/target.md", "# target\n")
+        self.write("docs/inline-pre.md", (
+            "[before](./target.md) <pre>[hidden](./target.md)\n"
+            "[hidden](./target.md)</pre> [after](./target.md)\n"
+            "[real](./target.md)\n"
+        ))
+        edges, _, _ = self.edges()
+        own = [edge for edge in edges if edge["src"] == "file:docs/inline-pre.md"]
+        self.assertEqual([(1, "S1"), (2, "S1"), (3, "S1")], [
+            (edge["source"]["start_line"], edge["evidence_level"])
+            for edge in own
+        ], own)
+
     def test_yaml_plain_scalar_bracket_and_embedded_hash_preserve_uses(self):
         self.write("actions/local/action.yml", "name: local\n")
         for value in ("name: Build [linux", "env: {NOTE: abc#def}",
@@ -914,7 +947,7 @@ class TestStaticConfigLinks(unittest.TestCase):
             ("{\n          uses: ./actions/local\n        }", [5]),
             ("{uses: ./actions/local}", [4]),
             ("{\n          env: {uses: ./actions/local},\n"
-             "          uses: ./actions/local\n        }", [6]),
+             + "          uses: ./actions/local\n        }", [6]),
             ("{\n          env: {\n            uses: ./actions/local\n          }\n        }", []),
             ("{with: {uses: ./actions/local}}", []),
             ("env: {\n          uses: ./actions/local\n        }", []),

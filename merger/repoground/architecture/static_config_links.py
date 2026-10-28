@@ -384,11 +384,18 @@ def _mask_markdown_html_code(
             if tag.group("closing"):
                 continue
             active_tag = name
-            raw_block = raw_block or name == "pre"
+            if name == "pre":
+                prefix, _ = _markdown_quote_info(line[:tag.start()])
+                prefix, _ = _markdown_fence_text(prefix)
+                raw_block = re.fullmatch(r" {0,3}", prefix) is not None
+                if not raw_block:
+                    # Carry inline spans without turning them into raw blocks
+                    # on the next line.
+                    active_tag = "inline-pre"
             cursor = tag.start()
         if active_tag is not None:
             chars[cursor:tag.end()] = " " * (tag.end() - cursor)
-            if tag.group("closing") and name == active_tag:
+            if tag.group("closing") and name == active_tag.removeprefix("inline-"):
                 active_tag = None
                 if raw_block:
                     # The whole closing line belongs to this raw block. Tags
