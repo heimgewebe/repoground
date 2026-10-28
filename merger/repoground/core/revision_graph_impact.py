@@ -120,7 +120,12 @@ def _is_graph_source_path(path: str) -> bool:
     parent = parts[:-1]
     suffix = PurePosixPath(path).suffix.lower()
     if suffix == ".py":
-        return not any(part in EXCLUDED_DIRS for part in parent)
+        symbol_source = not any(part in EXCLUDED_DIRS for part in parent)
+        # Import graph also reads Python under build/dist, unlike symbol_index.
+        import_source = ".github" not in parent and not any(
+            part in _SKIP_DIRECTORIES or part.startswith(".") for part in parent
+        )
+        return symbol_source or import_source
     if any(part in _SKIP_DIRECTORIES or (part.startswith(".") and part != ".github") for part in parent):
         return False
     if path.endswith(".graph.json"):

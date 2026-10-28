@@ -216,6 +216,31 @@ class TestRevisionGraphImpact(unittest.TestCase):
                 repo_root=self.root, base_sha=self.head, head_sha=linked_head
             )
 
+    def test_ignored_build_python_import_source_is_rejected(self):
+        # The import producer traverses build/ even though symbol_index
+        # intentionally excludes it; an ignored import is still graph input.
+        (self.root / ".git" / "info" / "exclude").write_text(
+            "build/\n", encoding="utf-8"
+        )
+        self.write("build/injected.py", "import mod\n")
+        self.assertEqual("", self.git("status", "--porcelain").strip())
+        with self.assertRaisesRegex(ValueError, "ignored_source_not_in_head"):
+            self.report()
+
+    def test_assume_unchanged_build_python_source_is_rejected(self):
+        # Index trust flags must cover union of import and symbol producers.
+        self.write("build/tracked.py", "import os\n")
+        self.git("add", "build/tracked.py")
+        self.commit("track build import source")
+        checked_head = self.git("rev-parse", "HEAD").strip()
+        self.git("update-index", "--assume-unchanged", "build/tracked.py")
+        self.write("build/tracked.py", "import mod\n")
+        self.assertEqual("", self.git("status", "--porcelain").strip())
+        with self.assertRaisesRegex(ValueError, "tracked_source_index_trust_flags"):
+            compile_revision_impact(
+                repo_root=self.root, base_sha=self.head, head_sha=checked_head
+            )
+
     def test_tracked_symlink_is_not_a_git_blob_python_source(self):
         external = self.root.parent / f"{self.root.name}-exfil.py"
         external.write_text("def injected():\n    return 0\n", encoding="utf-8")
