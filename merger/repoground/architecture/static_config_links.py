@@ -67,9 +67,7 @@ def _local_target(
     ):
         return "module:" + ref, "unresolved", []
     if repo_relative:
-        if raw.startswith("$/"):
-            raw = raw[2:]
-        elif raw.startswith("./"):
+        if raw.startswith(("$/", "./")):
             raw = raw[2:]
         else:
             return "module:" + ref, "unresolved", []
@@ -373,8 +371,11 @@ def _mask_markdown_html_code(
     line: str, active_tag: str | None,
 ) -> tuple[str, str | None]:
     """Hide only HTML code containers, preserving prose around closed spans."""
-    # A tag rendered inside Markdown backticks is literal documentation.
-    visible = _without_inline_code(line)
+    # A tag rendered inside Markdown backticks cannot open a container. Once a
+    # raw HTML block is active, however, Markdown inline-code parsing is
+    # disabled and even a backtick-wrapped closing tag closes that container.
+    raw_block = active_tag in {"pre", "script", "style", "textarea"}
+    visible = line if raw_block else _without_inline_code(line)
     chars = list(line)
     cursor = 0
     for tag in _MD_HTML_CODE_TAG.finditer(visible):
@@ -383,15 +384,20 @@ def _mask_markdown_html_code(
             if tag.group("closing"):
                 continue
             active_tag = name
+            raw_block = raw_block or name == "pre"
             cursor = tag.start()
         if active_tag is not None:
             chars[cursor:tag.end()] = " " * (tag.end() - cursor)
             if tag.group("closing") and name == active_tag:
                 active_tag = None
+                if raw_block:
+                    # The whole closing line belongs to this raw block. Tags
+                    # in its suffix cannot open a new block for the next line.
+                    return " " * len(line), None
         cursor = tag.end()
     if active_tag is not None:
         chars[cursor:] = " " * (len(chars) - cursor)
-    return "".join(chars), active_tag
+    return " " * len(line) if raw_block else "".join(chars), active_tag
 
 
 def _markdown_edges(path: str, source: str, known: set[str]) -> list[dict[str, Any]]:
@@ -420,19 +426,21 @@ def _markdown_edges(path: str, source: str, known: set[str]) -> list[dict[str, A
                         and not candidate[closing.end("marks"):].strip()):
                     fenced = None
             continue
-        # Masked comments turn into spaces, not Markdown indentation.
-        if _markdown_indented_code(raw_line) or _markdown_indented_code(raw_content):
-            edges.extend(_markdown_prose_edges(path, paragraph, known))
-            paragraph.clear()
-            continue
         if html_code_tag is not None:
-            # HTML code can end mid-line; links after its closing tag count.
+            # Raw HTML blocks may be indented, and Markdown backticks inside
+            # them are literal text. Recognize their closing tag before either
+            # Markdown exclusion can discard it.
             prose, html_code_tag = _mask_markdown_html_code(line, html_code_tag)
             if prose.strip():
                 paragraph.append((ordinal, prose))
             else:
                 edges.extend(_markdown_prose_edges(path, paragraph, known))
                 paragraph.clear()
+            continue
+        # Masked comments turn into spaces, not Markdown indentation.
+        if _markdown_indented_code(raw_line) or _markdown_indented_code(raw_content):
+            edges.extend(_markdown_prose_edges(path, paragraph, known))
+            paragraph.clear()
             continue
         candidate, list_indent = _markdown_fence_text(content)
         opener = _MD_FENCE.match(candidate)
@@ -471,6 +479,117 @@ def _yaml_quote_continues(line: str, quote: str, start: int = 0) -> bool:
     return True
 
 
+def _yaml_flow_depth(
+    line: str, depth: int = 0, quote: str | None = None,
+) -> tuple[int, str | None]:
+    """Track multiline YAML flow collections without parsing their contents."""
+    index = 0
+    scalar_start = quote is None
+    while index < len(line):
+        char = line[index]
+        if quote == '"' and char == "\\":
+            index += 2
+            continue
+        if quote is not None:
+            if char == quote:
+                if quote == "'" and line[index:index + 2] == "''":
+                    index += 2
+                    continue
+                quote = None
+        elif char in {"'", '"'} and scalar_start:
+            quote = char
+            scalar_start = False
+        elif char == "#" and (index == 0 or line[index - 1].isspace()):
+            break
+        elif char in "[{":
+            depth += 1
+            scalar_start = True
+        elif char in "]}" and depth:
+            depth -= 1
+            scalar_start = False
+        elif char == "," or (char == ":" and (
+            index + 1 == len(line) or line[index + 1] in " \t[{\"'"
+        )):
+            scalar_start = True
+        elif not char.isspace():
+            # Whitespace within a plain scalar does not make its quote
+            # punctuation the beginning of a new quoted scalar.
+            scalar_start = False
+        index += 1
+    return depth, quote
+
+
+def _yaml_root_flow_uses(lines: list[tuple[int, str]]) -> list[tuple[int, str]]:
+    """Read direct scalar uses from a complete, conservative step flow map.
+
+    Split only on root commas, respecting quoted scalars and nested collections.
+    Unsupported or malformed entries invalidate the whole mapping.
+    """
+    text = "\n".join(line for _, line in lines)
+    stack: list[str] = []
+    quote: str | None = None
+    start = 1
+    entries: list[tuple[int, str]] = []
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if quote is not None:
+            if quote == '"' and char == "\\":
+                index += 2
+                continue
+            if char == quote:
+                if quote == "'" and text[index:index + 2] == "''":
+                    index += 2
+                    continue
+                quote = None
+        elif char in "'\"":
+            # Only accept quote openers at scalar boundaries.
+            if index == 0 or text[index - 1].isspace() or text[index - 1] in ":,{[":
+                quote = char
+        elif char == "#" and (index == 0 or text[index - 1].isspace()):
+            return []
+        elif char in "{[":
+            stack.append(char)
+        elif char in "}]":
+            if not stack or stack.pop() != ("{" if char == "}" else "["):
+                return []
+            if not stack:
+                entries.append((start, text[start:index]))
+                if text[index + 1:].strip():
+                    return []
+        elif char == "," and len(stack) == 1:
+            entries.append((start, text[start:index]))
+            start = index + 1
+        index += 1
+    if stack or quote is not None:
+        return []
+    uses: list[tuple[int, str]] = []
+    keys: set[str] = set()
+    for offset, entry in entries:
+        if not entry.strip() and offset == start:
+            continue  # YAML permits a trailing comma.
+        prop = re.fullmatch(
+            rf"\s*(?P<key>{_YAML_KEY}):[ \t\n]+(?P<value>.+?)\s*",
+            entry, re.DOTALL,
+        )
+        if prop is None:
+            return []
+        key = prop.group("key").strip("'\"")
+        if key in keys:
+            return []
+        keys.add(key)
+        value = prop.group("value")
+        if key == "uses":
+            match = _YAML_USES.fullmatch("uses: " + value)
+            if match is None:
+                return []
+            line = lines[0][0] + text.count("\n", 0, offset + prop.start("key"))
+            uses.append((line, match.group("value")))
+        elif "\n" in value and not value.startswith(("{", "[", "'", '"')):
+            return []
+    return uses
+
+
 def _yaml_uses_edges(path: str, source: str, known: set[str]) -> list[dict[str, Any]]:
     """Parse explicit workflow/action metadata use fields, not YAML scalar text."""
     if not (
@@ -481,11 +600,23 @@ def _yaml_uses_edges(path: str, source: str, known: set[str]) -> list[dict[str, 
     edges: list[dict[str, Any]] = []
     blocked_indent: int | None = None
     quoted_scalar: str | None = None
+    flow_depth = 0
+    flow_quote: str | None = None
+    root_flow: list[tuple[int, str]] = []
     context: list[tuple[int, str]] = []
     for ordinal, line in enumerate(source.splitlines(), 1):
         if quoted_scalar is not None:
             if not _yaml_quote_continues(line, quoted_scalar):
                 quoted_scalar = None
+            continue
+        if flow_depth:
+            if root_flow:
+                root_flow.append((ordinal, line))
+            flow_depth, flow_quote = _yaml_flow_depth(line, flow_depth, flow_quote)
+            if not flow_depth and root_flow:
+                for use_line, ref in _yaml_root_flow_uses(root_flow):
+                    edges.extend(_yaml_use_edges(path, ref, use_line, known))
+                root_flow = []
             continue
         if not line.strip() or line.lstrip().startswith("#"):
             continue
@@ -511,6 +642,27 @@ def _yaml_uses_edges(path: str, source: str, known: set[str]) -> list[dict[str, 
             line, quoted.group("quote"), quoted.end(),
         ):
             quoted_scalar = quoted.group("quote")
+            continue
+        flow_start = re.match(
+            rf"^[ \t]*(?:-[ \t]+)?(?:{_YAML_KEY}:[ \t]*{_YAML_SCALAR_PROPERTIES})?(?P<flow>[{{\[])",
+            line,
+        )
+        if flow_start is not None:
+            flow_text = line[flow_start.start("flow"):]
+            flow_depth, flow_quote = _yaml_flow_depth(flow_text)
+            step_context = (
+                (len(context) == 3 and context[0][1] == "jobs"
+                 and path.startswith(".github/workflows/"))
+                or (len(context) == 2 and context[0][1] == "runs"
+                    and PurePosixPath(path).name in {"action.yml", "action.yaml"})
+            ) and context[-1][1] == "steps"
+            if (step_context and flow_text.startswith("{")
+                    and re.fullmatch(r"[ \t]*-[ \t]+", line[:flow_start.start("flow")])):
+                root_flow = [(ordinal, flow_text)]
+                if not flow_depth:
+                    for use_line, ref in _yaml_root_flow_uses(root_flow):
+                        edges.extend(_yaml_use_edges(path, ref, use_line, known))
+                    root_flow = []
             continue
         parent = _YAML_PARENT.match(line)
         if parent is not None:
@@ -538,66 +690,84 @@ def _yaml_uses_edges(path: str, source: str, known: set[str]) -> list[dict[str, 
         )
         if not (job_use or workflow_step or composite_step):
             continue
-        ref = match.group("value").strip("'\"")
-        if ref.startswith(("./", "$/")):
-            target, status, _ = _local_target(
-                path, ref, known, repo_relative=True,
+        edges.extend(_yaml_use_edges(
+            path, match.group("value"), ordinal, known, job_use=job_use,
+        ))
+    return edges
+
+
+def _yaml_use_edges(
+    path: str, ref: str, ordinal: int, known: set[str], *, job_use: bool = False,
+) -> list[dict[str, Any]]:
+    edges: list[dict[str, Any]] = []
+    if len(ref) >= 2 and ref[0] in "'\"" and ref[-1] == ref[0]:
+        ref = ref[1:-1]
+    if ref.startswith(("./", "$/")):
+        target, status, _ = _local_target(
+            path, ref, known, repo_relative=True,
+        )
+        if job_use:
+            # Job-level uses accepts a reusable workflow FILE, never
+            # a local action metadata directory. The prefix is an
+            # Actions syntax constraint, not runtime execution proof.
+            relative = ref[2:]
+            valid_workflow = (
+                relative.startswith(".github/workflows/")
+                and PurePosixPath(relative).suffix in {".yml", ".yaml"}
             )
-            if job_use:
-                # Job-level uses accepts a reusable workflow FILE, never
-                # a local action metadata directory. The prefix is an
-                # Actions syntax constraint, not runtime execution proof.
-                relative = ref[2:]
-                valid_workflow = (
-                    relative.startswith(".github/workflows/")
-                    and PurePosixPath(relative).suffix in {".yml", ".yaml"}
-                )
-                if valid_workflow and status == "resolved":
-                    edges.append(_reference(
-                        path, ref, ordinal, known,
-                        artifact="github_actions_reusable_workflow_file",
-                        repo_relative=True,
-                    ))
-                else:
-                    edges.append(_unproven(
-                        path, "module:" + ref, ordinal,
-                        artifact="github_actions_job_uses_unproven",
-                        candidates=[target] if status == "resolved" else None,
-                    ))
-                continue
-            # Step uses expects an action DIRECTORY containing metadata.
-            # Pointing directly at a workflow .yml is not a proven action
-            # dependency, even when that YAML file exists in the inventory.
-            directory = ref[2:].rstrip("/")
-            metadata_prefix = directory + "/" if directory else ""
-            metadata = [
-                "file:" + metadata_prefix + suffix
-                for suffix in ("action.yml", "action.yaml")
-                if "file:" + metadata_prefix + suffix in known
-            ]
-            if len(metadata) == 1:
-                edges.append(_edge(
-                    "references", "file:" + path, metadata[0],
-                    _source(path, ordinal, ordinal), "resolved", "S1",
-                    "github_actions_local_action_metadata",
-                ))
-            elif len(metadata) > 1:
-                edges.append(_unproven(
-                    path, "module:" + ref, ordinal,
-                    artifact="github_actions_ambiguous_action_metadata",
-                    candidates=metadata,
+            if valid_workflow and status == "resolved":
+                edges.append(_reference(
+                    path, ref, ordinal, known,
+                    artifact="github_actions_reusable_workflow_file",
+                    repo_relative=True,
                 ))
             else:
                 edges.append(_unproven(
                     path, "module:" + ref, ordinal,
-                    artifact="github_actions_step_uses_unproven",
+                    artifact="github_actions_job_uses_unproven",
                     candidates=[target] if status == "resolved" else None,
                 ))
-        elif ref and "$" not in ref and "\x00" not in ref:
-            edges.append(_unproven(
-                path, "external-action:" + ref, ordinal,
-                artifact="github_actions_external_uses",
+            return edges
+        # Step uses expects an action DIRECTORY containing metadata.
+        # Pointing directly at a workflow .yml is not a proven action
+        # dependency, even when that YAML file exists in the inventory.
+        raw_directory = ref[2:].rstrip("/")
+        directory = posixpath.normpath(raw_directory)
+        safe_directory = not (
+            directory == ".." or directory.startswith(("../", "/")) or "%" in raw_directory
+            or chr(92) in raw_directory or chr(0) in raw_directory
+        )
+        if directory == ".":
+            directory = ""
+        metadata_prefix = directory + "/" if directory else ""
+        metadata = [] if not safe_directory else [
+            "file:" + metadata_prefix + suffix
+            for suffix in ("action.yml", "action.yaml")
+            if "file:" + metadata_prefix + suffix in known
+        ]
+        if len(metadata) == 1:
+            edges.append(_edge(
+                "references", "file:" + path, metadata[0],
+                _source(path, ordinal, ordinal), "resolved", "S1",
+                "github_actions_local_action_metadata",
             ))
+        elif len(metadata) > 1:
+            edges.append(_unproven(
+                path, "module:" + ref, ordinal,
+                artifact="github_actions_ambiguous_action_metadata",
+                candidates=metadata,
+            ))
+        else:
+            edges.append(_unproven(
+                path, "module:" + ref, ordinal,
+                artifact="github_actions_step_uses_unproven",
+                candidates=[target] if status == "resolved" else None,
+            ))
+    elif ref and "$" not in ref and "\x00" not in ref:
+        edges.append(_unproven(
+            path, "external-action:" + ref, ordinal,
+            artifact="github_actions_external_uses",
+        ))
     return edges
 
 

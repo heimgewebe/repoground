@@ -2,14 +2,16 @@
 from __future__ import annotations
 
 import json
-import time
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
 from merger.repoground.architecture.declared_relations import extract_declared_relations
 from merger.repoground.architecture.import_graph import generate_import_graph_document
-from merger.repoground.architecture.relationship_projection import generate_relationship_document
+from merger.repoground.architecture.relationship_projection import (
+    generate_relationship_document,
+)
 
 
 class TestStaticConfigLinks(unittest.TestCase):
@@ -660,8 +662,175 @@ class TestStaticConfigLinks(unittest.TestCase):
         ))
         edges, _, _ = self.edges()
         own = [edge for edge in edges if edge["src"] == "file:docs/code-prose.md"]
-        self.assertEqual([1, 1, 3, 4, 5],
+        self.assertEqual([1, 1, 3, 5],
                          [edge["source"]["start_line"] for edge in own], own)
+
+    def test_markdown_active_html_closes_before_markdown_exclusions(self):
+        self.write("docs/target.md", "# target\n")
+        self.write("docs/html-closing.md", (
+            "<pre>\n"
+            "[hidden](./target.md)\n"
+            "    </pre>\n"
+            "[after-indented-close](./target.md)\n"
+            "<pre>\n"
+            "`</pre>` [after-backtick-close](./target.md)\n"
+            "`<pre>` [literal-opener](./target.md)\n"
+        ))
+        edges, _, _ = self.edges()
+        own = [edge for edge in edges
+               if edge["src"] == "file:docs/html-closing.md"]
+        self.assertEqual([4, 7], [
+            edge["source"]["start_line"] for edge in own
+        ], own)
+
+    def test_multiline_yaml_flow_mapping_does_not_invent_step_uses(self):
+        self.write("actions/local/action.yml", "name: local\n")
+        self.write(".github/workflows/flow-env.yml", (
+            "jobs:\n"
+            "  build:\n"
+            "    steps:\n"
+            "      - env: {\n"
+            "          NOTE: value,\n"
+            "          uses: ./actions/local\n"
+            "        }\n"
+            "        uses: ./actions/local\n"
+        ))
+        edges, _, _ = self.edges()
+        own = [edge for edge in edges
+               if edge["src"] == "file:.github/workflows/flow-env.yml"]
+        self.assertEqual([8], [
+            edge["source"]["start_line"] for edge in own
+        ], own)
+
+    def test_multiline_html_closing_line_remains_raw(self):
+        self.write("docs/target.md", "# target\n")
+        for closing in ("</pre>", "`</pre>`", "    </pre>"):
+            with self.subTest(closing=closing):
+                self.write("docs/raw.md", (
+                    "<pre>\n[hidden](./target.md)\n"
+                    + closing + " [hidden](./target.md)\n"
+                    "[real](./target.md)\n"
+                    "<code>hidden</code> [suffix](./target.md)\n"
+                ))
+                edges, _, _ = self.edges()
+                own = [edge for edge in edges if edge["src"] == "file:docs/raw.md"]
+                self.assertEqual([(4, "S1"), (5, "S1")], [
+                    (edge["source"]["start_line"], edge["evidence_level"])
+                    for edge in own
+                ], own)
+
+    def test_flow_yaml_multiline_quotes_hide_false_uses(self):
+        self.write("actions/local/action.yml", "name: local\n")
+        for quote in ('"', "'"):
+            with self.subTest(quote=quote):
+                self.write(".github/workflows/quotes.yml", (
+                    "jobs:\n  build:\n    steps:\n      - env: {\n"
+                    + "          NOTE: " + quote + "hello,\n"
+                    "            a line with } inside the still-open quote\n"
+                    "          uses: ./actions/local\n"
+                    + "          " + quote + "\n"
+                    "        }\n        uses: ./actions/local\n"
+                ))
+                edges, _, _ = self.edges()
+                own = [edge for edge in edges
+                       if edge["src"] == "file:.github/workflows/quotes.yml"]
+                self.assertEqual([(10, "S1")], [
+                    (edge["source"]["start_line"], edge["evidence_level"])
+                    for edge in own
+                ], own)
+
+    def test_flow_yaml_plain_scalar_quote_punctuation_preserves_uses(self):
+        self.write("actions/local/action.yml", "name: local\n")
+        for value in ("hello ' world", 'hello " world', "hello'world", 'hello"world'):
+            with self.subTest(value=value):
+                self.write(".github/workflows/plain-quotes.yml", (
+                    "jobs:\n  build:\n    steps:\n      - env: {NOTE: "
+                    + value + "}\n        uses: ./actions/local\n"
+                ))
+                edges, _, _ = self.edges()
+                own = [edge for edge in edges
+                       if edge["src"] == "file:.github/workflows/plain-quotes.yml"]
+                self.assertEqual([(5, "S1")], [
+                    (edge["source"]["start_line"], edge["evidence_level"])
+                    for edge in own
+                ], own)
+
+    def test_flow_yaml_quote_opening_on_collection_line_remains_multiline(self):
+        self.write("actions/local/action.yml", "name: local\n")
+        for quote, escaped in (("'", "''"), ('"', '\\"')):
+            with self.subTest(quote=quote):
+                self.write(".github/workflows/inline-flow-quote.yml", (
+                    "jobs:\n  build:\n    steps:\n      - env: {NOTE: "
+                    + quote + "hello " + escaped + " }\n"
+                    "          uses: ./actions/local\n"
+                    + "          world" + quote + "}\n"
+                    "        uses: ./actions/local\n"
+                ))
+                edges, _, _ = self.edges()
+                own = [edge for edge in edges
+                       if edge["src"] == "file:.github/workflows/inline-flow-quote.yml"]
+                self.assertEqual([(7, "S1")], [
+                    (edge["source"]["start_line"], edge["evidence_level"])
+                    for edge in own
+                ], own)
+
+    def test_same_line_html_block_close_masks_suffix_but_inline_code_does_not(self):
+        self.write("docs/target.md", "# target\n")
+        for opening in ("<pre>", "<PRE class='sample'>"):
+            with self.subTest(opening=opening):
+                self.write("docs/same-line-html.md", (
+                    opening + "hidden</pre> [hidden](./target.md)\n"
+                    "[real](./target.md)\n"
+                    "<code>[hidden](./target.md)</code> [real](./target.md)\n"
+                    "`<pre>hidden</pre>` [real](./target.md)\n"
+                ))
+                edges, _, _ = self.edges()
+                own = [edge for edge in edges
+                       if edge["src"] == "file:docs/same-line-html.md"]
+                self.assertEqual([(2, "S1"), (3, "S1"), (4, "S1")], [
+                    (edge["source"]["start_line"], edge["evidence_level"])
+                    for edge in own
+                ], own)
+
+    def test_yaml_plain_scalar_bracket_and_embedded_hash_preserve_uses(self):
+        self.write("actions/local/action.yml", "name: local\n")
+        for value in ("name: Build [linux", "env: {NOTE: abc#def}",
+                      "env: {NOTE: abc#def} # comment"):
+            with self.subTest(value=value):
+                self.write(".github/workflows/plain.yml", (
+                    "jobs:\n  build:\n    steps:\n      - " + value
+                    + "\n        uses: ./actions/local\n"
+                ))
+                edges, _, _ = self.edges()
+                own = [edge for edge in edges
+                       if edge["src"] == "file:.github/workflows/plain.yml"]
+                self.assertEqual([(5, "S1")], [
+                    (edge["source"]["start_line"], edge["evidence_level"])
+                    for edge in own
+                ], own)
+
+    def test_local_action_directory_dot_segments_are_normalized_safely(self):
+        self.write("actions/local/action.yml", "name: local\n")
+        self.write("outside/action.yml", "name: outside\n")
+        self.write(".github/workflows/dot-segments.yml", (
+            "jobs:\n"
+            "  build:\n"
+            "    steps:\n"
+            "      - uses: ./actions/./local\n"
+            "      - uses: ./actions/local/../local\n"
+            "      - uses: ./actions/../../outside\n"
+        ))
+        edges, _, _ = self.edges()
+        own = [edge for edge in edges
+               if edge["src"] == "file:.github/workflows/dot-segments.yml"]
+        self.assertEqual([
+            (4, "file:actions/local/action.yml", "S1"),
+            (5, "file:actions/local/action.yml", "S1"),
+            (6, "module:./actions/../../outside", "S0"),
+        ], [
+            (edge["source"]["start_line"], edge["dst"], edge["evidence_level"])
+            for edge in own
+        ], own)
 
     def test_sequence_block_scalar_does_not_hide_sibling_action(self):
         self.write("actions/local/action.yml", "name: local\n")
@@ -705,6 +874,81 @@ class TestStaticConfigLinks(unittest.TestCase):
         edges, _, _ = self.edges()
         own = [edge for edge in edges if edge["src"] == "file:docs/comment-backtick.md"]
         self.assertEqual([1], [edge["source"]["start_line"] for edge in own], own)
+
+    def test_inline_html_code_keeps_backtick_closers_literal(self):
+        self.write("docs/target.md", "# target\n")
+        self.write("docs/code-span.md", (
+            "Text <code>\n"
+            "`</code> [hidden](./target.md)`\n"
+            "[also-hidden](./target.md)\n"
+            "</code> [real](./target.md)\n"
+            "[after](./target.md)\n"
+        ))
+        edges, _, _ = self.edges()
+        own = [e for e in edges if e["src"] == "file:docs/code-span.md"]
+        self.assertEqual([(4, "S1"), (5, "S1")], [
+            (e["source"]["start_line"], e["evidence_level"]) for e in own
+        ], own)
+
+    def test_local_action_matching_outer_quotes_preserve_inner_quotes(self):
+        self.write("actions/local/action.yml", "name: local\n")
+        for outer, inner in (("'", '"'), ('"', "'")):
+            with self.subTest(outer=outer):
+                self.write(".github/workflows/quoted-local.yml", (
+                    "jobs:\n  build:\n    steps:\n"
+                    "      - uses: " + outer + "./actions/./local" + inner + outer + "\n"
+                    "      - uses: " + outer + "./actions/./local" + outer + "\n"
+                ))
+                edges, _, _ = self.edges()
+                own = [e for e in edges
+                       if e["src"] == "file:.github/workflows/quoted-local.yml"]
+                self.assertEqual([
+                    (4, "module:./actions/./local" + inner, "S0"),
+                    (5, "file:actions/local/action.yml", "S1"),
+                ], [(e["source"]["start_line"], e["dst"], e["evidence_level"])
+                    for e in own], own)
+
+    def test_root_step_flow_mapping_only_proves_direct_uses(self):
+        self.write("actions/local/action.yml", "name: local\n")
+        cases = (
+            ("{\n          uses: ./actions/local\n        }", [5]),
+            ("{uses: ./actions/local}", [4]),
+            ("{\n          env: {uses: ./actions/local},\n"
+             "          uses: ./actions/local\n        }", [6]),
+            ("{\n          env: {\n            uses: ./actions/local\n          }\n        }", []),
+            ("{with: {uses: ./actions/local}}", []),
+            ("env: {\n          uses: ./actions/local\n        }", []),
+            ("{\n          name: missing-comma\n          uses: ./actions/local\n        }", []),
+            ("{uses: ./actions/local, uses: ./actions/local}", []),
+            ("{\n          uses: ./actions/local\n        ]", []),
+        )
+        for step, expected in cases:
+            with self.subTest(step=step):
+                self.write(".github/workflows/root-flow.yml", (
+                    "jobs:\n  build:\n    steps:\n      - " + step + "\n"
+                ))
+                edges, _, _ = self.edges()
+                own = [e for e in edges
+                       if e["src"] == "file:.github/workflows/root-flow.yml"]
+                self.assertEqual([(line, "S1") for line in expected], [
+                    (e["source"]["start_line"], e["evidence_level"]) for e in own
+                ], own)
+
+    def test_raw_pre_closing_line_cannot_reopen_container(self):
+        self.write("docs/target.md", "# target\n")
+        for closing in ("</pre>", "    </pre>", "`</pre>`"):
+            with self.subTest(closing=closing):
+                self.write("docs/pre-reopen.md", (
+                    "<pre>\n" + closing + " `<pre>` [hidden](./target.md)\n"
+                    "[real](./target.md)\n"
+                    "<pre>\n[hidden](./target.md)\n</pre>\n"
+                    "[after](./target.md)\n"
+                ))
+                edges, _, _ = self.edges()
+                own = [e for e in edges if e["src"] == "file:docs/pre-reopen.md"]
+                self.assertEqual([(3, "S1"), (7, "S1")], [
+                    (e["source"]["start_line"], e["evidence_level"]) for e in own
+                ], own)
 
     def test_projection_contract_is_stable_and_legacy_consumers_unchanged(self):
         self.write("README.md", "[graph](./target.md)\n")
