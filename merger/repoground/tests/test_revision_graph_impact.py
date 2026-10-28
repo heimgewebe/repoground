@@ -168,6 +168,20 @@ class TestRevisionGraphImpact(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "ignored_source_not_in_head"):
             self.report()
 
+    def test_tracked_source_index_trust_flags_cannot_hide_source_mutations(self):
+        source = "tests/test_mod.py"
+        for flag, reset in (
+            ("--assume-unchanged", "--no-assume-unchanged"),
+            ("--skip-worktree", "--no-skip-worktree"),
+        ):
+            with self.subTest(flag=flag):
+                self.git("update-index", flag, source)
+                self.write(source, "def test_no_longer_references_feature():\n    pass\n")
+                with self.assertRaisesRegex(ValueError, "tracked_source_index_trust_flags"):
+                    self.report()
+                self.git("update-index", reset, source)
+                self.git("checkout", "--", source)
+
     def test_ignored_schema_source_does_not_change_revision_graph(self):
         exclude = self.root / ".git" / "info" / "exclude"
         exclude.write_text("local/\n", encoding="utf-8")
@@ -291,6 +305,34 @@ class TestRevisionGraphImpact(unittest.TestCase):
             "deleted_symbol_incoming_relations_not_analyzed",
             {gap["reason"] for gap in report["gaps"]},
         )
+        self.assertIn("complete_blast_radius", report["does_not_establish"])
+
+    def test_deleted_schema_preserves_explicit_incoming_relation_gap(self):
+        self.git("rm", "schemas/core.json")
+        self.commit("delete referenced schema")
+        head = self.git("rev-parse", "HEAD").strip()
+        report = compile_revision_impact(
+            repo_root=self.root, base_sha=self.head, head_sha=head,
+        )
+        self.assertIn(
+            "deleted_file_incoming_relations_not_analyzed",
+            {gap["reason"] for gap in report["gaps"]},
+        )
+        self.assertEqual([], report["potentially_affected"])
+        self.assertIn("complete_blast_radius", report["does_not_establish"])
+
+    def test_renamed_schema_preserves_explicit_incoming_relation_gap(self):
+        self.git("mv", "schemas/core.json", "schemas/renamed.json")
+        self.commit("rename referenced schema, leave old reference")
+        head = self.git("rev-parse", "HEAD").strip()
+        report = compile_revision_impact(
+            repo_root=self.root, base_sha=self.head, head_sha=head,
+        )
+        self.assertIn(
+            "renamed_away_file_incoming_relations_not_analyzed",
+            {gap["reason"] for gap in report["gaps"]},
+        )
+        self.assertEqual([], report["potentially_affected"])
         self.assertIn("complete_blast_radius", report["does_not_establish"])
 
     def test_oversized_unchanged_schema_truncation_propagates(self):

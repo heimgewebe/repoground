@@ -128,6 +128,19 @@ def _is_graph_source_path(path: str) -> bool:
     return _graph_inventory_language(PurePosixPath(path)) is not None
 
 
+def _reject_source_index_trust_flags(repo: Path) -> None:
+    """Refuse Git index hints that conceal on-disk producer changes from status."""
+    flagged = _git(repo, ["ls-files", "-v", "-z"], max_bytes=8_000_000)
+    for record in flagged.split(b"\x00"):
+        if not record:
+            continue
+        tag, separator, raw_path = record.partition(b" ")
+        if separator != b" " or len(tag) != 1:
+            raise ValueError("tracked_source_flags_invalid")
+        if (tag.islower() or tag == b"S") and _is_graph_source_path(raw_path.decode("utf-8")):
+            raise ValueError("tracked_source_index_trust_flags")
+
+
 def _source_inventory_safe(repo: Path) -> None:
     """Fail closed when a producer could read bytes absent from Git HEAD.
 
@@ -143,6 +156,7 @@ def _source_inventory_safe(repo: Path) -> None:
     for raw in ignored.split(b"\x00"):
         if raw and _is_graph_source_path(raw.decode("utf-8")):
             raise ValueError("ignored_source_not_in_head")
+    _reject_source_index_trust_flags(repo)
     stage = _git(repo, ["ls-files", "--stage", "-z"], max_bytes=8_000_000)
     for raw in stage.split(b"\x00"):
         if not raw:
@@ -328,6 +342,66 @@ def _impact_from_relations(
     return affected, uncertain, sorted(tests)
 
 
+def _validated_revision_diff(
+    root: Path, base_sha: str, head_sha: str,
+) -> tuple[bytes, dict[str, Any]]:
+    """Bound and compare both patch and raw Git path inventory."""
+    diff = _git(
+        root, ["diff", "--no-ext-diff", "--no-textconv", "--no-color",
+               "--unified=0", base_sha, head_sha, "--"],
+        max_bytes=MAX_DIFF_BYTES,
+    )
+    parsed = parse_unified_diff(diff.decode("utf-8"), context_window_lines=0)
+    if parsed["truncated"] or parsed["file_count"] > MAX_FILES:
+        raise ValueError("diff_file_limit_exceeded")
+    # Raw NUL-delimited paths reject silently skipped Git-quoted filenames.
+    raw_names = _git(
+        root, ["diff", "--name-only", "-z", base_sha, head_sha, "--"],
+        max_bytes=MAX_DIFF_BYTES,
+    )
+    names = {part.decode("utf-8") for part in raw_names.split(b"\x00") if part}
+    parsed_names = {item["path"] for item in parsed["files"]}
+    if names != parsed_names:
+        raise ValueError("unsupported_or_unparsed_git_diff_paths")
+    return diff, parsed
+
+
+def _unexamined_incoming_relation_gaps(
+    files: list[dict[str, Any]], changed_symbols: set[str],
+    head_symbols: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Report targets whose base-side incoming edges cannot be checked at HEAD."""
+    gaps: list[dict[str, Any]] = []
+    missing_symbols = changed_symbols - {item["id"] for item in head_symbols}
+    if missing_symbols:
+        gaps.append({
+            "reason": "deleted_symbol_incoming_relations_not_analyzed",
+            "count": len(missing_symbols), "evidence_level": "S0",
+        })
+    deleted_paths = {
+        file.get("old_path") or file.get("path")
+        for file in files if file.get("change_status") == "deleted"
+    }
+    if deleted_paths:
+        gaps.append({
+            "reason": "deleted_file_incoming_relations_not_analyzed",
+            "count": len(deleted_paths), "evidence_level": "S0",
+        })
+    renamed_away_paths = {
+        file.get("old_path")
+        for file in files
+        if file.get("change_status") == "renamed"
+        and isinstance(file.get("old_path"), str)
+        and file.get("old_path") != file.get("new_path")
+    }
+    if renamed_away_paths:
+        gaps.append({
+            "reason": "renamed_away_file_incoming_relations_not_analyzed",
+            "count": len(renamed_away_paths), "evidence_level": "S0",
+        })
+    return gaps
+
+
 def compile_revision_graph_impact(
     repo_root: Path,
     *,
@@ -352,25 +426,8 @@ def compile_revision_graph_impact(
         raise ValueError("repository_root_must_be_worktree_toplevel")
     identity = _identity(root, base_sha, head_sha)
     _source_inventory_safe(root)
-    diff = _git(
-        root, ["diff", "--no-ext-diff", "--no-textconv", "--no-color",
-               "--unified=0", base_sha, head_sha, "--"],
-        max_bytes=MAX_DIFF_BYTES,
-    )
+    diff, parsed = _validated_revision_diff(root, base_sha, head_sha)
     diff_sha = hashlib.sha256(diff).hexdigest()
-    parsed = parse_unified_diff(diff.decode("utf-8"), context_window_lines=0)
-    if parsed["truncated"] or parsed["file_count"] > MAX_FILES:
-        raise ValueError("diff_file_limit_exceeded")
-    # Git reports NUL-delimited raw paths; a quoted/unparseable path may not be
-    # silently omitted from the structural report.
-    raw_names = _git(
-        root, ["diff", "--name-only", "-z", base_sha, head_sha, "--"],
-        max_bytes=MAX_DIFF_BYTES,
-    )
-    names = {part.decode("utf-8") for part in raw_names.split(b"\x00") if part}
-    parsed_names = {item["path"] for item in parsed["files"]}
-    if names != parsed_names:
-        raise ValueError("unsupported_or_unparsed_git_diff_paths")
     from merger.repoground.architecture.symbol_index import extract_python_symbols
 
     symbols, symbol_skip_count, symbol_errors = extract_python_symbols(root)
@@ -381,13 +438,7 @@ def compile_revision_graph_impact(
         max_edges=250_000,
     )
     proven, unresolved, relevant_tests = _impact_from_relations(context["edges"], ids, paths)
-    head_ids = {item["id"] for item in symbols}
-    removed_ids = ids - head_ids
-    if removed_ids:
-        gaps.append({
-            "reason": "deleted_symbol_incoming_relations_not_analyzed",
-            "count": len(removed_ids), "evidence_level": "S0",
-        })
+    gaps.extend(_unexamined_incoming_relation_gaps(parsed["files"], ids, symbols))
     graph_coverage = context["coverage"]
     source_truncated = bool(
         graph_coverage.get("producer_repository_truncated")

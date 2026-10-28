@@ -28,7 +28,7 @@ _JS_DECLARATION = re.compile(
     re.DOTALL,
 )
 _NIX_TRIVIA = re.compile(
-    r"/\*[\s\S]*?\*/|''[\s\S]*?''|\"(?:\\.|[^\"\\])*\"|#[^\n]*"
+    r"/\*[\s\S]*?\*/|''(?:''(?:\$\{|\\|')|(?!'')[\s\S])*''|\"(?:\\.|[^\"\\])*\"|#[^\n]*"
 )
 _NIX_LITERAL = re.compile(r"(?<![\w./])(?P<ref>\.{1,2}/[a-zA-Z0-9_./-]+\.nix)(?![\w])")
 _JSON_REF = re.compile(r'"\$ref"\s*:\s*"(?P<ref>(?:\\.|[^"\\])*)"')
@@ -43,13 +43,18 @@ def _resolve_local(
     source_path: str, ref: str, known_files: set[str], *, extensions: Sequence[str],
 ) -> tuple[str, str, list[str]]:
     """Resolve only unique repository-local path spellings, never import search paths."""
-    if not ref.startswith(("./", "../")):
+    if not ref.startswith(("./", "../")) or "%" in ref:
         return "module:" + ref, "unresolved", []
     basedir = str(PurePosixPath(source_path).parent)
     base = posixpath.normpath(posixpath.join(basedir, ref))
     if base == ".." or base.startswith("../") or base.startswith("/"):
         return "module:" + ref, "unresolved", []
     suffix = PurePosixPath(base).suffix
+    if suffix and suffix not in extensions:
+        candidate = "file:" + base
+        return "module:" + ref, "unresolved", (
+            [candidate] if candidate in known_files else []
+        )
     paths = [base] if suffix in extensions else [
         *(base + ext for ext in extensions),
         *(base + "/index" + ext for ext in extensions),
@@ -63,7 +68,7 @@ def _resolve_local(
 
 
 def _js_edges(path: str, source: str, known: set[str]) -> list[dict[str, Any]]:
-    syntax_lines, source_lines = _js_sources(source)
+    syntax_lines, source_lines = _js_sources(source, jsx=path.endswith((".jsx", ".tsx")))
     result: list[dict[str, Any]] = []
     for ordinal, line in enumerate(syntax_lines):
         if not line.lstrip().startswith(("import ", "export ")):
@@ -80,7 +85,7 @@ def _js_edges(path: str, source: str, known: set[str]) -> list[dict[str, Any]]:
         result.append(_edge(
             relation, "file:" + path, target, evidence,
             status, "S1" if status == "resolved" else "S0", "js_ts_lexical_declaration",
-            candidates=possibilities if status == "ambiguous" else None,
+            candidates=possibilities if status != "resolved" else None,
         ))
     return result
 
@@ -94,6 +99,11 @@ _JS_CALL = re.compile(r"(?<![.\w$])(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)\s*\(")
 def _masked(text: str) -> list[str]:
     return ["\n" if char == "\n" else " " for char in text]
 
+
+_JSX_ELEMENT = re.compile(
+    r"<(?P<tag>[A-Za-z][A-Za-z0-9_.:-]*)\b[^<>]*>[\s\S]*?</(?P=tag)\s*>"
+)
+_JSX_FRAGMENT = re.compile(r"<>[\s\S]*?</>")
 
 _JS_REGEX_CONTEXT = re.compile(r"\b(?:return|throw|case|yield)\s*$")
 
@@ -201,7 +211,7 @@ def _js_template_expr_end(source: str, start: int, *, depth: int) -> int:
     return len(source)
 
 
-def _js_sources(source: str) -> tuple[list[str], list[str]]:
+def _js_sources(source: str, *, jsx: bool = False) -> tuple[list[str], list[str]]:
     """Mask comments and strings in one ordered lexical pass.
 
     Only the literal-preserving view supplies an import specifier after
@@ -239,6 +249,15 @@ def _js_sources(source: str) -> tuple[list[str], list[str]]:
             index = end
             continue
         index += 1
+    if jsx:
+        # JSX child text is not executable JS. Mask entire balanced elements
+        # rather than claiming lexically observed imports/functions inside them.
+        text = "".join(syntax)
+        for pattern in (_JSX_ELEMENT, _JSX_FRAGMENT):
+            for match in pattern.finditer(text):
+                masked = _masked(source[match.start():match.end()])
+                syntax[match.start():match.end()] = masked
+                literals[match.start():match.end()] = masked
     return "".join(syntax).splitlines(), "".join(literals).splitlines()
 
 
@@ -248,9 +267,9 @@ def _js_function_edges(path: str, source: str) -> list[dict[str, Any]]:
     This conservative lexer does not model JS lexical scopes, overloads, dynamic
     dispatch or TypeScript type semantics; calls remain S0 even for one candidate.
     """
-    lines, _ = _js_sources(source)
+    lines, _ = _js_sources(source, jsx=path.endswith((".jsx", ".tsx")))
     declarations: dict[str, list[str]] = {}
-    declaration_lines: set[int] = set()
+    declaration_sites: set[tuple[int, int]] = set()
     edges: list[dict[str, Any]] = []
     for ordinal, line in enumerate(lines, 1):
         match = _JS_FUNCTION.match(line)
@@ -259,7 +278,7 @@ def _js_function_edges(path: str, source: str) -> list[dict[str, Any]]:
         name = match.group("name")
         symbol_id = f"js:{path}:function:{name}:L{ordinal}"
         declarations.setdefault(name, []).append(symbol_id)
-        declaration_lines.add(ordinal)
+        declaration_sites.add((ordinal, match.start("name")))
         edges.append(_edge(
             "defines", "file:" + path, symbol_id, _source(path, ordinal, ordinal),
             "resolved", "S1", "js_ts_named_function_syntax",
@@ -267,9 +286,10 @@ def _js_function_edges(path: str, source: str) -> list[dict[str, Any]]:
     if not declarations:
         return []
     for ordinal, line in enumerate(lines, 1):
-        if ordinal in declaration_lines:
-            continue
         for match in _JS_CALL.finditer(line):
+            # A declaration has call-like spelling; its body may contain real calls.
+            if (ordinal, match.start("name")) in declaration_sites:
+                continue
             name = match.group("name")
             candidates = declarations.get(name)
             if not candidates:
@@ -305,6 +325,66 @@ def _nix_literal_edge(
     )
 
 
+def _nix_quoted_end(source: str, start: int, depth: int) -> int:
+    """Mask outer Nix strings through nested interpolation expressions."""
+    if depth > 24:
+        return len(source)
+    index = start + 1
+    while index < len(source):
+        if source[index] == "\\":
+            index += 2
+        elif source.startswith("${", index):
+            index = _nix_interpolation_end(source, index + 2, depth + 1)
+        elif source[index] == '"':
+            return index + 1
+        else:
+            index += 1
+    return len(source)
+
+
+def _nix_lexeme_end(source: str, start: int, depth: int) -> int | None:
+    if source[start] == '"':
+        return _nix_quoted_end(source, start, depth)
+    if source.startswith(("''", "/*"), start) or source[start] == "#":
+        trivia = _NIX_TRIVIA.match(source, start)
+        # A malformed unterminated string/comment cannot prove an import.
+        return trivia.end() if trivia is not None else len(source)
+    return None
+
+
+def _nix_interpolation_end(source: str, start: int, depth: int) -> int:
+    """Skip nested string literals and brace groups inside a ${...} expression."""
+    braces = 1
+    index = start
+    while index < len(source):
+        end = _nix_lexeme_end(source, index, depth)
+        if end is not None:
+            index = end
+            continue
+        if source[index] == "{":
+            braces += 1
+        elif source[index] == "}":
+            braces -= 1
+            if braces == 0:
+                return index + 1
+        index += 1
+    return len(source)
+
+
+def _nix_without_trivia(source: str) -> str:
+    """Ordered lexical masking prevents quotes in interpolation from leaking S1."""
+    clean = list(source)
+    index = 0
+    while index < len(source):
+        end = _nix_lexeme_end(source, index, 0)
+        if end is None:
+            index += 1
+            continue
+        clean[index:end] = _masked(source[index:end])
+        index = end
+    return "".join(clean)
+
+
 def _nix_edges(path: str, source: str, known: set[str]) -> list[dict[str, Any]]:
     """Only lexical import arguments and plain imports-list path items are S1.
 
@@ -312,7 +392,7 @@ def _nix_edges(path: str, source: str, known: set[str]) -> list[dict[str, Any]]:
     sibling paths are not themselves imports. Complex list expressions not
     proven to consist solely of paths remain outside the S1 projection.
     """
-    clean = _NIX_TRIVIA.sub(_mask, source)
+    clean = _nix_without_trivia(source)
     edges: list[dict[str, Any]] = []
     list_active = False
     list_lines = 0
@@ -355,6 +435,7 @@ def _resolve_schema_ref(
         _URI_SCHEME.match(filename)
         or filename.startswith("/")
         or "\\" in filename
+        or "%" in filename
         or "\x00" in filename
         or "?" in filename
     ):
@@ -383,30 +464,81 @@ def _schema_has_id_scope(value: Any) -> bool:
     return False
 
 
+_SCHEMA_SINGLE = frozenset({
+    "not", "items", "additionalItems", "additionalProperties", "contains",
+    "propertyNames", "if", "then", "else", "unevaluatedItems",
+    "unevaluatedProperties", "contentSchema",
+})
+_SCHEMA_MAP = frozenset({
+    "properties", "patternProperties", "$defs", "definitions", "dependentSchemas",
+})
+_SCHEMA_LIST = frozenset({"allOf", "anyOf", "oneOf", "prefixItems"})
+
+
+def _schema_ref_counts(schema: Any) -> Counter[str]:
+    """Only schema-valued locations can prove a JSON Schema $ref declaration."""
+    refs: Counter[str] = Counter()
+    pending = [schema]
+    seen = 0
+    while pending and seen < 10000:
+        entry = pending.pop()
+        seen += 1
+        if not isinstance(entry, dict):
+            continue
+        ref = entry.get("$ref")
+        if isinstance(ref, str):
+            refs[ref] += 1
+        for key, value in entry.items():
+            if key in _SCHEMA_SINGLE:
+                pending.append(value)
+            elif key in _SCHEMA_LIST and isinstance(value, list):
+                pending.extend(value)
+            elif key in _SCHEMA_MAP and isinstance(value, dict):
+                pending.extend(value.values())
+    return refs if not pending else Counter()
+
+
 def _json_edges(path: str, source: str, known: set[str]) -> list[dict[str, Any]]:
     try:
         schema = json.loads(source)
     except (ValueError, RecursionError):
         return []
     has_id_scope = _schema_has_id_scope(schema)
+    # A textual $ref inside default/const/examples is instance data, not
+    # a schema declaration. Ambiguous repeated spellings stay S0.
+    lexical = [
+        (match, json.loads('"' + match.group("ref") + '"'))
+        for match in _JSON_REF.finditer(source)
+    ]
+    counts = Counter(ref for _, ref in lexical)
+    schema_counts = _schema_ref_counts(schema)
     result: list[dict[str, Any]] = []
-    for match in _JSON_REF.finditer(source):
-        ref = json.loads('"' + match.group("ref") + '"')
+    for match, ref in lexical:
         if not isinstance(ref, str) or not ref:
             continue
+        # JSON permits lone escaped surrogates, but graph identities require
+        # UTF-8. Keep their evidence as S0 without aborting other declarations.
+        safe_ref = ref.encode("utf-8", errors="backslashreplace").decode("utf-8")
         file_ref = ref.split("#", 1)[0]
-        if not file_ref:
+        if safe_ref != ref:
+            target, status, candidates = (
+                "schema-ref:invalid-unicode:" + safe_ref, "unresolved", [],
+            )
+        elif not file_ref:
             target, status, candidates = "contract-pointer:" + path + ref, "unresolved", []
         else:
             target, status, candidates = _resolve_schema_ref(path, ref, known)
-        if has_id_scope and status == "resolved":
+        proven_location = (
+            schema_counts[ref] > 0 and schema_counts[ref] == counts[ref]
+        )
+        if status == "resolved" and (has_id_scope or not proven_location):
             candidates = [target]
             target, status = "schema-ref:" + ref, "unresolved"
         line = source.count("\n", 0, match.start()) + 1
         result.append(_edge(
             "declares_contract", "file:" + path, target, _source(path, line, line),
             status, "S1" if status == "resolved" else "S0", "json_schema_declared_ref",
-            candidates=candidates if status in {"ambiguous", "unresolved"} and has_id_scope else None,
+            candidates=candidates if status in {"ambiguous", "unresolved"} else None,
         ))
     return result
 
@@ -451,6 +583,29 @@ def _edges_for_source(path: str, source: str, known: set[str]) -> list[dict[str,
         return _compose_edges(path, source) + config_reference_edges(path, source, known)
     return config_reference_edges(path, source, known)
 
+
+
+def _read_declared_source(
+    repo_root: Path,
+    name: str,
+    root_resolved: Path,
+    bytes_read: int,
+    max_total_bytes: int,
+) -> tuple[str | None, int, str | None]:
+    """Read one inventory file with the existing symlink and byte-budget guards."""
+    target = repo_root / name
+    try:
+        if target.is_symlink() or not target.resolve().is_relative_to(root_resolved):
+            return None, 0, "symlink_or_outside_repo"
+        size = target.stat().st_size
+        if size > MAX_SOURCE_BYTES or bytes_read + size > max_total_bytes:
+            return None, 0, "source_byte_limit"
+        data = target.read_bytes()
+        if len(data) != size:
+            return None, 0, "source_changed_during_read"
+        return data.decode("utf-8"), size, None
+    except (OSError, UnicodeDecodeError):
+        return None, 0, "unreadable_source"
 
 def extract_declared_relations(
     repo_root: Path,
@@ -500,24 +655,14 @@ def extract_declared_relations(
         if ordinal >= max_files:
             skipped["file_count_limit"] += 1
             continue
-        target = repo_root / name
-        try:
-            if target.is_symlink() or not target.resolve().is_relative_to(root_resolved):
-                skipped["symlink_or_outside_repo"] += 1
-                continue
-            size = target.stat().st_size
-            if size > MAX_SOURCE_BYTES or bytes_read + size > max_total_bytes:
-                skipped["source_byte_limit"] += 1
-                continue
-            data = target.read_bytes()
-            if len(data) != size:
-                skipped["source_changed_during_read"] += 1
-                continue
-            source = data.decode("utf-8")
-        except (OSError, UnicodeDecodeError):
-            skipped["unreadable_source"] += 1
+        source, source_size, skip_reason = _read_declared_source(
+            repo_root, name, root_resolved, bytes_read, max_total_bytes,
+        )
+        if skip_reason is not None:
+            skipped[skip_reason] += 1
             continue
-        bytes_read += len(data)
+        assert source is not None
+        bytes_read += source_size
         parsed += 1
         found = _edges_for_source(name, source, known)
         remaining = max_relation_edges - len(emitted)
