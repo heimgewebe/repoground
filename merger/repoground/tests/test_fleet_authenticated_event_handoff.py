@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.machinery
 import importlib.util
 import json
+import sqlite3
 import subprocess
 import sys
 import time
@@ -290,6 +291,15 @@ def test_unchanged_dirty_checkout_prunes_previous_clean_recovery(
     monkeypatch.setattr(m, "STATE_ROOT", tmp_path / "managed-fleet-state")
     monkeypatch.setattr(m, "LOG_ROOT", tmp_path / "fleet-logs")
     monkeypatch.setattr(m, "FLEET_LOG", tmp_path / "fleet-logs" / "fleet.log")
+    lease_db = tmp_path / "grabowski-resources.sqlite3"
+    with sqlite3.connect(lease_db) as connection:
+        connection.executescript(
+            "CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);"
+            "CREATE TABLE leases(resource_key TEXT PRIMARY KEY, owner_id TEXT NOT NULL,"
+            " expires_at_unix INTEGER NOT NULL, updated_at_unix INTEGER NOT NULL);"
+            "INSERT INTO metadata(key, value) VALUES('schema_version', '3');"
+        )
+    monkeypatch.setattr(m, "GRABOWSKI_RESOURCE_DB", lease_db)
     canonical = m.ensure_source_worktree(entry, "main", head)
     # Never reset or delete the canonical source with valuable dirty data.
     dirty = canonical / "operator-untracked.txt"
