@@ -22,7 +22,7 @@ _YAML_USES = re.compile(
     r"""^[ \t]*(?:-[ \t]+)?uses:[ \t]*(?P<value>"[^"\n]+"|'[^'\n]+'|[^\s#]+)[ \t]*(?:#.*)?$"""
 )
 _YAML_BLOCK = re.compile(
-    r"""^(?P<indent>[ \t]*)(?:-[ \t]+)?(?:[a-zA-Z_][\w.-]*|"[a-zA-Z_][\w.-]*"|'[a-zA-Z_][\w.-]*'):[ \t]*[|>](?:[-+][1-9]?|[1-9][-+]?)?[ \t]*(?:#.*)?$"""
+    r"""^(?P<indent>[ \t]*)(?P<prefix>-[ \t]+)?(?:[a-zA-Z_][\w.-]*|"[a-zA-Z_][\w.-]*"|'[a-zA-Z_][\w.-]*'):[ \t]*[|>](?:[-+][1-9]?|[1-9][-+]?)?[ \t]*(?:#.*)?$"""
 )
 _YAML_PARENT = re.compile(
     r"""^[ \t]*(?P<prefix>-[ \t]+)?(?P<key>[A-Za-z_][\w.-]*|"[A-Za-z_][\w.-]*"|'[A-Za-z_][\w.-]*'):[ \t]*(?:&[A-Za-z0-9_-]+[ \t]*)?(?:#.*)?$"""
@@ -242,10 +242,43 @@ def _markdown_fence_continues(
     )
 
 
+def _markdown_backtick_pairs(
+    line: str,
+) -> tuple[list[tuple[int, int]], list[int | None]]:
+    """Find exact-width backtick closures once, before linear prose scanning."""
+    runs = [(match.start(), match.end())
+            for match in re.finditer(r"`+", line)]
+    following: dict[int, int] = {}
+    next_run: list[int | None] = [None] * len(runs)
+    for index in range(len(runs) - 1, -1, -1):
+        width = runs[index][1] - runs[index][0]
+        next_run[index] = following.get(width)
+        following[width] = index
+    return runs, next_run
+
+
+def _next_markdown_comment_tokens(
+    runs: list[tuple[int, int]], openings: list[int],
+    cursor: int, run_index: int, comment_index: int, size: int,
+) -> tuple[int, int, int, int]:
+    """Advance past already consumed tokens; each index only moves forward."""
+    while run_index < len(runs) and runs[run_index][0] < cursor:
+        run_index += 1
+    while comment_index < len(openings) and openings[comment_index] < cursor:
+        comment_index += 1
+    next_tick = runs[run_index][0] if run_index < len(runs) else size
+    next_comment = openings[comment_index] if comment_index < len(openings) else size
+    return run_index, comment_index, next_tick, next_comment
+
+
 def _mask_markdown_comment_line(
     line: str, comment_open: bool,
 ) -> tuple[str, bool]:
-    """Mask HTML comments in prose, never backtick-quoted examples."""
+    """One bounded forward pass over comments and exact-width inline code.
+
+    A comment beginning before a backtick span hides its internal backticks;
+    paired backticks beginning first hide literal HTML-comment-looking text.
+    """
     chars = list(line)
     cursor = 0
     if comment_open:
@@ -254,17 +287,35 @@ def _mask_markdown_comment_line(
             return _mask_span(line), True
         chars[:closing + 3] = " " * (closing + 3)
         cursor = closing + 3
-    while cursor < len(line):
-        visible = _without_inline_code("".join(chars))
-        start = visible.find("<!--", cursor)
-        if start < 0:
+    runs, partners = _markdown_backtick_pairs(line)
+    openings = [match.start() for match in re.finditer("<!--", line)]
+    run_index = 0
+    comment_index = 0
+    while True:
+        run_index, comment_index, next_tick, next_comment = (
+            _next_markdown_comment_tokens(
+                runs, openings, cursor, run_index, comment_index, len(line),
+            )
+        )
+        if next_tick == next_comment == len(line):
             break
-        closing = line.find("-->", start + 4)
-        if closing < 0:
-            chars[start:] = " " * (len(line) - start)
-            return "".join(chars), True
-        chars[start:closing + 3] = " " * (closing + 3 - start)
-        cursor = closing + 3
+        if next_comment < next_tick:
+            closing = line.find("-->", next_comment + 4)
+            if closing < 0:
+                chars[next_comment:] = " " * (len(line) - next_comment)
+                return "".join(chars), True
+            chars[next_comment:closing + 3] = " " * (closing + 3 - next_comment)
+            cursor = closing + 3
+            continue
+        partner = partners[run_index]
+        if partner is not None and not _escaped_markdown_opener(
+            line, runs[run_index][0],
+        ):
+            cursor = runs[partner][1]
+            run_index = partner + 1
+        else:
+            cursor = runs[run_index][1]
+            run_index += 1
     return "".join(chars), False
 
 
@@ -343,8 +394,11 @@ def _markdown_edges(path: str, source: str, known: set[str]) -> list[dict[str, A
     fenced: tuple[str, int, int | None, int] | None = None
     html_code_tag: str | None = None
     paragraph: list[tuple[int, str]] = []
-    for ordinal, line in enumerate(sanitized.splitlines(), 1):
+    for ordinal, (raw_line, line) in enumerate(
+        zip(source.splitlines(), sanitized.splitlines(), strict=True), 1,
+    ):
         content, quote_depth = _markdown_quote_info(line)
+        raw_content, _ = _markdown_quote_info(raw_line)
         if fenced is not None and not _markdown_fence_continues(
             content, quote_depth, fenced,
         ):
@@ -360,7 +414,8 @@ def _markdown_edges(path: str, source: str, known: set[str]) -> list[dict[str, A
                         and not candidate[closing.end("marks"):].strip()):
                     fenced = None
             continue
-        if _markdown_indented_code(line) or _markdown_indented_code(content):
+        # Masked comments turn into spaces, not Markdown indentation.
+        if _markdown_indented_code(raw_line) or _markdown_indented_code(raw_content):
             edges.extend(_markdown_prose_edges(path, paragraph, known))
             paragraph.clear()
             continue
@@ -443,7 +498,7 @@ def _yaml_uses_edges(path: str, source: str, known: set[str]) -> list[dict[str, 
             context.pop()
         block = _YAML_BLOCK.match(line)
         if block is not None:
-            blocked_indent = len(block.group("indent"))
+            blocked_indent = len(block.group("indent")) + len(block.group("prefix") or "")
             continue
         quoted = _YAML_QUOTED_VALUE.match(line)
         if quoted is not None and _yaml_quote_continues(

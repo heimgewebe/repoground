@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import time
 import tempfile
 import unittest
 from pathlib import Path
@@ -579,6 +580,49 @@ class TestStaticConfigLinks(unittest.TestCase):
         own = [edge for edge in edges if edge["src"] == "file:docs/code-prose.md"]
         self.assertEqual([1, 1, 3, 4, 5],
                          [edge["source"]["start_line"] for edge in own], own)
+
+    def test_sequence_block_scalar_does_not_hide_sibling_action(self):
+        self.write("actions/local/action.yml", "name: local\n")
+        self.write(".github/workflows/multiline-name.yml", (
+            "jobs:\n"
+            "  build:\n"
+            "    steps:\n"
+            "      - name: >-\n"
+            "          uses: ./actions/local\n"
+            "        uses: ./actions/local\n"
+        ))
+        edges, _, _ = self.edges()
+        own = [edge for edge in edges
+               if edge["src"] == "file:.github/workflows/multiline-name.yml"]
+        self.assertEqual([6], [
+            edge["source"]["start_line"] for edge in own
+            if edge["evidence_level"] == "S1"
+        ], own)
+
+    def test_thousands_of_html_comments_preserve_link_with_bounded_work(self):
+        self.write("docs/target.md", "# target\n")
+        self.write(
+            "docs/many-comments.md",
+            "<!--x-->" * 8000 + " [real](./target.md)\n",
+        )
+        started = time.perf_counter()
+        edges, _, _ = self.edges()
+        elapsed = time.perf_counter() - started
+        own = [edge for edge in edges
+               if edge["src"] == "file:docs/many-comments.md"]
+        self.assertEqual([1], [edge["source"]["start_line"] for edge in own], own)
+        # Before this fix even 8k comments spent several seconds repeatedly
+        # remasking the full line. Retain a generous CI budget.
+        self.assertLess(elapsed, 2.0)
+
+    def test_backtick_inside_html_comment_does_not_hide_following_link(self):
+        self.write("docs/target.md", "# target\n")
+        self.write("docs/comment-backtick.md", (
+            "<!-- ` inside comment --> [real](./target.md)\n"
+        ))
+        edges, _, _ = self.edges()
+        own = [edge for edge in edges if edge["src"] == "file:docs/comment-backtick.md"]
+        self.assertEqual([1], [edge["source"]["start_line"] for edge in own], own)
 
     def test_projection_contract_is_stable_and_legacy_consumers_unchanged(self):
         self.write("README.md", "[graph](./target.md)\n")
