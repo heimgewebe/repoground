@@ -470,6 +470,76 @@ class TestStaticConfigLinks(unittest.TestCase):
         self.assertEqual("S0", next(e["evidence_level"] for e in unit if e["relation"] == "configures_service"))
         self.assertIn("caddy_import_expansion", coverage["does_not_establish"])
 
+    def test_quoted_yaml_step_mapping_keys_do_not_fake_actions(self):
+        self.write("actions/local/action.yml", "name: local\n")
+        self.write(".github/workflows/quoted-mapping.yml", (
+            "jobs:\n"
+            "  build:\n"
+            "    steps:\n"
+            '      - "env":\n'
+            "          uses: ./actions/local\n"
+            "      - 'with':\n"
+            "          uses: ./actions/local\n"
+            "      - uses: ./actions/local\n"
+            "  quoted:\n"
+            '    "steps":\n'
+            "      - uses: ./actions/local\n"
+        ))
+        edges, _, _ = self.edges()
+        own = [edge for edge in edges
+               if edge["src"] == "file:.github/workflows/quoted-mapping.yml"]
+        self.assertEqual([8, 11], [
+            edge["source"]["start_line"] for edge in own
+            if edge["evidence_level"] == "S1"
+        ], own)
+
+    def test_unclosed_blockquote_fence_ends_at_quote_boundary(self):
+        self.write("docs/target.md", "# target\n")
+        self.write("docs/unclosed-quote.md", (
+            "> ~~~sh\n"
+            "> echo hello\n"
+            "\n"
+            "[real](./target.md)\n"
+        ))
+        edges, _, _ = self.edges()
+        own = [edge for edge in edges if edge["src"] == "file:docs/unclosed-quote.md"]
+        self.assertEqual([4], [edge["source"]["start_line"] for edge in own], own)
+
+    def test_unclosed_nested_quote_fence_does_not_hide_outer_prose(self):
+        self.write("docs/target.md", "# target\n")
+        self.write("docs/nested-unclosed.md", (
+            "> > ~~~sh\n"
+            "> > echo hello\n"
+            "> [outer](./target.md)\n"
+            "[outside](./target.md)\n"
+        ))
+        edges, _, _ = self.edges()
+        own = [edge for edge in edges if edge["src"] == "file:docs/nested-unclosed.md"]
+        self.assertEqual([3, 4], [edge["source"]["start_line"] for edge in own], own)
+
+    def test_unclosed_list_fence_does_not_hide_outside_prose(self):
+        self.write("docs/target.md", "# target\n")
+        self.write("docs/list-unclosed.md", (
+            "- ~~~sh\n"
+            "  echo hello\n"
+            "[real](./target.md)\n"
+        ))
+        edges, _, _ = self.edges()
+        own = [edge for edge in edges if edge["src"] == "file:docs/list-unclosed.md"]
+        self.assertEqual([3], [edge["source"]["start_line"] for edge in own], own)
+
+    def test_html_comment_inside_unclosed_quote_fence_is_literal(self):
+        self.write("docs/target.md", "# target\n")
+        self.write("docs/comment-unclosed.md", (
+            "> ~~~html\n"
+            "> <!--\n"
+            "\n"
+            "[real](./target.md)\n"
+        ))
+        edges, _, _ = self.edges()
+        own = [edge for edge in edges if edge["src"] == "file:docs/comment-unclosed.md"]
+        self.assertEqual([4], [edge["source"]["start_line"] for edge in own], own)
+
     def test_projection_contract_is_stable_and_legacy_consumers_unchanged(self):
         self.write("README.md", "[graph](./target.md)\n")
         self.write("target.md", "# target\n")

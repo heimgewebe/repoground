@@ -25,7 +25,7 @@ _YAML_BLOCK = re.compile(
     r"^(?P<indent>[ \t]*)(?:-[ \t]+)?[a-zA-Z_][\w.-]*:[ \t]*[|>](?:[-+][1-9]?|[1-9][-+]?)?[ \t]*(?:#.*)?$"
 )
 _YAML_PARENT = re.compile(
-    r"^[ \t]*(?P<prefix>-[ \t]+)?(?P<key>[A-Za-z_][\w.-]*):[ \t]*(?:&[A-Za-z0-9_-]+[ \t]*)?(?:#.*)?$"
+    r"""^[ \t]*(?P<prefix>-[ \t]+)?(?P<key>[A-Za-z_][\w.-]*|"[A-Za-z_][\w.-]*"|'[A-Za-z_][\w.-]*'):[ \t]*(?:&[A-Za-z0-9_-]+[ \t]*)?(?:#.*)?$"""
 )
 _YAML_QUOTED_VALUE = re.compile(
     r"""^[ \t]*(?:-[ \t]+)?[A-Za-z_][\w.-]*:[ \t]*(?P<quote>["'])"""
@@ -176,12 +176,14 @@ def _escaped_markdown_opener(text: str, start: int) -> bool:
 _MD_QUOTE_PREFIX = re.compile(r"^ {0,3}>[ \\t]?")
 
 
-def _markdown_quote_content(line: str) -> str:
-    """Peel only actual leading CommonMark blockquote containers."""
+def _markdown_quote_info(line: str) -> tuple[str, int]:
+    """Peel CommonMark blockquotes and retain their enclosing depth."""
     content = line
+    depth = 0
     while (prefix := _MD_QUOTE_PREFIX.match(content)) is not None:
         content = content[prefix.end():]
-    return content
+        depth += 1
+    return content, depth
 
 
 def _markdown_prose_edges(
@@ -225,6 +227,21 @@ def _markdown_fence_text(
     return content, None
 
 
+def _markdown_fence_continues(
+    content: str, quote_depth: int,
+    fenced: tuple[str, int, int | None, int],
+) -> bool:
+    """An unclosed fence ends when its quote or list container ends."""
+    if quote_depth < fenced[3]:
+        return False
+    list_indent = fenced[2]
+    return (
+        list_indent is None
+        or not content.strip()
+        or content.startswith(" " * list_indent)
+    )
+
+
 def _mask_markdown_comment_line(
     line: str, comment_open: bool,
 ) -> tuple[str, bool]:
@@ -254,7 +271,7 @@ def _mask_markdown_comment_line(
 def _markdown_mask_html_comments(source: str) -> str:
     """Preserve fences when HTML comment syntax is literal code content."""
     masked: list[str] = []
-    fenced: tuple[str, int, int | None] | None = None
+    fenced: tuple[str, int, int | None, int] | None = None
     comment_open = False
     for raw in source.splitlines(keepends=True):
         line = raw.rstrip("\r\n")
@@ -263,7 +280,11 @@ def _markdown_mask_html_comments(source: str) -> str:
             clean, comment_open = _mask_markdown_comment_line(line, True)
             masked.append(clean + ending)
             continue
-        content = _markdown_quote_content(line)
+        content, quote_depth = _markdown_quote_info(line)
+        if fenced is not None and not _markdown_fence_continues(
+            content, quote_depth, fenced,
+        ):
+            fenced = None
         if fenced is not None:
             candidate, _ = _markdown_fence_text(content, fenced[2])
             closing = _MD_FENCE.match(candidate)
@@ -278,7 +299,7 @@ def _markdown_mask_html_comments(source: str) -> str:
         opening = _MD_FENCE.match(candidate)
         if opening is not None:
             marks = opening.group("marks")
-            fenced = marks[0], len(marks), indent
+            fenced = marks[0], len(marks), indent, quote_depth
             masked.append(raw)
             continue
         clean, comment_open = _mask_markdown_comment_line(line, False)
@@ -289,11 +310,15 @@ def _markdown_mask_html_comments(source: str) -> str:
 def _markdown_edges(path: str, source: str, known: set[str]) -> list[dict[str, Any]]:
     sanitized = _markdown_mask_html_comments(source)
     edges: list[dict[str, Any]] = []
-    fenced: tuple[str, int, int | None] | None = None
+    fenced: tuple[str, int, int | None, int] | None = None
     in_html_code = False
     paragraph: list[tuple[int, str]] = []
     for ordinal, line in enumerate(sanitized.splitlines(), 1):
-        content = _markdown_quote_content(line)
+        content, quote_depth = _markdown_quote_info(line)
+        if fenced is not None and not _markdown_fence_continues(
+            content, quote_depth, fenced,
+        ):
+            fenced = None
         if fenced is not None:
             edges.extend(_markdown_prose_edges(path, paragraph, known))
             paragraph.clear()
@@ -321,7 +346,7 @@ def _markdown_edges(path: str, source: str, known: set[str]) -> list[dict[str, A
             edges.extend(_markdown_prose_edges(path, paragraph, known))
             paragraph.clear()
             marks = opener.group("marks")
-            fenced = marks[0], len(marks), list_indent
+            fenced = marks[0], len(marks), list_indent, quote_depth
             continue
         # Inline `<code>` examples are prose, not HTML code regions.
         visible = _without_inline_code(content)
@@ -400,7 +425,7 @@ def _yaml_uses_edges(path: str, source: str, known: set[str]) -> list[dict[str, 
             continue
         parent = _YAML_PARENT.match(line)
         if parent is not None:
-            context.append((indent + len(parent.group("prefix") or ""), parent.group("key")))
+            context.append((indent + len(parent.group("prefix") or ""), parent.group("key").strip("'\"")))
             continue
         match = _YAML_USES.match(line)
         if match is None:
