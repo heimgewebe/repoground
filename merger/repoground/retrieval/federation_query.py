@@ -497,3 +497,32 @@ def execute_federated_query_from_bundles(
         build_context=build_context,
         allow_external_bundle_paths=True,
     )
+
+# Revision-addressable readers share the existing federation query entrypoint
+# but do not touch persisted federation-index.v1 or build on query.
+def query_federation_revision(repo_root: Path, repo_id: str, commit: str) -> Dict[str, Any]:
+    from ..core.history_lens import git_revision_view
+    return git_revision_view(repo_root, repo_id, commit)
+
+
+def query_federation_delta(repo_root: Path, repo_id: str,
+                           base_commit: str, head_commit: str) -> Dict[str, Any]:
+    from ..core.history_lens import git_revision_delta
+    return git_revision_delta(repo_root, repo_id, base_commit, head_commit)
+
+
+def query_federation_relations(metarepo_root: Path, metarepo_commit: str,
+                               targets: Dict[str, tuple[Path, str]]) -> Dict[str, Any]:
+    from ..core.federation import fleet_revision_relations
+    return fleet_revision_relations(metarepo_root, metarepo_commit, targets)
+
+
+def query_federation_relation_delta(
+    metarepo_root: Path, base_metarepo_commit: str, head_metarepo_commit: str,
+    base_targets: Dict[str, tuple[Path, str]], head_targets: Dict[str, tuple[Path, str]],
+) -> Dict[str, Any]:
+    from ..core.federation import fleet_relation_delta
+    return fleet_relation_delta(
+        metarepo_root, base_metarepo_commit, head_metarepo_commit,
+        base_targets, head_targets,
+    )

@@ -4,6 +4,8 @@
 
 **Rolle:** Strategischer Ausführungsplan, kein Nachweis für Implementierung, Produktionsreife oder abgeschlossene Aufgaben.
 
+**Verbindliche neue Ausbaupriorität (27.10.2026):** Das [massive Ausbauprogramm](repoground-massive-expansion-program.md) ersetzt die frühere Reihenfolge „erst allgemeine Produktivitätssteigerung/20 A/B-Aufgaben nachweisen, dann breit implementieren“. **Zuerst** wird der deterministische Graph-, Änderungs-, Zeit- und Föderationskern einschließlich echter Agenten-Consumer in drei abgegrenzten Arbeitssträngen substanziell ausgebaut. **Danach** folgt die breite Gesamt-Nutzenbewertung. Vorlaufende Nutzenmessungen, historisch fehlende Bundles oder freiwillige Agentenaufrufe sind keine Start- oder Merge-Gates für unabhängige Features; korrektes Verhalten, Versionstreue, Rechte, Tests, CI und bestehende Sicherheitsgates bleiben verpflichtend.
+
 **Bezug:** [Master-Roadmap](repoground-master-roadmap.md) · [Agent Operationalization](lenskit-agent-operationalization-roadmap.md) · [Deterministic Core](../architecture/deterministic-repoground-core.md)
 
 ## 1. Auftrag
@@ -51,7 +53,7 @@ Langfristig entsteht eine **temporale Veränderungslandkarte**: Was existiert? W
 - Ein datiertes Heim-PC-Readback vom 27.10.2026 ergab für Grabowskis RepoGround-Frontdoor `publication_unavailable` / `no_bundle_available`. Beim Beginn des ersten Arbeitspakets **frisch neu prüfen**; dieser historische Check ist kein dauerhafter Betriebsstatus.
 - Die bisherigen Claude-A/B-Läufe belegen gezielt die Nutzung von Snapshot-Freshness, **nicht** eine generelle Verbesserung von Coding-Agenten. Der ursprüngliche Codex-Benchmark bleibt getrennt.
 
-**Folgerung:** Zuerst aktuelle Publikation, echter Agentenkonsum und funktionierende Suche. Erst danach weitere Artefakte und neue Systemebenen.
+**Historische Folgerung (in der Reihenfolge abgelöst):** Der frühere Vorrang von Betrieb, Adoption und Suche vor breiter Feature-Arbeit gilt nicht mehr als programmweite Implementierungssperre. Diese drei Fähigkeiten werden parallel zum großen Ausbau weiter verbessert; der neue Schwerpunkt liegt auf Veränderungsgraph, Zeitgeschichte, Föderation und darauf aufbauenden Agentenprodukten.
 
 ## 3. Produktstufen
 
@@ -67,7 +69,7 @@ Langfristig entsteht eine **temporale Veränderungslandkarte**: Was existiert? W
 
 Die Kennungen unten sind **Plan-IDs**, noch keine angelegten Bureau-Aufgaben. Bei Abarbeitung jeweils eine separate kanonische Task-ID, Ausgangsrevision, genau ein Scope, Tests und einen belastbaren Readback anlegen. Bereits existierende Features nicht neu implementieren.
 
-### P0 – Betrieb und echte Agentenadoption (muss zuerst funktionieren)
+### P0 – Betrieb und echte Agentenadoption (parallel fortführen, kein Ausbau-Gate)
 
 #### RG-P0-01 – Aktuelle Bundles zuverlässig bereitstellen
 
@@ -84,14 +86,16 @@ Die Kennungen unten sind **Plan-IDs**, noch keine angelegten Bureau-Aufgaben. Be
 - **Abnahme:** Pro Consumer ein echter, wiederholbarer End-to-End-Task mit **nachgewiesenem Toolaufruf**, korrekter Quelle, passendem Modell-/Checkout-Kontext und getestetem Fallback. „MCP eingerichtet“ oder „Tool verfügbar“ ist kein Nutzungsnachweis.
 - Credentials dürfen niemals in RepoGround-Bundles, Repositorytexte oder Benchmarkartefakte gelangen.
 
-#### RG-P0-03 – Realen Mehrwert gegen normale Agenten messen
+#### RG-P0-03 – Realen Mehrwert gegen normale Agenten messen (Gesamtbenchmark nach Ausbau)
+
+**Neue Terminierung:** Die mindestens 20 realen A/B-Aufgaben bleiben als spätere Gesamtabnahme erhalten, sind aber **keine Voraussetzung für RG-XG/RG-XH/RG-XF/RG-XC-Implementierungen**. Kleine Tests während der Entwicklung sind zulässig, ohne über das Ausbauprogramm zu entscheiden.
 
 - Vor jeder Messreihe Aufgaben, Goldstandard, Modell, Revision, Ressourcenbudgets, Bewertung und Stop-Kriterien fixieren.
 - Mindestens **20 reale** Aufgaben aus **mehreren** Heimgewebe-Repositories: Code-Navigation, Fehleranalyse, Testfindung, Änderungs- und Vertragsfolgen, Patch-Vorbereitung. Keine künstlichen „ist RepoGround-Snapshot fresh?“-Aufgaben als allgemeiner Nützlichkeitsbeleg.
 - Jeder Agent erledigt Vergleichsaufgaben **mit** und **ohne** optional verfügbares RepoGround; der Agent darf Tools normal wählen. Tatsächliche Verwendung wird gemessen, nicht erzwungen.
 - **Abnahme:** vollständige, identitätsgebundene A/B-Quittungen inklusive Fehlern: richtige Zielfundstellen und Aufgabenergebnisse, Recall@k/Einzelziel-Recall, Nacharbeit, Toolaufrufe, Tokens und gesamte Zeit **einschließlich** Snapshot-Erzeugung/Betrieb. Pro Aufgabenklasse separate Entscheidung, keine globale Promotion aus Einzelbeispielen.
 
-### P1 – Suchqualität verbessern, bevor wir mehr produzieren
+### P1 – Suchqualität parallel zum massiven Ausbau verbessern
 
 #### RG-P1-01 – Vorhandene deterministische Suchwege richtig nutzen
 
@@ -106,7 +110,7 @@ Die Kennungen unten sind **Plan-IDs**, noch keine angelegten Bureau-Aufgaben. Be
 - **Abnahme:** mindestens zwei reale Agenten nutzen nachweislich die passende Route und lösen eine dokumentierte Klasse von Aufgaben besser als mit ihrer nativen Suche.
 - Optionales Embedding-Reranking bleibt außerhalb des deterministischen **Standardkerns** und braucht einen eigenen Mess- und Freigabepfad.
 
-### P2 – Change Intelligence mit dem kleinsten nutzbaren Produkt
+### P2 – Change Intelligence als Kern des großen Ausbauprogramms
 
 #### RG-P2-01 – Revisionsgebundener Änderungsbericht
 
@@ -171,16 +175,18 @@ Für die genannten passenden Aufgaben wird diese *nicht blockierende* Disziplin 
 
 Konkrete Default-Schwellen für jede Aufgabenklasse werden **vor** der jeweiligen Messung im Goldstandard festgelegt (etwa Aufgabenerfolg, tolerierbare Mehrkosten und Vermeidung wesentlicher Regressionen). Ein hoher Recall-Wert allein beweist keine allgemeine Agentenqualität.
 
-## 7. Der erste auszuführende Auftrag nach Integration
+## 7. Neue Ausführungsreihenfolge: drei parallele Ausbau-Threads
 
-**Starte mit RG-P0-01. Nicht gleichzeitig die gesamte Roadmap implementieren.**
+**Beschluss vom 27.10.2026:** Das [massive Ausbauprogramm](repoground-massive-expansion-program.md) und seine drei Arbeitsaufträge sind jetzt der verbindliche Einstieg, nicht mehr die frühere Reihenfolge „RG-P0-01, dann Adoption, erst danach Features“.
 
-- **Writer:** Grabowski; bestehende Captain-/Review-/CI-/Release-Verträge einhalten.
-- **Unabhängige Kontrolle:** Großer Adler lesend, Nixer nur für NixOS-Fragen, Same-Thread-Gegenprobe bei tragenden Architekturfestlegungen.
-- **Auftrag:** aktuellen Git-, Heim-PC-, Publisher- und Bundle-Zustand lesen, Ursache der fehlenden Agentenverfügbarkeit beheben, *einen* echten RepoGround-Bundle-Consumerweg für Grabowski demonstrieren.
-- **Abnahmequittung:** tatsächliches Bundle/Manifest, Git-Bindung, `discover → preflight → query`, echtes Agenten-`tool_use`, nachvollziehbarer Fallback und explizite unerledigte Punkte.
-- **Dann:** RG-P0-02 mit realer Grabowski-Adoption und anschließend Claude/Codex beginnen. Kein Feature-Großumbau aufgrund einer unverifizierten Annahme.
+1. [Thread 1: Strukturgraph und Veränderungsanalyse](repoground-expansion-thread-1-graph.md) – echte Parser-/Graph-/Impact-Implementierung.
+2. [Thread 2: Föderation und technische Geschichte](repoground-expansion-thread-2-federation-time.md) – revisionsgebundene Geschichte und belegte Cross-Repo-Beziehungen.
+3. [Thread 3: Agentenprodukt und Ereignisfluss](repoground-expansion-thread-3-consumers.md) – nachvollziehbare CLI/MCP-Berichte, aktive Consumer und inkrementeller Handoff.
 
-Die Plan-IDs ersetzen **nicht** die kanonischen Taskstatus in `docs/tasks/index.json` beziehungsweise Bureau. Jede Implementierung erhält beim Beginn einen eigenen begrenzten Task und PR mit Ist-Zustand, Tests, STOP-Scope und nachgewiesenem Merge-/Produktions-Readback.
+**Gleichzeitig ausführbar:** Je Thread ein unabhängiger Grabowski-Writer-Scope mit eigenem Branch, Lease, Task/PR und disjunkten Dateipfaden. Keine parallelen Änderungen an denselben Modulen. Öffentliche Antwort-Verträge werden als kleine Folge-PRs koordiniert; Risiken blockieren nur die jeweilige betroffene Mutation, nicht das ganze Programm.
 
-**Entscheidung:** RepoGround muss als deterministisches Werkzeug die **Agenten** besser machen, nicht den Bedarf an seinen eigenen Snapshots vergrößern.
+**Bereits historische P0-01-Ergebnisse:** Ein tatsächlicher Fleet-Publisher, gesunde Bundles sowie Grabowski/Codex-MCP-Nutzung wurden am 27.10.2026 beobachtet. Das ist kein Freibrief, aktuelle Verfügbarkeit nicht mehr frisch zu prüfen. Die ursprünglichen P0-IDs werden nicht als erneut ungeprüft offen oder als globaler Stop angenommen.
+
+Die Plan-IDs ersetzen **nicht** die kanonischen Taskstatus in `docs/tasks/index.json` beziehungsweise Bureau. Jede Implementierung erhält einen kleinen Scope, Tests und revisionsgebundenen Merge-/Produktions-Readback.
+
+**Entscheidung:** Erst den echten deterministischen Mehr-Repo-Veränderungskern massiv ausbauen und anschließend den systemweiten Nutzen evaluieren. RepoGround bleibt ein Werkzeug für Agenten, kein Agent selbst.

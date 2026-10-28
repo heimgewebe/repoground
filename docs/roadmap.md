@@ -22,3 +22,7 @@ Die folgenden Planungsartefakte sind aktiv und in Task-Control registriert:
 - `docs/blueprints/lenskit-agent-front-door-hardening.md`
 - `docs/blueprints/repobrief-agent-frontdoor-grounding-verifier-v1.md`
 - `docs/roadmap/repoground-vision-and-agent-adoption.md`
+- `docs/roadmap/repoground-massive-expansion-program.md`
+- `docs/roadmap/repoground-expansion-thread-1-graph.md`
+- `docs/roadmap/repoground-expansion-thread-2-federation-time.md`
+- `docs/roadmap/repoground-expansion-thread-3-consumers.md`
