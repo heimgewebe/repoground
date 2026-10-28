@@ -128,6 +128,19 @@ def _is_graph_source_path(path: str) -> bool:
     return suffix in _GRAPH_FILE_LANGUAGES
 
 
+def _reject_source_index_trust_flags(repo: Path) -> None:
+    """Refuse Git index hints that conceal on-disk producer changes from status."""
+    flagged = _git(repo, ["ls-files", "-v", "-z"], max_bytes=8_000_000)
+    for record in flagged.split(b"\x00"):
+        if not record:
+            continue
+        tag, separator, raw_path = record.partition(b" ")
+        if separator != b" " or len(tag) != 1:
+            raise ValueError("tracked_source_flags_invalid")
+        if (tag.islower() or tag == b"S") and _is_graph_source_path(raw_path.decode("utf-8")):
+            raise ValueError("tracked_source_index_trust_flags")
+
+
 def _source_inventory_safe(repo: Path) -> None:
     """Fail closed when a producer could read bytes absent from Git HEAD.
 
@@ -143,6 +156,7 @@ def _source_inventory_safe(repo: Path) -> None:
     for raw in ignored.split(b"\x00"):
         if raw and _is_graph_source_path(raw.decode("utf-8")):
             raise ValueError("ignored_source_not_in_head")
+    _reject_source_index_trust_flags(repo)
     stage = _git(repo, ["ls-files", "--stage", "-z"], max_bytes=8_000_000)
     for raw in stage.split(b"\x00"):
         if not raw:

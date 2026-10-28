@@ -168,6 +168,20 @@ class TestRevisionGraphImpact(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "ignored_source_not_in_head"):
             self.report()
 
+    def test_tracked_source_index_trust_flags_cannot_hide_source_mutations(self):
+        source = "tests/test_mod.py"
+        for flag, reset in (
+            ("--assume-unchanged", "--no-assume-unchanged"),
+            ("--skip-worktree", "--no-skip-worktree"),
+        ):
+            with self.subTest(flag=flag):
+                self.git("update-index", flag, source)
+                self.write(source, "def test_no_longer_references_feature():\n    pass\n")
+                with self.assertRaisesRegex(ValueError, "tracked_source_index_trust_flags"):
+                    self.report()
+                self.git("update-index", reset, source)
+                self.git("checkout", "--", source)
+
     def test_ignored_schema_source_does_not_change_revision_graph(self):
         exclude = self.root / ".git" / "info" / "exclude"
         exclude.write_text("local/\n", encoding="utf-8")
