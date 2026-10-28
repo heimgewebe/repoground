@@ -9,17 +9,18 @@ Leitlinien:
 - Keine Implementierung in diesem PR.
 - Keine Blaupausen-Megafusion.
 
-## Strategische Anschlussplanung ab 27.10.2026
+## Strategische Anschlussplanung ab 27.10.2026 – massiver Ausbau beschlossen
 
-Der [ausführbare RepoGround-Vision- und Agentenadoptionsplan](repoground-vision-and-agent-adoption.md)
-ordnet die nächsten **praktischen** Arbeiten: P0 echte Bündelverfügbarkeit und nachweisbare
-Nutzung durch Grabowski/Claude/Codex, P1 vorhandenes deterministisches Retrieval wirksam
-machen, danach revisionsgebundene Change Intelligence, Föderation und Zeitgeschichte.
+**Verbindlicher Vorrang:** Das [RepoGround-Massivausbauprogramm](repoground-massive-expansion-program.md) ersetzt die bisherige Reihenfolge „erst allgemeiner Nutzennachweis, danach breiter Funktionsausbau“. **Zuerst werden** der deterministische Struktur- und Veränderungsgraph, revisionsgebundene technische Geschichte, echte repositoryübergreifende Beziehungen sowie ein nutzbares Agenten-/Ereignisprodukt in drei unabhängigen Arbeitssträngen substanziell ausgebaut. **Danach** wird der systemweite Mehrwert durch einen breiten Aufgabenvergleich bewertet.
 
-Er ist **kein** Ersatz für die Phasen-/Contract-Arbeit dieses Dokuments und
-**keine** alternative Statusautorität. Priorität, Freigaben und Done-Zustände
-werden bei der tatsächlichen Abarbeitung anhand der jeweils aktuellen Primärquellen,
-Tests und kanonischen Task-ID bestätigt. Keine breite Feature-Arbeit vor P0-/Nutzennachweis.
+Die drei unmittelbar ausführbaren Arbeitspakete sind:
+- [Struktur-/Veränderungskern](repoground-expansion-thread-1-graph.md)
+- [Föderation und Zeitgeschichte](repoground-expansion-thread-2-federation-time.md)
+- [Agentenprodukt und Ereignisfluss](repoground-expansion-thread-3-consumers.md)
+
+Der frühere [Vision- und Agentenadoptionsplan](repoground-vision-and-agent-adoption.md) bleibt als fachlicher Referenzplan gültig, **seine frühere vorgelagerte Benchmark-/Adoptionssperre gilt nicht mehr**. Fehlende vollständige 20er-A/B-Messung blockiert keine unabhängige Implementierung. Dagegen bleiben konkrete Git-/Lease-/CI-/Review-/Sicherheits-/Versionsgates vor einer jeweiligen Integration verbindlich.
+
+Die Master-Roadmap ist weder alternative Taskstatusquelle noch Implementierungsbeleg; aktuelle Primärzustände, eigentümergebundene Grabowski-Writer-Lanes und kanonische Task-/PR-Belege sind weiter notwendig.
 
 ## Statuswahrheit
 
