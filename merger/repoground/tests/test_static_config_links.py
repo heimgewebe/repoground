@@ -140,7 +140,7 @@ class TestStaticConfigLinks(unittest.TestCase):
             "          uses: ./actions/local\n"
             "      - uses: $/actions/local\n"
             "      - uses: ./.github/workflows/reusable.yml\n"
-            "      - run: echo uses: ./.github/workflows/fake.yml\n"
+            '      - run: "echo uses: ./.github/workflows/fake.yml"\n'
             "    env:\n"
             "      uses: ./.github/workflows/reusable.yml\n"
             "      steps:\n"
@@ -319,14 +319,14 @@ class TestStaticConfigLinks(unittest.TestCase):
             "  [example](./target.md)\n"
             "  ~~~\n"
             "[real](./target.md)\n"
-            "10000. ~~~md\n"
+            "\n10000. ~~~md\n"
             "       [example2](./target.md)\n"
             "       ~~~\n"
             "[after](./target.md)\n"
         ))
         edges, _, _ = self.edges()
         own = [e for e in edges if e["src"] == "file:docs/list-fences.md"]
-        self.assertEqual([4, 8], [
+        self.assertEqual([4, 9], [
             e["source"]["start_line"] for e in own
         ], own)
 
@@ -887,7 +887,7 @@ class TestStaticConfigLinks(unittest.TestCase):
         self.write("docs/target.md", "# target\n")
         self.write(
             "docs/many-comments.md",
-            "<!--x-->" * 8000 + " [real](./target.md)\n",
+            "prose " + "<!--x-->" * 8000 + " [real](./target.md)\n",
         )
         started = time.perf_counter()
         edges, _, _ = self.edges()
@@ -902,7 +902,7 @@ class TestStaticConfigLinks(unittest.TestCase):
     def test_backtick_inside_html_comment_does_not_hide_following_link(self):
         self.write("docs/target.md", "# target\n")
         self.write("docs/comment-backtick.md", (
-            "<!-- ` inside comment --> [real](./target.md)\n"
+            "prose <!-- ` inside comment --> [real](./target.md)\n"
         ))
         edges, _, _ = self.edges()
         own = [edge for edge in edges if edge["src"] == "file:docs/comment-backtick.md"]
@@ -1365,6 +1365,202 @@ class TestStaticConfigLinks(unittest.TestCase):
         self.assertEqual([("file:actions/local/action.yml", "S1")], [
             (edge["dst"], edge["evidence_level"]) for edge in edges
         ])
+
+
+
+    def test_yaml_sequence_scalars_and_non_identifier_keys_are_not_uses(self):
+        import yaml
+
+        known = {"file:actions/local/action.yml", "file:actions/real/action.yml"}
+        scalar_steps = (
+            "      - |\n        uses: ./actions/local\n",
+            "      - >-\n        uses: ./actions/local\n",
+            "      - &script |\n        uses: ./actions/local\n",
+            "      - !!str |\n        uses: ./actions/local\n",
+            '      - "my step": |\n          uses: ./actions/local\n',
+            "      - 'my step': >-\n          uses: ./actions/local\n",
+        )
+        for steps in scalar_steps:
+            with self.subTest(steps=steps):
+                source = "jobs:\n  build:\n    steps:\n" + steps + "      - uses: ./actions/real\n"
+                parsed = yaml.safe_load(source)
+                self.assertEqual("./actions/real", parsed["jobs"]["build"]["steps"][-1]["uses"])
+                edges = config_reference_edges(".github/workflows/scalars.yml", source, known)
+                self.assertEqual(
+                    [("file:actions/real/action.yml", "S1")],
+                    [(edge["dst"], edge["evidence_level"]) for edge in edges], edges,
+                )
+
+    def test_yaml_hash_without_separator_remains_in_literal_uses_path(self):
+        known = {"file:actions/local/action.yml", "file:.github/workflows/reusable.yml"}
+        source = (
+            "jobs:\n"
+            "  reusable:\n"
+            "    uses: ./.github/workflows/reusable.yml#v1\n"
+            "  build:\n"
+            "    steps:\n"
+            "      - uses: ./actions/local#v1\n"
+        )
+        edges = config_reference_edges(".github/workflows/hash.yml", source, known)
+        self.assertEqual(2, len(edges), edges)
+        self.assertTrue(all(edge["evidence_level"] == "S0" for edge in edges), edges)
+        self.assertTrue(all("#v1" in edge["dst"] for edge in edges), edges)
+
+    def test_markdown_html_attributes_cannot_mask_fence_boundaries(self):
+        known = {"file:target.md", "file:real.md"}
+        sources = (
+            '<a title="\n~~~\n">\n[fake](./target.md)\n~~~\n',
+            '~~~\n<a title="\n~~~\n">\n~~~\n[fake](./target.md)\n~~~\n',
+        )
+        for source in sources:
+            with self.subTest(source=source):
+                edges = config_reference_edges("README.md", source + "\n[real](./real.md)\n", known)
+                self.assertEqual(["file:real.md"], [edge["dst"] for edge in edges], edges)
+
+    def test_markdown_complete_standalone_tags_start_html_blocks(self):
+        known = {"file:target.md", "file:real.md"}
+        for tag in ('<img src="logo.png">', "<span>", "<br>", '<a href="x">', "</a>"):
+            with self.subTest(tag=tag):
+                source = tag + "\n[fake](./target.md)\n\n[real](./real.md)\n"
+                edges = config_reference_edges("README.md", source, known)
+                self.assertEqual(["file:real.md"], [edge["dst"] for edge in edges], edges)
+        source = "Prose\n<span>\n[real](./real.md)\n"
+        edges = config_reference_edges("README.md", source, known)
+        self.assertEqual(["file:real.md"], [edge["dst"] for edge in edges], edges)
+
+    def test_markdown_escape_consumes_only_first_backtick_of_run(self):
+        known = {"file:target.md", "file:real.md"}
+        for width in range(2, 6):
+            with self.subTest(width=width):
+                source = (
+                    "\\" + chr(96) * width + "[fake](./target.md)"
+                    + chr(96) * (width - 1) + "\n\n[real](./real.md)"
+                )
+                edges = config_reference_edges("README.md", source, known)
+                self.assertEqual(["file:real.md"], [edge["dst"] for edge in edges], edges)
+
+
+
+    def test_yaml_invalid_and_ambiguous_documents_have_explicit_coverage_gaps(self):
+        cases = {
+            "invalid_yaml": "jobs:\n  build:\n    steps:\n      - run: echo uses: ./actions/local\n",
+            "yaml_alias_provenance_unavailable": (
+                "anchor: &step {uses: ./actions/local}\n"
+                "jobs: {build: {steps: [*step]}}\n"
+            ),
+            "yaml_duplicate_or_merge_key": (
+                "jobs: {build: {steps: [{uses: ./actions/local, uses: ./actions/other}]}}\n"
+            ),
+            "yaml_unsupported_tag": (
+                "jobs: !custom {build: {steps: [{uses: ./actions/local}]}}\n"
+            ),
+        }
+        self.write("actions/local/action.yml", "name: local\n")
+        for code, source in cases.items():
+            with self.subTest(code=code):
+                self.write(".github/workflows/uncertain.yml", source)
+                edges, coverage, _ = self.edges()
+                self.assertFalse(any(
+                    edge["src"] == "file:.github/workflows/uncertain.yml"
+                    for edge in edges
+                ), edges)
+                self.assertEqual(1, coverage["skipped"].get(code), coverage)
+
+    def test_yaml_composed_tags_must_match_node_kinds(self):
+        self.write("actions/local/action.yml", "name: local\n")
+        for source in (
+            "jobs: !!str {build: {steps: [{uses: ./actions/local}]}}\n",
+            "jobs: {build: {steps: !!map [{uses: ./actions/local}]}}\n",
+            "jobs: {build: {steps: [{uses: !!map ./actions/local}]}}\n",
+        ):
+            with self.subTest(source=source):
+                self.write(".github/workflows/tag-kind.yml", source)
+                edges, coverage, _ = self.edges()
+                self.assertFalse(any(
+                    edge["src"] == "file:.github/workflows/tag-kind.yml"
+                    for edge in edges
+                ), edges)
+                self.assertEqual(1, coverage["skipped"].get("yaml_unsupported_tag"), coverage)
+
+    def test_yaml_multiline_use_evidence_includes_value(self):
+        self.write("actions/local/action.yml", "name: local\n")
+        for opener in ("uses:", "uses: >-", 'uses: "\\'):
+            with self.subTest(opener=opener):
+                suffix = '"' if opener.startswith('uses: "') else ""
+                source = (
+                    "jobs:\n  build:\n    steps:\n"
+                    "      - " + opener + "\n"
+                    "          ./actions/local" + suffix + "\n"
+                )
+                self.write(".github/workflows/multiline-use.yml", source)
+                edges, _, _ = self.edges()
+                own = [e for e in edges
+                       if e["src"] == "file:.github/workflows/multiline-use.yml"]
+                self.assertEqual(1, len(own), own)
+                self.assertEqual("S1", own[0]["evidence_level"])
+                self.assertEqual({
+                    "path": ".github/workflows/multiline-use.yml",
+                    "start_line": 4, "end_line": 5,
+                    "range_ref": "file:.github/workflows/multiline-use.yml#L4-L5",
+                }, own[0]["source"])
+
+    def test_markdown_trimmed_parent_does_not_fabricate_precise_source_line(self):
+        for leading in ("\u2028", "\f", "\v"):
+            with self.subTest(leading=repr(leading)):
+                source = leading + "\n[a](./target.md)\n[a](./target.md)\n"
+                edges = config_reference_edges("README.md", source, {"file:target.md"})
+                self.assertTrue(edges)
+                # A native parent whose rows were stripped cannot prove a
+                # precise per-token line; preserve its true enclosing range.
+                for edge in edges:
+                    self.assertEqual((1, 4), (
+                        edge["source"]["start_line"], edge["source"]["end_line"],
+                    ), edges)
+
+    def test_markdown_nonvoid_html_slash_keeps_code_container_open(self):
+        for tag in ("code", "pre", "script", "style", "textarea"):
+            with self.subTest(tag=tag):
+                source = (
+                    f"Some <{tag}/>[fake](./target.md)</{tag}> "
+                    "[real](./real.md)\n"
+                )
+                edges = config_reference_edges(
+                    "README.md", source, {"file:target.md", "file:real.md"},
+                )
+                self.assertEqual(["file:real.md"], [edge["dst"] for edge in edges], edges)
+
+    def test_markdown_block_comments_and_noninterrupting_ordered_markers(self):
+        comment = "<!-- \u0060 inside --> [raw](./target.md)\n\n[real](./real.md)\n"
+        edges = config_reference_edges(
+            "README.md", comment, {"file:target.md", "file:real.md"},
+        )
+        self.assertEqual(["file:real.md"], [edge["dst"] for edge in edges], edges)
+        source = (
+            "paragraph\n10000. ~~~md\n"
+            "       [real](./target.md)\n       ~~~\n"
+        )
+        edges = config_reference_edges("README.md", source, {"file:target.md"})
+        self.assertEqual([3], [edge["source"]["start_line"] for edge in edges], edges)
+
+    def test_markdown_native_links_images_references_and_unicode_source_ranges(self):
+        known = {"file:target.md", "file:other.md", "file:image.svg", "file:real.md"}
+        cases = (
+            ("prose [real](./target.md)\n", [("file:target.md", 1)]),
+            ("![alt [fake](./other.md)](./image.svg)\n", [("file:image.svg", 1)]),
+            ("[ref][name]\n\n[name]: ./target.md\n", []),
+            ("before\f[real](./target.md)\n", [("file:target.md", 2)]),
+            ("before\u2028[real](./target.md)\n", [("file:target.md", 2)]),
+            ('before <a title="x\f[fake](./other.md)">x</a> [real](./target.md)\n',
+             [("file:target.md", 2)]),
+            ("<code>[hidden](./target.md)\n\n[hidden](./target.md)</code>\n"
+             "[real](./real.md)\n", [("file:real.md", 4)]),
+        )
+        for source, expected in cases:
+            with self.subTest(source=source):
+                edges = config_reference_edges("README.md", source, known)
+                self.assertEqual(expected, [
+                    (edge["dst"], edge["source"]["start_line"]) for edge in edges
+                ], edges)
 
 
 if __name__ == "__main__":

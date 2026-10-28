@@ -1,7 +1,8 @@
 """Bounded lexical declarations for languages already represented by the file graph.
 
-No parser dependency or runtime inference: unique literal local references get
-S1 file edges, unresolved/dynamic/lexically uncertain declarations remain S0.
+Structural parsers handle YAML and Markdown boundaries; other formats retain
+bounded lexical rules. Unique literal local references get S1 file edges;
+unresolved/dynamic/uncertain declarations remain S0. No runtime inference.
 All candidate files come from the existing architecture.graph inventory.
 """
 from __future__ import annotations
@@ -14,6 +15,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, Sequence
 
 from merger.repoground.architecture.relationship_projection import _edge, _safe_path, _source
+from merger.repoground.architecture.static_config_links import ConfigSourceUnavailable
 
 MAX_FILES = 10_000
 MAX_SOURCE_BYTES = 250_000
@@ -607,6 +609,20 @@ def _read_declared_source(
     except (OSError, UnicodeDecodeError):
         return None, 0, "unreadable_source"
 
+def _validate_declared_limits(
+    max_files: int, max_total_bytes: int, max_relation_edges: int,
+) -> None:
+    """Reject invalid inventory budgets before beginning any source scan."""
+    if isinstance(max_files, bool) or not isinstance(max_files, int) or not 1 <= max_files <= MAX_FILES:
+        raise ValueError("max_files outside bounded range")
+    if (isinstance(max_total_bytes, bool) or not isinstance(max_total_bytes, int)
+            or not 1 <= max_total_bytes <= MAX_TOTAL_BYTES):
+        raise ValueError("max_total_bytes outside bounded range")
+    if (isinstance(max_relation_edges, bool) or not isinstance(max_relation_edges, int)
+            or not 1 <= max_relation_edges <= MAX_DECLARED_EDGES):
+        raise ValueError("max_relation_edges outside bounded range")
+
+
 def extract_declared_relations(
     repo_root: Path,
     architecture_graph: Mapping[str, Any],
@@ -620,14 +636,7 @@ def extract_declared_relations(
     No traversal beyond the recorded graph inventory, no symlink chasing and
     no guessing runtime or parser completeness. Stable output excludes clocks.
     """
-    if isinstance(max_files, bool) or not isinstance(max_files, int) or not 1 <= max_files <= MAX_FILES:
-        raise ValueError("max_files outside bounded range")
-    if (isinstance(max_total_bytes, bool) or not isinstance(max_total_bytes, int)
-            or not 1 <= max_total_bytes <= MAX_TOTAL_BYTES):
-        raise ValueError("max_total_bytes outside bounded range")
-    if (isinstance(max_relation_edges, bool) or not isinstance(max_relation_edges, int)
-            or not 1 <= max_relation_edges <= MAX_DECLARED_EDGES):
-        raise ValueError("max_relation_edges outside bounded range")
+    _validate_declared_limits(max_files, max_total_bytes, max_relation_edges)
     nodes = architecture_graph.get("nodes")
     if not isinstance(nodes, list):
         raise ValueError("architecture graph inventory is unavailable")
@@ -663,8 +672,12 @@ def extract_declared_relations(
             continue
         assert source is not None
         bytes_read += source_size
+        try:
+            found = _edges_for_source(name, source, known)
+        except ConfigSourceUnavailable as exc:
+            skipped[exc.code] += 1
+            continue
         parsed += 1
-        found = _edges_for_source(name, source, known)
         remaining = max_relation_edges - len(emitted)
         emitted.extend(found[:remaining])
         if len(found) > remaining:

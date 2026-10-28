@@ -1,4 +1,4 @@
-"""Conservative lexical file/config references for the existing relationship graph.
+"""Conservative file/config references for the existing relationship graph.
 
 Only known, literal repository files are S1. Runtime-dependent shell paths,
 systemd unit names, Caddy imports and external Actions remain S0. Neither
@@ -8,59 +8,13 @@ from __future__ import annotations
 
 import posixpath
 import re
+from bisect import bisect_right
+from html.parser import HTMLParser
+from itertools import accumulate
 from pathlib import PurePosixPath
 from typing import Any
 
 from merger.repoground.architecture.relationship_projection import _edge, _source
-
-_MD_LINK = re.compile(
-    r"""!?\[[^\]\n]{1,200}\]\(\s*(?P<ref><[^>\n]{1,240}>|[^()\s]{1,240})(?:\s+"[^"\n]{0,80}")?\s*\)"""
-)
-_MD_FENCE = re.compile(r"^ {0,3}(?P<marks>\x60{3,}|~{3,})(?:[^\n]*)$")
-_MD_COMMENT = re.compile(r"<!--[\s\S]*?(?:-->|$)")
-
-# CommonMark 0.31.2, section 6.6: complete tags and attribute values are
-# lexical units. A '>' or backtick inside a quoted value is not a boundary.
-_MD_HTML_WS = r"[ \t]*(?:\n[ \t]*)?"
-_MD_HTML_REQUIRED_WS = r"(?:[ \t]+(?:\n[ \t]*)?|\n[ \t]*)"
-_MD_HTML_VALUE = r"""(?:[^ \t\r\n"'=<>\x60]+|'[^']*'|"[^"]*")"""
-_MD_HTML_ATTRIBUTE = (
-    rf"{_MD_HTML_REQUIRED_WS}[A-Za-z_:][A-Za-z0-9_.:-]*"
-    rf"(?:{_MD_HTML_WS}={_MD_HTML_WS}{_MD_HTML_VALUE})?"
-)
-_MD_HTML_TAG = (
-    rf"<(?P<closing>/)?(?P<tag>[A-Za-z][A-Za-z0-9-]*)"
-    rf"(?(closing){_MD_HTML_WS}>|(?:{_MD_HTML_ATTRIBUTE})*{_MD_HTML_WS}/?>)"
-)
-_MD_INLINE_TOKEN = re.compile(
-    rf"(?P<ticks>\x60+)|{_MD_HTML_TAG}|"
-    r"<!--(?:>|->|[\s\S]*?(?:-->|$))|"
-    r"<\?[\s\S]*?\?>|<!\[CDATA\[[\s\S]*?\]\]>|<![A-Za-z][^>]*>"
-)
-_MD_LINE_ENDINGS = frozenset("\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029")
-
-_YAML_USES = re.compile(
-    r"""^[ \t]*(?:-[ \t]+)?(?:uses|"uses"|'uses'):[ \t]+(?P<value>"[^"\n]+"|'[^'\n]+'|[^\s#]+)[ \t]*(?:#.*)?$"""
-)
-# YAML node properties may precede either a block indicator or a multiline
-# quoted scalar. Share the lexical boundary so anchors/tags cannot make script
-# text look like an S1 GitHub Actions "uses" declaration.
-_YAML_KEY = r"""(?:[A-Za-z_][\w.-]*|"[A-Za-z_][\w.-]*"|'[A-Za-z_][\w.-]*')"""
-_YAML_NODE_PROPERTY = (
-    r"(?:&[A-Za-z0-9_-]+|"
-    r"!(?:<[^\s<>]{1,128}>|[A-Za-z0-9_.:/!+-]+)?)"
-)
-_YAML_SCALAR_PROPERTIES = rf"""(?:{_YAML_NODE_PROPERTY}[ \t]+){{0,2}}"""
-_YAML_FLOW_PROPERTY = re.compile(rf"{_YAML_NODE_PROPERTY}(?=[ \t]|$)")
-_YAML_BLOCK = re.compile(
-    rf"""^(?P<indent>[ \t]*)(?P<prefix>-[ \t]+)?{_YAML_KEY}:[ \t]*{_YAML_SCALAR_PROPERTIES}[|>](?:[-+][1-9]?|[1-9][-+]?)?[ \t]*(?:#.*)?$"""
-)
-_YAML_PARENT = re.compile(
-    rf"""^[ \t]*(?P<prefix>-[ \t]+)?(?P<key>{_YAML_KEY}):[ \t]*(?:{_YAML_NODE_PROPERTY}[ \t]*){{0,2}}(?:#.*)?$"""
-)
-_YAML_QUOTED_VALUE = re.compile(
-    rf"""^[ \t]*(?:-[ \t]+)?{_YAML_KEY}:[ \t]*{_YAML_SCALAR_PROPERTIES}(?P<quote>["'])"""
-)
 
 _SHELL_SOURCE = re.compile(
     r"""^\s*(?:source|\.)\s+(?P<ref>\.{1,2}/[A-Za-z0-9_./+-]+)(?:\s*(?:#.*)?)?$"""
@@ -70,10 +24,6 @@ _SYSTEMD_SECTION = re.compile(r"^[ \t]*\[(?P<section>[A-Za-z]+)\][ \t]*$")
 _SYSTEMD_UNIT_REF = re.compile(r"^[A-Za-z0-9_.@:-]+\.(?:service|socket|timer|target|path)$")
 _URL_SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 _UNIT_SUFFIXES = {".service", ".socket", ".target", ".timer", ".path"}
-
-
-def _mask_span(text: str) -> str:
-    return "".join(char if char in _MD_LINE_ENDINGS else " " for char in text)
 
 
 def _local_target(
@@ -131,797 +81,317 @@ def _unproven(
     )
 
 
-def _without_inline_code(paragraph: str) -> str:
-    """Mask only paired exact-width backtick spans within one prose paragraph.
+class ConfigSourceUnavailable(ValueError):
+    """A source could not be interpreted safely; preserve a coverage gap."""
 
-    An unmatched backtick is literal CommonMark text and must not hide links.
-    Matching positions are calculated backwards, bounded linearly by source size.
-    """
-    marker = chr(96)
-    runs: list[tuple[int, int]] = []
-    index = 0
-    while index < len(paragraph):
-        start = paragraph.find(marker, index)
-        if start < 0:
-            break
-        end = start + 1
-        while end < len(paragraph) and paragraph[end] == marker:
-            end += 1
-        runs.append((start, end))
-        index = end
-
-    next_run: list[int | None] = [None] * len(runs)
-    following: dict[int, int] = {}
-    for index in range(len(runs) - 1, -1, -1):
-        start, end = runs[index]
-        width = end - start
-        next_run[index] = following.get(width)
-        following[width] = index
-
-    visible = list(paragraph)
-    index = 0
-    while index < len(runs):
-        if _escaped_markdown_opener(paragraph, runs[index][0]):
-            index += 1
-            continue
-        closing = next_run[index]
-        if closing is None:
-            index += 1
-            continue
-        for position in range(runs[index][0], runs[closing][1]):
-            if visible[position] != "\n":
-                visible[position] = " "
-        index = closing + 1
-    return "".join(visible)
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
 
 
-def _markdown_indented_code(line: str) -> bool:
-    """Exclude possible CommonMark indented code, even in ambiguous lists.
+class _MarkdownLines:
+    """Bind native CommonMark tokens to RepoGround's splitlines source ranges."""
 
-    A tab stops at the next multiple of four columns; skipping ambiguous
-    nested-list content favors a missed link over a false proven S1 edge.
-    """
-    columns = 0
-    for char in line:
-        if char == " ":
-            columns += 1
-        elif char == "\t":
-            columns += 4 - columns % 4
-        else:
-            break
-        if columns >= 4:
-            return True
-    return False
+    def __init__(self, source: str) -> None:
+        self.source = source
+        self.rows = source.split("\n")
+        self.starts = list(accumulate(
+            (len(row) + 1 for row in self.rows), initial=0,
+        ))[:-1]
+        self.canonical = list(accumulate(
+            (len(row) for row in source.splitlines(keepends=True)), initial=0,
+        ))[:-1]
 
+    def bind(self, parent: Any) -> None:
+        self.parent = parent
+        self.content_rows = parent.content.split("\n")
+        self.content_starts = list(accumulate(
+            (len(row) + 1 for row in self.content_rows), initial=0,
+        ))[:-1]
+        self.bound: dict[int, int | None] = {}
 
-def _escaped_markdown_opener(text: str, start: int) -> bool:
-    """Odd backslash parity escapes Markdown links or image openers."""
-    count = 0
-    while start > count and text[start - count - 1] == "\\":
-        count += 1
-    return count % 2 == 1
+    def _bind_row(self, row: int) -> int | None:
+        if len(self.content_rows) != self.parent.map[1] - self.parent.map[0]:
+            return None
+        original = self.parent.map[0] + row
+        if not 0 <= original < len(self.rows):
+            return None
+        content = self.content_rows[row]
+        # Container stripping can expand leading tabs to virtual spaces.
+        needle = content.lstrip(" \t")
+        if not needle:
+            return None
+        raw = self.rows[original]
+        offset = raw.find(needle)
+        if offset < 0 or raw.find(needle, offset + 1) >= 0:
+            return None
+        return self.starts[original] + offset - (len(content) - len(needle))
 
+    def _ordinal(self, position: int) -> int | None:
+        if not 0 <= position < len(self.parent.content):
+            return None
+        row = bisect_right(self.content_starts, position) - 1
+        if row not in self.bound:
+            self.bound[row] = self._bind_row(row)
+        origin = self.bound[row]
+        if origin is None:
+            return None
+        absolute = origin + position - self.content_starts[row]
+        if not 0 <= absolute < len(self.source):
+            return None
+        return bisect_right(self.canonical, absolute)
 
-_MD_QUOTE_PREFIX = re.compile(r"^ {0,3}>[ \t]?")
-
-
-def _markdown_quote_info(line: str) -> tuple[str, int]:
-    """Peel CommonMark blockquotes and retain their enclosing depth."""
-    content = line.expandtabs(4)
-    depth = 0
-    while (prefix := _MD_QUOTE_PREFIX.match(content)) is not None:
-        content = content[prefix.end():]
-        depth += 1
-    return content, depth
-
-
-
-def _markdown_inline_regions(source: str):
-    """Yield nonoverlapping tokens; the first valid code/HTML opener wins."""
-    runs, following = _markdown_backtick_pairs(source)
-    run_index = {start: index for index, (start, _) in enumerate(runs)}
-    cursor = 0
-    while (token := _MD_INLINE_TOKEN.search(source, cursor)) is not None:
-        cursor = token.end()
-        if _escaped_markdown_opener(source, token.start()):
-            # Escaping a tag opener leaves its contents as Markdown prose.
-            if token.group("ticks") is None:
-                cursor = token.start() + 1
-            continue
-        if token.group("ticks") is not None:
-            closing = following[run_index[token.start()]]
-            if closing is None:
-                continue
-            cursor = runs[closing][1]
-        yield token, cursor
-
-
-def _markdown_mask_inline_syntax(source: str, *, preserve_tags: bool = False) -> str:
-    """Mask complete HTML syntax, retaining real tag boundaries when requested.
-
-    The initial pass neutralizes attributes before comment/code-container
-    recognition. The paragraph pass masks whole tags and code spans before
-    links are extracted. Both passes share the same first-token grammar.
-    """
-    visible = list(source)
-    for token, end in _markdown_inline_regions(source):
-        start = token.start()
-        if preserve_tags:
-            if token.group("ticks") is not None or source.startswith("<!--", start):
-                continue
-            if token.group("tag") is not None:
-                start = token.end("tag")
-                end -= 2 if source[end - 2:end] == "/>" else 1
-        visible[start:end] = _mask_span(source[start:end])
-    return "".join(visible)
-
-
-def _markdown_html_code_tags(source: str, *, raw_block: bool = False):
-    """Only complete, unescaped code tags can change the container state."""
-    tokens = (
-        ((token, token.end()) for token in re.finditer(_MD_HTML_TAG, source))
-        if raw_block else _markdown_inline_regions(source)
-    )
-    for token, _ in tokens:
-        name = token.group("tag")
-        if name and name.lower() in {"code", "pre", "script", "style", "textarea"}:
-            yield token
-
-
-def _markdown_prose_edges(
-    path: str, lines: list[tuple[int, str]], known: set[str],
-) -> list[dict[str, Any]]:
-    """Only this contiguous, unfenced paragraph can pair inline code markers."""
-    if not lines:
-        return []
-    visible = _markdown_mask_inline_syntax("\n".join(line for _, line in lines))
-    edges: list[dict[str, Any]] = []
-    for (ordinal, _), line in zip(lines, visible.split("\n"), strict=True):
-        for match in _MD_LINK.finditer(line):
-            if _escaped_markdown_opener(line, match.start()):
-                continue
-            ref = match.group("ref").removeprefix("<").removesuffix(">")
-            if ref.startswith(("#", "/", "//")) or _URL_SCHEME.match(ref):
-                continue
-            edges.append(_reference(
-                path, ref, ordinal, known, artifact="markdown_literal_link",
-            ))
-    return edges
-
-
-_MD_LIST_FENCE_PREFIX = re.compile(
-    r"^ {0,3}(?:[-+*]|[0-9]{1,9}[.)])[ \t]{1,4}(?![ \t])"
-)
-
-
-def _markdown_fence_text(
-    content: str, list_indent: int | None = None,
-) -> tuple[str, int | None]:
-    """Remove only a real list-item marker or matching container indentation."""
-    if list_indent is not None:
+    def span(self, start: int, end: int) -> tuple[int, int]:
+        first, last = self._ordinal(start), self._ordinal(end - 1)
+        if first is not None and last is not None and first <= last:
+            return first, last
+        # An ambiguous point mapping retains the proven enclosing range.
+        begin, finish = self.parent.map
+        lower = self.starts[begin]
+        upper = (
+            self.starts[finish] if finish < len(self.starts)
+            else len(self.source)
+        ) - 1
         return (
-            content[list_indent:] if content.startswith(" " * list_indent) else content,
-            list_indent,
+            bisect_right(self.canonical, lower),
+            bisect_right(self.canonical, max(lower, upper)),
         )
-    match = _MD_LIST_FENCE_PREFIX.match(content)
-    if match is not None:
-        return content[match.end():], match.end()
-    return content, None
 
 
-def _markdown_fence_continues(
-    content: str, quote_depth: int,
-    fenced: tuple[str, int, int | None, int],
-) -> bool:
-    """An unclosed fence ends when its quote or list container ends."""
-    if quote_depth < fenced[3]:
-        return False
-    list_indent = fenced[2]
-    return (
-        list_indent is None
-        or not content.strip()
-        or content.startswith(" " * list_indent)
+class _MarkdownHtmlContext(HTMLParser):
+    """Consume only native HTML tokens, never mask raw Markdown source."""
+
+    LITERAL = frozenset({"code", "pre", "script", "style", "textarea"})
+    RAW_TEXT = frozenset({"script", "style", "textarea"})
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=False)
+        self.literal: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: Any) -> None:
+        if self.literal and self.literal[-1] in self.RAW_TEXT:
+            return
+        if tag in self.LITERAL:
+            self.literal.append(tag)
+
+    def handle_endtag(self, tag: str) -> None:
+        if self.literal and self.literal[-1] == tag:
+            self.literal.pop()
+
+    def handle_startendtag(self, tag: str, attrs: Any) -> None:
+        self.handle_starttag(tag, attrs)
+
+    def consume(self, token: Any) -> None:
+        # Native HTML blocks cannot introduce our inline-only context.
+        if token.type == "html_inline" or self.literal:
+            self.feed(token.content)
+        if not self.literal:
+            self.reset()
+
+
+def _marked_markdown_rule(rule: Any, token_type: str) -> Any:
+    def marked(state: Any, silent: bool) -> bool:
+        start, count = state.pos, len(state.tokens)
+        matched = rule(state, silent)
+        if matched and not silent:
+            # state.push() may first flush pending text.
+            for token in state.tokens[count:]:
+                if token.type == token_type:
+                    token.meta["repoground_span"] = (start, state.pos)
+                    break
+        return matched
+    return marked
+
+
+def _markdown_link_edge(
+    path: str, token: Any, known: set[str], lines: _MarkdownLines,
+) -> dict[str, Any] | None:
+    span = token.meta.get("repoground_span")
+    if span is None or "label" in token.meta:
+        return None
+    ref = token.attrGet("src" if token.type == "image" else "href")
+    if not ref or len(ref) > 240:
+        return None
+    if ref.startswith(("#", "/", "//")) or _URL_SCHEME.match(ref):
+        return None
+    first, last = lines.span(*span)
+    target, status, _ = _local_target(path, ref, known)
+    return _edge(
+        "references", "file:" + path, target, _source(path, first, last),
+        status, "S1" if status == "resolved" else "S0",
+        "markdown_literal_link",
     )
 
 
-def _markdown_backtick_pairs(
-    line: str,
-) -> tuple[list[tuple[int, int]], list[int | None]]:
-    """Find exact-width backtick closures once, before linear prose scanning."""
-    runs = [(match.start(), match.end())
-            for match in re.finditer(r"`+", line)]
-    following: dict[int, int] = {}
-    next_run: list[int | None] = [None] * len(runs)
-    for index in range(len(runs) - 1, -1, -1):
-        width = runs[index][1] - runs[index][0]
-        next_run[index] = following.get(width)
-        following[width] = index
-    return runs, next_run
+def _markdown_parser() -> Any:
+    try:
+        from markdown_it import MarkdownIt
+        from markdown_it.rules_inline.image import image
+        from markdown_it.rules_inline.link import link
+    except ImportError as exc:
+        raise ConfigSourceUnavailable("markdown_parser_unavailable") from exc
+    parser = MarkdownIt("commonmark", {"html": True, "store_labels": True})
+    parser.inline.ruler.at("link", _marked_markdown_rule(link, "link_open"))
+    parser.inline.ruler.at("image", _marked_markdown_rule(image, "image"))
+    return parser
 
 
-def _next_markdown_comment_tokens(
-    runs: list[tuple[int, int]], openings: list[int],
-    cursor: int, run_index: int, comment_index: int, size: int,
-) -> tuple[int, int, int, int]:
-    """Advance past already consumed tokens; each index only moves forward."""
-    while run_index < len(runs) and runs[run_index][0] < cursor:
-        run_index += 1
-    while comment_index < len(openings) and openings[comment_index] < cursor:
-        comment_index += 1
-    next_tick = runs[run_index][0] if run_index < len(runs) else size
-    next_comment = openings[comment_index] if comment_index < len(openings) else size
-    return run_index, comment_index, next_tick, next_comment
-
-
-def _mask_markdown_comment_line(
-    line: str, comment_open: bool,
-) -> tuple[str, bool]:
-    """One bounded forward pass over comments and exact-width inline code.
-
-    A comment beginning before a backtick span hides its internal backticks;
-    paired backticks beginning first hide literal HTML-comment-looking text.
-    """
-    chars = list(line)
-    cursor = 0
-    if comment_open:
-        closing = line.find("-->")
-        if closing < 0:
-            return _mask_span(line), True
-        chars[:closing + 3] = " " * (closing + 3)
-        cursor = closing + 3
-    runs, partners = _markdown_backtick_pairs(line)
-    openings = [match.start() for match in re.finditer("<!--", line)]
-    run_index = 0
-    comment_index = 0
-    while True:
-        run_index, comment_index, next_tick, next_comment = (
-            _next_markdown_comment_tokens(
-                runs, openings, cursor, run_index, comment_index, len(line),
-            )
-        )
-        if next_tick == next_comment == len(line):
-            break
-        if next_comment < next_tick:
-            closing = line.find("-->", next_comment + 4)
-            if closing < 0:
-                chars[next_comment:] = " " * (len(line) - next_comment)
-                return "".join(chars), True
-            chars[next_comment:closing + 3] = " " * (closing + 3 - next_comment)
-            cursor = closing + 3
-            continue
-        partner = partners[run_index]
-        if partner is not None and not _escaped_markdown_opener(
-            line, runs[run_index][0],
-        ):
-            cursor = runs[partner][1]
-            run_index = partner + 1
-        else:
-            cursor = runs[run_index][1]
-            run_index += 1
-    return "".join(chars), False
-
-
-def _markdown_mask_html_comments(source: str) -> str:
-    """Preserve fences when HTML comment syntax is literal code content."""
-    masked: list[str] = []
-    fenced: tuple[str, int, int | None, int] | None = None
-    comment_open = False
-    for raw in source.splitlines(keepends=True):
-        line = raw.splitlines()[0]
-        ending = raw[len(line):]
-        if comment_open:
-            clean, comment_open = _mask_markdown_comment_line(line, True)
-            masked.append(clean + ending)
-            continue
-        content, quote_depth = _markdown_quote_info(line)
-        if fenced is not None and not _markdown_fence_continues(
-            content, quote_depth, fenced,
-        ):
-            fenced = None
-        if fenced is not None:
-            candidate, _ = _markdown_fence_text(content, fenced[2])
-            closing = _MD_FENCE.match(candidate)
-            if closing is not None:
-                marks = closing.group("marks")
-                if (marks[0] == fenced[0] and len(marks) >= fenced[1]
-                        and not candidate[closing.end("marks"):].strip()):
-                    fenced = None
-            masked.append(raw)
-            continue
-        candidate, indent = _markdown_fence_text(content)
-        opening = _MD_FENCE.match(candidate)
-        if opening is not None:
-            marks = opening.group("marks")
-            fenced = marks[0], len(marks), indent, quote_depth
-            masked.append(raw)
-            continue
-        clean, comment_open = _mask_markdown_comment_line(line, False)
-        masked.append(clean + ending)
-    return "".join(masked)
-
-
-_MD_HTML_RAW_OPEN = re.compile(
-    r"^ {0,3}<(?P<tag>pre|script|style|textarea)(?=[ \t>]|$)",
-    re.IGNORECASE,
-)
-_MD_HTML_BLOCK_OPEN = re.compile(
-    r"^ {0,3}</?(?:address|article|aside|base|basefont|blockquote|body|caption|center|"
-    r"col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|"
-    r"form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|"
-    r"menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|"
-    r"tbody|td|tfoot|th|thead|title|tr|track|ul)(?=[ \t/>]|$)",
-    re.IGNORECASE,
-)
-
-
-def _markdown_html_block_state(
-    line: str, active_tag: str | None,
-) -> tuple[str | None, bool]:
-    """Recognize raw HTML starts and blocks terminated by a blank line."""
-    content, _ = _markdown_quote_info(line)
-    content, _ = _markdown_fence_text(content)
-    if active_tag == "blank-line":
-        return "blank-line" if content.strip() else None, True
-    if active_tag is not None:
-        return active_tag, False
-    raw = _MD_HTML_RAW_OPEN.match(content)
-    if raw is not None:
-        return raw.group("tag").lower(), False
-    if _MD_HTML_BLOCK_OPEN.match(content):
-        return "blank-line", True
-    return None, False
-
-
-def _mask_markdown_html_code(
-    line: str, active_tag: str | None,
-) -> tuple[str, str | None]:
-    """Hide raw HTML blocks and code containers, preserving inline prose."""
-    active_tag, mask_whole_line = _markdown_html_block_state(line, active_tag)
-    if mask_whole_line:
-        return " " * len(line), active_tag
-    return _mask_markdown_html_code_content(line, active_tag)
-
-
-def _mask_markdown_html_code_content(
-    line: str, active_tag: str | None,
-) -> tuple[str, str | None]:
-    """Mask tag spans after the enclosing HTML block state is established."""
-    # A tag rendered inside Markdown backticks cannot open a container. Once a
-    # raw HTML block is active, however, Markdown inline-code parsing is
-    # disabled and even a backtick-wrapped closing tag closes that container.
-    raw_block = active_tag in {"pre", "script", "style", "textarea"}
-    visible = line if raw_block else _without_inline_code(line)
-    chars = list(line)
-    cursor = 0
-    for tag in _markdown_html_code_tags(visible, raw_block=raw_block):
-        name = tag.group("tag").lower()
-        if active_tag is None:
-            if tag.group("closing"):
-                continue
-            active_tag = name
-            if name in {"pre", "script", "style", "textarea"}:
-                prefix, _ = _markdown_quote_info(line[:tag.start()])
-                prefix, _ = _markdown_fence_text(prefix)
-                raw_block = re.fullmatch(r" {0,3}", prefix) is not None
-                if not raw_block:
-                    # Carry inline spans without turning them into raw blocks
-                    # on the next line.
-                    active_tag = "inline-" + name
-            cursor = tag.start()
-        if active_tag is not None:
-            chars[cursor:tag.end()] = " " * (tag.end() - cursor)
-            if tag.group("closing") and name == active_tag.removeprefix("inline-"):
-                active_tag = None
-                if raw_block:
-                    # The whole closing line belongs to this raw block. Tags
-                    # in its suffix cannot open a new block for the next line.
-                    return " " * len(line), None
-        cursor = tag.end()
-    if active_tag is not None:
-        chars[cursor:] = " " * (len(chars) - cursor)
-    return " " * len(line) if raw_block else "".join(chars), active_tag
-
-
-def _markdown_close_fence(
-    content: str, fenced: tuple[str, int, int | None, int],
-) -> tuple[str, int, int | None, int] | None:
-    """Close only a matching fence with an otherwise empty suffix."""
-    candidate, _ = _markdown_fence_text(content, fenced[2])
-    closing = _MD_FENCE.match(candidate)
-    if closing is not None:
-        marks = closing.group("marks")
-        if (marks[0] == fenced[0] and len(marks) >= fenced[1]
-                and not candidate[closing.end("marks"):].strip()):
-            return None
-    return fenced
-
-
-def _markdown_edges(path: str, source: str, known: set[str]) -> list[dict[str, Any]]:
-    sanitized = _markdown_mask_html_comments(
-        _markdown_mask_inline_syntax(source, preserve_tags=True),
-    )
+def _markdown_edges(
+    path: str, source: str, known: set[str],
+) -> list[dict[str, Any]]:
+    # Match CommonMark normalization; other Unicode separators stay literal.
+    normalized = source.replace("\r\n", "\n").replace("\r", "\n")
+    normalized = normalized.replace("\0", "\ufffd")
+    lines = _MarkdownLines(normalized)
+    html = _MarkdownHtmlContext()
     edges: list[dict[str, Any]] = []
-    fenced: tuple[str, int, int | None, int] | None = None
-    html_code_tag: str | None = None
-    paragraph: list[tuple[int, str]] = []
-    for ordinal, (raw_line, line) in enumerate(
-        zip(source.splitlines(), sanitized.splitlines(), strict=True), 1,
-    ):
-        content, quote_depth = _markdown_quote_info(line)
-        raw_content, _ = _markdown_quote_info(raw_line)
-        if fenced is not None and not _markdown_fence_continues(
-            content, quote_depth, fenced,
-        ):
-            fenced = None
-        if fenced is not None:
-            edges.extend(_markdown_prose_edges(path, paragraph, known))
-            paragraph.clear()
-            fenced = _markdown_close_fence(content, fenced)
+    try:
+        tokens = _markdown_parser().parse(normalized)
+    except RecursionError as exc:
+        raise ConfigSourceUnavailable("markdown_nesting_limit") from exc
+    for parent in tokens:
+        if parent.type == "html_block":
+            html.consume(parent)
+        if parent.type != "inline":
             continue
-        if html_code_tag is not None:
-            # Raw HTML blocks may be indented, and Markdown backticks inside
-            # them are literal text. Recognize their closing tag before either
-            # Markdown exclusion can discard it.
-            block, _ = _markdown_html_block_state(line, html_code_tag)
-            prose, html_code_tag = _mask_markdown_html_code(line, html_code_tag)
-            if raw_line.strip() and block in {None, "code", "inline-pre", "inline-script", "inline-style", "inline-textarea"}:
-                paragraph.append((ordinal, prose))
-            else:
-                edges.extend(_markdown_prose_edges(path, paragraph, known))
-                paragraph.clear()
-            continue
-        # Masked comments turn into spaces, not Markdown indentation.
-        if _markdown_indented_code(raw_line) or _markdown_indented_code(raw_content):
-            edges.extend(_markdown_prose_edges(path, paragraph, known))
-            paragraph.clear()
-            continue
-        candidate, list_indent = _markdown_fence_text(content)
-        opener = _MD_FENCE.match(candidate)
-        if opener is not None:
-            edges.extend(_markdown_prose_edges(path, paragraph, known))
-            paragraph.clear()
-            marks = opener.group("marks")
-            fenced = marks[0], len(marks), list_indent, quote_depth
-            continue
-        # HTML code spans mask only their own text and tags, not nearby prose.
-        # Backtick code is masked while recognizing tags so literal examples
-        # cannot accidentally open an HTML code container.
-        block, _ = _markdown_html_block_state(line, html_code_tag)
-        prose, html_code_tag = _mask_markdown_html_code(line, html_code_tag)
-        if not raw_line.strip() or block in {"pre", "script", "style", "textarea", "blank-line"}:
-            edges.extend(_markdown_prose_edges(path, paragraph, known))
-            paragraph.clear()
-            continue
-        paragraph.append((ordinal, prose))
-    edges.extend(_markdown_prose_edges(path, paragraph, known))
+        lines.bind(parent)
+        # Image children are alt text, not independently rendered links.
+        for token in parent.children or ():
+            if token.type == "html_inline":
+                html.consume(token)
+            elif token.type in {"link_open", "image"} and not html.literal:
+                edge = _markdown_link_edge(path, token, known, lines)
+                if edge is not None:
+                    edges.append(edge)
     return edges
 
 
-def _yaml_quote_continues(line: str, quote: str, start: int = 0) -> bool:
-    """Detect a YAML quoted scalar that has not yet closed on this line."""
-    index = start
-    while index < len(line):
-        if quote == '"' and line[index] == "\\":
-            index += 2
-        elif line[index] == quote:
-            if quote == "'" and line[index:index + 2] == "''":
-                index += 2
-            else:
-                return False
-        else:
-            index += 1
-    return True
+_YAML_TAG = "tag:yaml.org,2002:"
+_YAML_TAGS = frozenset(
+    _YAML_TAG + kind for kind in
+    ("str", "null", "bool", "int", "float", "timestamp", "binary", "map", "seq")
+)
 
 
-def _yaml_quoted_character(text: str, index: int, quote: str) -> tuple[int, str | None]:
-    """Consume one quoted character, including YAML escape pairs."""
-    if quote == '"' and text[index] == "\\":
-        return index + 2, quote
-    if text[index] == quote:
-        if quote == "'" and text[index:index + 2] == "''":
-            return index + 2, quote
-        return index + 1, None
-    return index + 1, quote
+def _yaml_mapping(node: Any) -> dict[str, tuple[Any, Any]]:
+    if node is None or node.id != "mapping":
+        return {}
+    entries: dict[str, tuple[Any, Any]] = {}
+    for key, value in node.value:
+        if key.id != "scalar":
+            raise ConfigSourceUnavailable("yaml_complex_mapping_key")
+        if key.value == "<<" or key.value in entries:
+            raise ConfigSourceUnavailable("yaml_duplicate_or_merge_key")
+        entries[key.value] = key, value
+    return entries
 
 
-def _yaml_flow_depth(
-    line: str, depth: int = 0, quote: str | None = None,
-) -> tuple[int, str | None]:
-    """Track multiline YAML flow collections without parsing their contents."""
-    index = 0
-    scalar_start = quote is None
-    while index < len(line):
-        char = line[index]
-        if quote is not None:
-            index, quote = _yaml_quoted_character(line, index, quote)
-            continue
-        if char in {"'", '"'} and scalar_start:
-            quote = char
-            scalar_start = False
-        elif scalar_start and (node_property := _YAML_FLOW_PROPERTY.match(line, index)):
-            index = node_property.end()
-            continue
-        elif char == "#" and (index == 0 or line[index - 1].isspace()):
-            break
-        elif char in "[{":
-            depth += 1
-            scalar_start = True
-        elif char in "]}" and depth:
-            depth -= 1
-            scalar_start = False
-        elif char == "," or (char == ":" and (
-            index + 1 == len(line) or line[index + 1] in " \t[{\"'"
-        )):
-            scalar_start = True
-        elif not char.isspace():
-            # Whitespace within a plain scalar does not make its quote
-            # punctuation the beginning of a new quoted scalar.
-            scalar_start = False
-        index += 1
-    return depth, quote
-
-
-def _yaml_close_flow_collection(text: str, index: int, stack: list[str]) -> list[str] | None:
-    """Validate a closing delimiter and require an empty root suffix."""
-    expected = "{" if text[index] == "}" else "["
-    if not stack or stack[-1] != expected:
-        return None
-    remaining = stack[:-1]
-    if not remaining and text[index + 1:].strip():
-        return None
-    return remaining
-
-
-def _yaml_flow_quote_boundary(text: str, index: int) -> bool:
-    return index == 0 or text[index - 1].isspace() or text[index - 1] in ":,{["
-
-
-def _yaml_flow_result(
-    stack: list[str], quote: str | None, entries: list[tuple[int, str]], start: int,
-) -> tuple[list[tuple[int, str]], int] | None:
-    """Only complete collections with closed quotes have usable entries."""
-    if stack or quote is not None:
-        return None
-    return entries, start
-
-
-def _yaml_flow_entries(text: str) -> tuple[list[tuple[int, str]], int] | None:
-    """Split root entries while rejecting comments and unbalanced collections."""
-    stack: list[str] = []
-    quote: str | None = None
-    start = 1
-    entries: list[tuple[int, str]] = []
-    index = 0
-    while index < len(text):
-        char = text[index]
-        if quote is not None:
-            index, quote = _yaml_quoted_character(text, index, quote)
-            continue
-        if char in "'\"":
-            # Only accept quote openers at scalar boundaries.
-            quote = char if _yaml_flow_quote_boundary(text, index) else None
-        elif char == "#" and (index == 0 or text[index - 1].isspace()):
-            return None
-        elif char in "{[":
-            stack.append(char)
-        elif char in "}]":
-            closed = _yaml_close_flow_collection(text, index, stack)
-            if closed is None:
-                return None
-            stack = closed
-            if not stack:
-                entries.append((start, text[start:index]))
-        elif char == "," and len(stack) == 1:
-            entries.append((start, text[start:index]))
-            start = index + 1
-        index += 1
-    return _yaml_flow_result(stack, quote, entries, start)
-
-
-def _yaml_root_flow_uses(lines: list[tuple[int, str]]) -> list[tuple[int, str]]:
-    """Read direct scalar uses from a complete, conservative step flow map.
-
-    Split only on root commas, respecting quoted scalars and nested collections.
-    Unsupported or malformed entries invalidate the whole mapping.
-    """
-    text = "\n".join(line for _, line in lines)
-    split = _yaml_flow_entries(text)
-    if split is None:
-        return []
-    entries, start = split
-    uses: list[tuple[int, str]] = []
-    keys: set[str] = set()
-    for offset, entry in entries:
-        if not entry.strip() and offset == start:
-            continue  # YAML permits a trailing comma.
-        prop = re.fullmatch(
-            rf"\s*(?P<key>{_YAML_KEY}):[ \t\n]+(?P<value>.+?)\s*",
-            entry, re.DOTALL,
-        )
-        if prop is None:
-            return []
-        key = prop.group("key").strip("'\"")
-        if key in keys:
-            return []
-        keys.add(key)
-        value = prop.group("value")
-        if key == "uses":
-            match = _YAML_USES.fullmatch("uses: " + value)
-            if match is None:
-                return []
-            line = lines[0][0] + text.count("\n", 0, offset + prop.start("key"))
-            uses.append((line, match.group("value")))
-        elif "\n" in value and not re.match(
-            rf"{_YAML_SCALAR_PROPERTIES}" + r"""[{\['"]""", value,
+def _yaml_validate_nodes(root: Any) -> None:
+    """Reject unsupported tags and ambiguous keys without constructing values."""
+    pending = [root] if root is not None else []
+    while pending:
+        node = pending.pop()
+        if (
+            node.tag not in _YAML_TAGS
+            or (node.id == "mapping" and node.tag != _YAML_TAG + "map")
+            or (node.id == "sequence" and node.tag != _YAML_TAG + "seq")
+            or (node.id == "scalar" and node.tag in {
+                _YAML_TAG + "map", _YAML_TAG + "seq",
+            })
         ):
-            return []
-    return uses
+            raise ConfigSourceUnavailable("yaml_unsupported_tag")
+        if node.id == "mapping":
+            for key, value in _yaml_mapping(node).values():
+                pending.extend((key, value))
+        elif node.id == "sequence":
+            pending.extend(node.value)
 
 
-def _yaml_parent_context(
-    context: list[tuple[int, str]], line: str, indent: int,
-) -> list[tuple[int, str]]:
-    """Retain parents, including a steps key before an indentless list."""
-    context = context[:]
-    indentless_step = line.lstrip().startswith(("- ", "-\t"))
-    while context and (
-        context[-1][0] > indent
-        or (context[-1][0] == indent and not (
-            indentless_step and context[-1][1] == "steps"
-        ))
-    ):
-        context.pop()
-    return context
+def _yaml_compose(source: str) -> Any:
+    try:
+        import yaml
+    except ImportError as exc:
+        raise ConfigSourceUnavailable("yaml_parser_unavailable") from exc
+    depth = 0
+    try:
+        for count, event in enumerate(yaml.parse(source, Loader=yaml.SafeLoader), 1):
+            if isinstance(event, yaml.AliasEvent):
+                raise ConfigSourceUnavailable("yaml_alias_provenance_unavailable")
+            if isinstance(event, yaml.CollectionStartEvent):
+                depth += 1
+            elif isinstance(event, yaml.CollectionEndEvent):
+                depth -= 1
+            if depth > 64 or count > 50_000:
+                raise ConfigSourceUnavailable("yaml_structure_limit")
+        root = yaml.compose(source, Loader=yaml.SafeLoader)
+    except (yaml.YAMLError, RecursionError) as exc:
+        raise ConfigSourceUnavailable("invalid_yaml") from exc
+    _yaml_validate_nodes(root)
+    return root
 
 
-def _yaml_use_context(path: str, context: list[tuple[int, str]]) -> tuple[bool, bool]:
-    """Classify direct reusable-workflow and workflow/composite step positions."""
-    workflow = path.startswith(".github/workflows/")
-    job_use = len(context) == 2 and context[0][1] == "jobs" and workflow
-    workflow_step = (
-        len(context) == 3 and context[0][1] == "jobs"
-        and context[-1][1] == "steps" and workflow
-    )
-    composite_step = (
-        len(context) == 2 and context[0][1] == "runs"
-        and context[-1][1] == "steps"
-        and PurePosixPath(path).name in {"action.yml", "action.yaml"}
-    )
-    return job_use, workflow_step or composite_step
+def _yaml_field(node: Any, name: str) -> Any:
+    entry = _yaml_mapping(node).get(name)
+    if entry is None or entry[0].tag != _YAML_TAG + "str":
+        return None
+    return entry[1]
 
 
-def _yaml_flow_use_edges(
-    path: str, lines: list[tuple[int, str]], known: set[str],
+def _yaml_node_use_edges(
+    path: str, node: Any, known: set[str], *, job_use: bool = False,
 ) -> list[dict[str, Any]]:
-    """Project validated root scalar uses with their original line evidence."""
+    entry = _yaml_mapping(node).get("uses")
+    if entry is None or entry[0].tag != _YAML_TAG + "str":
+        return []
+    key, value = entry
+    if value.id != "scalar" or value.tag != _YAML_TAG + "str":
+        raise ConfigSourceUnavailable("yaml_nonliteral_uses")
+    first = key.start_mark.line + 1
+    last = max(first, value.end_mark.line + int(value.end_mark.column > 0))
+    edges = _yaml_use_edges(
+        path, value.value, first, known, job_use=job_use,
+    )
+    if first == last:
+        return edges
     return [
-        edge for ordinal, ref in _yaml_root_flow_uses(lines)
-        for edge in _yaml_use_edges(path, ref, ordinal, known)
+        _edge(
+            edge["relation"], edge["src"], edge["dst"],
+            _source(path, first, last), edge["resolution_status"],
+            edge["evidence_level"], edge["origin_artifact"],
+            candidates=edge.get("candidate_target_ids"),
+        )
+        for edge in edges
     ]
 
 
-def _yaml_continue_flow(
-    path: str, line: str, ordinal: int, known: set[str],
-    depth: int, quote: str | None, root_flow: list[tuple[int, str]],
-) -> tuple[int, str | None, list[tuple[int, str]], list[dict[str, Any]]]:
-    """Advance a flow collection and project only a completed root step map."""
-    if root_flow:
-        root_flow.append((ordinal, line))
-    depth, quote = _yaml_flow_depth(line, depth, quote)
-    if not depth and root_flow:
-        return depth, quote, [], _yaml_flow_use_edges(path, root_flow, known)
-    return depth, quote, root_flow, []
-
-
-def _yaml_block_use_edges(
-    path: str, line: str, ordinal: int, indent: int,
-    context: list[tuple[int, str]], known: set[str],
-) -> tuple[list[tuple[int, str]], list[dict[str, Any]]]:
-    """Read a block parent or a use at a supported structural position."""
-    parent = _YAML_PARENT.match(line)
-    if parent is not None:
-        return [*context, (indent + len(parent.group("prefix") or ""), parent.group("key").strip("'\""))], []
-    match = _YAML_USES.match(line)
-    if match is None:
-        return context, []
-    job_use, step_use = _yaml_use_context(path, context)
-    if not (job_use or step_use):
-        return context, []
-    return context, _yaml_use_edges(
-        path, match.group("value"), ordinal, known, job_use=job_use,
-    )
-
-
-def _yaml_scalar_opener(line: str) -> tuple[int | None, str | None]:
-    """Identify block scalars and quoted scalars spanning following lines."""
-    block = _YAML_BLOCK.match(line)
-    if block is not None:
-        blocked_indent = len(block.group("indent")) + len(block.group("prefix") or "")
-        return blocked_indent, None
-    quoted = _YAML_QUOTED_VALUE.match(line)
-    if quoted is not None and _yaml_quote_continues(
-        line, quoted.group("quote"), quoted.end(),
-    ):
-        quoted_scalar = quoted.group("quote")
-        return None, quoted_scalar
-    return None, None
-
-
-def _yaml_start_flow(
-    path: str, line: str, ordinal: int, known: set[str],
-    context: list[tuple[int, str]], flow_start: re.Match[str],
-) -> tuple[int, str | None, list[tuple[int, str]], list[dict[str, Any]]]:
-    """Collect only direct step flow maps; track other flows for omission."""
-    root_flow: list[tuple[int, str]] = []
-    edges: list[dict[str, Any]] = []
-    flow_text = line[flow_start.start("flow"):]
-    flow_depth, flow_quote = _yaml_flow_depth(flow_text)
-    _, step_context = _yaml_use_context(path, context)
-    if (
-        step_context
-        and flow_text.startswith("{")
-        and re.fullmatch(
-            rf"[ \t]*-[ \t]+{_YAML_SCALAR_PROPERTIES}",
-            line[:flow_start.start("flow")],
-        )
-    ):
-        root_flow = [(ordinal, flow_text)]
-        if not flow_depth:
-            edges.extend(_yaml_flow_use_edges(path, root_flow, known))
-            root_flow = []
-    return flow_depth, flow_quote, root_flow, edges
-
-
-def _yaml_uses_edges(path: str, source: str, known: set[str]) -> list[dict[str, Any]]:
-    """Parse explicit workflow/action metadata use fields, not YAML scalar text."""
-    if not (
-        path.startswith(".github/workflows/")
-        or PurePosixPath(path).name in {"action.yml", "action.yaml"}
-    ):
+def _yaml_step_edges(
+    path: str, steps: Any, known: set[str],
+) -> list[dict[str, Any]]:
+    if steps is None or steps.id != "sequence":
         return []
-    edges: list[dict[str, Any]] = []
-    blocked_indent: int | None = None
-    quoted_scalar: str | None = None
-    flow_depth = 0
-    flow_quote: str | None = None
-    root_flow: list[tuple[int, str]] = []
-    context: list[tuple[int, str]] = []
-    for ordinal, line in enumerate(source.splitlines(), 1):
-        if quoted_scalar is not None:
-            quoted_scalar = (
-                quoted_scalar if _yaml_quote_continues(line, quoted_scalar) else None
-            )
-            continue
-        if flow_depth:
-            flow_depth, flow_quote, root_flow, flow_edges = _yaml_continue_flow(
-                path, line, ordinal, known, flow_depth, flow_quote, root_flow,
-            )
-            edges.extend(flow_edges)
-            continue
-        if not line.strip() or line.lstrip().startswith("#"):
-            continue
-        indent = len(line) - len(line.lstrip(" \t"))
-        if blocked_indent is not None:
-            if indent > blocked_indent:
-                continue
-            blocked_indent = None
-        context = _yaml_parent_context(context, line, indent)
-        blocked_indent, quoted_scalar = _yaml_scalar_opener(line)
-        if blocked_indent is not None or quoted_scalar is not None:
-            continue
-        flow_start = re.match(
-            rf"^[ \t]*(?:-[ \t]+)?(?:{_YAML_KEY}:[ \t]*)?"
-            rf"{_YAML_SCALAR_PROPERTIES}(?P<flow>[{{\[])",
-            line,
+    return [
+        edge for step in steps.value
+        for edge in _yaml_node_use_edges(path, step, known)
+    ]
+
+
+def _yaml_uses_edges(
+    path: str, source: str, known: set[str],
+) -> list[dict[str, Any]]:
+    """Read only real workflow/action mapping positions from composed YAML."""
+    workflow = path.startswith(".github/workflows/")
+    composite = PurePosixPath(path).name in {"action.yml", "action.yaml"}
+    if not (workflow or composite):
+        return []
+    root = _yaml_compose(source)
+    if composite:
+        return _yaml_step_edges(
+            path, _yaml_field(_yaml_field(root, "runs"), "steps"), known,
         )
-        if flow_start is not None:
-            flow_depth, flow_quote, root_flow, flow_edges = _yaml_start_flow(
-                path, line, ordinal, known, context, flow_start,
-            )
-            edges.extend(flow_edges)
-            continue
-        context, use_edges = _yaml_block_use_edges(path, line, ordinal, indent, context, known)
-        edges.extend(use_edges)
+    edges: list[dict[str, Any]] = []
+    for _, job in _yaml_mapping(_yaml_field(root, "jobs")).values():
+        edges.extend(_yaml_node_use_edges(path, job, known, job_use=True))
+        edges.extend(_yaml_step_edges(path, _yaml_field(job, "steps"), known))
     return edges
 
 
@@ -929,8 +399,6 @@ def _yaml_use_edges(
     path: str, ref: str, ordinal: int, known: set[str], *, job_use: bool = False,
 ) -> list[dict[str, Any]]:
     edges: list[dict[str, Any]] = []
-    if len(ref) >= 2 and ref[0] in "'\"" and ref[-1] == ref[0]:
-        ref = ref[1:-1]
     if ref.startswith(("./", "$/")):
         target, status, _ = _local_target(
             path, ref, known, repo_relative=True,
@@ -1069,7 +537,7 @@ def _caddy_edges(path: str, source: str, known: set[str]) -> list[dict[str, Any]
 def config_reference_edges(
     path: str, source: str, known: set[str],
 ) -> list[dict[str, Any]]:
-    """Pure lexical extension; never scans paths or calls another graph producer."""
+    """Pure source projection; never scans paths or calls another graph producer."""
     suffix = PurePosixPath(path).suffix.lower()
     if suffix == ".md":
         return _markdown_edges(path, source, known)
