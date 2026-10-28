@@ -53,6 +53,49 @@ def register_federation_commands(subparsers) -> None:
     )
     query_parser.add_argument("--trace", action="store_true", help="Include diagnostic trace and generate federation_trace.json (and federation_conflicts.json if applicable) in CWD")
 
+    # Thread 2: Git-commit-specific, effect-free federation views. No fetch/build.
+    revision_parser = federation_subparsers.add_parser("revision", help="Read exact Git tree at a full commit SHA")
+    revision_parser.add_argument("--repo-root", required=True)
+    revision_parser.add_argument("--repo-id", required=True)
+    revision_parser.add_argument("--commit", required=True)
+
+    delta_parser = federation_subparsers.add_parser("delta", help="Compare two full Git commit SHAs")
+    delta_parser.add_argument("--repo-root", required=True)
+    delta_parser.add_argument("--repo-id", required=True)
+    delta_parser.add_argument("--base", required=True)
+    delta_parser.add_argument("--head", required=True)
+
+    path_parser = federation_subparsers.add_parser("path-history", help="Find bounded historical Git commits for one relative path")
+    path_parser.add_argument("--repo-root", required=True)
+    path_parser.add_argument("--repo-id", required=True)
+    path_parser.add_argument("--commit", required=True)
+    path_parser.add_argument("--path", required=True)
+    path_parser.add_argument("--limit", type=int, default=30)
+
+    relations_parser = federation_subparsers.add_parser("relations", help="Read pinned Fleet and declared cross-repo sync evidence")
+    relations_parser.add_argument("--metarepo-root", required=True)
+    relations_parser.add_argument("--metarepo-commit", required=True)
+    relations_parser.add_argument("--target", action="append", required=True,
+                                  metavar="REPO_ID=LOCAL_REPO_ROOT@FULL_SHA")
+    relation_delta_parser = federation_subparsers.add_parser(
+        "relation-delta", help="Compare two pinned Fleet and target repository snapshots"
+    )
+    relation_delta_parser.add_argument("--metarepo-root", required=True)
+    relation_delta_parser.add_argument("--base-metarepo-commit", required=True)
+    relation_delta_parser.add_argument("--head-metarepo-commit", required=True)
+    relation_delta_parser.add_argument("--target-before", action="append", required=True,
+                                      metavar="REPO_ID=LOCAL_REPO_ROOT@FULL_SHA")
+    relation_delta_parser.add_argument("--target-after", action="append", required=True,
+                                     metavar="REPO_ID=LOCAL_REPO_ROOT@FULL_SHA")
+
+    events_parser = federation_subparsers.add_parser("history-events", help="Bind explicit external evidence references to Git history")
+    events_parser.add_argument("--repo-root", required=True)
+    events_parser.add_argument("--repo-id", required=True)
+    events_parser.add_argument("--commit", required=True)
+    events_parser.add_argument("--path")
+    events_parser.add_argument("--events-json", required=True, help="Explicit JSON list of evidence references; no network read")
+
+
 
 
 def _parse_inline_bundle_specs(bundle_args: list[str]) -> list[dict[str, str]]:
@@ -68,12 +111,81 @@ def _parse_inline_bundle_specs(bundle_args: list[str]) -> list[dict[str, str]]:
         specs.append({"repo_id": repo_id, "bundle_path": bundle_path})
     return specs
 
+def _parse_pinned_targets(values: list[str]) -> dict[str, tuple[Path, str]]:
+    targets: dict[str, tuple[Path, str]] = {}
+    for raw in values:
+        if "=" not in raw or "@" not in raw:
+            raise ValueError("--target requires REPO_ID=LOCAL_REPO_ROOT@FULL_SHA")
+        repo_id, path_and_commit = raw.split("=", 1)
+        root, commit = path_and_commit.rsplit("@", 1)
+        if not repo_id or not root or repo_id in targets:
+            raise ValueError("invalid or duplicate target")
+        targets[repo_id] = (Path(root), commit)
+    return targets
+
+
+
+_TEMPORAL_COMMANDS = frozenset({
+    "revision", "delta", "path-history", "relations", "relation-delta", "history-events",
+})
+
+
+def _temporal_federation_output(args: argparse.Namespace) -> dict:
+    """Read-only, commit-pinned Thread-2 operations; no Git refresh or publisher effects."""
+    if args.federation_command == "revision":
+        from merger.repoground.retrieval.federation_query import query_federation_revision
+
+        return query_federation_revision(Path(args.repo_root), args.repo_id, args.commit)
+    if args.federation_command == "delta":
+        from merger.repoground.retrieval.federation_query import query_federation_delta
+
+        return query_federation_delta(Path(args.repo_root), args.repo_id, args.base, args.head)
+    if args.federation_command == "path-history":
+        from merger.repoground.core.history_lens import git_path_history
+
+        return git_path_history(Path(args.repo_root), args.repo_id, args.commit, args.path, limit=args.limit)
+    if args.federation_command == "relations":
+        from merger.repoground.retrieval.federation_query import query_federation_relations
+
+        return query_federation_relations(Path(args.metarepo_root), args.metarepo_commit,
+                                          _parse_pinned_targets(args.target))
+    if args.federation_command == "relation-delta":
+        from merger.repoground.retrieval.federation_query import query_federation_relation_delta
+
+        return query_federation_relation_delta(
+            Path(args.metarepo_root), args.base_metarepo_commit, args.head_metarepo_commit,
+            _parse_pinned_targets(args.target_before), _parse_pinned_targets(args.target_after),
+        )
+    from merger.repoground.core.history_lens import bind_external_history
+
+    if len(args.events_json) > 50000:
+        raise ValueError("external evidence request exceeds limit")
+    events = json.loads(args.events_json)
+    if not isinstance(events, list):
+        raise ValueError("external evidence must be a JSON list")
+    return bind_external_history(Path(args.repo_root), args.repo_id, args.commit, events, path=args.path)
+
+
+def _handle_temporal_command(args: argparse.Namespace) -> int:
+    try:
+        output = _temporal_federation_output(args)
+        print(json.dumps(output, sort_keys=True, indent=2))
+        return 0
+    except (ValueError, OSError, RuntimeError, TypeError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+
 def handle_federation_command(args: argparse.Namespace) -> int:
     """Dispatches federation commands to their respective handlers."""
     from merger.repoground.core.federation import init_federation
     from merger.repoground.core.federation import add_bundle
     from merger.repoground.core.federation import inspect_federation
     from merger.repoground.core.federation import validate_federation
+
+
+    if args.federation_command in _TEMPORAL_COMMANDS:
+        return _handle_temporal_command(args)
 
     if args.federation_command == "init":
         out_path = Path(args.out)
@@ -108,13 +220,9 @@ def handle_federation_command(args: argparse.Namespace) -> int:
     elif args.federation_command == "validate":
         index_path = Path(args.index)
         try:
-            is_valid = validate_federation(index_path)
-            if is_valid:
-                print(f"Federation index at {index_path.as_posix()} is valid.")
-                return 0
-            else:
-                print(f"Federation index at {index_path.as_posix()} is invalid.", file=sys.stderr)
-                return 1
+            validate_federation(index_path)
+            print(f"Federation index at {index_path.as_posix()} is valid.")
+            return 0
         except Exception as e:
             print(f"Error: {e}", file=sys.stderr)
             return 1
