@@ -1,0 +1,212 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://heimgewebe.local/schema/federation-timeline.v1.schema.json",
+  "title": "RepoGround revision-addressed Git history evidence (v1)",
+  "description": "Read-only deterministic Git object projection, no runtime, causal or CI claims",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "kind",
+    "version",
+    "operation",
+    "status",
+    "repo_id"
+  ],
+  "properties": {
+    "kind": {
+      "const": "repoground.git-history"
+    },
+    "version": {
+      "const": "1"
+    },
+    "operation": {
+      "enum": [
+        "revision",
+        "delta",
+        "path_history"
+      ]
+    },
+    "status": {
+      "enum": [
+        "ok",
+        "partial",
+        "unavailable",
+        "ambiguous",
+        "stale"
+      ]
+    },
+    "repo_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_commit": {
+      "$ref": "#/definitions/commit"
+    },
+    "base_commit": {
+      "$ref": "#/definitions/commit"
+    },
+    "head_commit": {
+      "$ref": "#/definitions/commit"
+    },
+    "observation_time": {
+      "type": "null"
+    },
+    "publication_time": {
+      "type": "null"
+    },
+    "gaps": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "blob_oid",
+          "source_commit"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "blob_oid": {
+            "type": "string"
+          },
+          "source_commit": {
+            "$ref": "#/definitions/commit"
+          }
+        }
+      }
+    },
+    "file_changes": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "action",
+          "before_commit",
+          "after_commit",
+          "evidence_type"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "action": {
+            "enum": [
+              "added",
+              "removed",
+              "modified"
+            ]
+          },
+          "before_commit": {
+            "$ref": "#/definitions/commit"
+          },
+          "after_commit": {
+            "$ref": "#/definitions/commit"
+          },
+          "evidence_type": {
+            "enum": [
+              "git_tree_oid_comparison",
+              "git_tree_mode_comparison"
+            ]
+          },
+          "before_mode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]{6}$"
+          },
+          "after_mode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]{6}$"
+          }
+        }
+      }
+    },
+    "history": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "required": [
+          "commit",
+          "causality"
+        ],
+        "properties": {
+          "commit": {
+            "$ref": "#/definitions/commit"
+          },
+          "causality": {
+            "const": "unknown"
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "commit": {
+      "type": "string",
+      "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "operation": {
+            "const": "delta"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "base_commit",
+          "head_commit",
+          "file_changes"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "operation": {
+            "const": "revision"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "source_commit",
+          "artifacts"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "operation": {
+            "const": "path_history"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "source_commit",
+          "history"
+        ]
+      }
+    }
+  ]
+}
