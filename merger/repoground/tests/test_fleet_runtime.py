@@ -7954,3 +7954,29 @@ def test_review_membership_counts_excluded_checkouts_not_distinct_keys(
     assert selected == []
     assert missing == ["heimgewebe/member"]
     assert excluded == 2
+
+
+def test_bounded_git_fetch_oversize_returns_efbig_without_sigxfsz(
+    tmp_path: Path,
+) -> None:
+    module = load_publisher()
+    target = tmp_path / "oversized-git-pack"
+    script = (
+        "import errno, pathlib, sys\n"
+        "path = pathlib.Path(sys.argv[1])\n"
+        "try:\n"
+        "    path.write_bytes(b'X' * 8192)\n"
+        "except OSError as exc:\n"
+        "    if exc.errno != errno.EFBIG:\n"
+        "        raise\n"
+        "    print('EFBIG')\n"
+        "else:\n"
+        "    raise AssertionError('file-size cap bypassed')\n"
+    )
+    result = module._run_with_file_size_limit(
+        [sys.executable, "-c", script, str(target)],
+        env=os.environ.copy(),
+        max_file_bytes=4096,
+    )
+    assert result.stdout.strip() == "EFBIG"
+    assert target.stat().st_size <= 4096

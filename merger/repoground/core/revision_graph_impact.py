@@ -120,12 +120,31 @@ def _is_graph_source_path(path: str) -> bool:
     parent = parts[:-1]
     suffix = PurePosixPath(path).suffix.lower()
     if suffix == ".py":
-        return not any(part in EXCLUDED_DIRS for part in parent)
+        symbol_source = not any(part in EXCLUDED_DIRS for part in parent)
+        # Import graph also reads Python under build/dist, unlike symbol_index.
+        import_source = ".github" not in parent and not any(
+            part in _SKIP_DIRECTORIES or part.startswith(".") for part in parent
+        )
+        return symbol_source or import_source
     if any(part in _SKIP_DIRECTORIES or (part.startswith(".") and part != ".github") for part in parent):
         return False
     if path.endswith(".graph.json"):
         return False
     return _graph_inventory_language(PurePosixPath(path)) is not None
+
+
+def _producer_may_traverse_directory(path: str) -> bool:
+    """Reject opaque ignored directories only if a source producer walks them."""
+    parts = PurePosixPath(path).parts
+    if not parts or path.startswith("/") or ".." in parts:
+        return True
+    symbol_walk = not any(part in EXCLUDED_DIRS for part in parts)
+    import_walk = not any(
+        part in _SKIP_DIRECTORIES
+        or (part.startswith(".") and part != ".github")
+        for part in parts
+    )
+    return symbol_walk or import_walk
 
 
 def _reject_source_index_trust_flags(repo: Path) -> None:
@@ -154,7 +173,12 @@ def _source_inventory_safe(repo: Path) -> None:
         max_bytes=8_000_000,
     )
     for raw in ignored.split(b"\x00"):
-        if raw and _is_graph_source_path(raw.decode("utf-8")):
+        if not raw:
+            continue
+        path = raw.decode("utf-8")
+        if _is_graph_source_path(path) or (
+            path.endswith("/") and _producer_may_traverse_directory(path)
+        ):
             raise ValueError("ignored_source_not_in_head")
     _reject_source_index_trust_flags(repo)
     stage = _git(repo, ["ls-files", "--stage", "-z"], max_bytes=8_000_000)

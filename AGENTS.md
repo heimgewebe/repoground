@@ -50,8 +50,8 @@ Stop without mutation when the current revision, task/claim, lease ownership, or
 
 ## Using RepoGround as an actual agent tool (phased adoption)
 
-The [RepoGround vision and agent adoption plan](docs/roadmap/repoground-vision-and-agent-adoption.md)
-prioritizes an **operationally available, measurable** consumer path before expanding feature breadth.
+The [binding massive expansion program](docs/roadmap/repoground-massive-expansion-program.md)
+prioritizes building the temporal, cross-repository change-intelligence system **before** the broad end-to-end usefulness benchmark. The earlier preference for proving general agent benefit before feature expansion has been superseded by the user's explicit decision on 2026-10-27. The existing [vision and agent adoption plan](docs/roadmap/repoground-vision-and-agent-adoption.md) remains useful for consumer correctness, but **its former implementation ordering is no longer a gate**. Three non-overlapping [execution briefs](docs/roadmap/repoground-massive-expansion-program.md#5-genau-drei-unabhängige-ausführungs-threads) can be carried out in parallel by Grabowski-owned work lanes.
 For suitable code navigation, PR review, test selection, change-impact or source-grounding tasks:
 
 1. Bind the actual repository revision and worktree state from Git. Check that a unique,
