@@ -4,10 +4,28 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from merger.repoground.cli.main import main
 from merger.repoground.core.agent_evidence_pack import (
     build_evidence_pack, render_evidence_markdown,
 )
+
+
+@pytest.fixture(autouse=True)
+def isolate_global_git_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep disposable Git fixtures independent from CI runner global filters.
+
+    The production reader must treat executable clean/process filters as an
+    unknown worktree; these tests assert clean/dirty only for known simple
+    repositories. A CI-installed global filter must not silently alter them.
+    """
+    home = tmp_path / "isolated-home"
+    config = tmp_path / "isolated-config"
+    home.mkdir()
+    config.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config))
 
 
 def git(repo: Path, *args: str) -> str:
@@ -341,3 +359,191 @@ def test_request_pinned_manifest_identity_survives_selected_symlink_retarget(tmp
     ).hexdigest()
     assert result["changed_files"][0]["path"] == "alpha.py"
     assert result["mutation_boundary"]["writes"] == []
+
+
+def test_direct_cli_pins_initial_manifest_generation_without_outer_binding(
+    tmp_path, monkeypatch,
+):
+    """Direct core/CLI callers must not mix two generations on a pointer race."""
+    from merger.repoground.core import agent_evidence_pack
+
+    repo, base, head = seeded_repo(tmp_path)
+    gen_a, gen_b = tmp_path / "direct-generation-a", tmp_path / "direct-generation-b"
+    gen_a.mkdir()
+    gen_b.mkdir()
+    manifest_a = manifest(gen_a, base)
+    manifest_b = manifest(gen_b, head)
+    selected = tmp_path / "direct.bundle.manifest.json"
+    selected.symlink_to(manifest_a)
+    original_git = agent_evidence_pack._read_git_delta
+
+    def switch_pointer_after_request_begins(*args, **kwargs):
+        selected.unlink()
+        selected.symlink_to(manifest_b)
+        return original_git(*args, **kwargs)
+
+    monkeypatch.setattr(
+        agent_evidence_pack, "_read_git_delta",
+        switch_pointer_after_request_begins,
+    )
+    # No external use_manifest_binding context: this matches normal CLI use.
+    pack = agent_evidence_pack.build_evidence_pack(
+        repo_root=repo,
+        base_revision=base,
+        target_revision=head,
+        bundle_manifest=selected,
+    )
+    assert selected.resolve() == manifest_b.resolve()
+    assert pack["status"] in {"warn", "pass"}
+    assert pack["bundle"]["source_commit"] == base
+    assert pack["bundle"]["manifest_sha256"] == hashlib.sha256(
+        manifest_a.read_bytes()
+    ).hexdigest()
+    assert pack["bundle"]["manifest_sha256"] != hashlib.sha256(
+        manifest_b.read_bytes()
+    ).hexdigest()
+    assert pack["changed_files"][0]["path"] == "alpha.py"
+
+
+def test_configured_ignore_submodules_all_does_not_hide_gitlink_changes(tmp_path):
+    """A configured ignoreSubmodules=all must not erase committed gitlinks."""
+    repo, _base, first = seeded_repo(tmp_path)
+    # Index cacheinfo creates a Git *gitlink* (mode 160000) without a network
+    # clone or nested repository; only committed tree objects are inspected.
+    git(repo, "update-index", "--add", "--cacheinfo",
+        "160000," + "1" * 40 + ",vendor")
+    git(repo, "commit", "-qm", "record first dependency revision")
+    base = git(repo, "rev-parse", "HEAD")
+    (repo / "alpha.py").write_text("def old():\n    return 3\n", encoding="utf-8")
+    git(repo, "add", "alpha.py")
+    git(repo, "update-index", "--add", "--cacheinfo",
+        "160000," + "2" * 40 + ",vendor")
+    git(repo, "commit", "-qm", "update code and dependency revision")
+    target = git(repo, "rev-parse", "HEAD")
+    git(repo, "config", "diff.ignoreSubmodules", "all")
+
+    # Both the human-readable delta and the NUL-safe inventory must
+    # explicitly override this checkout-local setting.
+    report = build_evidence_pack(
+        repo_root=repo, base_revision=base, target_revision=target
+    )
+    assert report["status"] in {"warn", "pass"}
+    assert report["changed_file_count"] == 2
+    assert {item["path"] for item in report["changed_files"]} == {
+        "alpha.py", "vendor",
+    }
+    assert all(item["claim_level"] == "direct_git_diff"
+               for item in report["changed_files"])
+    expected = subprocess.run(
+        ["git", "-C", str(repo), "diff", "--no-ext-diff", "--no-textconv",
+         "--no-renames", "--no-color", "--ignore-submodules=none",
+         "--unified=3", base, target, "--"],
+        check=True, capture_output=True,
+    ).stdout
+    assert report["revision"]["diff_sha256"] == hashlib.sha256(expected).hexdigest()
+    assert not {gap["code"] for gap in report["gaps"]}.intersection({
+        "diff_paths_unresolved", "empty_or_truncated_diff",
+    })
+    assert git(repo, "status", "--porcelain") == ""
+
+
+def test_partial_clone_missing_blob_never_invokes_promisor_transport(
+    tmp_path, monkeypatch,
+):
+    """Read-only evidence must neither fetch nor modify Git object storage."""
+    repo, base, head = seeded_repo(tmp_path)
+    old_blob = git(repo, "rev-parse", f"{base}:alpha.py")
+    loose_blob = repo / ".git" / "objects" / old_blob[:2] / old_blob[2:]
+    assert loose_blob.is_file()
+    held_blob = tmp_path / "held-blob"
+    loose_blob.rename(held_blob)
+    # Simulate a promisor checkout without hitting the network. The only
+    # alleged SSH transport is an executable that records invocation.
+    git(repo, "config", "extensions.partialClone", "origin")
+    git(repo, "config", "remote.origin.promisor", "true")
+    git(repo, "config", "remote.origin.partialclonefilter", "blob:none")
+    git(repo, "config", "remote.origin.url", "ssh://example.invalid/forbidden")
+    marker = tmp_path / "attempted-remote-fetch"
+    fake_ssh = tmp_path / "fake-git-ssh"
+    fake_ssh.write_text(
+        "#!/bin/sh\nprintf attempted > \"$PROBE_MARKER\"\nexit 37\n",
+        encoding="utf-8",
+    )
+    fake_ssh.chmod(0o700)
+    monkeypatch.setenv("GIT_SSH_COMMAND", str(fake_ssh))
+    monkeypatch.setenv("PROBE_MARKER", str(marker))
+    # Deliberately hostile inherited values: _bounded_git must override
+    # them so even config-driven promisor fetches cannot reach transport.
+    monkeypatch.setenv("GIT_NO_LAZY_FETCH", "0")
+    monkeypatch.setenv("GIT_ALLOW_PROTOCOL", "ssh")
+
+    before_objects = {
+        str(p.relative_to(repo / ".git")) for p in (repo / ".git").rglob("*")
+        if p.is_file()
+    }
+    result = build_evidence_pack(
+        repo_root=repo, base_revision=base, target_revision=head
+    )
+    assert result["status"] == "invalid"
+    assert result["reason"] in {
+        "git_command_failed", "diff_unavailable", "unavailable_commit",
+    }
+    assert not marker.exists(), "a Git evidence read attempted an SSH fetch"
+    assert not loose_blob.exists(), "read-only operation restored an object"
+    assert {
+        str(p.relative_to(repo / ".git")) for p in (repo / ".git").rglob("*")
+        if p.is_file()
+    } == before_objects
+
+
+def test_configured_clean_filter_never_runs_during_worktree_status(tmp_path):
+    """A pure evidence read must not execute configured worktree filters."""
+    repo, base, head = seeded_repo(tmp_path)
+    (repo / ".gitattributes").write_text("alpha.py filter=probe\n", encoding="utf-8")
+    git(repo, "add", ".gitattributes")
+    git(repo, "commit", "-qm", "mark tracked path for filter")
+    target = git(repo, "rev-parse", "HEAD")
+    marker = tmp_path / "clean-filter-invoked"
+    program = tmp_path / "test-clean-filter"
+    program.write_text(
+        '#!/bin/sh\nprintf invoked > "' + str(marker) + '"\ncat\n',
+        encoding="utf-8",
+    )
+    program.chmod(0o700)
+    git(repo, "config", "filter.probe.clean", str(program))
+    # Git's stat cache would otherwise hide the unsafe clean-filter path.
+    alpha = repo / "alpha.py"
+    original = alpha.stat()
+    import os
+    os.utime(alpha, ns=(original.st_atime_ns, original.st_mtime_ns + 1_000_000_000))
+    result = build_evidence_pack(
+        repo_root=repo, base_revision=base, target_revision=target,
+    )
+    assert result["status"] in {"warn", "pass"}
+    assert result["revision"]["worktree"] == "unknown"
+    assert "worktree_unknown" in {gap["code"] for gap in result["gaps"]}
+    assert not marker.exists(), "read-only Git status executed an external filter"
+    assert not (repo / ".git" / "index.lock").exists()
+
+
+def test_diff_noprefix_config_keeps_real_a_directory_paths(tmp_path):
+    """Git's diff.noprefix presentation config must not corrupt file identity."""
+    repo, _base, head = seeded_repo(tmp_path)
+    (repo / "a").mkdir()
+    (repo / "a" / "x.py").write_text("value = 1\n", encoding="utf-8")
+    git(repo, "add", "a/x.py")
+    git(repo, "commit", "-qm", "introduce a namespace directory")
+    base = git(repo, "rev-parse", "HEAD")
+    (repo / "a" / "x.py").write_text("value = 2\n", encoding="utf-8")
+    git(repo, "add", "a/x.py")
+    git(repo, "commit", "-qm", "update prefixed path")
+    target = git(repo, "rev-parse", "HEAD")
+    git(repo, "config", "diff.noprefix", "true")
+    result = build_evidence_pack(
+        repo_root=repo, base_revision=base, target_revision=target,
+    )
+    assert result["status"] in {"pass", "warn"}
+    assert result["changed_file_count"] == 1
+    assert result["changed_files"][0]["path"] == "a/x.py"
+    assert result["revision"]["target"] == target
+    assert not any(g["code"] == "diff_paths_unresolved" for g in result["gaps"])

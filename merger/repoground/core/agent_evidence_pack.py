@@ -16,7 +16,9 @@ import time
 from typing import Any
 
 from merger.repoground.core.delta_context import compile_delta_context, parse_unified_diff
-from merger.repoground.core.manifest_snapshot import ManifestBindingError, manifest_snapshot
+from merger.repoground.core.manifest_snapshot import (
+    ManifestBindingError, manifest_snapshot, use_manifest_binding,
+)
 
 KIND = "repoground.agent_change_evidence"
 VERSION = 1
@@ -91,9 +93,22 @@ def _bounded_git(root: Path, args: list[str], *, max_bytes: int = 131072) -> tup
     command = [
         "git", "-c", "core.hooksPath=/dev/null", "-c", "color.ui=never",
         "-c", "core.fsmonitor=false", "-c", "diff.external=",
-        "-c", "protocol.file.allow=never", "-C", str(root), *args,
+        "-c", "protocol.allow=never", "-c", "protocol.file.allow=never",
+        "-C", str(root), *args,
     ]
-    env = dict(os.environ, GIT_OPTIONAL_LOCKS="0", GIT_TERMINAL_PROMPT="0")
+    # Git partial clones can lazily fetch missing *promisor* objects even
+    # during an ordinary "diff". Explicitly prohibit all transports and
+    # disable lazy fetch; read-only CLI/MCP must never mutate .git this way.
+    # Override hostile inherited GIT_ALLOW_PROTOCOL/GIT_NO_LAZY_FETCH values.
+    # Eliminate caller-controlled Git config, object-path, transport, and
+    # trace overrides; no ambient Git variable may redirect an evidence read.
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith("GIT_")}
+    env.update({
+        "GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0",
+        "GIT_NO_LAZY_FETCH": "1", "GIT_ALLOW_PROTOCOL": "",
+        "GIT_PROTOCOL_FROM_USER": "0",
+    })
     process: subprocess.Popen[bytes] | None = None
     try:
         process = subprocess.Popen(
@@ -253,7 +268,7 @@ def _diff_inventory_problem(
     """Do not let textual Git quotePath parsing silently omit changed files."""
     raw_names, error = _bounded_git(
         root, ["diff", "--no-ext-diff", "--no-textconv", "--no-renames",
-               "--name-only", "-z", base_revision, target_revision, "--"],
+               "--ignore-submodules=none", "--name-only", "-z", base_revision, target_revision, "--"],
         max_bytes=MAX_DIFF_BYTES,
     )
     if error or raw_names is None:
@@ -280,7 +295,9 @@ def _read_git_delta(
             return None, "unavailable_commit"
     diff, error = _bounded_git(
         root, ["diff", "--no-ext-diff", "--no-textconv", "--no-renames",
-               "--no-color", "--unified=3", base_revision, target_revision, "--"],
+               "--ignore-submodules=none", "--no-color",
+               "--src-prefix=a/", "--dst-prefix=b/",
+               "--unified=3", base_revision, target_revision, "--"],
         max_bytes=MAX_DIFF_BYTES,
     )
     if error or diff is None:
@@ -432,7 +449,7 @@ def _case_candidates_and_gaps(
     return test_candidates, gap_codes
 
 
-def build_evidence_pack(
+def _build_evidence_pack_bound(
     *,
     repo_root: str | Path,
     base_revision: str,
@@ -457,8 +474,30 @@ def build_evidence_pack(
         return _invalid(problem or "diff_unavailable")
     diff, diff_sha, parsed = delta
 
-    dirty, dirty_error = _bounded_git(root, ["status", "--porcelain", "--untracked-files=normal"])
-    worktree_state = "unknown" if dirty_error else ("dirty" if dirty else "clean")
+    # git status may invoke filter.<driver>.clean/process on a stat-dirty file.
+    # First inspect the *effective* Git configuration using a builtin which
+    # does not touch worktree files. If any executable filter is configured,
+    # or configuration is unobservable, decline worktree classification rather
+    # than executing the configured program or claiming "clean".
+    config, config_problem = _bounded_git(
+        root, ["config", "--list", "--null"], max_bytes=MAX_DIFF_BYTES,
+    )
+    executable_filter = (
+        config_problem is not None
+        or config is None
+        or any(
+            entry.split("\n", 1)[0].casefold().startswith("filter.")
+            and entry.split("\n", 1)[0].casefold().endswith((".clean", ".process"))
+            for entry in (config or "").split("\0") if entry
+        )
+    )
+    if executable_filter:
+        worktree_state = "unknown"
+    else:
+        dirty, dirty_error = _bounded_git(
+            root, ["status", "--porcelain", "--untracked-files=normal"]
+        )
+        worktree_state = "unknown" if dirty_error else ("dirty" if dirty else "clean")
     bundle, gap_codes = _bundle_identity(bundle_manifest)
     gap_codes.extend(_bundle_revision_gaps(bundle, worktree_state, base_revision, target_revision))
     hints, hint_gaps = _bundle_navigation_hints(
@@ -504,6 +543,38 @@ def build_evidence_pack(
     }
     result["response_sha256"] = hashlib.sha256(_json_bytes(result)).hexdigest()
     return result
+
+
+def build_evidence_pack(
+    *,
+    repo_root: str | Path,
+    base_revision: str,
+    target_revision: str,
+    bundle_manifest: str | Path | None = None,
+    use_case: str = "explain-change",
+    context_budget_tokens: int = 1_200,
+    expected_diff_sha256: str | None = None,
+) -> dict[str, Any]:
+    """Pin one manifest for the complete CLI/core invocation, not only MCP.
+
+    Both manifest metadata and delta navigation must share the same request
+    snapshot even if a mutable selected symlink moves while Git is read.
+    The explicit no-bundle Git-only fallback remains available.
+    """
+    kwargs = {
+        "repo_root": repo_root, "base_revision": base_revision,
+        "target_revision": target_revision, "bundle_manifest": bundle_manifest,
+        "use_case": use_case, "context_budget_tokens": context_budget_tokens,
+        "expected_diff_sha256": expected_diff_sha256,
+    }
+    if bundle_manifest is None:
+        return _build_evidence_pack_bound(**kwargs)
+    try:
+        snapshot = manifest_snapshot(bundle_manifest)
+        with use_manifest_binding(snapshot.binding):
+            return _build_evidence_pack_bound(**kwargs)
+    except (ManifestBindingError, OSError, ValueError):
+        return _invalid("manifest_not_readable")
 
 
 def _append_markdown_section(
