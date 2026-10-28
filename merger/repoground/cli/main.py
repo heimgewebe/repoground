@@ -78,6 +78,10 @@ def main(args: Optional[List[str]] = None) -> int:
     from .cmd_evidence_query import register_evidence_query_commands
     register_evidence_query_commands(subparsers)
 
+    # Read-only revision-bound evidence pack for coding agents.
+    from .cmd_agent_evidence import register_agent_evidence_commands
+    register_agent_evidence_commands(subparsers)
+
     # Explicit incremental retrieval snapshot writer and optional watcher.
     from .cmd_incremental_snapshot import register_incremental_snapshot_commands
     register_incremental_snapshot_commands(subparsers)
@@ -313,7 +317,8 @@ def main(args: Optional[List[str]] = None) -> int:
     elif parsed_args.command == "agent-consumption":
         from .cmd_agent_consumption import run_agent_consumption
         return run_agent_consumption(parsed_args)
-    elif parsed_args.command in {"doctor", "token-budget", "evidence-query", "retrieval-snapshot", "diagnostics", "observed-calls"}:
+    elif parsed_args.command in {"doctor", "token-budget", "evidence-query", "retrieval-snapshot", "diagnostics", "observed-calls", "agent-evidence"}:
+        from .cmd_agent_evidence import run_agent_evidence
         from .cmd_diagnostics import run_diagnostics
         from .cmd_doctor import run_doctor
         from .cmd_evidence_query import run_evidence_query
@@ -322,6 +327,7 @@ def main(args: Optional[List[str]] = None) -> int:
         from .cmd_token_budget import run_token_budget
 
         handlers = {
+            "agent-evidence": run_agent_evidence,
             "doctor": run_doctor,
             "token-budget": run_token_budget,
             "evidence-query": run_evidence_query,
