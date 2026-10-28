@@ -142,8 +142,8 @@
       "path": ".github/workflows/semantic-lock.yml",
       "class": "required_protection",
       "rationale": "Semantic identity / lock surface.",
-      "sha256": "68c31d6ebce296f15cb5693a5c5583281651371d8a0412375d8501359aa7b4b6",
-      "bytes": 3559
+      "sha256": "d3459b7552806c9838109530bf762a0254a659143b7f0f17890ad162a15320ec",
+      "bytes": 3649
     },
     {
       "path": ".github/workflows/task-index.yml",
