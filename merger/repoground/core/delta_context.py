@@ -727,3 +727,23 @@ def compile_delta_context(
         "mutation_boundary": _read_only_boundary(),
         "does_not_establish": list(DOES_NOT_ESTABLISH),
     }
+
+def compile_revision_impact(
+    *,
+    repo_root: str | Path,
+    base_sha: str,
+    head_sha: str,
+    max_items: int = 200,
+) -> dict[str, Any]:
+    """Opt-in revision-bound structural counterpart of compile_delta_context.
+
+    Existing v1 delta responses stay unchanged. No MCP/CLI or publisher wiring
+    is performed here; consumers must verify exact Git provenance.
+    """
+    from merger.repoground.core.revision_graph_impact import (
+        compile_revision_graph_impact,
+    )
+
+    return compile_revision_graph_impact(
+        Path(repo_root), base_sha=base_sha, head_sha=head_sha, max_items=max_items,
+    )
