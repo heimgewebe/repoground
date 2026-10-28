@@ -300,3 +300,23 @@ def test_valid_flow_yaml_without_unique_metadata_line_is_partial_not_removed(tmp
     assert compared["status"] == "partial"
     assert compared["relation_deltas"] == []
     assert "after:fleet_metadata_declaration_unresolved:service" in compared["gaps"]
+
+
+def test_null_and_empty_non_mapping_metadata_preserve_fleet_evidence(tmp_path):
+    metarepo, _, service, service_sha = create_pair(tmp_path)
+    metadata = metarepo / "fleet" / "repo-metadata.yml"
+    for annotation in ("", " []", " false"):
+        metadata.write_text(
+            "schema_version: 1\nrepositories:\n  service:" + annotation + "\n",
+            encoding="utf-8",
+        )
+        meta_sha = commit(metarepo)
+        targets = {"service": (service, service_sha)}
+        result = fleet_revision_relations(metarepo, meta_sha, targets)
+        assert "invalid_metadata:service" in result["gaps"]
+        assert any(
+            relation["relation_type"] == "fleet_core"
+            for relation in result["relations"]
+        )
+        delta = fleet_relation_delta(metarepo, meta_sha, meta_sha, targets, targets)
+        assert delta["status"] == "partial"

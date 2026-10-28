@@ -349,7 +349,7 @@ def _declared_target_relations(name: str, target_sha: str, ctx: dict[str, Any]) 
         return [], ["fleet_declaration_ambiguous:" + name]
     annotation = ctx["annotations"].get(name, {})
     gaps: list[str] = []
-    if annotation and not isinstance(annotation, dict):
+    if not isinstance(annotation, dict):
         gaps.append("invalid_metadata:" + name)
         annotation = {}
     conflict = annotation.get("fleet") is False
