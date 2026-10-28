@@ -540,6 +540,46 @@ class TestStaticConfigLinks(unittest.TestCase):
         own = [edge for edge in edges if edge["src"] == "file:docs/comment-unclosed.md"]
         self.assertEqual([4], [edge["source"]["start_line"] for edge in own], own)
 
+    def test_quoted_yaml_multiline_scalar_bodies_never_emit_action_edges(self):
+        self.write("actions/local/action.yml", "name: local\n")
+        self.write(".github/workflows/quoted-scalars.yml", (
+            "jobs:\n"
+            "  build:\n"
+            "    steps:\n"
+            '      - "run": |\n'
+            "          uses: ./actions/local\n"
+            "      - 'run': >-\n"
+            "          uses: ./actions/local\n"
+            '      - "name": "first line\n'
+            "          uses: ./actions/local\n"
+            '        last line"\n'
+            "      - uses: ./actions/local\n"
+        ))
+        edges, _, _ = self.edges()
+        own = [edge for edge in edges
+               if edge["src"] == "file:.github/workflows/quoted-scalars.yml"]
+        self.assertEqual([11], [
+            edge["source"]["start_line"] for edge in own
+            if edge["evidence_level"] == "S1"
+        ], own)
+
+    def test_markdown_links_survive_inline_and_multiline_html_code_tags(self):
+        self.write("docs/target.md", "# target\n")
+        self.write("docs/second.md", "# second\n")
+        self.write("docs/code-prose.md", (
+            "[before](./target.md) <code>[hidden](./target.md)</code> "
+            "[after](./second.md)\n"
+            "<code>[hidden-start](./target.md)\n"
+            "[hidden-end](./target.md)</code> [after-close](./target.md)\n"
+            "<pre class='sample'>[hidden-pre](./target.md)</pre> "
+            "[end](./target.md)\n"
+            "`<code>` [literal](./target.md)\n"
+        ))
+        edges, _, _ = self.edges()
+        own = [edge for edge in edges if edge["src"] == "file:docs/code-prose.md"]
+        self.assertEqual([1, 1, 3, 4, 5],
+                         [edge["source"]["start_line"] for edge in own], own)
+
     def test_projection_contract_is_stable_and_legacy_consumers_unchanged(self):
         self.write("README.md", "[graph](./target.md)\n")
         self.write("target.md", "# target\n")

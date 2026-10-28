@@ -22,13 +22,13 @@ _YAML_USES = re.compile(
     r"""^[ \t]*(?:-[ \t]+)?uses:[ \t]*(?P<value>"[^"\n]+"|'[^'\n]+'|[^\s#]+)[ \t]*(?:#.*)?$"""
 )
 _YAML_BLOCK = re.compile(
-    r"^(?P<indent>[ \t]*)(?:-[ \t]+)?[a-zA-Z_][\w.-]*:[ \t]*[|>](?:[-+][1-9]?|[1-9][-+]?)?[ \t]*(?:#.*)?$"
+    r"""^(?P<indent>[ \t]*)(?:-[ \t]+)?(?:[a-zA-Z_][\w.-]*|"[a-zA-Z_][\w.-]*"|'[a-zA-Z_][\w.-]*'):[ \t]*[|>](?:[-+][1-9]?|[1-9][-+]?)?[ \t]*(?:#.*)?$"""
 )
 _YAML_PARENT = re.compile(
     r"""^[ \t]*(?P<prefix>-[ \t]+)?(?P<key>[A-Za-z_][\w.-]*|"[A-Za-z_][\w.-]*"|'[A-Za-z_][\w.-]*'):[ \t]*(?:&[A-Za-z0-9_-]+[ \t]*)?(?:#.*)?$"""
 )
 _YAML_QUOTED_VALUE = re.compile(
-    r"""^[ \t]*(?:-[ \t]+)?[A-Za-z_][\w.-]*:[ \t]*(?P<quote>["'])"""
+    r"""^[ \t]*(?:-[ \t]+)?(?:[A-Za-z_][\w.-]*|"[A-Za-z_][\w.-]*"|'[A-Za-z_][\w.-]*'):[ \t]*(?P<quote>["'])"""
 )
 
 _SHELL_SOURCE = re.compile(
@@ -307,11 +307,41 @@ def _markdown_mask_html_comments(source: str) -> str:
     return "".join(masked)
 
 
+_MD_HTML_CODE_TAG = re.compile(
+    r"<(?P<closing>/)?(?P<tag>code|pre)\b[^>]*>", flags=re.IGNORECASE,
+)
+
+
+def _mask_markdown_html_code(
+    line: str, active_tag: str | None,
+) -> tuple[str, str | None]:
+    """Hide only HTML code containers, preserving prose around closed spans."""
+    # A tag rendered inside Markdown backticks is literal documentation.
+    visible = _without_inline_code(line)
+    chars = list(line)
+    cursor = 0
+    for tag in _MD_HTML_CODE_TAG.finditer(visible):
+        name = tag.group("tag").lower()
+        if active_tag is None:
+            if tag.group("closing"):
+                continue
+            active_tag = name
+            cursor = tag.start()
+        if active_tag is not None:
+            chars[cursor:tag.end()] = " " * (tag.end() - cursor)
+            if tag.group("closing") and name == active_tag:
+                active_tag = None
+        cursor = tag.end()
+    if active_tag is not None:
+        chars[cursor:] = " " * (len(chars) - cursor)
+    return "".join(chars), active_tag
+
+
 def _markdown_edges(path: str, source: str, known: set[str]) -> list[dict[str, Any]]:
     sanitized = _markdown_mask_html_comments(source)
     edges: list[dict[str, Any]] = []
     fenced: tuple[str, int, int | None, int] | None = None
-    in_html_code = False
+    html_code_tag: str | None = None
     paragraph: list[tuple[int, str]] = []
     for ordinal, line in enumerate(sanitized.splitlines(), 1):
         content, quote_depth = _markdown_quote_info(line)
@@ -334,11 +364,14 @@ def _markdown_edges(path: str, source: str, known: set[str]) -> list[dict[str, A
             edges.extend(_markdown_prose_edges(path, paragraph, known))
             paragraph.clear()
             continue
-        if in_html_code:
-            edges.extend(_markdown_prose_edges(path, paragraph, known))
-            paragraph.clear()
-            if "</pre>" in content or "</code>" in content:
-                in_html_code = False
+        if html_code_tag is not None:
+            # HTML code can end mid-line; links after its closing tag count.
+            prose, html_code_tag = _mask_markdown_html_code(line, html_code_tag)
+            if prose.strip():
+                paragraph.append((ordinal, prose))
+            else:
+                edges.extend(_markdown_prose_edges(path, paragraph, known))
+                paragraph.clear()
             continue
         candidate, list_indent = _markdown_fence_text(content)
         opener = _MD_FENCE.match(candidate)
@@ -348,20 +381,15 @@ def _markdown_edges(path: str, source: str, known: set[str]) -> list[dict[str, A
             marks = opener.group("marks")
             fenced = marks[0], len(marks), list_indent, quote_depth
             continue
-        # Inline `<code>` examples are prose, not HTML code regions.
-        visible = _without_inline_code(content)
-        if "<pre" in visible or "<code" in visible:
-            in_html_code = True
-            edges.extend(_markdown_prose_edges(path, paragraph, known))
-            paragraph.clear()
-            if "</pre>" in visible or "</code>" in visible:
-                in_html_code = False
-            continue
-        if not content.strip():
+        # HTML code spans mask only their own text and tags, not nearby prose.
+        # Backtick code is masked while recognizing tags so literal examples
+        # cannot accidentally open an HTML code container.
+        prose, html_code_tag = _mask_markdown_html_code(line, html_code_tag)
+        if not prose.strip():
             edges.extend(_markdown_prose_edges(path, paragraph, known))
             paragraph.clear()
             continue
-        paragraph.append((ordinal, line))
+        paragraph.append((ordinal, prose))
     edges.extend(_markdown_prose_edges(path, paragraph, known))
     return edges
 
