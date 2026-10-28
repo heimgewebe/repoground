@@ -122,6 +122,7 @@ def test_mcp_stdio_launcher_completes_handshake_outside_checkout(
         "find_references",
         "get_callers",
         "get_callees",
+        "get_structure_neighborhood",
     }
 
 

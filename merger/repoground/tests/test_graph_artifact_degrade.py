@@ -3,6 +3,7 @@ from pathlib import Path
 
 from merger.repoground.architecture import graph_source_validation
 from merger.repoground.core.merge import build_derived_artifacts
+from merger.repoground.tests.test_graph_bundle_sources import _contact_records
 
 
 def test_graph_side_artifacts_skip_when_schema_dependency_absent(tmp_path, monkeypatch):
@@ -15,14 +16,10 @@ def test_graph_side_artifacts_skip_when_schema_dependency_absent(tmp_path, monke
     dump.write_text(json.dumps({"contract": "dump-index", "artifacts": {}}), encoding="utf-8")
 
     chunks = tmp_path / "bundle.chunk_index.jsonl"
-    chunks.write_text(json.dumps({
-        "chunk_id": "c1",
-        "repo": "sample",
-        "path": "src/main.py",
-        "source_status": "full",
-        "truncated": False,
-        "source_range": {"status": "declared"},
-    }) + "\n", encoding="utf-8")
+    records = _contact_records(repo, "sample", "src/main.py")
+    chunks.write_text(
+        "".join(json.dumps(record) + "\n" for record in records), encoding="utf-8",
+    )
 
     monkeypatch.setattr(graph_source_validation, "json" + "schema", None)
 
@@ -38,3 +35,5 @@ def test_graph_side_artifacts_skip_when_schema_dependency_absent(tmp_path, monke
     assert "bundle.graph_index.json" not in names
     assert "bundle.architecture_graph.json" not in names
     assert "bundle.entrypoints.json" not in names
+    assert "bundle.relationship_projection.json" not in names
+    assert not (tmp_path / "bundle.relationship_projection.json").exists()
