@@ -941,6 +941,21 @@ class TestStaticConfigLinks(unittest.TestCase):
                 ], [(e["source"]["start_line"], e["dst"], e["evidence_level"])
                     for e in own], own)
 
+    def test_long_multiline_step_flow_map_preserves_single_direct_use(self):
+        self.write("actions/local/action.yml", "name: local\n")
+        self.write(".github/workflows/long-flow.yml", (
+            "jobs:\n  build:\n    steps:\n      - {\n"
+            + (" \n" * 40000)
+            + "        uses: ./actions/local\n      }\n"
+        ))
+        edges, _, _ = self.edges()
+        own = [e for e in edges
+               if e["src"] == "file:.github/workflows/long-flow.yml"]
+        self.assertEqual([(40005, "file:actions/local/action.yml", "S1")], [
+            (e["source"]["start_line"], e["dst"], e["evidence_level"])
+            for e in own
+        ], own)
+
     def test_root_step_flow_mapping_only_proves_direct_uses(self):
         self.write("actions/local/action.yml", "name: local\n")
         cases = (

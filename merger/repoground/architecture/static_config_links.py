@@ -682,7 +682,7 @@ def _yaml_continue_flow(
 ) -> tuple[int, str | None, list[tuple[int, str]], list[dict[str, Any]]]:
     """Advance a flow collection and project only a completed root step map."""
     if root_flow:
-        root_flow = [*root_flow, (ordinal, line)]
+        root_flow.append((ordinal, line))
     depth, quote = _yaml_flow_depth(line, depth, quote)
     if not depth and root_flow:
         return depth, quote, [], _yaml_flow_use_edges(path, root_flow, known)
