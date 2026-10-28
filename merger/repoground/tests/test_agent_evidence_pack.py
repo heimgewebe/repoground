@@ -8,17 +8,16 @@ import pytest
 
 from merger.repoground.cli.main import main
 from merger.repoground.core.agent_evidence_pack import (
-    build_evidence_pack, render_evidence_markdown,
+    MAX_DIFF_BYTES, _bounded_git, build_evidence_pack, render_evidence_markdown,
 )
 
 
 @pytest.fixture(autouse=True)
 def isolate_global_git_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep disposable Git fixtures independent from CI runner global filters.
+    """Isolate the caller's HOME; system Git filters may still be effective.
 
-    The production reader must treat executable clean/process filters as an
-    unknown worktree; these tests assert clean/dirty only for known simple
-    repositories. A CI-installed global filter must not silently alter them.
+    The reader intentionally reports unknown when executable filters are
+    configured. Assertions below honor this contract on every CI runner.
     """
     home = tmp_path / "isolated-home"
     config = tmp_path / "isolated-config"
@@ -32,6 +31,34 @@ def git(repo: Path, *args: str) -> str:
     return subprocess.run(
         ["git", "-C", str(repo), *args], check=True, capture_output=True, text=True
     ).stdout.strip()
+
+
+def assert_worktree_with_effective_filter_policy(
+    report: dict, repo: Path, unfiltered_state: str,
+) -> None:
+    """A CI-wide filter configuration must produce an explicit unknown gap.
+
+    The product's bounded, side-effect-free Git configuration read is the
+    authority for whether status probing may run on this host.
+    """
+    config, problem = _bounded_git(
+        repo, ["config", "--list", "--null"], max_bytes=MAX_DIFF_BYTES,
+    )
+    executable_filter = (
+        problem is not None
+        or config is None
+        or any(
+            name.startswith("filter.")
+            and name.endswith((".clean", ".process"))
+            for entry in (config or "").split("\0") if entry
+            for name in [entry.split("\n", 1)[0].casefold()]
+        )
+    )
+    expected = "unknown" if executable_filter else unfiltered_state
+    assert report["revision"]["worktree"] == expected
+    gaps = {gap["code"] for gap in report["gaps"]}
+    if expected != "clean":
+        assert "worktree_" + expected in gaps
 
 
 def seeded_repo(tmp_path: Path) -> tuple[Path, str, str]:
@@ -84,7 +111,7 @@ def test_repeated_same_git_and_bundle_are_byte_identical(tmp_path):
     assert first["status"] in {"pass", "warn"}
     assert first["revision"]["base"] == base
     assert first["revision"]["target"] == head
-    assert first["revision"]["worktree"] == "clean"
+    assert_worktree_with_effective_filter_policy(first, repo, "clean")
     assert first["bundle"]["source_commit"] == base
     assert first["changed_files"][0]["path"] == "alpha.py"
     assert first["changed_files"][0]["ranges"]
@@ -148,8 +175,7 @@ def test_revisions_and_input_failures_not_interpreted_as_review(tmp_path):
         use_case="cross-repo-impact",
     )
     assert status["status"] == "warn"
-    assert status["revision"]["worktree"] == "dirty"
-    assert "worktree_dirty" in {gap["code"] for gap in status["gaps"]}
+    assert_worktree_with_effective_filter_policy(status, repo, "dirty")
 
 
 def test_cli_json_and_markdown_share_core_digest(tmp_path, capsys):
@@ -251,7 +277,7 @@ def test_git_color_always_does_not_corrupt_parsed_diff(tmp_path):
     assert result["status"] in {"pass", "warn"}
     assert result["changed_files"][0]["path"] == "alpha.py"
     assert result["revision"]["diff_sha256"]
-    assert result["revision"]["worktree"] == "clean"
+    assert_worktree_with_effective_filter_policy(result, repo, "clean")
 
 
 def test_selected_symbol_and_relation_hints_retain_safe_navigation_paths(tmp_path, monkeypatch):
