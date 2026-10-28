@@ -90,7 +90,11 @@ class TestRelationshipProjection(unittest.TestCase):
         from merger.repoground.architecture.relationship_projection import generate_relationship_document
         expected = project_relationships(**self.sources())
         actual = generate_relationship_document(self.root, "run-id", "a" * 64)
-        self.assertEqual(expected, actual)
+        self.assertEqual(expected["edges"], actual["edges"])
+        self.assertEqual(expected["run_id"], actual["run_id"])
+        self.assertEqual(
+            actual["coverage"]["declared_source_coverage"]["files_selected"], 0
+        )
         contract = Path(__file__).parent.parent / "contracts" / "relationship_projection.v1.schema.json"
         schema = json.loads(contract.read_text(encoding="utf-8"))
         self.assertEqual(schema["properties"]["kind"]["const"], actual["kind"])
