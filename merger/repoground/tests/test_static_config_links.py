@@ -1260,5 +1260,112 @@ class TestStaticConfigLinks(unittest.TestCase):
 
 
 
+
+    def test_markdown_html_attributes_never_become_literal_links(self):
+        known = {"file:target.md", "file:before.md", "file:inside.md", "file:after.md"}
+        tags = (
+            '<a title="[fake](./target.md)">',
+            "<a title='[fake](./target.md)'>",
+            '<a title="> [fake](./target.md)">',
+            '<a\n title="[fake](./target.md)">',
+            '<a title="[fake](./target.md)\nmore">',
+            '<custom-tag data_ref=[fake](./target.md) disabled>',
+            '<a title="<code> [fake](./target.md)">',
+            '<a title="<!-- [fake](./target.md)">',
+        )
+        for tag in tags:
+            with self.subTest(tag=tag):
+                source = (
+                    "[before](./before.md) " + tag
+                    + "[inside](./inside.md)</a> [after](./after.md)"
+                )
+                edges = config_reference_edges("README.md", source, known)
+                self.assertEqual(
+                    ["file:before.md", "file:inside.md", "file:after.md"],
+                    [edge["dst"] for edge in edges], edges,
+                )
+
+    def test_markdown_html_and_backticks_use_first_token_boundary(self):
+        known = {"file:target.md", "file:real.md"}
+        sources = (
+            r'Some \<a title="`[fake](./target.md)`"> [real](./real.md)',
+            'Some <a title="` [fake](./target.md)">text</a> [real](./real.md) `tail',
+            '`<a title="[fake](./target.md)">` [real](./real.md)',
+            'Some <a title="` > [fake](./target.md) `">text</a> [real](./real.md)',
+        )
+        for source in sources:
+            with self.subTest(source=source):
+                edges = config_reference_edges("README.md", source, known)
+                self.assertEqual(["file:real.md"], [edge["dst"] for edge in edges], edges)
+
+    def test_markdown_invalid_or_escaped_html_keeps_literal_prose(self):
+        known = {"file:real.md"}
+        sources = (
+            r'Some \<a title="[real](./real.md)">',
+            'Some <a invalid*="[real](./real.md)">',
+            'Some <a title="[real](./real.md)',
+            'Some </a title="[real](./real.md)">',
+            'Some <33 title="[real](./real.md)">',
+        )
+        for source in sources:
+            with self.subTest(source=source):
+                edges = config_reference_edges("README.md", source, known)
+                self.assertEqual(["file:real.md"], [edge["dst"] for edge in edges], edges)
+
+    def test_markdown_other_raw_html_tokens_hide_only_their_contents(self):
+        known = {"file:target.md", "file:real.md"}
+        tokens = (
+            '<?process [fake](./target.md) ?>',
+            '<![CDATA[[fake](./target.md)]]>',
+            '<!DOCTYPE [fake](./target.md)>',
+        )
+        for token in tokens:
+            with self.subTest(token=token):
+                source = "Some " + token + " [real](./real.md)"
+                edges = config_reference_edges("README.md", source, known)
+                self.assertEqual(["file:real.md"], [edge["dst"] for edge in edges], edges)
+
+    def test_markdown_comments_preserve_all_splitline_boundaries(self):
+        known = {"file:real.md"}
+        for boundary in ("\v", "\f", "\x1c", "\x1d", "\x1e", "\x85", "\u2028", "\u2029"):
+            with self.subTest(boundary=repr(boundary)):
+                source = "<!-- a" + boundary + "b -->\n[real](./real.md)\n"
+                edges = config_reference_edges("README.md", source, known)
+                self.assertEqual(
+                    [("file:real.md", 3)],
+                    [(edge["dst"], edge["source"]["start_line"]) for edge in edges],
+                    edges,
+                )
+
+    def test_masked_inline_html_does_not_split_backtick_paragraph(self):
+        known = {"file:target.md", "file:real.md"}
+        for middle in ("<code>x</code>", "<code>\nx\n</code>"):
+            with self.subTest(middle=middle):
+                source = "`start\n" + middle + "\n[fake](./target.md) end`\n\n[real](./real.md)"
+                edges = config_reference_edges("README.md", source, known)
+                self.assertEqual(["file:real.md"], [edge["dst"] for edge in edges], edges)
+
+    def test_github_actions_plain_scalar_uses_requires_mapping_separator(self):
+        import yaml
+
+        known = {"file:actions/local/action.yml"}
+        sources = (
+            "jobs:\n  build:\n    steps:\n      - name: Build\n          uses:./actions/local\n",
+            "jobs:\n  build:\n    steps:\n      - uses:./actions/local\n",
+        )
+        for source in sources:
+            with self.subTest(source=source):
+                parsed = yaml.safe_load(source)
+                step = parsed["jobs"]["build"]["steps"][0]
+                self.assertTrue(isinstance(step, str) or "uses" not in step)
+                edges = config_reference_edges(".github/workflows/example.yml", source, known)
+                self.assertEqual([], edges)
+        positive = "jobs:\n  build:\n    steps:\n      - uses: ./actions/local\n"
+        edges = config_reference_edges(".github/workflows/example.yml", positive, known)
+        self.assertEqual([("file:actions/local/action.yml", "S1")], [
+            (edge["dst"], edge["evidence_level"]) for edge in edges
+        ])
+
+
 if __name__ == "__main__":
     unittest.main()

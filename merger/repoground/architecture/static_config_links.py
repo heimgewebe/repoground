@@ -18,8 +18,29 @@ _MD_LINK = re.compile(
 )
 _MD_FENCE = re.compile(r"^ {0,3}(?P<marks>\x60{3,}|~{3,})(?:[^\n]*)$")
 _MD_COMMENT = re.compile(r"<!--[\s\S]*?(?:-->|$)")
+
+# CommonMark 0.31.2, section 6.6: complete tags and attribute values are
+# lexical units. A '>' or backtick inside a quoted value is not a boundary.
+_MD_HTML_WS = r"[ \t]*(?:\n[ \t]*)?"
+_MD_HTML_REQUIRED_WS = r"(?:[ \t]+(?:\n[ \t]*)?|\n[ \t]*)"
+_MD_HTML_VALUE = r"""(?:[^ \t\r\n"'=<>\x60]+|'[^']*'|"[^"]*")"""
+_MD_HTML_ATTRIBUTE = (
+    rf"{_MD_HTML_REQUIRED_WS}[A-Za-z_:][A-Za-z0-9_.:-]*"
+    rf"(?:{_MD_HTML_WS}={_MD_HTML_WS}{_MD_HTML_VALUE})?"
+)
+_MD_HTML_TAG = (
+    rf"<(?P<closing>/)?(?P<tag>[A-Za-z][A-Za-z0-9-]*)"
+    rf"(?(closing){_MD_HTML_WS}>|(?:{_MD_HTML_ATTRIBUTE})*{_MD_HTML_WS}/?>)"
+)
+_MD_INLINE_TOKEN = re.compile(
+    rf"(?P<ticks>\x60+)|{_MD_HTML_TAG}|"
+    r"<!--(?:>|->|[\s\S]*?(?:-->|$))|"
+    r"<\?[\s\S]*?\?>|<!\[CDATA\[[\s\S]*?\]\]>|<![A-Za-z][^>]*>"
+)
+_MD_LINE_ENDINGS = frozenset("\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029")
+
 _YAML_USES = re.compile(
-    r"""^[ \t]*(?:-[ \t]+)?(?:uses|"uses"|'uses'):[ \t]*(?P<value>"[^"\n]+"|'[^'\n]+'|[^\s#]+)[ \t]*(?:#.*)?$"""
+    r"""^[ \t]*(?:-[ \t]+)?(?:uses|"uses"|'uses'):[ \t]+(?P<value>"[^"\n]+"|'[^'\n]+'|[^\s#]+)[ \t]*(?:#.*)?$"""
 )
 # YAML node properties may precede either a block indicator or a multiline
 # quoted scalar. Share the lexical boundary so anchors/tags cannot make script
@@ -52,7 +73,7 @@ _UNIT_SUFFIXES = {".service", ".socket", ".target", ".timer", ".path"}
 
 
 def _mask_span(text: str) -> str:
-    return "".join("\n" if char == "\n" else " " for char in text)
+    return "".join(char if char in _MD_LINE_ENDINGS else " " for char in text)
 
 
 def _local_target(
@@ -194,13 +215,66 @@ def _markdown_quote_info(line: str) -> tuple[str, int]:
     return content, depth
 
 
+
+def _markdown_inline_regions(source: str):
+    """Yield nonoverlapping tokens; the first valid code/HTML opener wins."""
+    runs, following = _markdown_backtick_pairs(source)
+    run_index = {start: index for index, (start, _) in enumerate(runs)}
+    cursor = 0
+    while (token := _MD_INLINE_TOKEN.search(source, cursor)) is not None:
+        cursor = token.end()
+        if _escaped_markdown_opener(source, token.start()):
+            # Escaping a tag opener leaves its contents as Markdown prose.
+            if token.group("ticks") is None:
+                cursor = token.start() + 1
+            continue
+        if token.group("ticks") is not None:
+            closing = following[run_index[token.start()]]
+            if closing is None:
+                continue
+            cursor = runs[closing][1]
+        yield token, cursor
+
+
+def _markdown_mask_inline_syntax(source: str, *, preserve_tags: bool = False) -> str:
+    """Mask complete HTML syntax, retaining real tag boundaries when requested.
+
+    The initial pass neutralizes attributes before comment/code-container
+    recognition. The paragraph pass masks whole tags and code spans before
+    links are extracted. Both passes share the same first-token grammar.
+    """
+    visible = list(source)
+    for token, end in _markdown_inline_regions(source):
+        start = token.start()
+        if preserve_tags:
+            if token.group("ticks") is not None or source.startswith("<!--", start):
+                continue
+            if token.group("tag") is not None:
+                start = token.end("tag")
+                end -= 2 if source[end - 2:end] == "/>" else 1
+        visible[start:end] = _mask_span(source[start:end])
+    return "".join(visible)
+
+
+def _markdown_html_code_tags(source: str, *, raw_block: bool = False):
+    """Only complete, unescaped code tags can change the container state."""
+    tokens = (
+        ((token, token.end()) for token in re.finditer(_MD_HTML_TAG, source))
+        if raw_block else _markdown_inline_regions(source)
+    )
+    for token, _ in tokens:
+        name = token.group("tag")
+        if name and name.lower() in {"code", "pre", "script", "style", "textarea"}:
+            yield token
+
+
 def _markdown_prose_edges(
     path: str, lines: list[tuple[int, str]], known: set[str],
 ) -> list[dict[str, Any]]:
     """Only this contiguous, unfenced paragraph can pair inline code markers."""
     if not lines:
         return []
-    visible = _without_inline_code("\n".join(line for _, line in lines))
+    visible = _markdown_mask_inline_syntax("\n".join(line for _, line in lines))
     edges: list[dict[str, Any]] = []
     for (ordinal, _), line in zip(lines, visible.split("\n"), strict=True):
         for match in _MD_LINK.finditer(line):
@@ -333,7 +407,7 @@ def _markdown_mask_html_comments(source: str) -> str:
     fenced: tuple[str, int, int | None, int] | None = None
     comment_open = False
     for raw in source.splitlines(keepends=True):
-        line = raw.rstrip("\r\n")
+        line = raw.splitlines()[0]
         ending = raw[len(line):]
         if comment_open:
             clean, comment_open = _mask_markdown_comment_line(line, True)
@@ -364,11 +438,6 @@ def _markdown_mask_html_comments(source: str) -> str:
         clean, comment_open = _mask_markdown_comment_line(line, False)
         masked.append(clean + ending)
     return "".join(masked)
-
-
-_MD_HTML_CODE_TAG = re.compile(
-    r"<(?P<closing>/)?(?P<tag>code|pre|script|style|textarea)\b[^>]*>", flags=re.IGNORECASE,
-)
 
 
 _MD_HTML_RAW_OPEN = re.compile(
@@ -424,7 +493,7 @@ def _mask_markdown_html_code_content(
     visible = line if raw_block else _without_inline_code(line)
     chars = list(line)
     cursor = 0
-    for tag in _MD_HTML_CODE_TAG.finditer(visible):
+    for tag in _markdown_html_code_tags(visible, raw_block=raw_block):
         name = tag.group("tag").lower()
         if active_tag is None:
             if tag.group("closing"):
@@ -468,7 +537,9 @@ def _markdown_close_fence(
 
 
 def _markdown_edges(path: str, source: str, known: set[str]) -> list[dict[str, Any]]:
-    sanitized = _markdown_mask_html_comments(source)
+    sanitized = _markdown_mask_html_comments(
+        _markdown_mask_inline_syntax(source, preserve_tags=True),
+    )
     edges: list[dict[str, Any]] = []
     fenced: tuple[str, int, int | None, int] | None = None
     html_code_tag: str | None = None
@@ -491,8 +562,9 @@ def _markdown_edges(path: str, source: str, known: set[str]) -> list[dict[str, A
             # Raw HTML blocks may be indented, and Markdown backticks inside
             # them are literal text. Recognize their closing tag before either
             # Markdown exclusion can discard it.
+            block, _ = _markdown_html_block_state(line, html_code_tag)
             prose, html_code_tag = _mask_markdown_html_code(line, html_code_tag)
-            if prose.strip():
+            if raw_line.strip() and block in {None, "code", "inline-pre", "inline-script", "inline-style", "inline-textarea"}:
                 paragraph.append((ordinal, prose))
             else:
                 edges.extend(_markdown_prose_edges(path, paragraph, known))
@@ -514,8 +586,9 @@ def _markdown_edges(path: str, source: str, known: set[str]) -> list[dict[str, A
         # HTML code spans mask only their own text and tags, not nearby prose.
         # Backtick code is masked while recognizing tags so literal examples
         # cannot accidentally open an HTML code container.
+        block, _ = _markdown_html_block_state(line, html_code_tag)
         prose, html_code_tag = _mask_markdown_html_code(line, html_code_tag)
-        if not prose.strip():
+        if not raw_line.strip() or block in {"pre", "script", "style", "textarea", "blank-line"}:
             edges.extend(_markdown_prose_edges(path, paragraph, known))
             paragraph.clear()
             continue
