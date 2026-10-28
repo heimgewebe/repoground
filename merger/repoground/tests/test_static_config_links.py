@@ -294,6 +294,40 @@ class TestStaticConfigLinks(unittest.TestCase):
         own = [e for e in edges if e["src"] == "file:.github/workflows/anchor.yml"]
         self.assertEqual([7], [e["source"]["start_line"] for e in own], own)
 
+    def test_yaml_anchored_scalar_properties_do_not_create_s1_edges(self):
+        import yaml
+
+        self.write("actions/local/action.yml", "name: local\n")
+        cases = (
+            ("block", "- run: &script |", ""),
+            ("folded_quoted_key", '- "run": &script >-', ""),
+            ("tag_before_anchor", "- run: !!str &script |", ""),
+            ("anchor_before_tag", "- run: &script !!str |", ""),
+            ("multiline_double", '- "name": &description "first line', '        last line"\n'),
+            ("multiline_single", "- 'name': &description 'first line", "        last line'\n"),
+        )
+        for label, opening, closing in cases:
+            with self.subTest(label=label):
+                source = (
+                    "jobs:\n"
+                    "  build:\n"
+                    "    steps:\n"
+                    f"      {opening}\n"
+                    "          uses: ./actions/local\n"
+                    + closing
+                    + "      - uses: ./actions/local\n"
+                )
+                parsed = yaml.safe_load(source)
+                first, second = parsed["jobs"]["build"]["steps"]
+                self.assertIn("uses: ./actions/local", first.get("run", first.get("name")))
+                self.assertEqual("./actions/local", second["uses"])
+                path = f".github/workflows/anchored-{label}.yml"
+                self.write(path, source)
+                edges, _, _ = self.edges()
+                own = [edge for edge in edges if edge["src"] == f"file:{path}"]
+                actual = [(edge["source"]["start_line"], edge["evidence_level"]) for edge in own]
+                self.assertEqual([(len(source.splitlines()), "S1")], actual, own)
+
     def test_markdown_html_comment_opened_inside_fence_cannot_hide_real_links(self):
         self.write("docs/target.md", "# target\n")
         self.write("docs/commented-fence.md", (

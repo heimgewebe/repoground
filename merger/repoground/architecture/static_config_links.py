@@ -21,14 +21,20 @@ _MD_COMMENT = re.compile(r"<!--[\s\S]*?(?:-->|$)")
 _YAML_USES = re.compile(
     r"""^[ \t]*(?:-[ \t]+)?uses:[ \t]*(?P<value>"[^"\n]+"|'[^'\n]+'|[^\s#]+)[ \t]*(?:#.*)?$"""
 )
+# YAML node properties may precede either a block indicator or a multiline
+# quoted scalar. Share the lexical boundary so anchors/tags cannot make script
+# text look like an S1 GitHub Actions "uses" declaration.
+_YAML_KEY = r"""(?:[A-Za-z_][\w.-]*|"[A-Za-z_][\w.-]*"|'[A-Za-z_][\w.-]*')"""
+_YAML_NODE_PROPERTY = r"""(?:&[A-Za-z0-9_-]+|!(?:<[^\s<>]{1,128}>|[A-Za-z0-9_.:/!+-]+))"""
+_YAML_SCALAR_PROPERTIES = rf"""(?:{_YAML_NODE_PROPERTY}[ \t]+){{0,2}}"""
 _YAML_BLOCK = re.compile(
-    r"""^(?P<indent>[ \t]*)(?P<prefix>-[ \t]+)?(?:[a-zA-Z_][\w.-]*|"[a-zA-Z_][\w.-]*"|'[a-zA-Z_][\w.-]*'):[ \t]*[|>](?:[-+][1-9]?|[1-9][-+]?)?[ \t]*(?:#.*)?$"""
+    rf"""^(?P<indent>[ \t]*)(?P<prefix>-[ \t]+)?{_YAML_KEY}:[ \t]*{_YAML_SCALAR_PROPERTIES}[|>](?:[-+][1-9]?|[1-9][-+]?)?[ \t]*(?:#.*)?$"""
 )
 _YAML_PARENT = re.compile(
-    r"""^[ \t]*(?P<prefix>-[ \t]+)?(?P<key>[A-Za-z_][\w.-]*|"[A-Za-z_][\w.-]*"|'[A-Za-z_][\w.-]*'):[ \t]*(?:&[A-Za-z0-9_-]+[ \t]*)?(?:#.*)?$"""
+    rf"""^[ \t]*(?P<prefix>-[ \t]+)?(?P<key>{_YAML_KEY}):[ \t]*(?:&[A-Za-z0-9_-]+[ \t]*)?(?:#.*)?$"""
 )
 _YAML_QUOTED_VALUE = re.compile(
-    r"""^[ \t]*(?:-[ \t]+)?(?:[A-Za-z_][\w.-]*|"[A-Za-z_][\w.-]*"|'[A-Za-z_][\w.-]*'):[ \t]*(?P<quote>["'])"""
+    rf"""^[ \t]*(?:-[ \t]+)?{_YAML_KEY}:[ \t]*{_YAML_SCALAR_PROPERTIES}(?P<quote>["'])"""
 )
 
 _SHELL_SOURCE = re.compile(
