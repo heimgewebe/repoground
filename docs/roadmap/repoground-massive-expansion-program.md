@@ -22,6 +22,27 @@ Historischer, am 27.10.2026 verifizierter Stand: ein laufender Fleet-Publisher, 
 
 Aktuelle Wahrheitsquellen sind weiterhin Git-Bäume, CI, Laufzeitdienste, Metarepo-Fleet-Quellen und die jeweils zuständigen Systeme. Die RepoGround-Publikation ist ein deterministischer, abgeleiteter Navigations-/Analysezustand, keine neue Source of Truth.
 
+### 1.1 Verifizierter Integrationsstand am 28.10.2026 (Momentaufnahme)
+
+Dieses Programm wird **nicht** dadurch produktiv, dass seine Aufgaben bereits implementiert sind. Der maßgebliche Unterschied ist *Code auf `main`*, *getesteter PR-Branch*, *veröffentlichter Generator* und *echte CLI-/MCP-Nutzung*. Die folgende Tabelle ist eine datierte GitHub-/Betriebsaufnahme, keine selbstfortschreibende Merge-Freigabe.
+
+| Original-PR | Stand am 28.10.2026 | Tatsächlich belegt |
+| --- | --- | --- |
+| [#1353](https://github.com/heimgewebe/repoground/pull/1353) | **MERGED** | Python-Strukturgraph, Merge `cdf215b070412167d2816c291acd7efcb1bbfc37`. |
+| [#1354](https://github.com/heimgewebe/repoground/pull/1354) | **MERGED** | Weitere statische JS/TS-, Nix-, Schema- und Compose-Beziehungen, Merge `61d4d12cdf9f83a03332fc64aa80e942472fe477`. |
+| [#1356](https://github.com/heimgewebe/repoground/pull/1356) | **OPEN**, noch nicht auf `main` | Revisionsbezogene Graph-Impact-Analyse und S0-Regressionskorrekturen, Head `2faca4bfc133c229b213d86754f499cc3df1941a`; zuletzt 22/22 CI erfolgreich. |
+| [#1359](https://github.com/heimgewebe/repoground/pull/1359) | **OPEN**, auf #1356 gestapelt | Vierte Parserwelle (Markdown, Actions, systemd, Shell, Caddy), Head `60119a37c7e0a2cfd428bd49605b3268788ef155`; zuletzt 14/14 CI erfolgreich, neue Parser-Reviewbefunde noch in Bearbeitung. |
+| [#1355](https://github.com/heimgewebe/repoground/pull/1355) | **OPEN**, unabhängig | Föderation, Git-Revisionen und technische Zeitgeschichte, Head `2681c40c4bdd4772a7a6fa32d32cf0029dd46c69`; 23/23 CI erfolgreich, alle bis dahin bekannten Reviewthreads aufgelöst. |
+| [#1352](https://github.com/heimgewebe/repoground/pull/1352) | **OPEN**, Dokumentation | Dieses Ausbauprogramm ist kein Funktions- oder Release-Nachweis. |
+
+Die parallelen Agenten-/Ereignisfluss-PRs [#1357](https://github.com/heimgewebe/repoground/pull/1357), [#1358](https://github.com/heimgewebe/repoground/pull/1358) und [#1360](https://github.com/heimgewebe/repoground/pull/1360) bleiben ein eigener Arbeitsstrang. Ihre PR-Basen und Writer-Lanes werden von diesen Graph-/Historienarbeiten nicht übernommen.
+
+**Reale, aber noch branchgebundene Funktionsproben:** Mit dem #1355-Code lief `federation delta` für RepoGround `cdf215b…` bis `61d4d12…` auf sechs geänderten Dateien; eine exakte Pfadhistorie enthielt 13 Git-Einträge. `federation relations` auf `metarepo@0d27ec7…` und `repoground@61d4d12…` lieferte vier deklarative Beziehungen (zwei `declared_copy_target`, einmal `fleet_core`, einmal `fleet_metadata`) ohne ausgewiesene Lücken. Das sind **Git-/Deklarationsbelege**, keine tatsächlichen Dienst- oder Laufzeitabhängigkeiten. Die logischen Outputs wurden auf identischen Eingaben wiederholt.
+
+**Produktiver Bundlestand:** Ein gesundes veröffentlichtes RepoGround-Bundle mit **23 Artefaktrollen** referenziert Source `61d4d12cdf9f83a03332fc64aa80e942472fe477`, wurde tatsächlich aber noch vom Generator `bf2ad72785c47ede4b8b94ce2215b07e4773877e` erstellt. Die aktive immutable Runtime unter `~/.local/share/repoground-runtime/current` zeigt ebenfalls auf `bf2ad727…`. Ein grünes Bundle mit neuer Source-SHA beweist **nicht**, dass die neuen Graph-, Revisions- oder Föderationsparser bereits vom produktiven Generator ausgeführt wurden.
+
+**Noch offen:** reguläre Integration aller Original-PRs nach `main`, Übernahme der wirklich integrierten Generatorversion in die bestehende immutable Runtime, Veröffentlichung neuer Bundles aus genau diesem Generator sowie frischer CLI-/MCP-Ende-zu-Ende-Nachweis. Bei jeder Statusänderung sind PR-Head, CI, Reviews, Generator-SHA und Manifest erneut an ihren Primärquellen zu prüfen. Kein neues Roadmap- oder Backupprojekt ersetzt diese Schritte.
+
 ## 2. Zielarchitektur ohne zweite Systemwelt
 
 ```text
