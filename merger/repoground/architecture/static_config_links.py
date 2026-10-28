@@ -25,8 +25,12 @@ _YAML_USES = re.compile(
 # quoted scalar. Share the lexical boundary so anchors/tags cannot make script
 # text look like an S1 GitHub Actions "uses" declaration.
 _YAML_KEY = r"""(?:[A-Za-z_][\w.-]*|"[A-Za-z_][\w.-]*"|'[A-Za-z_][\w.-]*')"""
-_YAML_NODE_PROPERTY = r"""(?:&[A-Za-z0-9_-]+|!(?:<[^\s<>]{1,128}>|[A-Za-z0-9_.:/!+-]+))"""
+_YAML_NODE_PROPERTY = (
+    r"(?:&[A-Za-z0-9_-]+|"
+    r"!(?:<[^\s<>]{1,128}>|[A-Za-z0-9_.:/!+-]+)?)"
+)
 _YAML_SCALAR_PROPERTIES = rf"""(?:{_YAML_NODE_PROPERTY}[ \t]+){{0,2}}"""
+_YAML_FLOW_PROPERTY = re.compile(rf"{_YAML_NODE_PROPERTY}(?=[ \t]|$)")
 _YAML_BLOCK = re.compile(
     rf"""^(?P<indent>[ \t]*)(?P<prefix>-[ \t]+)?{_YAML_KEY}:[ \t]*{_YAML_SCALAR_PROPERTIES}[|>](?:[-+][1-9]?|[1-9][-+]?)?[ \t]*(?:#.*)?$"""
 )
@@ -177,12 +181,12 @@ def _escaped_markdown_opener(text: str, start: int) -> bool:
     return count % 2 == 1
 
 
-_MD_QUOTE_PREFIX = re.compile(r"^ {0,3}>[ \\t]?")
+_MD_QUOTE_PREFIX = re.compile(r"^ {0,3}>[ \t]?")
 
 
 def _markdown_quote_info(line: str) -> tuple[str, int]:
     """Peel CommonMark blockquotes and retain their enclosing depth."""
-    content = line
+    content = line.expandtabs(4)
     depth = 0
     while (prefix := _MD_QUOTE_PREFIX.match(content)) is not None:
         content = content[prefix.end():]
@@ -212,7 +216,7 @@ def _markdown_prose_edges(
 
 
 _MD_LIST_FENCE_PREFIX = re.compile(
-    r"^ {0,3}(?:[-+*]|[0-9]{1,9}[.)])[ \\t]{1,4}(?![ \\t])"
+    r"^ {0,3}(?:[-+*]|[0-9]{1,9}[.)])[ \t]{1,4}(?![ \t])"
 )
 
 
@@ -367,10 +371,52 @@ _MD_HTML_CODE_TAG = re.compile(
 )
 
 
+_MD_HTML_RAW_OPEN = re.compile(
+    r"^ {0,3}<(?P<tag>pre|script|style|textarea)(?=[ \t>]|$)",
+    re.IGNORECASE,
+)
+_MD_HTML_BLOCK_OPEN = re.compile(
+    r"^ {0,3}</?(?:address|article|aside|base|basefont|blockquote|body|caption|center|"
+    r"col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|"
+    r"form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|"
+    r"menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|"
+    r"tbody|td|tfoot|th|thead|title|tr|track|ul)(?=[ \t/>]|$)",
+    re.IGNORECASE,
+)
+
+
+def _markdown_html_block_state(
+    line: str, active_tag: str | None,
+) -> tuple[str | None, bool]:
+    """Recognize raw HTML starts and blocks terminated by a blank line."""
+    content, _ = _markdown_quote_info(line)
+    content, _ = _markdown_fence_text(content)
+    if active_tag == "blank-line":
+        return "blank-line" if content.strip() else None, True
+    if active_tag is not None:
+        return active_tag, False
+    raw = _MD_HTML_RAW_OPEN.match(content)
+    if raw is not None:
+        return raw.group("tag").lower(), False
+    if _MD_HTML_BLOCK_OPEN.match(content):
+        return "blank-line", True
+    return None, False
+
+
 def _mask_markdown_html_code(
     line: str, active_tag: str | None,
 ) -> tuple[str, str | None]:
-    """Hide only HTML code containers, preserving prose around closed spans."""
+    """Hide raw HTML blocks and code containers, preserving inline prose."""
+    active_tag, mask_whole_line = _markdown_html_block_state(line, active_tag)
+    if mask_whole_line:
+        return " " * len(line), active_tag
+    return _mask_markdown_html_code_content(line, active_tag)
+
+
+def _mask_markdown_html_code_content(
+    line: str, active_tag: str | None,
+) -> tuple[str, str | None]:
+    """Mask tag spans after the enclosing HTML block state is established."""
     # A tag rendered inside Markdown backticks cannot open a container. Once a
     # raw HTML block is active, however, Markdown inline-code parsing is
     # disabled and even a backtick-wrapped closing tag closes that container.
@@ -519,6 +565,9 @@ def _yaml_flow_depth(
         if char in {"'", '"'} and scalar_start:
             quote = char
             scalar_start = False
+        elif scalar_start and (node_property := _YAML_FLOW_PROPERTY.match(line, index)):
+            index = node_property.end()
+            continue
         elif char == "#" and (index == 0 or line[index - 1].isspace()):
             break
         elif char in "[{":
@@ -629,7 +678,9 @@ def _yaml_root_flow_uses(lines: list[tuple[int, str]]) -> list[tuple[int, str]]:
                 return []
             line = lines[0][0] + text.count("\n", 0, offset + prop.start("key"))
             uses.append((line, match.group("value")))
-        elif "\n" in value and not value.startswith(("{", "[", "'", '"')):
+        elif "\n" in value and not re.match(
+            rf"{_YAML_SCALAR_PROPERTIES}" + r"""[{\['"]""", value,
+        ):
             return []
     return uses
 
@@ -733,8 +784,14 @@ def _yaml_start_flow(
     flow_text = line[flow_start.start("flow"):]
     flow_depth, flow_quote = _yaml_flow_depth(flow_text)
     _, step_context = _yaml_use_context(path, context)
-    if (step_context and flow_text.startswith("{")
-            and re.fullmatch(r"[ \t]*-[ \t]+", line[:flow_start.start("flow")])):
+    if (
+        step_context
+        and flow_text.startswith("{")
+        and re.fullmatch(
+            rf"[ \t]*-[ \t]+{_YAML_SCALAR_PROPERTIES}",
+            line[:flow_start.start("flow")],
+        )
+    ):
         root_flow = [(ordinal, flow_text)]
         if not flow_depth:
             edges.extend(_yaml_flow_use_edges(path, root_flow, known))
@@ -780,7 +837,8 @@ def _yaml_uses_edges(path: str, source: str, known: set[str]) -> list[dict[str, 
         if blocked_indent is not None or quoted_scalar is not None:
             continue
         flow_start = re.match(
-            rf"^[ \t]*(?:-[ \t]+)?(?:{_YAML_KEY}:[ \t]*{_YAML_SCALAR_PROPERTIES})?(?P<flow>[{{\[])",
+            rf"^[ \t]*(?:-[ \t]+)?(?:{_YAML_KEY}:[ \t]*)?"
+            rf"{_YAML_SCALAR_PROPERTIES}(?P<flow>[{{\[])",
             line,
         )
         if flow_start is not None:

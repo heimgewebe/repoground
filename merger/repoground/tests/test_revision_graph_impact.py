@@ -449,5 +449,38 @@ class TestRevisionGraphImpact(unittest.TestCase):
             jsonschema.validate(report, schema)
 
 
+    def test_ignored_non_python_generated_files_leave_report_unchanged(self):
+        baseline = self.report()
+        (self.root / ".git" / "info" / "exclude").write_text(
+            "build/\ndist/\ntarget/\n", encoding="utf-8"
+        )
+        cases = (
+            ("build/setup.sh", "source ../helper.sh\n"),
+            ("dist/setup.sh", "source ../helper.sh\n"),
+            ("target/setup.sh", "source ../helper.sh\n"),
+            ("build/generated.json", '{"$ref":"../schemas/core.json"}\n'),
+            ("dist/generated.ts", 'import "./helper";\n'),
+            ("target/generated.nix", "import ../module.nix\n"),
+        )
+        for path, content in cases:
+            with self.subTest(path=path):
+                self.write(path, content)
+                try:
+                    self.assertEqual("", self.git("status", "--porcelain").strip())
+                    self.assertEqual(baseline, self.report())
+                finally:
+                    (self.root / path).unlink()
+
+    def test_ignored_shell_source_in_producer_scope_is_rejected(self):
+        (self.root / ".git" / "info" / "exclude").write_text(
+            "scripts/\n", encoding="utf-8"
+        )
+        self.write("scripts/setup.sh", "source ../helper.sh\n")
+        self.assertEqual("", self.git("status", "--porcelain").strip())
+        with self.assertRaisesRegex(ValueError, "ignored_source_not_in_head"):
+            self.report()
+
+
+
 if __name__ == "__main__":
     unittest.main()

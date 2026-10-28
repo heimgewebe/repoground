@@ -1078,5 +1078,187 @@ class TestStaticConfigLinks(unittest.TestCase):
                            coverage["skipped"].get("files_not_scanned_after_relation_limit", 0), 0)
 
 
+    def test_yaml_step_flow_properties_keep_only_direct_uses(self):
+        import yaml
+
+        self.write("actions/local/action.yml", "name: local\n")
+        for index, props in enumerate(("&step", "!!map &step", "&step !!map", "! &step")):
+            with self.subTest(properties=props):
+                source = (
+                    "jobs:\n  build:\n    steps:\n"
+                    f"      - {props} {{env: {{\n"
+                    "          uses: ./actions/local\n"
+                    "        }, run: echo ok}\n"
+                    "      - uses: ./actions/local\n"
+                )
+                first, second = yaml.safe_load(source)["jobs"]["build"]["steps"]
+                self.assertNotIn("uses", first)
+                self.assertEqual("./actions/local", first["env"]["uses"])
+                self.assertEqual("./actions/local", second["uses"])
+                path = f".github/workflows/property-flow-{index}.yml"
+                self.write(path, source)
+                edges, _, _ = self.edges()
+                own = [edge for edge in edges if edge["src"] == f"file:{path}"]
+                self.assertEqual([(7, "file:actions/local/action.yml", "S1")], [
+                    (edge["source"]["start_line"], edge["dst"], edge["evidence_level"])
+                    for edge in own
+                ], own)
+
+                direct = (
+                    "jobs:\n  build:\n    steps:\n"
+                    f"      - {props} "
+                    "{env: {uses: ./actions/local}, uses: ./actions/local}\n"
+                )
+                self.assertEqual(
+                    "./actions/local",
+                    yaml.safe_load(direct)["jobs"]["build"]["steps"][0]["uses"],
+                )
+                path = f".github/workflows/property-direct-{index}.yml"
+                self.write(path, direct)
+                edges, _, _ = self.edges()
+                own = [edge for edge in edges if edge["src"] == f"file:{path}"]
+                self.assertEqual([(4, "file:actions/local/action.yml", "S1")], [
+                    (edge["source"]["start_line"], edge["dst"], edge["evidence_level"])
+                    for edge in own
+                ], own)
+
+    def test_yaml_nonspecific_tag_does_not_expose_scalar_uses(self):
+        import yaml
+
+        self.write("actions/local/action.yml", "name: local\n")
+        for index, props in enumerate(("!", "! &scalar", "&scalar !")):
+            cases = (
+                ("block", (
+                    "jobs:\n  build:\n    steps:\n"
+                    f"      - run: {props} |\n"
+                    "          uses: ./actions/local\n"
+                    "      - uses: ./actions/local\n"
+                ), 6),
+                ("quoted", (
+                    "jobs:\n  build:\n    steps:\n"
+                    f'      - name: {props} "first\n'
+                    "          uses: ./actions/local\n"
+                    '          last"\n'
+                    "        uses: ./actions/local\n"
+                ), 7),
+            )
+            for label, source, expected_line in cases:
+                with self.subTest(properties=props, scalar=label):
+                    first = yaml.safe_load(source)["jobs"]["build"]["steps"][0]
+                    self.assertIn("uses: ./actions/local", first.get("run", first.get("name")))
+                    path = f".github/workflows/nonspecific-{index}-{label}.yml"
+                    self.write(path, source)
+                    edges, _, _ = self.edges()
+                    own = [edge for edge in edges if edge["src"] == f"file:{path}"]
+                    self.assertEqual([(expected_line, "S1")], [
+                        (edge["source"]["start_line"], edge["evidence_level"])
+                        for edge in own
+                    ], own)
+
+    def test_markdown_tab_containers_with_space_continuations(self):
+        self.write("docs/target.md", "# target\n")
+        cases = (
+            ("quote", ">\t~~~md\n> [example](./target.md)\n> ~~~\n"
+             "[real](./target.md)\n", 4),
+            ("list", "-\t~~~md\n    [example](./target.md)\n    ~~~\n\n"
+             "[real](./target.md)\n", 5),
+        )
+        for label, source, expected_line in cases:
+            with self.subTest(container=label):
+                path = f"docs/tab-container-{label}.md"
+                self.write(path, source)
+                edges, _, _ = self.edges()
+                own = [edge for edge in edges if edge["src"] == f"file:{path}"]
+                self.assertEqual([(expected_line, "S1")], [
+                    (edge["source"]["start_line"], edge["evidence_level"])
+                    for edge in own
+                ], own)
+
+    def test_split_raw_html_start_tags_hide_literal_links(self):
+        self.write("docs/target.md", "# target\n")
+        for tag in ("pre", "script", "style", "textarea"):
+            with self.subTest(tag=tag):
+                path = f"docs/split-raw-{tag}.md"
+                self.write(path, (
+                    f"<{tag}\n"
+                    ' class="example">\n'
+                    "[example](./target.md)\n"
+                    f"</{tag}> [still-literal](./target.md)\n"
+                    "[real](./target.md)\n"
+                ))
+                edges, _, _ = self.edges()
+                own = [edge for edge in edges if edge["src"] == f"file:{path}"]
+                self.assertEqual([(5, "file:docs/target.md", "S1")], [
+                    (edge["source"]["start_line"], edge["dst"], edge["evidence_level"])
+                    for edge in own
+                ], own)
+
+    def test_raw_html_block_tags_end_at_blank_line(self):
+        self.write("docs/target.md", "# target\n")
+        for tag in ("div", "details", "section", "table"):
+            with self.subTest(tag=tag):
+                path = f"docs/raw-block-{tag}.md"
+                self.write(path, (
+                    f"<{tag}>\n"
+                    "[example](./target.md)\n"
+                    f"</{tag}>\n"
+                    "[still-literal](./target.md)\n\n"
+                    "[real](./target.md)\n"
+                ))
+                edges, _, _ = self.edges()
+                own = [edge for edge in edges if edge["src"] == f"file:{path}"]
+                self.assertEqual([(6, "file:docs/target.md", "S1")], [
+                    (edge["source"]["start_line"], edge["dst"], edge["evidence_level"])
+                    for edge in own
+                ], own)
+
+    def test_raw_html_blockquote_blank_line_ends_block(self):
+        self.write("docs/target.md", "# target\n")
+        self.write("docs/raw-quote.md", (
+            "> <div>\n"
+            "> [example](./target.md)\n"
+            "> </div>\n"
+            ">\n"
+            "> [real](./target.md)\n"
+        ))
+        edges, _, _ = self.edges()
+        own = [edge for edge in edges if edge["src"] == "file:docs/raw-quote.md"]
+        self.assertEqual([(5, "S1")], [
+            (edge["source"]["start_line"], edge["evidence_level"]) for edge in own
+        ], own)
+
+    def test_yaml_flow_scalar_properties_keep_literal_braces_quoted(self):
+        import yaml
+
+        self.write("actions/local/action.yml", "name: local\n")
+        variants = (("!", '"'), ("!!str", '"'), ("!!str &name", "'"), ("&name !!str", "'"))
+        for index, (properties, quote) in enumerate(variants):
+            for direct in (False, True):
+                with self.subTest(properties=properties, quote=quote, direct=direct):
+                    suffix = (
+                        f"          last{quote}, uses: ./actions/local}}\n"
+                        if direct else
+                        f"          last{quote}}}\n      - uses: ./actions/local\n"
+                    )
+                    source = (
+                        "jobs:\n  build:\n    steps:\n"
+                        f"      - &step {{name: {properties} {quote}first }}\n"
+                        "          uses: ./actions/local\n"
+                        + suffix
+                    )
+                    steps = yaml.safe_load(source)["jobs"]["build"]["steps"]
+                    self.assertIn("uses: ./actions/local", steps[0]["name"])
+                    self.assertEqual("./actions/local", steps[0 if direct else 1]["uses"])
+                    path = f".github/workflows/flow-property-quote-{index}-{direct}.yml"
+                    self.write(path, source)
+                    edges, _, _ = self.edges()
+                    own = [edge for edge in edges if edge["src"] == f"file:{path}"]
+                    self.assertEqual([(6 if direct else 7, "file:actions/local/action.yml", "S1")], [
+                        (edge["source"]["start_line"], edge["dst"], edge["evidence_level"])
+                        for edge in own
+                    ], own)
+
+
+
 if __name__ == "__main__":
     unittest.main()
