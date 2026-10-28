@@ -4,10 +4,28 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from merger.repoground.cli.main import main
 from merger.repoground.core.agent_evidence_pack import (
     build_evidence_pack, render_evidence_markdown,
 )
+
+
+@pytest.fixture(autouse=True)
+def isolate_global_git_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep disposable Git fixtures independent from CI runner global filters.
+
+    The production reader must treat executable clean/process filters as an
+    unknown worktree; these tests assert clean/dirty only for known simple
+    repositories. A CI-installed global filter must not silently alter them.
+    """
+    home = tmp_path / "isolated-home"
+    config = tmp_path / "isolated-config"
+    home.mkdir()
+    config.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config))
 
 
 def git(repo: Path, *args: str) -> str:
