@@ -61,6 +61,54 @@ class TestStaticConfigLinks(unittest.TestCase):
         self.assertTrue(any(e["source"]["range_ref"] == "file:docs/overview.md#L1-L1" for e in own))
         self.assertIn("markdown_anchor_validity", coverage["does_not_establish"])
 
+    def test_github_actions_quoted_uses_keys_are_real_references(self):
+        import yaml
+
+        self.write(".github/workflows/reusable.yml", "on: workflow_call\n")
+        self.write("actions/local/action.yml", "name: local\n")
+        source = (
+            "jobs:\n"
+            "  reusable:\n"
+            '    "uses": ./.github/workflows/reusable.yml\n'
+            "  build:\n"
+            "    steps:\n"
+            '      - "uses": ./actions/local\n'
+            "      - 'uses': ./actions/local\n"
+            "      - env:\n"
+            '          "uses": ./actions/local\n'
+            '        "uses": ./actions/local\n'
+            "      - run: |\n"
+            '          "uses": ./actions/local\n'
+        )
+        parsed = yaml.safe_load(source)
+        self.assertEqual("./.github/workflows/reusable.yml", parsed["jobs"]["reusable"]["uses"])
+        self.assertEqual("./actions/local", parsed["jobs"]["build"]["steps"][0]["uses"])
+        self.assertEqual("./actions/local", parsed["jobs"]["build"]["steps"][1]["uses"])
+        self.write(".github/workflows/quoted-uses.yml", source)
+        self.write("actions/composite/action.yml", (
+            "runs:\n  using: composite\n  steps:\n"
+            "    - 'uses': ./actions/local\n"
+        ))
+        edges, _, _ = self.edges()
+        own = [edge for edge in edges if edge["src"] == "file:.github/workflows/quoted-uses.yml"]
+        proven = [edge for edge in own if edge["evidence_level"] == "S1"]
+        self.assertEqual([3, 6, 7, 10], [
+            edge["source"]["start_line"] for edge in proven
+        ], own)
+        self.assertEqual(
+            ["file:.github/workflows/reusable.yml"]
+            + ["file:actions/local/action.yml"] * 3,
+            [edge["dst"] for edge in proven],
+        )
+        composite = [
+            edge for edge in edges
+            if edge["src"] == "file:actions/composite/action.yml"
+        ]
+        self.assertEqual(
+            [("file:actions/local/action.yml", "S1")],
+            [(edge["dst"], edge["evidence_level"]) for edge in composite],
+        )
+
     def test_github_actions_exact_local_metadata_remote_and_block_scalar(self):
         self.write(".github/workflows/reusable.yml", "name: reused\non: workflow_call\n")
         self.write("actions/local/action.yml", "name: local\nruns:\n  using: composite\n  steps: []\n")

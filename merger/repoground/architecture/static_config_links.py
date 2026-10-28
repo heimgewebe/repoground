@@ -19,7 +19,7 @@ _MD_LINK = re.compile(
 _MD_FENCE = re.compile(r"^ {0,3}(?P<marks>\x60{3,}|~{3,})(?:[^\n]*)$")
 _MD_COMMENT = re.compile(r"<!--[\s\S]*?(?:-->|$)")
 _YAML_USES = re.compile(
-    r"""^[ \t]*(?:-[ \t]+)?uses:[ \t]*(?P<value>"[^"\n]+"|'[^'\n]+'|[^\s#]+)[ \t]*(?:#.*)?$"""
+    r"""^[ \t]*(?:-[ \t]+)?(?:uses|"uses"|'uses'):[ \t]*(?P<value>"[^"\n]+"|'[^'\n]+'|[^\s#]+)[ \t]*(?:#.*)?$"""
 )
 # YAML node properties may precede either a block indicator or a multiline
 # quoted scalar. Share the lexical boundary so anchors/tags cannot make script
