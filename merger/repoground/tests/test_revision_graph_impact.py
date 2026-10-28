@@ -189,6 +189,33 @@ class TestRevisionGraphImpact(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "ignored_source_not_in_head"):
             self.report()
 
+    def test_tracked_gitlink_is_rejected_even_without_source_suffix(self):
+        # A nested Git checkout is a directory that both existing producers
+        # traverse, but its contents are not blobs of the superproject HEAD.
+        vendor = self.root / "vendor"
+        vendor.mkdir()
+        subprocess.run(["git", "-C", str(vendor), "init", "-q"], check=True)
+        (vendor / "original.py").write_text("def original(): pass\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(vendor), "add", "original.py"], check=True)
+        subprocess.run([
+            "git", "-C", str(vendor),
+            "-c", "user.name=RepoGround Test",
+            "-c", "user.email=test@example.invalid",
+            "commit", "-qm", "nested base",
+        ], check=True)
+        inner_head = subprocess.check_output(
+            ["git", "-C", str(vendor), "rev-parse", "HEAD"], text=True
+        ).strip()
+        self.git("update-index", "--add", "--cacheinfo",
+                 f"160000,{inner_head},vendor")
+        self.commit("track opaque submodule")
+        linked_head = self.git("rev-parse", "HEAD").strip()
+        self.assertEqual("", self.git("status", "--porcelain").strip())
+        with self.assertRaisesRegex(ValueError, "tracked_submodule_untrusted"):
+            compile_revision_impact(
+                repo_root=self.root, base_sha=self.head, head_sha=linked_head
+            )
+
     def test_tracked_symlink_is_not_a_git_blob_python_source(self):
         external = self.root.parent / f"{self.root.name}-exfil.py"
         external.write_text("def injected():\n    return 0\n", encoding="utf-8")
