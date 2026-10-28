@@ -19,6 +19,7 @@ import os
 import pwd
 import re
 import resource
+import signal
 import shlex
 import shutil
 import sqlite3
@@ -4133,6 +4134,9 @@ def _run_with_file_size_limit(
         raise RuntimeError("invalid bounded Git fetch file-size limit")
 
     def set_file_size_limit() -> None:
+        # Preserve the Git fetch size cap, but return EFBIG instead of
+        # aborting index-pack with SIGXFSZ (and spawning KDE DrKonqi).
+        signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
         resource.setrlimit(
             resource.RLIMIT_FSIZE,
             (max_file_bytes, max_file_bytes),
