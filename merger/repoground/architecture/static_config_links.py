@@ -31,7 +31,7 @@ _YAML_BLOCK = re.compile(
     rf"""^(?P<indent>[ \t]*)(?P<prefix>-[ \t]+)?{_YAML_KEY}:[ \t]*{_YAML_SCALAR_PROPERTIES}[|>](?:[-+][1-9]?|[1-9][-+]?)?[ \t]*(?:#.*)?$"""
 )
 _YAML_PARENT = re.compile(
-    rf"""^[ \t]*(?P<prefix>-[ \t]+)?(?P<key>{_YAML_KEY}):[ \t]*(?:&[A-Za-z0-9_-]+[ \t]*)?(?:#.*)?$"""
+    rf"""^[ \t]*(?P<prefix>-[ \t]+)?(?P<key>{_YAML_KEY}):[ \t]*(?:{_YAML_NODE_PROPERTY}[ \t]*){{0,2}}(?:#.*)?$"""
 )
 _YAML_QUOTED_VALUE = re.compile(
     rf"""^[ \t]*(?:-[ \t]+)?{_YAML_KEY}:[ \t]*{_YAML_SCALAR_PROPERTIES}(?P<quote>["'])"""
@@ -363,7 +363,7 @@ def _markdown_mask_html_comments(source: str) -> str:
 
 
 _MD_HTML_CODE_TAG = re.compile(
-    r"<(?P<closing>/)?(?P<tag>code|pre)\b[^>]*>", flags=re.IGNORECASE,
+    r"<(?P<closing>/)?(?P<tag>code|pre|script|style|textarea)\b[^>]*>", flags=re.IGNORECASE,
 )
 
 
@@ -384,14 +384,14 @@ def _mask_markdown_html_code(
             if tag.group("closing"):
                 continue
             active_tag = name
-            if name == "pre":
+            if name in {"pre", "script", "style", "textarea"}:
                 prefix, _ = _markdown_quote_info(line[:tag.start()])
                 prefix, _ = _markdown_fence_text(prefix)
                 raw_block = re.fullmatch(r" {0,3}", prefix) is not None
                 if not raw_block:
                     # Carry inline spans without turning them into raw blocks
                     # on the next line.
-                    active_tag = "inline-pre"
+                    active_tag = "inline-" + name
             cursor = tag.start()
         if active_tag is not None:
             chars[cursor:tag.end()] = " " * (tag.end() - cursor)

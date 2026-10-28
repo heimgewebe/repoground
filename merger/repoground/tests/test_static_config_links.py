@@ -941,6 +941,50 @@ class TestStaticConfigLinks(unittest.TestCase):
                 ], [(e["source"]["start_line"], e["dst"], e["evidence_level"])
                     for e in own], own)
 
+    def test_tagged_env_mapping_does_not_promote_nested_action_use(self):
+        self.write("actions/local/action.yml", "name: local\n")
+        for tag in ("!!map", "&envanchor !!map", "!<tag:yaml.org,2002:map>"):
+            with self.subTest(tag=tag):
+                self.write(".github/workflows/tagged-env.yml", (
+                    "jobs:\n  build:\n    steps:\n"
+                    "      - env: " + tag + "\n"
+                    "          uses: ./actions/local\n"
+                    "        run: echo ok\n"
+                    "      - uses: ./actions/local\n"
+                ))
+                edges, _, _ = self.edges()
+                own = [e for e in edges
+                       if e["src"] == "file:.github/workflows/tagged-env.yml"]
+                self.assertEqual([(7, "file:actions/local/action.yml", "S1")], [
+                    (e["source"]["start_line"], e["dst"], e["evidence_level"])
+                    for e in own
+                ], own)
+
+    def test_script_style_textarea_blocks_mask_fake_markdown_links(self):
+        self.write("docs/target.md", "# target\n")
+        for tag in ("script", "style", "textarea"):
+            with self.subTest(tag=tag):
+                self.write("docs/raw-html.md", (
+                    "<" + tag + ">\n"
+                    'const example = "[hidden](./target.md)";\n'
+                    "</" + tag + "> [hidden](./target.md)\n"
+                    "[real](./target.md)\n"
+                ))
+                edges, _, _ = self.edges()
+                own = [e for e in edges if e["src"] == "file:docs/raw-html.md"]
+                self.assertEqual([(4, "file:docs/target.md", "S1")], [
+                    (e["source"]["start_line"], e["dst"], e["evidence_level"])
+                    for e in own
+                ], own)
+        inline = config_reference_edges(
+            "docs/raw-html.md",
+            "[before](./target.md) <script>hidden</script> [after](./target.md)\n",
+            {"file:docs/target.md"},
+        )
+        self.assertEqual([(1, "S1"), (1, "S1")], [
+            (e["source"]["start_line"], e["evidence_level"]) for e in inline
+        ], inline)
+
     def test_long_multiline_step_flow_map_preserves_single_direct_use(self):
         self.write("actions/local/action.yml", "name: local\n")
         self.write(".github/workflows/long-flow.yml", (
