@@ -1432,9 +1432,11 @@ def _query_context(
     source_first = _navigation_source_first_needed(
         ranges, navigation=navigation, tokens=tokens
     )
-    if (ranges and not source_first) or query_result.get("status") != "available":
-        return state
-    if len(tokens) < 2:
+    if (
+        (ranges and not source_first)
+        or query_result.get("status") != "available"
+        or len(tokens) < 2
+    ):
         return state
     or_query = _or_fts_query(tokens)
     # Overfetch verified chunks only as needed; preserve the wider existing
