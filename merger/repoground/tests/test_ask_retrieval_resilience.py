@@ -1848,3 +1848,202 @@ def test_unbound_ask_pins_snapshot_during_index_query(tmp_path, monkeypatch):
     assert observed == [digest]
     assert result["snapshot_ref"]["manifest_sha256"] == digest
     assert result["resolved_ranges"][0]["citation_id"].startswith("cit_")
+
+
+def _rgopt03_verified_index(label, paths):
+    """Cited source rows bound to one immutable manifest and SQLite artifact."""
+    rows, hits, citations = [], [], []
+    for n, source in enumerate(paths):
+        ref = f"{label}:{n}"
+        citation = f"cit_{label}_{n}"
+        rows.append({"chunk_id": ref, "source_path": source})
+        hits.append({
+            "chunk_id": ref,
+            "source_path": source,
+            "range_status": "resolved",
+            "range_ref": {"ref": ref},
+            "range": {"text": "verified source content: " + source},
+            "citation_id": citation,
+        })
+        citations.append({"chunk_id": ref, "citation_id": citation})
+    return {
+        "status": "available",
+        "bundle_manifest": "same-immutable-manifest",
+        "index_artifact": {"sha256": "a" * 64},
+        "query_result": {"results": rows},
+        "resolved_evidence": {"hits": hits},
+        "source_citation_projection": {"items": citations},
+    }
+
+
+def test_navigation_source_first_uses_verified_implementation_test_contract():
+    from merger.repoground.core.ask_context import _prefer_diverse_relaxed_sources
+
+    diagnostic = _rgopt03_verified_index(
+        "diagnostic", ["docs/diagnostics/retrieval-report.json"]
+    )
+    source = _rgopt03_verified_index(
+        "source",
+        [
+            "merger/repoground/contracts/claim-evidence-map.v1.schema.json",
+            "merger/repoground/tests/test_claim_evidence_map.py",
+            "merger/repoground/core/claim_evidence_map.py",
+        ],
+    )
+    result = _prefer_diverse_relaxed_sources(
+        diagnostic,
+        query="Find claim-to-evidence map production, tests, and contract",
+        k=3,
+        path_results=[source],
+        source_first=True,
+    )
+    paths = [
+        row["source_path"] for row in result["query_result"]["results"]
+    ]
+    assert paths == [
+        "merger/repoground/core/claim_evidence_map.py",
+        "merger/repoground/tests/test_claim_evidence_map.py",
+        "merger/repoground/contracts/claim-evidence-map.v1.schema.json",
+    ]
+    assert len(result["resolved_evidence"]["hits"]) == len(paths)
+    assert len(result["source_citation_projection"]["items"]) == len(paths)
+
+
+def test_navigation_exact_diagnostic_hits_trigger_source_fallback_only_when_needed(
+    monkeypatch, tmp_path
+):
+    from merger.repoground.core import ask_context as context
+
+    diagnostic = _rgopt03_verified_index(
+        "diagnostic", ["docs/diagnostics/retrieval-report.json"]
+    )
+    source = _rgopt03_verified_index(
+        "source",
+        [
+            "merger/repoground/core/agent_reading_pack.py",
+            "merger/repoground/tests/test_agent_reading_pack.py",
+        ],
+    )
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text("immutable-bundle", encoding="utf-8")
+    calls = []
+
+    def query(_manifest, _question, _k, prepared_fts_query=None):
+        calls.append("or" if prepared_fts_query else "and")
+        return diagnostic
+
+    def hints(*_args, **_kwargs):
+        calls.append("path")
+        return [source]
+
+    monkeypatch.setattr(context, "_run_query", query)
+    monkeypatch.setattr(context, "_relaxed_path_index_reads", hints)
+    question = "Find the Agent Reading Pack producer and its primary tests"
+    state = context._query_context(
+        manifest, query=question, k=2,
+        max_context_tokens=1000, max_context_bytes=4000,
+    )
+    assert state["strategy"] == "or_relaxed"
+    assert calls == ["and", "or", "path"]
+    assert [row["source_path"] for row in state["resolved_ranges"]] == [
+        "merger/repoground/core/agent_reading_pack.py",
+        "merger/repoground/tests/test_agent_reading_pack.py",
+    ]
+    assert [hit["citation_id"] for hit in state["retrieval_hits"]] == [
+        row["citation_id"] for row in state["resolved_ranges"]
+    ]
+
+    # The same exact AND documentation is still authoritative when no
+    # explicit source-location intent is present.  No extra index reads.
+    calls.clear()
+    explanatory = context._query_context(
+        manifest, query="Why is the Agent Reading Pack implementation slow?",
+        k=2, max_context_tokens=1000, max_context_bytes=4000,
+    )
+    assert explanatory["strategy"] == "exact_and"
+    assert explanatory["resolved_ranges"][0]["source_path"].startswith("docs/")
+    assert calls == ["and"]
+
+    # Explicitly looking for documentation must not redirect to source code.
+    calls.clear()
+    docs_query = context._query_context(
+        manifest, query="Find documentation about the implementation tests",
+        k=2, max_context_tokens=1000, max_context_bytes=4000,
+    )
+    assert docs_query["strategy"] == "exact_and"
+    assert calls == ["and"]
+
+
+def test_navigation_source_first_retains_exact_when_no_verified_source(monkeypatch, tmp_path):
+    from merger.repoground.core import ask_context as context
+
+    original = _rgopt03_verified_index(
+        "exact", ["docs/diagnostics/valid-original.json"]
+    )
+    other_docs = _rgopt03_verified_index(
+        "or", ["docs/diagnostics/only-other-docs.json"]
+    )
+    monkeypatch.setattr(
+        context, "_run_query",
+        lambda _m, _q, _k, prepared_fts_query=None: (
+            other_docs if prepared_fts_query is not None else original
+        ),
+    )
+    monkeypatch.setattr(context, "_relaxed_path_index_reads", lambda *_a, **_k: [])
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text("unchanged", encoding="utf-8")
+    state = context._query_context(
+        manifest, query="Find the retry implementation",
+        k=1, max_context_tokens=100, max_context_bytes=1000,
+    )
+    assert state["strategy"] == "exact_and"
+    assert state["resolved_ranges"][0]["source_path"] == (
+        "docs/diagnostics/valid-original.json"
+    )
+
+
+
+def test_navigation_unrelated_exact_source_yields_to_relevant_verified_source(
+    monkeypatch, tmp_path
+):
+    from merger.repoground.core import ask_context as context
+
+    unrelated = _rgopt03_verified_index(
+        "unrelated", ["merger/repoground/tests/test_review_router.py"]
+    )
+    relevant = _rgopt03_verified_index(
+        "relevant", ["merger/repoground/core/lenses.py"]
+    )
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text("immutable", encoding="utf-8")
+    calls = []
+
+    def indexed(_manifest, _question, _k, prepared_fts_query=None):
+        calls.append("or" if prepared_fts_query else "and")
+        return relevant if prepared_fts_query else unrelated
+
+    def hints(*_args, **_kw):
+        calls.append("path")
+        return [relevant]
+
+    monkeypatch.setattr(context, "_run_query", indexed)
+    monkeypatch.setattr(context, "_relaxed_path_index_reads", hints)
+    query = "Find lens selection implementation and tests"
+    state = context._query_context(
+        manifest, query=query, k=2,
+        max_context_tokens=1000, max_context_bytes=4000,
+    )
+    assert state["strategy"] == "or_relaxed"
+    assert state["resolved_ranges"][0]["source_path"] == (
+        "merger/repoground/core/lenses.py"
+    )
+    assert calls == ["and", "or", "path"]
+
+    calls.clear()
+    monkeypatch.setattr(context, "_run_query", lambda *_a, **_kw: relevant)
+    already_found = context._query_context(
+        manifest, query=query, k=2,
+        max_context_tokens=1000, max_context_bytes=4000,
+    )
+    assert already_found["strategy"] == "exact_and"
+    assert calls == []
