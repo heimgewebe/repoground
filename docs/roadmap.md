@@ -7,7 +7,7 @@ Siehe `docs/roadmap/repoground-master-roadmap.md` für die aktuelle Hauptroadmap
 
 ## Registrierte Planungsartefakte
 
-Die folgenden Planungsartefakte sind aktiv und in Task-Control registriert:
+Die folgenden Planungsartefakte sind im Planungsindex registriert. Das allein erstellt weder eine Task-Control-/Bureau-Aufgabe noch belegt es eine Implementierung:
 
 - `docs/roadmap/repoground-master-roadmap.md`
 - `docs/blueprints/lenskit-output-optimierung-v1.md`
@@ -26,3 +26,4 @@ Die folgenden Planungsartefakte sind aktiv und in Task-Control registriert:
 - `docs/roadmap/repoground-expansion-thread-1-graph.md`
 - `docs/roadmap/repoground-expansion-thread-2-federation-time.md`
 - `docs/roadmap/repoground-expansion-thread-3-consumers.md`
+- `docs/roadmap/repoground-agent-tool-selection-plan.md`
