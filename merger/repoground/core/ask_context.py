@@ -1362,6 +1362,18 @@ def _manifest_content_digest(manifest_path: Path) -> str | None:
     return hashlib.sha256(raw).hexdigest() if len(raw) <= MAX_MANIFEST_BYTES else None
 
 
+def _navigation_topic_terms(terms: set[str]) -> set[str]:
+    """Exclude locator vocabulary when comparing a filename to a request."""
+    return terms - {
+        "find", "implementation", "implementierung", "producer", "production",
+        "logic", "handler", "source", "code", "module", "modules",
+        "test", "tests", "contract", "contracts", "schema",
+        "command", "commands", "cli", "registration", "coverage",
+        "file", "files", "path", "paths", "primary", "real",
+        "report", "output", "check", "checks", "used", "during",
+    }
+
+
 def _navigation_source_first_needed(
     ranges: list[dict[str, Any]], *, navigation: bool, tokens: list[str]
 ) -> bool:
@@ -1379,14 +1391,7 @@ def _navigation_source_first_needed(
         "handbook", "proof", "diagnostic",
     }:
         return False
-    topic_terms = terms - {
-        "find", "implementation", "implementierung", "producer", "production",
-        "logic", "handler", "source", "code", "module", "modules",
-        "test", "tests", "contract", "contracts", "schema",
-        "command", "commands", "cli", "registration", "coverage",
-        "file", "files", "path", "paths", "primary", "real",
-        "report", "output", "check", "checks", "used", "during",
-    }
+    topic_terms = _navigation_topic_terms(terms)
     return not any(
         _navigation_source_class(str(item.get("source_path") or "")) < 3
         and _navigation_source_matches_topic(
@@ -1524,6 +1529,9 @@ def _query_context(
     )
     if source_first and not any(
         _navigation_source_class(str(hit.get("source_path") or "")) < 3
+        and _navigation_source_matches_topic(
+            str(hit.get("source_path") or ""), _navigation_topic_terms(set(tokens))
+        )
         for hit in selected_result["resolved_evidence"]["hits"]
     ):
         # If no verifiable source path surfaced, retain the original exact

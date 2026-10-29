@@ -2047,3 +2047,31 @@ def test_navigation_unrelated_exact_source_yields_to_relevant_verified_source(
     )
     assert already_found["strategy"] == "exact_and"
     assert calls == []
+
+
+
+def test_source_first_unrelated_or_code_preserves_exact_documentation(
+    monkeypatch, tmp_path
+):
+    """An unrelated verified .py is not a topical replacement for docs."""
+    from merger.repoground.core import ask_context as context
+
+    exact = _rgopt03_verified_index("exact", ["docs/retry.md"])
+    unrelated = _rgopt03_verified_index("or", ["src/logger.py"])
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text("constant", encoding="utf-8")
+    queried = []
+
+    def indexed(_manifest, _query, _k, prepared_fts_query=None):
+        queried.append("or" if prepared_fts_query else "and")
+        return unrelated if prepared_fts_query else exact
+
+    monkeypatch.setattr(context, "_run_query", indexed)
+    monkeypatch.setattr(context, "_relaxed_path_index_reads", lambda *_a, **_kw: [])
+    state = context._query_context(
+        manifest, query="Find retry implementation", k=1,
+        max_context_tokens=1000, max_context_bytes=4000,
+    )
+    assert queried == ["and", "or"]
+    assert state["strategy"] == "exact_and"
+    assert state["resolved_ranges"][0]["source_path"] == "docs/retry.md"
