@@ -945,6 +945,12 @@ _NAVIGATION_OBJECTS = frozenset(
         "handler",
         "test",
         "tests",
+        "command",
+        "commands",
+        "cli",
+        "contract",
+        "contracts",
+        "schema",
     }
 )
 
@@ -1213,12 +1219,42 @@ def _relaxed_path_index_reads(
     return results
 
 
+def _navigation_source_class(path: str) -> int:
+    """Rank verified source paths for explicit implementation/test navigation."""
+    normalized = path.replace("\\", "/").lower()
+    if normalized.startswith("docs/"):
+        return 3
+    if normalized.startswith("tests/") or "/tests/" in normalized:
+        return 1
+    if normalized.startswith("contracts/") or "/contracts/" in normalized or normalized.endswith(".schema.json"):
+        return 2
+    if normalized.endswith((".py", ".rs", ".go", ".js", ".jsx", ".ts", ".tsx", ".sh", ".nix")):
+        return 0
+    return 3
+
+
+def _navigation_source_matches_topic(source: str, topic_terms: set[str]) -> bool:
+    """An unrelated test/handler is not proof that the requested file was found."""
+    if not topic_terms:
+        return True
+    filename = Path(source).name.lower().replace("_", " ").replace("-", " ")
+    filename_tokens = set(re.findall(r"\b\w+\b", filename))
+    return any(
+        word == topic
+        or (len(topic) >= 4 and word in {topic + "s", topic + "es"})
+        or (len(word) >= 4 and topic in {word + "s", word + "es"})
+        for topic in topic_terms
+        for word in filename_tokens
+    )
+
+
 def _prefer_diverse_relaxed_sources(
     query_result: dict[str, Any],
     *,
     query: str,
     k: int,
     path_results: list[dict[str, Any]],
+    source_first: bool = False,
 ) -> dict[str, Any]:
     """Take at most k distinct sources with existing verifiable citations."""
     candidates = []
@@ -1233,14 +1269,49 @@ def _prefer_diverse_relaxed_sources(
                 item for item in citations["items"] if isinstance(item, dict)
             )
 
-    # Ordinary answers retain original FTS/BM25 order; explicit navigation
-    # alone may prioritize filename matches after the first original hit.
+    # Ordinary answers retain BM25 order.  Only an explicit source-navigation
+    # request whose exact AND results contained no *relevant* source opts into
+    # prioritizing verified implementation/test/contract paths.
     navigation = _navigation_path_intent(query)
-    ordered = (
-        candidates[:1] + sorted(candidates[1:], key=lambda row: -row[0])
-        if navigation
-        else candidates
-    )
+    if navigation and source_first:
+        buckets: list[list[tuple[int, str, dict[str, Any], dict[str, Any]]]] = [
+            [], [], [], []
+        ]
+        topic_terms = _navigation_topic_terms(set(_content_tokens(query)))
+        for candidate in sorted(
+            candidates,
+            key=lambda row: (
+                not _navigation_source_matches_topic(row[1], topic_terms),
+                -row[0],
+                len(Path(row[1]).stem),
+            ),
+        ):
+            buckets[_navigation_source_class(candidate[1])].append(candidate)
+        terms = set(_content_tokens(query))
+        wants_test = bool(terms & {"test", "tests"})
+        wants_contract = bool(terms & {"contract", "contracts", "schema"})
+        wants_implementation = bool(
+            terms & {
+                "implementation", "implementierung", "producer", "production",
+                "logic", "handler", "source", "code", "module", "modules",
+            }
+        ) or not (wants_test or wants_contract)
+        priority = (
+            (0, wants_implementation),
+            (1, wants_test),
+            (2, wants_contract),
+        )
+        ordered = []
+        for bucket, requested in priority:
+            if requested and buckets[bucket]:
+                ordered.append(buckets[bucket].pop(0))
+        ordered.extend(candidate for group in buckets for candidate in group)
+    else:
+        ordered = (
+            candidates[:1] + sorted(candidates[1:], key=lambda row: -row[0])
+            if navigation
+            else candidates
+        )
     selected = []
     seen = set()
     for _overlap, source, row, evidence in ordered:
@@ -1296,6 +1367,46 @@ def _manifest_content_digest(manifest_path: Path) -> str | None:
     return hashlib.sha256(raw).hexdigest() if len(raw) <= MAX_MANIFEST_BYTES else None
 
 
+def _navigation_topic_terms(terms: set[str]) -> set[str]:
+    """Exclude locator vocabulary when comparing a filename to a request."""
+    return terms - {
+        "find", "implementation", "implementierung", "producer", "production",
+        "logic", "handler", "source", "code", "module", "modules",
+        "test", "tests", "contract", "contracts", "schema",
+        "command", "commands", "cli", "registration", "coverage",
+        "file", "files", "path", "paths", "primary", "real",
+        "report", "output", "check", "checks", "used", "during",
+    }
+
+
+def _navigation_source_first_needed(
+    ranges: list[dict[str, Any]], *, navigation: bool, tokens: list[str]
+) -> bool:
+    """Use path hints when exact text cites no file relevant to a locator."""
+    if not ranges or not navigation:
+        return False
+    terms = set(tokens)
+    if not terms & {
+        "implementation", "implementierung", "producer", "production",
+        "logic", "handler", "source", "code", "module", "modules",
+        "test", "tests", "contract", "contracts", "schema",
+        "command", "commands", "cli", "registration", "coverage",
+    } or terms & {
+        "documentation", "docs", "document", "guide", "manual",
+        "handbook", "proof", "diagnostic",
+    }:
+        return False
+    topic_terms = _navigation_topic_terms(terms)
+    return not any(
+        _navigation_source_class(str(item.get("source_path") or "")) < 3
+        and _navigation_source_matches_topic(
+            str(item.get("source_path") or ""), topic_terms
+        )
+        for item in ranges
+        if isinstance(item, dict)
+    )
+
+
 def _query_context(
     manifest_path: Path,
     *,
@@ -1325,15 +1436,21 @@ def _query_context(
         "strategy": "exact_and",
         "relaxed": False,
     }
-    if ranges or query_result.get("status") != "available":
-        return state
+    navigation = _navigation_path_intent(query)
     tokens = _content_tokens(query)
-    if len(tokens) < 2:
+    # A diagnostic may quote a query verbatim without locating its source.
+    source_first = _navigation_source_first_needed(
+        ranges, navigation=navigation, tokens=tokens
+    )
+    if (
+        (ranges and not source_first)
+        or query_result.get("status") != "available"
+        or len(tokens) < 2
+    ):
         return state
     or_query = _or_fts_query(tokens)
     # Overfetch verified chunks only as needed; preserve the wider existing
     # search window for explicit navigation with multiple requested sources.
-    navigation = _navigation_path_intent(query)
     candidate_k = min(100, max(1, k * 3, 24 if navigation and k > 1 else k))
     manifest_digest_before = (
         _manifest_content_digest(manifest_path) if navigation else None
@@ -1344,7 +1461,7 @@ def _query_context(
     # With k=1, a verified first OR candidate already fills the answer.
     # Further path reads cannot alter it but would revalidate the full index.
     verified_candidates = _source_candidates_from_index(relaxed_result, set(tokens))
-    need_path_hints = navigation and (k > 1 or not verified_candidates)
+    need_path_hints = navigation and (k > 1 or not verified_candidates or source_first)
     path_results = (
         _relaxed_path_index_reads(manifest_path, query=query, fts_query=or_query, k=k)
         if need_path_hints
@@ -1412,8 +1529,19 @@ def _query_context(
         if isinstance(warning, str)
     ]
     selected_result = _prefer_diverse_relaxed_sources(
-        relaxed_result, query=query, k=k, path_results=path_results
+        relaxed_result, query=query, k=k, path_results=path_results,
+        source_first=source_first,
     )
+    if source_first and not any(
+        _navigation_source_class(str(hit.get("source_path") or "")) < 3
+        and _navigation_source_matches_topic(
+            str(hit.get("source_path") or ""), _navigation_topic_terms(set(tokens))
+        )
+        for hit in selected_result["resolved_evidence"]["hits"]
+    ):
+        # If no verifiable source path surfaced, retain the original exact
+        # result instead of replacing good documentation with weaker OR text.
+        return state
     # Check every consulted index result, including filtered path hints.
     # Uncitable candidates never become answer evidence, but must be reported.
     invalid_candidates = (
