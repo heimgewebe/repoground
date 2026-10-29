@@ -8,6 +8,11 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+try:
+    import fastjsonschema
+except ImportError:  # Optional fallback for non-locked minimal environments.
+    fastjsonschema = None
+
 from merger.repoground.architecture.graph_source_validation import (
     GraphIndexCompilationError,
     validate_document,
@@ -54,6 +59,31 @@ def _require_integrity(record: dict[str, Any], label: str) -> str:
         )
     assert digest is not None
     return digest
+
+
+def _validate_projection_schema(document: Any) -> dict[str, Any]:
+    """Validate the same tracked Draft-07 schema with a compiled hot path.
+
+    The locked production runtime has fastjsonschema. Keep legacy jsonschema
+    validation as a functional fallback for minimal source-only environments.
+    Neither path may apply schema defaults or refresh any artifact.
+    """
+    if fastjsonschema is None:
+        return validate_document(document, SCHEMA, ROLE)
+    path = Path(__file__).parent.parent / "contracts" / SCHEMA
+    try:
+        schema = json.loads(path.read_text(encoding="utf-8"))
+        validate = fastjsonschema.compile(
+            schema, use_default=False, use_formats=False,
+        )
+    except (OSError, UnicodeError, json.JSONDecodeError,
+            fastjsonschema.JsonSchemaDefinitionException) as exc:
+        _reject("schema_unavailable", f"{ROLE} schema is unavailable: {exc}")
+    try:
+        validate(document)
+    except fastjsonschema.JsonSchemaValueException as exc:
+        _reject("invalid_schema", f"{ROLE} does not satisfy {SCHEMA}: {exc}")
+    return document
 
 
 def _validate_manifest_binding(
@@ -155,7 +185,7 @@ def load_relationship_projection_source(bundle_manifest: str | Path) -> LoadResu
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         return _error_result(artifact, "invalid_json", str(exc))
     try:
-        document = validate_document(document, SCHEMA, ROLE)
+        document = _validate_projection_schema(document)
         _validate_manifest_binding(document, source, manifest_path)
         _validate_semantics(document)
     except GraphIndexCompilationError as exc:

@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from merger.repoground.core import agent_impact_context
+from merger.repoground.core import agent_impact_context, relationship_projection_access
 from merger.repoground.core.relationship_projection_access import read_structure_neighborhood
 from merger.repoground.tests.test_relationship_projection_publication import published_bundle, role_record
 
@@ -101,6 +101,57 @@ def test_rehashed_semantic_contradictions_are_rejected(published, fault):
     result = query(artifacts)
     assert result["status"] == "blocked"
     assert result["error_code"]
+
+
+
+@pytest.mark.parametrize("fault", [
+    "missing_src", "unknown_relation", "malformed_edge_id", "extra_edge_key",
+    "boolean_source_line", "duplicate_nonclaims", "missing_run_id",
+    "negative_coverage_count",
+])
+def test_rehashed_schema_faults_fail_closed_with_fast_validator(published, fault):
+    _, _, artifacts, manifest = published
+    document = json.loads(artifacts.relationship_projection.read_text())
+    edge = document["edges"][0]
+    if fault == "missing_src":
+        edge.pop("src")
+    elif fault == "unknown_relation":
+        edge["relation"] = "nonexistent"
+    elif fault == "malformed_edge_id":
+        edge["id"] = "rel:bad"
+    elif fault == "extra_edge_key":
+        edge["unexpected"] = True
+    elif fault == "boolean_source_line":
+        edge["source"]["start_line"] = True
+    elif fault == "duplicate_nonclaims":
+        document["does_not_establish"] = ["same", "same"]
+    elif fault == "missing_run_id":
+        document.pop("run_id")
+    else:
+        document["coverage"]["total_edges"] = -1
+    rewrite_projection(artifacts, manifest, document)
+    result = query(artifacts)
+    assert result["status"] == "blocked"
+    assert result["error_code"].endswith("_invalid_schema")
+
+
+def test_fast_validator_is_used_when_available(published, monkeypatch):
+    if relationship_projection_access.fastjsonschema is None:
+        pytest.skip("fastjsonschema is not installed in minimal developer environment")
+    _, _, artifacts, _ = published
+
+    def forbidden_legacy(*_args, **_kwargs):
+        pytest.fail("legacy JSONSchema validation was unexpectedly used")
+
+    monkeypatch.setattr(relationship_projection_access, "validate_document", forbidden_legacy)
+    assert query(artifacts)["status"] == "available"
+
+
+def test_missing_optional_fast_validator_keeps_existing_reader(published, monkeypatch):
+    _, _, artifacts, _ = published
+    monkeypatch.setattr(relationship_projection_access, "fastjsonschema", None)
+    assert query(artifacts)["status"] == "available"
+
 
 
 def test_artifact_change_during_real_compilation_fails_closed(published, monkeypatch):
