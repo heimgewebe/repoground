@@ -1,12 +1,96 @@
 # RepoGround – Vision und ausführbarer Entwicklungsplan
 
-**Stand:** 27. Oktober 2026
+**Stand:** 29. Oktober 2026 (operatives Audit-Update; Ausbauprogramm vom 27.10. bleibt Referenz)
 
 **Rolle:** Strategischer Ausführungsplan, kein Nachweis für Implementierung, Produktionsreife oder abgeschlossene Aufgaben.
 
 **Verbindliche neue Ausbaupriorität (27.10.2026):** Das [massive Ausbauprogramm](repoground-massive-expansion-program.md) ersetzt die frühere Reihenfolge „erst allgemeine Produktivitätssteigerung/20 A/B-Aufgaben nachweisen, dann breit implementieren“. **Zuerst** wird der deterministische Graph-, Änderungs-, Zeit- und Föderationskern einschließlich echter Agenten-Consumer in drei abgegrenzten Arbeitssträngen substanziell ausgebaut. **Danach** folgt die breite Gesamt-Nutzenbewertung. Vorlaufende Nutzenmessungen, historisch fehlende Bundles oder freiwillige Agentenaufrufe sind keine Start- oder Merge-Gates für unabhängige Features; korrektes Verhalten, Versionstreue, Rechte, Tests, CI und bestehende Sicherheitsgates bleiben verpflichtend.
 
 **Bezug:** [Master-Roadmap](repoground-master-roadmap.md) · [Agent Operationalization](lenskit-agent-operationalization-roadmap.md) · [Deterministic Core](../architecture/deterministic-repoground-core.md)
+
+## Optimierungsplan nach Gesamtaudit (29.10.2026)
+
+**Geltung:** Aktuelle operative Prioritäten auf Basis des Live-Audits. Dies ist **ein Plan**, weder Implementierungsnachweis noch zweite Taskstatus- oder Release-Quelle. Das Ausbauprogramm vom 27.10. bleibt fachliche Referenz, aber die nächste operative Arbeit priorisiert nachgewiesenen Nutzwert, aktuelle Agenten-Quellen und geringe Reibung vor weiteren unbewerteten Features. Unabhängige Arbeit wird nicht pauschal blockiert.
+
+**Ziel:** Ein Agent findet in einem aktuellen Repository die richtigen belegten Implementierungsstellen und erledigt eine reale Aufgabe mit **mindestens gleicher Korrektheit und geringerem Gesamtaufwand** als mit Git/Dateisuche allein. Weder Artefaktzahl noch Graphgröße, CI-Grün oder freiwillige Toolaufrufe sind selbst Erfolgskriterien.
+
+### A. Gemessene Ausgangsbasis
+
+| Gebiet | Stand 29.10.2026 | Aussagegrenze |
+| --- | --- | --- |
+| Produktionsversion | GitHub `main`, aktivierte Immutable-Runtime und RepoGround-Bundle verwenden `88584eee78a68c717bd9dc61bedbc865eed27fea`; 27/27 GitHub-Checks erfolgreich | Kein automatischer Agenten-Nutzenbeweis |
+| Graphgeschwindigkeit | Vier erneute Aufrufe über die **aktive Runtime**: Mittel **3,28 s**, vorheriger Vergleich **12,80 s**; je Ziel übereinstimmende Antwort-Hashes | Direktabfrage, nicht Agenten-End-to-End |
+| Fleet-Aktualität | 12 gesunde Bundle-Einträge, davon 10 `fresh_exact` und 2 `stale_head`: `heim-pc`, `grabowski` | Die autoritative `metarepo/fleet/repos.yml` nennt 11 Mitglieder **ohne Grabowski** |
+| Nativer MCP-Client | Runtime neu, `--repo-root` /home/alex/repos/repoground jedoch auf `7300ab30` (37 Commits hinter aktuellem `main`), `live_freshness=stale` | Grabowskis separate RepoGround-Frontdoor verwendet das aktuelle Publikationscheckout |
+| Beziehungsgraph | 119.202 Beziehungen, 50.025 als `resolved`; Python-Aufrufgraph 23.640/88.499 eindeutig aufgelöst (= 26,7 %) | `S0` ist nicht `S1`, keine vollständige Wirkungsanalyse |
+| Standard-Suche | Aktuelles `retrieval_eval_json`: **1/20** Fragen-Recall@10 und **1/60** Zielfundstellen-Recall; Default-Promotion blockiert | Kanonisches **lexikalisches** Goldset, keine Aussage über alle spezialisierten Suchwege |
+| Agenten-Suchweg | Sechs Auditfragen: **3/6** richtige Implementierungsdatei in Top-5, **2/6** auf Rang 1; Symbolsuche und `range_get` funktionieren | Kleine gezielte Stichprobe |
+| Alte Agenten-A/B-Messung | 20 gepaarte Codex-Aufgaben, Git Ø 25,107 s, mit RepoGround Ø 39,852 s (**+59 %**), gemeldete Eingabe-Tokens **+32 %** | Vor der jüngsten Beschleunigung; Ziel-ID in der Antwort beweist nicht volle Korrektheit |
+| Betrieb | Fleet-Timer aktiv und letzter geprüfter Lauf erfolgreich; ca. 3,2 GiB Bundle-Bestand | Ein gesunder Altbestand ist nicht automatisch aktuell |
+
+**Primärbelege und Wiederholung:** [Graphintegration #1362](https://github.com/heimgewebe/repoground/pull/1362), [Beschleunigung #1363](https://github.com/heimgewebe/repoground/pull/1363), [20-Paare-Messung](../proofs/repoground-agent-utility-20pairs-20261029.md), [Produktionsintegration](../proofs/repoground-production-graph-integration.md), `docs/retrieval/review_queries.v1.json`, `retrieval_eval_json` im commitgebundenen Bundle und [Fleet-Mitglieder](https://github.com/heimgewebe/metarepo/blob/main/fleet/repos.yml). Die Tabelle ist eine datierte Momentaufnahme und muss vor Änderungen am jeweils zuständigen Live-System überprüft werden.
+
+### B. Arbeitspakete, kleinster wirksamer Eingriff
+
+#### RG-OPT-01 – Echten MCP-Checkout an die beabsichtigte Revision binden (P0)
+
+**Ursache:** Das neue MCP-Skript läuft mit altem `--repo-root`, wodurch `live_freshness` korrekt `git_head_mismatch` meldet und `change_evidence_pack` gegebenenfalls nicht zum aktuellen Arbeitsstand gehört.
+
+**Umsetzung:** Im zuständigen Client-/Host-Setup den richtigen Checkout mit dem intendierten Git-Stand herstellen oder den MCP-Prozess auf einen vorhandenen exakt gebundenen Checkout zeigen lassen. Die Auswahl hängt vom tatsächlichen Agenten-Task ab; die immutable Publikationsquelle ersetzt nicht automatisch einen editierbaren Worktree. Keine pauschalen Resets, kein verdeckter Snapshot-Refresh, kein Abschalten der Freshness-Erkennung.
+
+**Abnahme:** Echter Client-Roundtrip `initialize` → tools/list → live_freshness → ask_context und `change_evidence_pack` für einen bekannten `base..target`: `fresh` bei passendem, sauberem Checkout; `stale` bei bewusst falschem Commit; korrekte Quellen und identische Diffbindung. Bei nicht verfügbarem Kontext geht native Git-/Dateisuche weiter. **Owner:** Grabowski, Client-/Host-Repository.
+
+#### RG-OPT-02 – Fleet-Freshness und Zuständigkeit dauerhaft klären (P0)
+
+**Ursache:** `heim-pc` hinkt der aktuellen Git-Revision hinterher; `grabowski` erscheint als gesundes, aber veraltetes Legacy-Bundle außerhalb der elf kanonischen Fleet-Mitglieder.
+
+**Umsetzung:** Den bestehenden Scheduler/Publisher auf wirkliche Änderungsaufnahme prüfen; `heim-pc` über denselben Publikationspfad nachführen, sofern nicht bereits durch einen regulären Lauf geschehen. Für `grabowski` explizit entscheiden: entweder als gewolltes Fleet-Mitglied im Metarepo aufnehmen **oder** eine bereits vorhandene zuständige Publikationsroute benutzen und den Legacy-Katalogeintrag korrekt behandeln. Keine zweite Queue, keine heimliche Fleet-Erweiterung oder erzwungene Full-Scans auf Lesewegen.
+
+**Abnahme:** Für jeden tatsächlich benötigten Consumer ein frisches, revisions-/hashgebundenes Bundle nach realem Quellupdate; Verzögerungen über **zwei reguläre Timerläufe** sind als Ursache/Fehler sichtbar. `stale` bleibt bei echter Differenz wahr; nur der Publisher schreibt. **Owner:** Grabowski, RepoGround/Metarepo je tatsächlicher Ursache.
+
+#### RG-OPT-03 – Richtige Implementierungsdatei beim ersten Versuch finden (P1, Haupthebel)
+
+**Ursache:** Die breite Wortsuche mit `or_relaxed` übergewichtet teils Tests und Dokumentation. Das vorhandene exakte Symbol-/Pfad-Routing wird bei natürlichen Implementierungsfragen nicht zuverlässig gewählt.
+
+**Umsetzung:** Die 20 kanonischen Goldsetfragen und die sechs Auditfragen mit eingefrorenen Commits aufschlüsseln; `query_existing_index`, `find_symbol`, vorhandene aufgabenspezifische Routen sowie `rg`/`git grep` vergleichend prüfen. Exakte Identifier und Dateinamen vorrangig durch **bestehende** Symbol-/Pfadfunktionen auflösen; breite Mischfragen klein und nachvollziehbar aufteilen; Ränge für Implementierung, Tests und Verträge begründet gewichten. Nur minimale Routingkorrektur samt Negativtests, keine neue Suchdatenbank und kein Standard-Embedding-Reranking.
+
+**Abnahme:** Zielwerte **mindestens 5/6** korrekte Implementierungsdateien in Top-5 der Auditstichprobe und **mindestens 10/20** Fragen-Recall@10 im kanonischen Goldset; kein Verlust gültiger Belege/Range-Auflösung, keine unbelegte S1-Promotion. Ergebnisse gegen ursprüngliche Messung **und** native Git-Suche ausweisen. Ziele werden nicht durch Umformulieren des Goldsets erreicht. **Owner:** Grabowski, RepoGround-Retrieval. Eine separate aktive Agent-Tool-Auswahl-Lane arbeitet bereits an verwandter Routingdisziplin: Ergebnisse übernehmen, keine konkurrierenden Regler bauen.
+
+#### RG-OPT-04 – Tool- und Kontextaufwand an der Aufgabe ausrichten (P1)
+
+**Ursache:** Der alte Codex-Vergleich benötigte 78 zusätzliche RepoGround-MCP-Aufrufe und +32 % gemeldete Eingabe-Tokens, ohne nachgewiesenen Qualitätsgewinn.
+
+**Umsetzung:** Für bekannten Pfad/einzelnen Identifier normale Datei- und Git-Suche nutzen; für unbekannte eingehende Abhängigkeiten, mehrstufige Relationen, revisionsgebundene Auswirkungen oder Testfolgen RepoGround gezielt verwenden. Doppelte `discover`/`preflight`-, unnötige Range- und Kontextaufrufe vermeiden, bestehende Budgets respektieren. Bei `stale`, `unavailable`, geringer Coverage oder `degraded` offen zur Primärquelle zurückfallen.
+
+**Abnahme:** Echte Agenten-Traces dokumentieren Auswahl, Fundstellen, Anzahl Aufrufe, Gesamtzeit, Tokens, fehlgeschlagene Versuche und Korrektheit. Weniger Werkzeugaufrufe allein genügt nicht; Antwortqualität darf nicht sinken. **Owner:** zuständiger Consumer-Owner via Grabowski; abgestimmt mit der bestehenden Tool-Auswahl-Lane.
+
+#### RG-OPT-05 – Agentennutzen auf der neuen produktiven Runtime belegen (P1)
+
+**Messaufbau:** Mindestens 20 reale gepaarte Aufgaben **über mehrere Repositories**, jeweils identische Prompts, Modell, Checkout/Commit, Ressourcenrahmen und Bewertungsstandard. Gruppen getrennt betrachten: bekannte Dateistelle, unbekannte eingehende Abhängigkeit, relevante Tests, `base..head-Folgen`, repositoryübergreifender Vertrag. Tools bleiben freiwillig nutzbar, nicht per Prompt erzwungen.
+
+**Abnahme:** Tatsächlicher Toolkonsum, korrekte Zielfundstellen **und** fachliche Lösung, Nacharbeit, vollständige Bearbeitungszeit inklusive Kontext-/Snapshotbetrieb, Input-/Output-/Cache-Tokens und Fehlversuche je Paar. RepoGround nur für belegbar bessere Aufgabenklassen als Default empfehlen. Bei ausbleibendem Vorteil selektive Nutzung statt erzwungener Agentenarbeit. Neue unabhängige Feature-PRs werden nicht allein wegen einer laufenden Messung blockiert. **Owner:** Grabowski; bei entscheidenden Stichproben unabhängiger read-only Gegencheck durch Großen Adler.
+
+#### RG-OPT-06 – Graphabdeckung nur dort vertiefen, wo sie reale Lücken schließt (P2)
+
+**Umsetzung:** Fehlende Beziehungen aus echten Impact-/Testfragen sammeln; wenige nachweisbar eindeutige Python-/Konfigurationsfälle ergänzen, jeweils mit positiven und negativen Regressionsbelegen. S0/S1, Parserlücken und Lösch-/Umbenennungsgrenzen sichtbar halten. Keine künstliche Erhöhung der 26,7-%-Quote und kein neues Parallelgraph-System.
+
+**Abnahme:** Bessere korrekte Test-/Abhängigkeitsfunde bei gleich bleibender Falschpositiv-Rate und reproduzierbaren Diff-, Manifest- und Hashbindungen. **Owner:** Grabowski, getrennte Parser-/Graph-Lane nach Bedarf.
+
+#### RG-OPT-07 – Historische Quellstand-Pins getrennt abschließen (P2, Recovery)
+
+[PR #1344](https://github.com/heimgewebe/repoground/pull/1344) bleibt ein eigenständiger Draft mit im Audit fehlgeschlagenem `pytest-full.` Aktuellen Head/CI erneut lesen, tatsächliche Ursache beheben und an einer **späteren normalen Fleet-Publikation** belegen, dass der benötigte historische Quellstand weiterhin verfügbar ist. Keine pauschale Aufhebung sinnvoller Aufbewahrungsgrenzen; nicht mit Suche/Graph zusammen mergen. **Owner:** bestehende zuständige Writer-Lane über Grabowski.
+
+### C. Reihenfolge, Erfolg, Nicht-Ziele
+
+1. **Zuerst RG-OPT-01 und -02:** Agenten müssen aktuelle und richtig zugeordnete Quellen sehen, bevor ein A/B-Test Aussagekraft hat.
+2. **Dann RG-OPT-03 und -04:** Bestehende Suche und Toolwahl reparieren, nicht die Zahl der Funktionen erhöhen.
+3. **Danach RG-OPT-05:** Aufgabenklassen einzeln gegen reine Git-Werkzeuge bewerten und die bevorzugte Route nur nach tatsächlichem Nutzen wählen.
+4. **RG-OPT-06/07** nur entlang realer Lücken bzw. vorhandener Recovery-Zuständigkeit. Keine vorgezogene Mikrooptimierung des nun ca. 3,3-s-Graphlesepfads, solange schlechte Trefferraten die Gesamtarbeit dominieren.
+5. **Betriebsnachweis statt Formalstatus:** Ein Plan, PR, Merge oder grüner Build ist noch kein abgeschlossener Nutzerweg. Für jede tatsächliche Änderung gilt frischer Git-/Runtime-/Client-Readback plus betroffene Regressionen, ohne unnötige Freigabeschleifen oder Architekturaufbau.
+
+**Abschlusskriterium der Optimierungswelle:** Bei einem vorab festgelegten Aufgabenmix liefert RepoGround aktuelle, auflösbare Belege und gegenüber Git **bessere Trefferqualität oder geringere Gesamtzeit bei mindestens gleicher Korrektheit**. Fehlt dieser Nachweis, bleibt RepoGround ein selektives Werkzeug; es wird nicht durch Nutzungszwang zum Erfolg erklärt.
+
+---
 
 ## 1. Auftrag
 
