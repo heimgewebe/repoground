@@ -1,4 +1,8 @@
+import hashlib
 import json
+from dataclasses import asdict
+
+from merger.repoground.core.chunker import Chunker
 
 import pytest
 
@@ -26,18 +30,33 @@ def _repo(tmp_path, name="repo1"):
     return {"root": root, "name": name}
 
 
+def _contact_records(root, repo, path):
+    raw = (root / path).read_bytes()
+    text = raw.decode("utf-8", errors="replace").replace("\r\n", "\n").replace("\r", "\n")
+    content = text.encode("utf-8")
+    blob = hashlib.sha1(f"blob {len(raw)}\0".encode() + raw, usedforsecurity=False).hexdigest()
+    result = []
+    for chunk in Chunker().chunk_file("fixture", text, file_path=path):
+        row = asdict(chunk)
+        row.update({
+            "repo": repo, "path": path, "source_status": "full", "truncated": False,
+            "content": content[chunk.start_byte:chunk.end_byte].decode("utf-8"),
+            "source_range": {
+                "status": "declared", "file_path": path, "repo_id": repo,
+                "start_byte": chunk.start_byte, "end_byte": chunk.end_byte,
+                "start_line": chunk.start_line, "end_line": chunk.end_line,
+                "content_sha256": chunk.sha256, "git_blob_sha1": blob,
+                "git_blob_sha1_basis": "source_worktree_file_content",
+            },
+        })
+        result.append(row)
+    return result
+
+
 def _chunk_index(tmp_path, repo="repo1", records=None):
     path = tmp_path / f"{repo}.chunk_index.jsonl"
     if records is None:
-        records = [
-            {
-                "repo": repo,
-                "path": "main.py",
-                "source_status": "full",
-                "truncated": False,
-                "source_range": {"status": "declared"},
-            }
-        ]
+        records = _contact_records(tmp_path / repo, repo, "main.py")
     path.write_text(
         "".join(json.dumps(record) + "\n" for record in records),
         encoding="utf-8",
@@ -46,10 +65,11 @@ def _chunk_index(tmp_path, repo="repo1", records=None):
 
 
 def _ensure(tmp_path, *, summaries=None, chunk_index=None):
+    summaries = summaries or [_repo(tmp_path)]
     return ensure_bundle_graph_sources(
         base_path=tmp_path / "bundle",
         chunk_index_path=chunk_index or _chunk_index(tmp_path),
-        repo_summaries=summaries or [_repo(tmp_path)],
+        repo_summaries=summaries,
         run_id="run-1",
         canonical_dump_index_sha256=SHA,
         generated_at="2026-06-28T12:00:00Z",
@@ -89,14 +109,8 @@ def test_produces_cross_language_inventory_from_full_contact_retrieval_paths(tmp
         target.write_text(content, encoding="utf-8")
 
     records = [
-        {
-            "repo": "repo1",
-            "path": path,
-            "source_status": "full",
-            "truncated": False,
-            "source_range": {"status": "declared"},
-        }
-        for path in ["main.py", *sources]
+        row for path in ["main.py", *sources]
+        for row in _contact_records(root, "repo1", path)
     ]
     result = _ensure(
         tmp_path,
@@ -245,3 +259,73 @@ def test_write_failure_removes_partial_pair(tmp_path, monkeypatch):
 
     assert not (tmp_path / "bundle.architecture_graph.json").exists()
     assert not (tmp_path / "bundle.entrypoints.json").exists()
+
+@pytest.mark.parametrize("drift", ["after_capture", "between_text_and_blob", "canonical"])
+def test_changed_source_never_becomes_bundle_bound_graph(tmp_path, drift):
+    repo = _repo(tmp_path)
+    root = repo["root"]
+    records = _contact_records(root, "repo1", "main.py")
+    before_hash = records[0]["source_range"]["content_sha256"]
+    (root / "main.py").write_text("import sys\nprint(sys.version)\n", encoding="utf-8")
+    after_records = _contact_records(root, "repo1", "main.py")
+    if drift == "between_text_and_blob":
+        for row in records:
+            row["source_range"]["git_blob_sha1"] = after_records[0]["source_range"]["git_blob_sha1"]
+    elif drift == "canonical":
+        records = after_records
+        records[0]["canonical_range"] = {"content_sha256": before_hash}
+    chunks = _chunk_index(tmp_path, records=records)
+    with pytest.raises(BundleGraphSourceError, match="source"):
+        _ensure(tmp_path, summaries=[repo], chunk_index=chunks)
+    assert not (tmp_path / "bundle.relationship_projection.json").exists()
+    assert not (tmp_path / "bundle.architecture_graph.json").exists()
+
+
+def test_missing_chunk_cannot_materialize_uncaptured_tail(tmp_path):
+    repo = _repo(tmp_path)
+    (repo["root"] / "main.py").write_text("value = 1\n" * 900, encoding="utf-8")
+    records = _contact_records(repo["root"], "repo1", "main.py")
+    assert len(records) >= 3
+    chunks = _chunk_index(tmp_path, records=records[:-1])
+    with pytest.raises(BundleGraphSourceError, match="complete file"):
+        _ensure(tmp_path, summaries=[repo], chunk_index=chunks)
+
+
+@pytest.mark.parametrize("raw", [
+    b"value = 1\n", b"value = 1\r\n", b"value = 1\r", b"value = 1", b"# invalid: \xff\n",
+])
+def test_materialization_preserves_exact_verified_raw_bytes(tmp_path, monkeypatch, raw):
+    repo = _repo(tmp_path)
+    source = repo["root"] / "main.py"
+    source.write_bytes(raw)
+    records = _contact_records(repo["root"], "repo1", "main.py")
+    chunks = _chunk_index(tmp_path, records=records)
+    bindings = {}
+    selected = bundle_sources._eligible_graph_paths(chunks, "repo1", source_ranges=bindings)
+    read = bundle_sources._read_source_buffer
+    def change_after_read(path, limit):
+        result = read(path, limit)
+        source.write_bytes(b"# newer unbound content\n")
+        return result
+    monkeypatch.setattr(bundle_sources, "_read_source_buffer", change_after_read)
+    target = tmp_path / "selected"
+    bundle_sources._materialize_selected_source_tree(
+        repo["root"], selected, target, source_ranges=bindings,
+    )
+    assert (target / "main.py").read_bytes() == raw
+    assert source.read_bytes() != raw
+
+
+def test_relationship_write_failure_removes_only_own_partial_outputs(tmp_path, monkeypatch):
+    original = bundle_sources._write_json_atomic
+    calls = 0
+    def fail_third(path, payload):
+        nonlocal calls
+        calls += 1
+        if calls == 3:
+            raise OSError("relationship write failure")
+        original(path, payload)
+    monkeypatch.setattr(bundle_sources, "_write_json_atomic", fail_third)
+    with pytest.raises(BundleGraphSourceError, match="failed to produce"):
+        _ensure(tmp_path)
+    assert not list(tmp_path.glob("bundle.*.json"))

@@ -3290,8 +3290,13 @@ def test_fingerprint_is_stable_and_covers_all_output_inputs() -> None:
     )
 
 
+@pytest.mark.parametrize("generator_relative", (
+    "merger/repoground/core/merge.py",
+    "merger/repoground/architecture/static_config_links.py",
+))
 def test_generator_inputs_sha_ignores_service_and_test_only_changes(
     tmp_path: Path,
+    generator_relative: str,
 ) -> None:
     module = load_publisher()
     repo, _ = initialize_repository(tmp_path, "lenskit")
@@ -3301,6 +3306,7 @@ def test_generator_inputs_sha_ignores_service_and_test_only_changes(
         "merger/repoground/cli/ground.py": "entrypoint\n",
         "merger/repoground/cli/cmd_ground.py": "command\n",
         "merger/repoground/core/merge.py": "generator v1\n",
+        "merger/repoground/architecture/static_config_links.py": "parser v1\n",
         "merger/repoground/contracts/bundle.json": "{}\n",
         "merger/repoground/retrieval/query.py": "query v1\n",
         "merger/repoground/service/app.py": "service v1\n",
@@ -3324,11 +3330,12 @@ def test_generator_inputs_sha_ignores_service_and_test_only_changes(
     git(repo, "commit", "-m", "non-generator changes")
     assert module.generator_inputs_sha(repo) == baseline
 
-    (repo / "merger/repoground/core/merge.py").write_text(
+    (repo / generator_relative).write_text(
         "generator v2\n", encoding="utf-8"
     )
     git(repo, "add", ".")
     git(repo, "commit", "-m", "generator change")
+    assert git(repo, "diff", "--name-only", "HEAD^", "HEAD") == generator_relative
     assert module.generator_inputs_sha(repo) != baseline
 
 
@@ -7856,14 +7863,20 @@ def test_review_refresh_python_flags_preserve_only_tool_tree_imports(
     assert observed["user_site"] is False
 
 
+@pytest.mark.parametrize("target_relative", (
+    "merger/repoground/cli/ground.py",
+    "merger/repoground/architecture/static_config_links.py",
+))
 def test_review_generator_preflight_rejects_clean_filtered_bytes(
     tmp_path: Path,
+    target_relative: str,
 ) -> None:
     module = load_publisher()
     repo, _ = initialize_repository(tmp_path, "filtered-generator")
     for relative in (
         "merger/repoground/cli/ground.py",
         "merger/repoground/cli/cmd_ground.py",
+        "merger/repoground/architecture/static_config_links.py",
     ):
         path = repo / relative
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -7876,9 +7889,9 @@ def test_review_generator_preflight_rejects_clean_filtered_bytes(
     attributes.write_text("*.py filter=casefixture\n", encoding="utf-8")
     git(repo, "config", "filter.casefixture.clean", "tr A-Z a-z")
     git(repo, "config", "filter.casefixture.smudge", "tr a-z A-Z")
-    target = repo / "merger/repoground/cli/ground.py"
+    target = repo / target_relative
     target.unlink()
-    git(repo, "checkout", "--", "merger/repoground/cli/ground.py")
+    git(repo, "checkout", "--", target_relative)
     assert target.read_text() == "CANONICAL\n"
     assert git(repo, "status", "--porcelain") == ""
     with pytest.raises(RuntimeError, match="materialized generator input differs"):

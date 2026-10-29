@@ -428,6 +428,7 @@ _ROLE_GUIDE = {
     "relation_cards_jsonl": "Relation Card navigation index over supported local import edges",
     "python_symbol_index_json": "Python AST symbol navigation index; static parse only, not runtime truth",
     "python_call_graph_json": "Python AST call-site navigation index; only safe static resolutions, not runtime truth",
+    "relationship_projection_json": "Cross-language directed S1 relations and S0 hints; read with get_structure_neighborhood, retain coverage gaps and canonical source ranges",
 }
 
 

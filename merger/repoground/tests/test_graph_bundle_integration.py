@@ -9,6 +9,7 @@ from merger.repoground.architecture import bundle_sources
 from merger.repoground.architecture.bundle_sources import BundleGraphSourceError
 from merger.repoground.architecture.graph_index import GraphIndexCompilationError
 from merger.repoground.core.constants import ArtifactRole
+from merger.repoground.tests.test_graph_bundle_sources import _contact_records
 from merger.repoground.core.merge import build_derived_artifacts
 from merger.repoground.retrieval.review_eval import SnapshotRetrievalMeasurementError
 
@@ -166,16 +167,7 @@ def test_graph_bundle_auto_produces_bound_sources_for_single_repo(tmp_path):
         encoding="utf-8",
     )
     args["chunk_path"].write_text(
-        json.dumps(
-            {
-                "repo": "repo1",
-                "path": "main.py",
-                "source_status": "full",
-                "truncated": False,
-                "source_range": {"status": "declared"},
-            }
-        )
-        + "\n",
+        "".join(json.dumps(row) + "\n" for row in _contact_records(repo_root, "repo1", "main.py")),
         encoding="utf-8",
     )
     args["repo_summaries"] = [{"root": repo_root, "name": "repo1"}]

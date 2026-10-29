@@ -35,8 +35,29 @@ def _load_source_roots(args: argparse.Namespace) -> tuple[str, ...]:
     return tuple(roots)
 
 
+def _run_relationship_query(args: argparse.Namespace) -> int:
+    from ..core.mcp_tools import get_structure_neighborhood
+
+    if not args.bundle_manifest or not args.target_id:
+        print("Error: --relationships requires --bundle-manifest and --target-id", file=sys.stderr)
+        return 2
+    try:
+        result = get_structure_neighborhood(
+            bundle_manifest=args.bundle_manifest, target_id=args.target_id,
+            max_items=args.max_items,
+        )
+    except ValueError as exc:
+        print(json.dumps({"status": "invalid", "error": str(exc)}), file=sys.stderr)
+        return 2
+    print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0 if result["status"] == "available" else 1
+
+
 def run_architecture_cmd(args: argparse.Namespace) -> int:
     """Execute the architecture CLI command."""
+
+    if getattr(args, "relationships", False):
+        return _run_relationship_query(args)
 
     if args.entrypoints:
         repo_root = Path(args.repo).expanduser().resolve()

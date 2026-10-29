@@ -5,6 +5,7 @@ historical, never assertions about a changed target revision.
 """
 from __future__ import annotations
 
+from collections import Counter
 import hashlib
 import json
 import os
@@ -15,7 +16,10 @@ import subprocess
 import time
 from typing import Any
 
-from merger.repoground.core.delta_context import compile_delta_context, parse_unified_diff
+from merger.repoground.core.context_budgeting import select_relevance_budgeted_context
+from merger.repoground.core.delta_context import (
+    compile_delta_context, compile_revision_impact, parse_unified_diff,
+)
 from merger.repoground.core.manifest_snapshot import (
     ManifestBindingError, manifest_snapshot, use_manifest_binding,
 )
@@ -112,6 +116,7 @@ def _bounded_git(root: Path, args: list[str], *, max_bytes: int = 131072) -> tup
         "GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0",
         "GIT_NO_LAZY_FETCH": "1", "GIT_ALLOW_PROTOCOL": "",
         "GIT_PROTOCOL_FROM_USER": "0",
+        "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
     })
     process: subprocess.Popen[bytes] | None = None
     try:
@@ -170,12 +175,27 @@ def _bundle_identity(path: str | Path | None) -> tuple[dict[str, Any], list[str]
         if isinstance(row, dict) and isinstance(row.get("git_commit"), str)
         and _SHA40.fullmatch(row["git_commit"])
     }) if isinstance(repositories, list) else []
+    generator = data.get("generator")
+    runtime = generator.get("runtime") if isinstance(generator, dict) else None
+    generated_by = runtime.get("git_commit") if isinstance(runtime, dict) else None
+    generator_commit = (
+        generated_by if isinstance(generated_by, str) and _SHA40.fullmatch(generated_by)
+        else None
+    )
+    run_id = data.get("run_id")
+    gaps = [] if len(commits) == 1 else ["bundle_source_revision_unknown"]
+    if generator_commit is None:
+        gaps.append("bundle_generator_revision_unknown")
     return {
         "status": "available",
         "manifest_sha256": snapshot.binding.sha256,
+        "manifest_filename": snapshot.resolved_path.name,
+        "run_id": run_id if isinstance(run_id, str) and len(run_id) <= 512 else None,
         "source_commit": commits[0] if len(commits) == 1 else None,
         "source_commit_binding": "unique" if len(commits) == 1 else "unknown_or_ambiguous",
-    }, [] if len(commits) == 1 else ["bundle_source_revision_unknown"]
+        "generator_commit": generator_commit,
+        "generator_dirty": runtime.get("git_dirty") if isinstance(runtime, dict) else None,
+    }, gaps
 
 
 MAX_TEST_CANDIDATES = 12
@@ -453,6 +473,102 @@ def _case_candidates_and_gaps(
     return test_candidates, gap_codes
 
 
+def _structural_report(
+    root: Path, base: str, target: str, worktree: str,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Use the existing Git-bound structural compiler only for its proven checkout."""
+    if worktree != "clean":
+        return None, {"reason": "structural_worktree_not_clean", "detail": worktree,
+                      "evidence_level": "S0"}
+    checked_out, problem = _bounded_git(root, ["rev-parse", "--verify", "HEAD"])
+    if problem or checked_out is None or checked_out.strip() != target:
+        return None, {"reason": "structural_target_not_checked_out", "evidence_level": "S0"}
+    try:
+        return compile_revision_impact(
+            repo_root=root, base_sha=base, head_sha=target, max_items=200,
+        ), None
+    except (OSError, UnicodeError, ValueError) as exc:
+        return None, {"reason": "structural_revision_unavailable", "detail": str(exc)[:240],
+                      "evidence_level": "S0"}
+
+
+def _detail_candidates(
+    hints: list[dict[str, Any]], report: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    groups = {"bundle_hint": hints}
+    if report is not None:
+        for category in ("directly_changed", "potentially_affected", "unresolved",
+                         "gaps", "expected_checks"):
+            groups[category] = report[category]
+    candidates = []
+    for category, rows in groups.items():
+        for index, row in enumerate(rows):
+            payload = {"category": category, "evidence": row}
+            size = len(_json_bytes(payload)) + 2
+            source = row.get("source")
+            path = row.get("path") or (
+                source.get("path") if isinstance(source, dict) else None
+            )
+            candidates.append({
+                "id": f"{category}:{index}", "category": category,
+                "source": "changed_path" if category == "directly_changed" else "revision_graph_impact",
+                "path": path, "priority": 50, "authority": "derived_navigation",
+                "estimated_bytes": size, "estimated_tokens": (size + 3) // 4,
+                "payload": payload,
+            })
+    return candidates
+
+
+def _budget_details(
+    hints: list[dict[str, Any]], report: dict[str, Any] | None,
+    changed_paths: list[str], budget_tokens: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+    candidates = _detail_candidates(hints, report)
+    selected, omitted, trace = select_relevance_budgeted_context(
+        candidates, token_budget=max(0, budget_tokens - 1),
+        byte_budget=max(0, budget_tokens * 4 - 4), bytes_per_token=4,
+        changed_paths=changed_paths,
+    )
+    selected_ids = {row["id"] for row in selected}
+    retained_hints = [
+        row for index, row in enumerate(hints) if f"bundle_hint:{index}" in selected_ids
+    ]
+    context = [row["payload"] for row in selected if row["category"] != "bundle_hint"]
+    return retained_hints, context, {
+        "scope": "hint_and_structural_detail_rows",
+        "algorithm": trace["algorithm"], "hard_budgets": trace["hard_budgets"],
+        "candidate_count": len(candidates), "omitted_count": len(omitted),
+        "omitted_structural_count": sum(row["category"] != "bundle_hint" for row in omitted),
+    }
+
+
+def _structural_projection(
+    report: dict[str, Any] | None, gap: dict[str, Any] | None,
+    context: list[dict[str, Any]], selection: dict[str, Any],
+) -> dict[str, Any]:
+    if report is None:
+        return {"status": "unavailable", "gap": gap, "context": [],
+                "does_not_establish": NOT_ESTABLISHED}
+    coverage = report["coverage"]
+    partial = bool(coverage["truncated"] or report["gaps"] or report["unresolved"]
+                   or selection["omitted_structural_count"])
+    return {
+        "status": "partial" if partial else "bounded",
+        "projection": "budgeted_existing_revision_graph_impact",
+        "source_contract": {"kind": report["kind"], "version": report["version"]},
+        "revision": {key: report[key] for key in ("base_sha", "head_sha", "diff_sha256", "diff_bytes")},
+        "source_provenance": report["source_provenance"],
+        "derived_source_report_sha256": hashlib.sha256(_json_bytes(report)).hexdigest(),
+        "coverage": coverage,
+        "reported_gap_reason_counts": dict(sorted(Counter(
+            row["reason"] for row in report["gaps"]
+        ).items())),
+        "context": context,
+        "display_omitted_count": selection["omitted_structural_count"],
+        "does_not_establish": report["does_not_establish"],
+    }
+
+
 def _build_evidence_pack_bound(
     *,
     repo_root: str | Path,
@@ -521,6 +637,19 @@ def _build_evidence_pack_bound(
         root, target_revision, use_case, changed,
     )
     gap_codes.extend(case_gaps)
+    report, structural_gap = _structural_report(
+        root, base_revision, target_revision, worktree_state,
+    )
+    hints, structural_context, selection = _budget_details(
+        hints, report, [row["path"] for row in changed], context_budget_tokens,
+    )
+    structural = _structural_projection(report, structural_gap, structural_context, selection)
+    if structural_gap:
+        gap_codes.append(structural_gap["reason"])
+    if structural["status"] == "partial":
+        gap_codes.append("structural_impact_partial")
+    if selection["omitted_count"]:
+        gap_codes.append("context_budget_omitted_candidates")
 
     result = {
         "kind": KIND, "version": VERSION, "status": "warn" if gap_codes else "pass",
@@ -535,6 +664,7 @@ def _build_evidence_pack_bound(
         "changed_contracts": changed_contracts,
         "test_candidates": test_candidates,
         "hints": hints,
+        "structural_impact": structural, "context_selection": selection,
         "gaps": [{"code": code} for code in sorted(set(gap_codes))],
         "limits": {"max_diff_bytes": MAX_DIFF_BYTES,
                    "max_changed_files": MAX_CHANGED_FILES,
@@ -591,6 +721,23 @@ def _append_markdown_section(
         lines.append(empty_note)
 
 
+def _render_structural_markdown(lines: list[str], structural: dict[str, Any]) -> None:
+    lines.extend(["", "## Revision-bound structural evidence", f"Status: {structural['status']}"])
+    if structural["status"] == "unavailable":
+        lines.append("- S0: " + str(structural.get("gap")))
+        return
+    revision = structural["revision"]
+    lines.extend([
+        f"Structural diff SHA-256: {revision['diff_sha256']}",
+        f"Derived report SHA-256: {structural['derived_source_report_sha256']}",
+        "Source identity: derived clean Git tree; this is not a published bundle manifest.",
+        f"Reported S0 gap reasons: {json.dumps(structural['reported_gap_reason_counts'], sort_keys=True)}",
+        f"Detail rows omitted by budget: {structural['display_omitted_count']}",
+    ])
+    for row in structural["context"]:
+        lines.append(f"- {row['category']}: " + json.dumps(row["evidence"], ensure_ascii=False, sort_keys=True))
+
+
 def render_evidence_markdown(pack: dict[str, Any]) -> str:
     """Render only the canonical JSON fields; no extra retrieval or side effects."""
     if pack.get("status") == "invalid":
@@ -606,6 +753,9 @@ def render_evidence_markdown(pack: dict[str, Any]) -> str:
         f"Worktree: {rev['worktree']}",
         f"Bundle SHA-256: {pack['bundle'].get('manifest_sha256', 'unavailable')}",
         f"Bundle source commit: {pack['bundle'].get('source_commit') or 'unknown'}",
+        f"Bundle generator commit: {pack['bundle'].get('generator_commit') or 'unknown'}",
+        f"Bundle run: {pack['bundle'].get('run_id') or 'unknown'}",
+        f"Bundle manifest: {pack['bundle'].get('manifest_filename') or 'unavailable'}",
         "",
         "## Direct changes (Git evidence)",
     ]
@@ -627,6 +777,7 @@ def render_evidence_markdown(pack: dict[str, Any]) -> str:
         [f"- {item['path']} ({item['source']})" for item in pack["hints"]],
         "- No supported relationship candidates",
     )
+    _render_structural_markdown(lines, pack["structural_impact"])
     _append_markdown_section(
         lines, "## Gaps / limits",
         [f"- {item['code']}" for item in pack["gaps"]],

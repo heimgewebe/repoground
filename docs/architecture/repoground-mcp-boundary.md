@@ -86,6 +86,7 @@ The MCP tools available by default are generated from the runtime registry:
 - `find_references`: List bounded static call sites for a callee name.
 - `get_callers`: Group uniquely resolved callers for one exact target symbol.
 - `get_callees`: Group uniquely resolved outgoing calls for one exact caller symbol.
+- `get_structure_neighborhood`: Read incoming/outgoing proven S1 relations and unresolved S0 hints for an exact file:PATH or symbol ID from a published bundle. Includes cross-language declarations and coverage; never scans or refreshes sources.
 <!-- repoground-mcp-tools:end -->
 
 Every read tool that targets one snapshot accepts either an exact `bundle_manifest`

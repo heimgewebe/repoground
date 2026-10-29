@@ -2,6 +2,7 @@ import json
 
 from merger.repoground.architecture.bundle_sources import ensure_bundle_graph_sources
 from merger.repoground.cli.main import main
+from merger.repoground.tests.test_graph_bundle_sources import _contact_records
 
 
 SHA = "a" * 64
@@ -41,8 +42,8 @@ def test_bundle_graph_sources_use_summary_roots(tmp_path):
 
     chunk_index = tmp_path / "repo1.chunk_index.jsonl"
     records = [
-        {"repo": "repo1", "path": "src/app.py", "source_status": "full", "truncated": False, "source_range": {"status": "declared"}},
-        {"repo": "repo1", "path": "src/lib.py", "source_status": "full", "truncated": False, "source_range": {"status": "declared"}},
+        record for path in ("src/app.py", "src/lib.py")
+        for record in _contact_records(repo_root, "repo1", path)
     ]
     chunk_index.write_text("".join(json.dumps(record) + "\n" for record in records), encoding="utf-8")
 

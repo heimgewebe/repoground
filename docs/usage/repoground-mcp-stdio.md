@@ -84,6 +84,7 @@ Read-only by default:
 - `find_references`: List bounded static call sites for a callee name.
 - `get_callers`: Group uniquely resolved callers for one exact target symbol.
 - `get_callees`: Group uniquely resolved outgoing calls for one exact caller symbol.
+- `get_structure_neighborhood`: Read incoming/outgoing proven S1 relations and unresolved S0 hints for an exact file:PATH or symbol ID from a published bundle. Includes cross-language declarations and coverage; never scans or refreshes sources.
 <!-- repoground-mcp-tools:end -->
 
 Snapshot-targeting read tools accept either `bundle_manifest` or the agent-facing
@@ -117,6 +118,35 @@ ranges and use `live_freshness` separately when current checkout state matters.
 This guidance improves query precision; it does not guarantee recall or correctness.
 
 The call-navigation tools read only bundle-registered `python_call_graph_json` and `python_symbol_index_json` artifacts. They validate artifact integrity and provenance coherence before returning symbol relations. `S1` means one unique local target under the producer's bounded static rules; it does not mean the target executes at runtime. `S0` preserves uncertainty instead of guessing.
+
+### Published cross-language relationships
+
+`get_structure_neighborhood` accepts an exact `target_id` such as
+`file:README.md` or `py:pkg:core.py:function:work`, plus `max_items`
+(default 50, at most 200). Use the same `repo`/`stem` or exact
+`bundle_manifest` selectors as the other read tools.
+
+The result reads the registered `relationship_projection_json` artifact and
+returns incoming/outgoing S1 edges, unresolved S0 hints, coverage and the selected
+manifest, source and generator identities. A bundle without this optional role
+returns `unavailable`; contradictory registration, hashes or provenance return
+`blocked`. Reading never builds a replacement projection from the checkout.
+
+The CLI exposes the same verified reader:
+
+```bash
+python -m merger.repoground.cli.main architecture --relationships \
+  --bundle-manifest /absolute/path/to/run.bundle.manifest.json \
+  --target-id file:README.md --max-items 20
+```
+
+With a startup `--repo-root`, the existing `change_evidence_pack` additionally
+includes a budgeted structural projection for a clean checkout at the requested
+target commit. Its derived Git-tree identity and structural diff hash remain
+separate from the published bundle and the outer textual diff. Dirty or historical
+checkouts retain direct Git evidence and report an explicit S0 structural gap.
+Deletion, rename and omitted-detail gaps remain visible even when a small context
+budget excludes their detailed rows.
 
 Optional explicit write tool:
 

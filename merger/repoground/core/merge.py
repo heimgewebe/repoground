@@ -269,6 +269,7 @@ ARTIFACT_CONTRACT_REGISTRY = {
     ArtifactRole.PYTHON_SYMBOL_INDEX_JSON: {"id": "python-symbol-index", "version": "v1"},
     ArtifactRole.PYTHON_CALL_GRAPH_JSON: {"id": "python-call-graph", "version": "v1"},
     ArtifactRole.LANGUAGE_STRUCTURE_JSON: {"id": "language-structure", "version": "v1"},
+    ArtifactRole.RELATIONSHIP_PROJECTION_JSON: {"id": "relationship_projection", "version": "v1"},
 }
 
 ARTIFACT_AUTHORITY_REGISTRY = {
@@ -439,6 +440,13 @@ ARTIFACT_AUTHORITY_REGISTRY = {
         "staleness_sensitive": True,
     },
     ArtifactRole.LANGUAGE_STRUCTURE_JSON: {
+        "authority": "navigation_index",
+        "canonicality": "derived",
+        "risk_class": "navigation",
+        "regenerable": True,
+        "staleness_sensitive": True,
+    },
+    ArtifactRole.RELATIONSHIP_PROJECTION_JSON: {
         "authority": "navigation_index",
         "canonicality": "derived",
         "risk_class": "navigation",
@@ -717,6 +725,7 @@ class MergeArtifacts:
     other: List[Path] = None
     legacy_bundle_manifest: Optional[Path] = None
     bundle_generation: Optional[Dict[str, Any]] = None
+    relationship_projection: Optional[Path] = None
 
     def __post_init__(self):
         if self.md_parts is None:
@@ -766,6 +775,7 @@ class MergeArtifacts:
         _append_unique_path(paths, self.python_symbol_index)
         _append_unique_path(paths, self.python_call_graph)
         _append_unique_path(paths, self.language_structure)
+        _append_unique_path(paths, self.relationship_projection)
         if self.bundle_manifest:
             paths.append(self.bundle_manifest)
 
@@ -840,6 +850,7 @@ def _publish_merge_artifact_generation(
         python_symbol_index=current(artifacts.python_symbol_index),
         python_call_graph=current(artifacts.python_call_graph),
         language_structure=current(artifacts.language_structure),
+        relationship_projection=current(artifacts.relationship_projection),
         other=[generation.current_path_for(path) for path in artifacts.other],
         legacy_bundle_manifest=flat_bundle_manifest,
         bundle_generation=generation.as_dict(),
@@ -5838,6 +5849,7 @@ def build_derived_artifacts(dump_index_path, chunk_path, base_name_func, run_id,
     # Generate bundle-bound Graph source artifacts and compile the Graph Index.
     architecture_graph_path = None
     entrypoints_path = None
+    relationship_projection_path = None
     graph_index_path = None
     source_result = None
     try:
@@ -5862,6 +5874,7 @@ def build_derived_artifacts(dump_index_path, chunk_path, base_name_func, run_id,
         )
         architecture_graph_path = source_result.graph_path
         entrypoints_path = source_result.entrypoints_path
+        relationship_projection_path = source_result.relationships_path
         if debug and source_result.reason:
             print(
                 f"Graph source production {source_result.status}: "
@@ -5882,8 +5895,8 @@ def build_derived_artifacts(dump_index_path, chunk_path, base_name_func, run_id,
                 json.dumps(graph_index_data, indent=2, sort_keys=True),
                 encoding="utf-8",
             )
-            for source_path in (architecture_graph_path, entrypoints_path):
-                if source_path.exists() and source_path not in derived_paths:
+            for source_path in (architecture_graph_path, entrypoints_path, relationship_projection_path):
+                if source_path is not None and source_path.exists() and source_path not in derived_paths:
                     derived_paths.append(source_path)
             derived_paths.append(graph_index_path)
     except ImportError as e:
@@ -5901,7 +5914,7 @@ def build_derived_artifacts(dump_index_path, chunk_path, base_name_func, run_id,
                     file=sys.stderr,
                 )
             if source_result is not None and source_result.produced:
-                for source_path in (architecture_graph_path, entrypoints_path):
+                for source_path in (architecture_graph_path, entrypoints_path, relationship_projection_path):
                     if source_path is None:
                         continue
                     try:
@@ -5910,6 +5923,7 @@ def build_derived_artifacts(dump_index_path, chunk_path, base_name_func, run_id,
                         pass
             architecture_graph_path = None
             entrypoints_path = None
+            relationship_projection_path = None
             graph_index_path = None
         else:
             raise
@@ -5921,17 +5935,18 @@ def build_derived_artifacts(dump_index_path, chunk_path, base_name_func, run_id,
         raise
 
     # Write Derived Manifest
-    derived_map = {}
-    if sqlite_index_path and sqlite_index_path.exists():
-        derived_map[ArtifactRole.SQLITE_INDEX.value] = sqlite_index_path
-    if eval_json_path and eval_json_path.exists():
-        derived_map[ArtifactRole.RETRIEVAL_EVAL_JSON.value] = eval_json_path
-    if architecture_graph_path and architecture_graph_path.exists():
-        derived_map[ArtifactRole.ARCHITECTURE_GRAPH_JSON.value] = architecture_graph_path
-    if entrypoints_path and entrypoints_path.exists():
-        derived_map[ArtifactRole.ENTRYPOINTS_JSON.value] = entrypoints_path
-    if graph_index_path and graph_index_path.exists():
-        derived_map[ArtifactRole.GRAPH_INDEX_JSON.value] = graph_index_path
+    derived_map = {
+        role.value: path
+        for role, path in (
+            (ArtifactRole.SQLITE_INDEX, sqlite_index_path),
+            (ArtifactRole.RETRIEVAL_EVAL_JSON, eval_json_path),
+            (ArtifactRole.ARCHITECTURE_GRAPH_JSON, architecture_graph_path),
+            (ArtifactRole.ENTRYPOINTS_JSON, entrypoints_path),
+            (ArtifactRole.GRAPH_INDEX_JSON, graph_index_path),
+            (ArtifactRole.RELATIONSHIP_PROJECTION_JSON, relationship_projection_path),
+        )
+        if path is not None and path.exists()
+    }
 
     if derived_map:
         derived_manifest_path = generate_derived_manifest(
@@ -7151,6 +7166,7 @@ def write_reports_v2(
         and not p.name.endswith(".architecture_graph.json")
         and not p.name.endswith(".entrypoints.json")
         and not p.name.endswith(".graph_index.json")
+        and not p.name.endswith(".relationship_projection.json")
     ]
 
     dump_indices = [p for p in out_paths if p.name.endswith(".dump_index.json")]
@@ -7161,6 +7177,7 @@ def write_reports_v2(
     architecture_graphs = sorted([p for p in out_paths if p.name.endswith(".architecture_graph.json")], key=lambda p: p.name)
     entrypoint_documents = sorted([p for p in out_paths if p.name.endswith(".entrypoints.json")], key=lambda p: p.name)
     graph_indices = sorted([p for p in out_paths if p.name.endswith(".graph_index.json")], key=lambda p: p.name)
+    relationship_projections = sorted([p for p in out_paths if p.name.endswith(".relationship_projection.json")], key=lambda p: p.name)
     derived_manifests = sorted([p for p in out_paths if p.name.endswith(".derived_index.json")], key=lambda p: p.name)
 
     # Everything else goes to other_paths (but exclude the ones explicitly extracted)
@@ -7273,6 +7290,10 @@ def write_reports_v2(
         )
     if graph_indices:
         _add_artifact(graph_indices[-1], ArtifactRole.GRAPH_INDEX_JSON, "application/json")
+    _add_artifact(
+        relationship_projections[-1] if relationship_projections else None,
+        ArtifactRole.RELATIONSHIP_PROJECTION_JSON, "application/json",
+    )
     if derived_manifests:
         _add_artifact(derived_manifests[-1], ArtifactRole.DERIVED_MANIFEST_JSON, "application/json")
 
@@ -7762,6 +7783,7 @@ def write_reports_v2(
         python_symbol_index=python_symbol_index_path,
         python_call_graph=python_call_graph_path,
         language_structure=language_structure_path,
+        relationship_projection=relationship_projections[-1] if relationship_projections else None,
         other=other_paths,
         legacy_bundle_manifest=bundle_manifest_path,
     )
