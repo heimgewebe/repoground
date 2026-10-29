@@ -1,5 +1,6 @@
 # Runtime inputs for the non-semantic RepoGround core and production service.
 -r ../merger/repoground/requirements.txt
+fastjsonschema==2.22.2
 fastapi>=0.119,<1
 pydantic>=2,<3
 uvicorn[standard]>=0.30,<1
