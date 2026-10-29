@@ -1362,6 +1362,41 @@ def _manifest_content_digest(manifest_path: Path) -> str | None:
     return hashlib.sha256(raw).hexdigest() if len(raw) <= MAX_MANIFEST_BYTES else None
 
 
+def _navigation_source_first_needed(
+    ranges: list[dict[str, Any]], *, navigation: bool, tokens: list[str]
+) -> bool:
+    """Use path hints when exact text cites no file relevant to a locator."""
+    if not ranges or not navigation:
+        return False
+    terms = set(tokens)
+    if not terms & {
+        "implementation", "implementierung", "producer", "production",
+        "logic", "handler", "source", "code", "module", "modules",
+        "test", "tests", "contract", "contracts", "schema",
+        "command", "commands", "cli", "registration", "coverage",
+    } or terms & {
+        "documentation", "docs", "document", "guide", "manual",
+        "handbook", "proof", "diagnostic",
+    }:
+        return False
+    topic_terms = terms - {
+        "find", "implementation", "implementierung", "producer", "production",
+        "logic", "handler", "source", "code", "module", "modules",
+        "test", "tests", "contract", "contracts", "schema",
+        "command", "commands", "cli", "registration", "coverage",
+        "file", "files", "path", "paths", "primary", "real",
+        "report", "output", "check", "checks", "used", "during",
+    }
+    return not any(
+        _navigation_source_class(str(item.get("source_path") or "")) < 3
+        and _navigation_source_matches_topic(
+            str(item.get("source_path") or ""), topic_terms
+        )
+        for item in ranges
+        if isinstance(item, dict)
+    )
+
+
 def _query_context(
     manifest_path: Path,
     *,
@@ -1393,39 +1428,9 @@ def _query_context(
     }
     navigation = _navigation_path_intent(query)
     tokens = _content_tokens(query)
-    # An exact text hit in a diagnostic report can quote a query verbatim
-    # without locating its implementation.  Only explicit code navigation
-    # without *any* source/test/contract hit may try existing path-index reads.
-    navigation_terms = set(tokens)
-    topic_terms = navigation_terms - {
-        "find", "implementation", "implementierung", "producer", "production",
-        "logic", "handler", "source", "code", "module", "modules",
-        "test", "tests", "contract", "contracts", "schema",
-        "command", "commands", "cli", "registration", "coverage",
-        "file", "files", "path", "paths", "primary", "real",
-        "report", "output", "check", "checks", "used", "during",
-    }
-    source_first = (
-        bool(ranges)
-        and navigation
-        and bool(navigation_terms & {
-            "implementation", "implementierung", "producer", "production",
-            "logic", "handler", "source", "code", "module", "modules",
-            "test", "tests", "contract", "contracts", "schema",
-            "command", "commands", "cli", "registration", "coverage",
-        })
-        and not navigation_terms & {
-            "documentation", "docs", "document", "guide", "manual",
-            "handbook", "proof", "diagnostic",
-        }
-        and not any(
-            _navigation_source_class(str(item.get("source_path") or "")) < 3
-            and _navigation_source_matches_topic(
-                str(item.get("source_path") or ""), topic_terms
-            )
-            for item in ranges
-            if isinstance(item, dict)
-        )
+    # A diagnostic may quote a query verbatim without locating its source.
+    source_first = _navigation_source_first_needed(
+        ranges, navigation=navigation, tokens=tokens
     )
     if (ranges and not source_first) or query_result.get("status") != "available":
         return state
