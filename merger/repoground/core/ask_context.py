@@ -1277,9 +1277,14 @@ def _prefer_diverse_relaxed_sources(
         buckets: list[list[tuple[int, str, dict[str, Any], dict[str, Any]]]] = [
             [], [], [], []
         ]
+        topic_terms = _navigation_topic_terms(set(_content_tokens(query)))
         for candidate in sorted(
             candidates,
-            key=lambda row: (-row[0], len(Path(row[1]).stem)),
+            key=lambda row: (
+                not _navigation_source_matches_topic(row[1], topic_terms),
+                -row[0],
+                len(Path(row[1]).stem),
+            ),
         ):
             buckets[_navigation_source_class(candidate[1])].append(candidate)
         terms = set(_content_tokens(query))

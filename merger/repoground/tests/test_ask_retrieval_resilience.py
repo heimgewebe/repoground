@@ -2075,3 +2075,37 @@ def test_source_first_unrelated_or_code_preserves_exact_documentation(
     assert queried == ["and", "or"]
     assert state["strategy"] == "exact_and"
     assert state["resolved_ranges"][0]["source_path"] == "docs/retry.md"
+
+
+
+def test_topical_source_wins_before_k_one_truncation(monkeypatch, tmp_path):
+    """A generic CLI basename must not crowd out a cited topical source."""
+    from merger.repoground.core import ask_context as context
+
+    exact = _rgopt03_verified_index("exact", ["docs/retry.md"])
+    generic = _rgopt03_verified_index("generic", ["src/cli.py"])
+    topical = _rgopt03_verified_index("topical", ["src/retry.py"])
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text("unchanged", encoding="utf-8")
+    calls = []
+
+    def indexed(_manifest, _query, _k, prepared_fts_query=None):
+        calls.append("or" if prepared_fts_query else "and")
+        return generic if prepared_fts_query else exact
+
+    def hints(*_args, **_kwargs):
+        calls.append("path")
+        return [topical]
+
+    monkeypatch.setattr(context, "_run_query", indexed)
+    monkeypatch.setattr(context, "_relaxed_path_index_reads", hints)
+    state = context._query_context(
+        manifest, query="Find retry CLI", k=1,
+        max_context_tokens=1000, max_context_bytes=4000,
+    )
+    assert calls == ["and", "or", "path"]
+    assert state["strategy"] == "or_relaxed"
+    assert [r["source_path"] for r in state["resolved_ranges"]] == ["src/retry.py"]
+    assert [h["citation_id"] for h in state["retrieval_hits"]] == [
+        r["citation_id"] for r in state["resolved_ranges"]
+    ]
