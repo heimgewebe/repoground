@@ -21,6 +21,10 @@ class BundleGraphSourceError(RuntimeError):
     """Graph source production failed before coherent artifacts were published."""
 
 
+class ChunkIndexSourceLimitError(BundleGraphSourceError):
+    """The graph contact index exceeded its hard scan-size bound."""
+
+
 @dataclass(frozen=True)
 class BundleGraphSources:
     graph_path: Path
@@ -99,7 +103,7 @@ def _chunk_rows(chunk_index_path: Path):
                 if not raw_line:
                     break
                 if len(raw_line) > remaining:
-                    raise BundleGraphSourceError("chunk index exceeds bounded source-contact limit")
+                    raise ChunkIndexSourceLimitError("chunk index exceeds bounded source-contact limit")
                 remaining -= len(raw_line)
                 line_number += 1
                 if not raw_line.strip():
@@ -337,7 +341,17 @@ def ensure_bundle_graph_sources(
             else summary.get("source_roots", ())
         )
         source_ranges: dict[str, list[_SourceChunk]] = {}
-        selected_paths = _eligible_graph_paths(chunk_index_path, repo_name, source_ranges=source_ranges)
+        try:
+            selected_paths = _eligible_graph_paths(
+                chunk_index_path, repo_name, source_ranges=source_ranges,
+            )
+        except ChunkIndexSourceLimitError as exc:
+            # No architecture evidence has been emitted yet. Keep the hard
+            # size bound, but do not abort unrelated retrieval artifacts.
+            # Graph availability stays explicitly absent, never inferred.
+            return BundleGraphSources(
+                graph_path, entrypoints_path, "skipped", str(exc),
+            )
         with tempfile.TemporaryDirectory(prefix="lenskit-graph-sources-") as tmp:
             selected_root = Path(tmp)
             _materialize_selected_source_tree(

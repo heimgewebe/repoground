@@ -156,6 +156,31 @@ def test_graph_bundle_fallback_without_sources(tmp_path):
     assert ArtifactRole.GRAPH_INDEX_JSON.value not in derived["artifacts"]
 
 
+def test_oversized_chunk_index_keeps_non_graph_derived_artifacts(tmp_path, monkeypatch):
+    base, _, args = _setup(tmp_path)
+    base.with_suffix(".architecture_graph.json").unlink()
+    base.with_suffix(".entrypoints.json").unlink()
+    root = tmp_path / "repo1"
+    root.mkdir()
+    (root / "main.py").write_text("print('hello')\n", encoding="utf-8")
+    args["repo_summaries"] = [{"root": root, "name": "repo1"}]
+    args["chunk_path"].write_text(
+        "".join(json.dumps(row) + "\n" for row in _contact_records(root, "repo1", "main.py")),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(bundle_sources, "_MAX_CHUNK_INDEX_BYTES", 16)
+
+    paths = build_derived_artifacts(**args)
+
+    graph = base.with_suffix(".graph_index.json")
+    assert graph not in paths
+    assert not graph.exists()
+    assert not base.with_suffix(".architecture_graph.json").exists()
+    assert not base.with_suffix(".entrypoints.json").exists()
+    derived = json.loads(base.with_suffix(".derived_index.json").read_text(encoding="utf-8"))
+    assert ArtifactRole.GRAPH_INDEX_JSON.value not in derived["artifacts"]
+
+
 def test_graph_bundle_auto_produces_bound_sources_for_single_repo(tmp_path):
     base, dump_sha, args = _setup(tmp_path)
     base.with_suffix(".architecture_graph.json").unlink()
