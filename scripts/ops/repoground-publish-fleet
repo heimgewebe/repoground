@@ -2201,6 +2201,7 @@ def prepare_managed_worktree(
     *,
     expected_repo: Path,
     target: str,
+    authenticated_remote: str | None = None,
 ) -> None:
     with tempfile.TemporaryDirectory(
         prefix="repoground-managed-worktree-gitconfig-",
@@ -2210,6 +2211,32 @@ def prepare_managed_worktree(
             expected_repo,
             safe_global_config=Path(raw_config_root) / "global.gitconfig",
         )
+        if authenticated_remote is not None:
+            # A partial clone can lazily fetch missing blobs during worktree
+            # checkout. Reuse the same bounded GitHub SSH identity that was
+            # admitted for remote_head_for_entry, never ambient SSH config.
+            transport_env = _authority_git_env()
+            assert_fleet_member_git_transport_safe(
+                expected_repo, env=transport_env,
+            )
+            observed = run(
+                [
+                    "git", "-C", str(expected_repo), "config", "--local",
+                    "--no-includes", "--get-all", "remote.origin.url",
+                ],
+                check=False, env=transport_env,
+            )
+            if (
+                observed.returncode != 0
+                or observed.stdout.splitlines() != [authenticated_remote]
+                or parse_github_remote(authenticated_remote) is None
+            ):
+                raise RuntimeError(
+                    "managed source repository origin changed before source worktree"
+                )
+            env["GIT_SSH_COMMAND"] = _fleet_repo_ssh_env(
+                remote=authenticated_remote,
+            )["GIT_SSH_COMMAND"]
         if path.exists() or path.is_symlink():
             cleanup_managed_disposable_artifacts(
                 path,
@@ -4919,6 +4946,7 @@ def ensure_source_worktree(entry: RepoEntry, ref_segment: str, sha: str) -> Path
             source_wt,
             expected_repo=entry.path,
             target=sha,
+            authenticated_remote=entry.remote,
         )
         return source_wt
     except ManagedWorktreeDirtyError as exc:
@@ -4943,6 +4971,7 @@ def ensure_source_worktree(entry: RepoEntry, ref_segment: str, sha: str) -> Path
         replacement,
         expected_repo=entry.path,
         target=sha,
+        authenticated_remote=entry.remote,
     )
     try:
         receipt_path = record_source_recovery(

@@ -395,6 +395,62 @@ def test_fleet_member_partial_clone_flags_in_worktree_scope_are_rejected(
         )
 
 
+def test_partial_clone_source_worktree_reuses_authenticated_github_ssh(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path, "member-lazy-source")
+    remote = "git@github.com:heimgewebe/member.git"
+    git(repo, "remote", "add", "origin", remote)
+    git(repo, "config", "remote.origin.promisor", "true")
+    git(repo, "config", "remote.origin.partialclonefilter", "blob:none")
+    monkeypatch.setattr(module, "SOURCE_ROOT", tmp_path / "managed-sources")
+    entry = module.RepoEntry(
+        key="heimgewebe/member", owner="heimgewebe", repo="member",
+        path=repo, remote=remote,
+    )
+    bound_command = module._fleet_repo_ssh_env(remote=remote)["GIT_SSH_COMMAND"]
+    original_run = module.run
+    actual_commands: list[str] = []
+
+    def observe_run(argv, cwd=None, check=True, env=None):
+        if "worktree" in argv and "add" in argv:
+            assert isinstance(env, dict)
+            actual_commands.append(env["GIT_SSH_COMMAND"])
+        return original_run(argv, cwd=cwd, check=check, env=env)
+
+    monkeypatch.setattr(module, "run", observe_run)
+    source = module.ensure_source_worktree(entry, "main", sha)
+
+    assert source.is_dir()
+    assert actual_commands == [bound_command]
+    assert module.run(
+        ["git", "-C", str(source), "rev-parse", "HEAD"],
+        env=module._authority_git_env(),
+    ).stdout.strip() == sha
+
+
+def test_partial_clone_worktree_rejects_origin_change_before_lazy_fetch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path, "member-lazy-origin-drift")
+    remote = "git@github.com:heimgewebe/member.git"
+    git(repo, "remote", "add", "origin", remote)
+    git(repo, "config", "remote.origin.promisor", "true")
+    git(repo, "config", "remote.origin.partialclonefilter", "blob:none")
+    git(repo, "remote", "set-url", "origin", "git@github.com:heimgewebe/other.git")
+    monkeypatch.setattr(module, "SOURCE_ROOT", tmp_path / "managed-sources")
+    entry = module.RepoEntry(
+        key="heimgewebe/member", owner="heimgewebe", repo="member",
+        path=repo, remote=remote,
+    )
+
+    with pytest.raises(RuntimeError, match="origin changed before source worktree"):
+        module.ensure_source_worktree(entry, "main", sha)
+    assert not list((tmp_path / "managed-sources").iterdir())
+
+
 def test_remote_head_for_entry_allows_separate_pushurl(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
