@@ -89,9 +89,89 @@ def test_missing_authoritative_member_fails_instead_of_silently_skipping(
     monkeypatch.setattr(
         module, "load_authoritative_fleet_membership", lambda: membership,
     )
-    with pytest.raises(RuntimeError, match="authoritative_fleet_checkout_missing"):
-        module._pending_fleet_head_reconciliation()
+    result = module._pending_fleet_head_reconciliation()
+    assert result["count"] == 2
+    assert result["pending_repositories"] == []
+    assert result["errors"] == [
+        {"repo": "heimgewebe/missing", "reason": "fleet_member_checkout_missing"}
+    ]
 
+
+
+def test_one_remote_failure_preserves_healthy_pending_publication(
+    observed_fleet, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    module, healthy, source, _generator = observed_fleet
+    source[0] = "f" * 40
+    broken = module.RepoEntry(
+        key="heimgewebe/unavailable",
+        owner="heimgewebe", repo="unavailable", path=tmp_path / "unavailable",
+        remote="git@github.com:heimgewebe/unavailable.git",
+    )
+    monkeypatch.setattr(module, "discover", lambda: [healthy, broken])
+    monkeypatch.setattr(
+        module, "load_authoritative_fleet_membership",
+        lambda: module.FleetMembership(
+            keys=(healthy.key, broken.key), source_commit="c" * 40,
+            source_ref="origin/main", source_path="fleet/repos.yml",
+            content_sha256="d" * 64,
+        ),
+    )
+
+    def remote_head(entry):
+        if entry.key == broken.key:
+            raise RuntimeError("remote_access_unavailable")
+        return "origin/main", "main", source[0]
+
+    monkeypatch.setattr(module, "remote_head_for_entry", remote_head)
+    closed: list[bool] = []
+    targeted: list[list[str]] = []
+    monkeypatch.setattr(
+        module, "acquire_lock", lambda: SimpleNamespace(close=lambda: closed.append(True)),
+    )
+    monkeypatch.setattr(module, "log", lambda _message: None)
+
+    def fake_main(argv: list[str]) -> int:
+        assert closed == [True]
+        targeted.append(argv)
+        return 0
+
+    monkeypatch.setattr(module, "main", fake_main)
+    assert module.reconcile_fleet_heads(retention=3, limit=8) == 1
+    assert targeted == [[
+        "--if-changed", "--retention", "3", "--limit", "8",
+        "--repo", healthy.key,
+    ]]
+    report = json.loads(capsys.readouterr().out)
+    assert report["status"] == "partial"
+    assert report["probe_errors"] == [
+        {"repo": broken.key, "reason": "remote_access_unavailable"}
+    ]
+
+
+def test_only_missing_member_is_a_visible_retryable_failure(
+    observed_fleet, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module, entry, _source, _generator = observed_fleet
+    monkeypatch.setattr(
+        module, "load_authoritative_fleet_membership",
+        lambda: module.FleetMembership(
+            keys=(entry.key, "heimgewebe/missing"), source_commit="c" * 40,
+            source_ref="origin/main", source_path="fleet/repos.yml",
+            content_sha256="d" * 64,
+        ),
+    )
+    monkeypatch.setattr(
+        module, "acquire_lock", lambda: SimpleNamespace(close=lambda: None),
+    )
+    assert module.reconcile_fleet_heads(retention=3, limit=8) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "error"
+    assert result["published"] == 0
+    assert result["pending_repositories"] == []
+    assert result["errors"][0]["repo"] == "heimgewebe/missing"
 
 def test_busy_fast_probe_is_deferred_without_any_remote_reads(
     observed_fleet, monkeypatch: pytest.MonkeyPatch,
@@ -197,3 +277,7 @@ def test_monotonic_probe_timer_keeps_hourly_full_reconciliation() -> None:
     assert "OnUnitInactiveSec=90s" in cheap_timer
     assert "AccuracySec=5s" in cheap_timer
     assert "OnCalendar=hourly" in full_timer
+    installer = (
+        root.parents[2] / "scripts/ops/install_repoground_publish_fleet_runtime.sh"
+    ).read_text()
+    assert "systemctl --user stop repoground-publish-head-watch.service" in installer

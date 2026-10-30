@@ -6566,29 +6566,32 @@ def _pending_fleet_head_reconciliation() -> dict[str, object]:
     selected, missing, _excluded = select_authoritative_fleet_entries(
         entries, membership,
     )
-    if missing:
-        raise RuntimeError(
-            "authoritative_fleet_checkout_missing: " + ", ".join(missing)
-        )
     tool_sha, generator_sha = ensure_tool_worktree()
     pending: list[str] = []
+    errors: list[dict[str, str]] = [
+        {"repo":key, "reason":"fleet_member_checkout_missing"} for key in missing
+    ]
     for entry in prioritize_generator_repository(selected):
-        _remote_ref, branch, source_sha = remote_head_for_entry(entry)
-        fingerprint, _identity = build_fingerprint(
-            source_sha=source_sha,
-            generator_inputs_sha=generator_sha,
-            publication_repository=publication_repository(entry),
-            config=publication_config(entry),
-        )
-        stored = load_state(state_path(entry, safe_segment(branch)))
-        if not stored or stored.get("fingerprint") != fingerprint:
-            pending.append(entry.key)
+        try:
+            _remote_ref, branch, source_sha = remote_head_for_entry(entry)
+            fingerprint, _identity = build_fingerprint(
+                source_sha=source_sha,
+                generator_inputs_sha=generator_sha,
+                publication_repository=publication_repository(entry),
+                config=publication_config(entry),
+            )
+            stored = load_state(state_path(entry, safe_segment(branch)))
+            if not stored or stored.get("fingerprint") != fingerprint:
+                pending.append(entry.key)
+        except (RuntimeError, ValueError, OSError) as exc:
+            errors.append({"repo":entry.key, "reason": str(exc)[:250]})
     return {
-        "status": "ok",
-        "count": len(selected),
+        "status": "ok" if not errors else "partial",
+        "count": len(selected) + len(missing),
         "generator_commit": tool_sha,
         "generator_inputs_sha": generator_sha,
         "pending_repositories": pending,
+        "errors": errors,
     }
 
 
@@ -6619,15 +6622,19 @@ def reconcile_fleet_heads(*, retention: int, limit: int) -> int:
         lock.close()
 
     pending = observed["pending_repositories"]
+    errors = observed["errors"]
     if not pending:
         print(json.dumps({
-            **observed, "status": "unchanged", "mode": "head-reconcile",
+            **observed,
+            "status": "error" if errors else "unchanged",
+            "mode": "head-reconcile",
             "published": 0,
         }, sort_keys=True))
-        return 0
+        return 1 if errors else 0
 
     log("HEAD-RECONCILE " + json.dumps({
         "pending_repositories": pending,
+        "probe_errors": errors,
         "generator_commit": observed["generator_commit"],
     }, sort_keys=True))
     publisher_args = ["--if-changed", "--retention", str(retention)]
@@ -6635,7 +6642,14 @@ def reconcile_fleet_heads(*, retention: int, limit: int) -> int:
         publisher_args.extend(["--limit", str(limit)])
     for key in pending:
         publisher_args.extend(["--repo", key])
-    return main(publisher_args)
+    result = main(publisher_args)
+    if errors:
+        print(json.dumps({
+            "status": "partial", "mode": "head-reconcile",
+            "probe_errors": errors, "publication_returncode": result,
+        }, sort_keys=True))
+        return result or 1
+    return result
 
 
 def main(argv: list[str]) -> int:
