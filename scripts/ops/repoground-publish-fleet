@@ -2623,6 +2623,11 @@ _AUTHORITY_GIT_ALLOWED_ORIGIN_CONFIG = frozenset(
 _FLEET_MEMBER_ALLOWED_ORIGIN_CONFIG = _AUTHORITY_GIT_ALLOWED_ORIGIN_CONFIG | frozenset(
     {"remote.origin.prune", "remote.origin.prunetags"}
 )
+# An ordinary Git partial clone is compatible with a pinned GitHub origin,
+# provided both fixed settings are present and remain repository-local.
+_FLEET_MEMBER_PARTIAL_CLONE_KEYS = frozenset(
+    {"remote.origin.promisor", "remote.origin.partialclonefilter"}
+)
 _AUTHORITY_PROXY_ENV_NAMES = frozenset({"all_proxy", "http_proxy", "https_proxy"})
 _AUTHORITY_TLS_ENV_NAMES = frozenset(
     {"curl_ca_bundle", "ssl_cert_dir", "ssl_cert_file"}
@@ -3747,6 +3752,10 @@ def _fleet_member_local_config_entry_is_transport_override(
         return value not in {"--no-tags", "--tags"}
     if normalized == "remote.origin.prunetags":
         return not _fleet_git_boolean_value_allowed(value)
+    if normalized == "remote.origin.promisor":
+        return value.casefold() != "true"
+    if normalized == "remote.origin.partialclonefilter":
+        return value != "blob:none"
     if _fleet_http_version_config_key_allowed(key):
         return not _fleet_http_version_value_allowed(value)
     if _fleet_github_extra_header_key_allowed(key):
@@ -3960,17 +3969,26 @@ def assert_fleet_member_git_transport_safe(
         for key, _value in local_entries
         if key.strip()
     }
-    unsafe_keys = sorted(
-        {
-            key.strip().lower()
-            for key, value in local_entries
-            if _fleet_member_local_config_entry_is_transport_override(key, value)
-        }
-    )
+    unsafe_keys = {
+        key.strip().lower()
+        for key, value in local_entries
+        if _fleet_member_local_config_entry_is_transport_override(key, value)
+    }
+    partial = {
+        name: [value for key, value in local_entries if key.strip().lower() == name]
+        for name in _FLEET_MEMBER_PARTIAL_CLONE_KEYS
+    }
+    if any(partial.values()) and (
+        len(partial["remote.origin.promisor"]) != 1
+        or partial["remote.origin.promisor"][0].casefold() != "true"
+        or partial["remote.origin.partialclonefilter"] != ["blob:none"]
+    ):
+        # Reject unpaired values, duplicate keys and noncanonical filters.
+        unsafe_keys.update(_FLEET_MEMBER_PARTIAL_CLONE_KEYS)
     if unsafe_keys:
         raise RuntimeError(
             "fleet repository has unsafe local Git transport configuration: "
-            + ", ".join(unsafe_keys)
+            + ", ".join(sorted(unsafe_keys))
         )
 
     if "extensions.worktreeconfig" in local_keys:
@@ -4020,9 +4038,12 @@ def assert_fleet_member_git_transport_safe(
                 {
                     key.strip().lower()
                     for key, value in worktree_entries
-                    if _fleet_member_local_config_entry_is_transport_override(
-                        key,
-                        value,
+                    if (
+                        key.strip().lower() in _FLEET_MEMBER_PARTIAL_CLONE_KEYS
+                        or _fleet_member_local_config_entry_is_transport_override(
+                            key,
+                            value,
+                        )
                     )
                 }
             )

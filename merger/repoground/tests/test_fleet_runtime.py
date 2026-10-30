@@ -294,6 +294,107 @@ def test_remote_head_for_entry_rejects_checkout_local_transport_override(
         module.remote_head_for_entry(entry)
 
 
+def test_fleet_member_exact_partial_clone_origin_is_allowed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path, "member-partial-clone")
+    remote = "git@github.com:heimgewebe/member.git"
+    git(repo, "remote", "add", "origin", remote)
+    git(repo, "config", "remote.origin.promisor", "true")
+    git(repo, "config", "remote.origin.partialclonefilter", "blob:none")
+    entry = module.RepoEntry(
+        key="heimgewebe/member", owner="heimgewebe", repo="member",
+        path=repo, remote=remote,
+    )
+    module.assert_fleet_member_git_transport_safe(
+        repo, env=module._authority_git_env()
+    )
+
+    observed: list[tuple[Path, str, dict[str, str]]] = []
+
+    def safe_remote_head(
+        repo_path: Path, *, remote: str = "origin",
+        env: dict[str, str] | None = None,
+    ) -> tuple[str, str, str]:
+        assert isinstance(env, dict)
+        observed.append((repo_path, remote, env))
+        return "origin/main", "main", sha
+
+    monkeypatch.setattr(module, "remote_head", safe_remote_head)
+    assert module.remote_head_for_entry(entry) == ("origin/main", "main", sha)
+    assert len(observed) == 1
+    assert observed[0][0] == repo
+    assert observed[0][1] == entry.remote
+    assert observed[0][2]["GIT_CONFIG_NOSYSTEM"] == "1"
+
+
+@pytest.mark.parametrize(
+    ("promisor", "filter_spec"),
+    [
+        (None, "blob:none"),
+        ("true", None),
+        ("false", "blob:none"),
+        ("true", "blob:limit=1024"),
+        ("true", "tree:0"),
+        ("true", "blob:none "),
+    ],
+)
+def test_fleet_member_partial_clone_must_be_exact_pair(
+    tmp_path: Path, promisor: str | None, filter_spec: str | None,
+) -> None:
+    module = load_publisher()
+    repo, _ = initialize_repository(tmp_path, "member-invalid-partial")
+    git(repo, "remote", "add", "origin", "git@github.com:heimgewebe/member.git")
+    if promisor is not None:
+        git(repo, "config", "remote.origin.promisor", promisor)
+    if filter_spec is not None:
+        git(repo, "config", "remote.origin.partialclonefilter", filter_spec)
+    with pytest.raises(
+        RuntimeError, match="unsafe local Git transport configuration"
+    ):
+        module.assert_fleet_member_git_transport_safe(
+            repo, env=module._authority_git_env()
+        )
+
+
+def test_fleet_member_partial_clone_rejects_duplicate_or_transport_override(
+    tmp_path: Path,
+) -> None:
+    module = load_publisher()
+    repo, _ = initialize_repository(tmp_path, "member-duplicate-partial")
+    git(repo, "remote", "add", "origin", "git@github.com:heimgewebe/member.git")
+    git(repo, "config", "remote.origin.promisor", "true")
+    git(repo, "config", "remote.origin.partialclonefilter", "blob:none")
+    git(repo, "config", "--add", "remote.origin.promisor", "true")
+    with pytest.raises(RuntimeError, match="unsafe local Git transport configuration"):
+        module.assert_fleet_member_git_transport_safe(
+            repo, env=module._authority_git_env()
+        )
+    git(repo, "config", "--unset-all", "remote.origin.promisor")
+    git(repo, "config", "remote.origin.promisor", "true")
+    git(repo, "config", "remote.origin.uploadpack", "/bin/false")
+    with pytest.raises(RuntimeError, match="unsafe local Git transport configuration"):
+        module.assert_fleet_member_git_transport_safe(
+            repo, env=module._authority_git_env()
+        )
+
+
+def test_fleet_member_partial_clone_flags_in_worktree_scope_are_rejected(
+    tmp_path: Path,
+) -> None:
+    module = load_publisher()
+    repo, _ = initialize_repository(tmp_path, "member-worktree-partial")
+    git(repo, "remote", "add", "origin", "git@github.com:heimgewebe/member.git")
+    git(repo, "config", "extensions.worktreeConfig", "true")
+    git(repo, "config", "--worktree", "remote.origin.promisor", "true")
+    git(repo, "config", "--worktree", "remote.origin.partialclonefilter", "blob:none")
+    with pytest.raises(RuntimeError, match="unsafe worktree Git transport configuration"):
+        module.assert_fleet_member_git_transport_safe(
+            repo, env=module._authority_git_env()
+        )
+
+
 def test_remote_head_for_entry_allows_separate_pushurl(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
