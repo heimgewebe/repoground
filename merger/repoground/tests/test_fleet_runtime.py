@@ -5021,6 +5021,8 @@ def test_runtime_has_one_hourly_changed_only_timer_and_no_force_fallback() -> No
     assert sorted(path.name for path in UNIT_DIR.iterdir()) == [
         "repoground-publish-fleet-watch.service",
         "repoground-publish-fleet-watch.timer",
+        "repoground-publish-head-watch.service",
+        "repoground-publish-head-watch.timer",
     ]
 
 
@@ -6201,6 +6203,8 @@ def test_regression_canonical_unit_names_and_installer_cutover_order() -> None:
     assert units == [
         "repoground-publish-fleet-watch.service",
         "repoground-publish-fleet-watch.timer",
+        "repoground-publish-head-watch.service",
+        "repoground-publish-head-watch.timer",
     ]
 
     installer = INSTALLER.read_text(encoding="utf-8")
@@ -6216,6 +6220,10 @@ def test_regression_canonical_unit_names_and_installer_cutover_order() -> None:
         "systemctl --user enable --now repoground-publish-fleet-watch.timer"
     )
     assert install_position < reload_position < enable_position
+    assert (
+        "systemctl --user enable --now repoground-publish-head-watch.timer"
+        in installer
+    )
 
 
 def test_dirty_managed_worktree_is_typed_and_preserved(tmp_path: Path) -> None:
