@@ -333,3 +333,59 @@ def test_unchanged_dirty_checkout_prunes_previous_clean_recovery(
         row["path"] == str(canonical)
         for row in second["source_worktree_prune"]["preserved"]
     )
+
+
+def test_authenticated_ci_batch_reuses_evidence_pack_only_within_one_handoff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Multiple CI checks at one revision build their shared graph only once."""
+    from merger.repoground.core import event_handoff
+
+    m, entry, repo, _base, head, bundle, values = checked_setup(tmp_path, monkeypatch)
+    check = dict(values["checks"]["check_runs"][0])
+    values["checks"] = {
+        "total_count": 3,
+        "check_runs": [{**check, "id": identifier} for identifier in (123456, 123457, 123458)],
+    }
+    real_builder = event_handoff.build_evidence_pack
+    use_cases: list[str] = []
+
+    def counting_builder(**kwargs):
+        use_cases.append(kwargs["use_case"])
+        return real_builder(**kwargs)
+
+    monkeypatch.setattr(event_handoff, "build_evidence_pack", counting_builder)
+    first = emit(m, entry, repo, head, bundle)
+    assert first["status"] == "ok"
+    assert [row["status"] for row in first["events"]] == ["published"] * 4
+    assert use_cases == ["explain-change", "find-related-tests"]
+    ci_rows = first["events"][1:]
+    assert len({row["event_key"] for row in ci_rows}) == 3
+    receipts = [
+        read_event_receipt(outbox_root=outbox(m, entry), event_key=row["event_key"])
+        for row in ci_rows
+    ]
+    assert [r["receipt"]["event"]["check_id"] for r in receipts] == [
+        "123456", "123457", "123458",
+    ]
+    assert len({
+        r["receipt"]["evidence_pack_sha256"] for r in receipts
+    }) == 1
+
+    second = emit(m, entry, repo, head, bundle)
+    assert [row["status"] for row in second["events"]] == ["deduplicated"] * 4
+    assert use_cases == ["explain-change", "find-related-tests"]
+
+    # A later provider read can reveal new checks; do not cache across batches.
+    values["checks"]["total_count"] = 4
+    values["checks"]["check_runs"].append({**check, "id": 123459})
+    third = emit(m, entry, repo, head, bundle)
+    assert [row["status"] for row in third["events"]] == [
+        "deduplicated", "deduplicated", "deduplicated", "deduplicated", "published",
+    ]
+    assert use_cases == [
+        "explain-change", "find-related-tests", "find-related-tests",
+    ]
+    assert read_event_receipt(
+        outbox_root=outbox(m, entry), event_key=third["events"][-1]["event_key"],
+    )["receipt"]["event"]["check_id"] == "123459"
