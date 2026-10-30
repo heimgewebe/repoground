@@ -45,7 +45,7 @@ GitHub default branch (Soll-SHA)
 1. **Soll-Wahrheit:** maßgeblicher GitHub-Default-Branch-Commit je Repository und gültige Fleet-Mitgliedschaft aus `metarepo/fleet/repos.yml`. Ein Push-Event ist nur ein Wecksignal. Keine zweite persistente Queue als Quelle der Wahrheit.
 2. **Ist-Wahrheit:** letzter erfolgreich validierter und im kanonischen Katalog veröffentlichter Snapshot mit `repo_id`, Ref, Commit, Generator-/Konfigurationsfingerprint und Integritätsbelegen. Ein vorhandenes Verzeichnis oder ein erfolgreicher Prozess-Exit allein genügt nicht.
 3. **Ein Writer:** Alle Refresh-Wege verwenden den **bestehenden** Publisher samt Lock/Worktree-/Publikationskontrakt. Der leichte Abgleich löst nur diesen Weg aus; keine parallel implementierten Generatoren und kein öffentlicher Webhookdienst.
-4. **Konvergenz statt Event-für-Event-Builds:** Mehrere Updates desselben Branches werden auf den **neuesten beobachteten SHA** zusammengefasst. Ein älterer Build bleibt ggf. gültiges Historienartefakt, darf aber nicht `fresh_exact` für einen neueren HEAD behaupten.
+4. **Konvergenz statt Event-für-Event-Builds:** Mehrere Updates desselben Branches werden auf den **neuesten beobachteten SHA** zusammengefasst. Deduplizierung erfolgt nur bei **identischer vollständiger Publikationsidentität** (Quell-Commit, Generator-/Konfigurationsfingerprint und relevante Ausgabe-Contracts), nicht bloß bei gleichem Quell-SHA. Fehlgeschlagene oder beschädigte Veröffentlichungen dürfen erneut gebaut werden. Ein älterer Build bleibt ggf. gültiges Historienartefakt, darf aber nicht `fresh_exact` für einen neueren HEAD behaupten.
 5. **Generator-Änderung:** Ändert RepoGround selbst Generator oder relevante Bundle-Contracts, wird über die vorhandene Fingerprint-Logik der betroffene Fleet-Satz nachgezogen. Nicht bei gewöhnlichem Repo-Commit sämtliche Bundles neu bauen.
 
 ## 3. Ausführung in vier begrenzten Paketen
@@ -100,7 +100,7 @@ Zeitpunkte unabhängig erfassen: `t_merge` (authentischer GitHub-Merge-/Push-Zei
 | Erkannt → nutzbar | tatsächliche Build-/Validierungszeit + möglichst ≤ 60 s Koordinations-Overhead |
 | Busy / Absturz / Neustart | nie als erledigt quittiert; ohne manuelle Reparatur nachgeholt |
 | Agent bei stale | laufende Aufgabe kann belegbar auf Git-Live-Recherche ausweichen |
-| Unnötige Builds | 0 Builds bei unverändertem Fingerprint; keine doppelten Builds pro identischem Ziel-SHA |
+| Unnötige Builds | 0 Neubauten bei unveränderter, gesunder **vollständiger Publikationsidentität**; erforderliche Wiederholungen bei Fehlern oder verändertem Generator/Config sind zulässig |
 
 P95-Werte erst nach mehreren repräsentativen realen Merges ausweisen; einzelne Smoke-Tests beweisen die Funktionskette, nicht das Perzentil. Fehlende Beobachtungen und externe GitHub-Ausfälle separat zählen. Bei tatsächlich hohen Buildzeiten vorerst **nicht** mehr Scheduling-Schichten einführen: erst messen, ob inkrementelle Indexierung wirtschaftlich wäre.
 
