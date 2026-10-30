@@ -234,6 +234,38 @@ def read_event_receipt(
     }
 
 
+
+def _event_evidence_pack(
+    item: Mapping[str, Any],
+    repo: Path,
+    bundle_manifest: str | Path | None,
+    use_case: str,
+    context_budget_tokens: int,
+) -> dict[str, Any]:
+    """Reuse an immutable-revision evidence pack only within a publisher batch."""
+    batch = _BATCH_EVIDENCE_PACKS.get()
+    # The authenticated publisher pins one manifest and source worktree per batch.
+    cache_key = (
+        str(repo), item["base_revision"], item["target_revision"],
+        str(bundle_manifest), use_case, context_budget_tokens,
+    )
+    cached = batch.get(cache_key) if batch is not None else None
+    if cached is not None:
+        return cached
+
+    pack = build_evidence_pack(
+        repo_root=repo,
+        base_revision=item["base_revision"],
+        target_revision=item["target_revision"],
+        bundle_manifest=bundle_manifest,
+        use_case=use_case,
+        context_budget_tokens=context_budget_tokens,
+    )
+    if batch is not None and pack.get("status") != "invalid":
+        batch[cache_key] = pack
+    return pack
+
+
 def publish_event(
     *,
     event: Mapping[str, Any],
@@ -283,25 +315,9 @@ def publish_event(
                 return {"status": "deduplicated", "receipt_path": str(path),
                         "event_key": key, "receipt": receipt}
             use_case = "explain-change" if item["event_type"] == "git.commit" else "find-related-tests"
-            batch = _BATCH_EVIDENCE_PACKS.get()
-            # The publisher pins one manifest and one clean revision worktree
-            # for this batch. The use case differs for commits and CI events.
-            cache_key = (
-                str(repo), item["base_revision"], item["target_revision"],
-                str(bundle_manifest), use_case, context_budget_tokens,
+            pack = _event_evidence_pack(
+                item, repo, bundle_manifest, use_case, context_budget_tokens,
             )
-            pack = batch.get(cache_key) if batch is not None else None
-            if pack is None:
-                pack = build_evidence_pack(
-                    repo_root=repo,
-                    base_revision=item["base_revision"],
-                    target_revision=item["target_revision"],
-                    bundle_manifest=bundle_manifest,
-                    use_case=use_case,
-                    context_budget_tokens=context_budget_tokens,
-                )
-                if batch is not None and pack.get("status") != "invalid":
-                    batch[cache_key] = pack
             if pack.get("status") == "invalid":
                 # A failed analysis is never committed as a completed handoff.
                 return {
