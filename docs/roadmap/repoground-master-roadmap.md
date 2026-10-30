@@ -18,6 +18,8 @@ Die drei unmittelbar ausführbaren Arbeitspakete sind:
 - [Föderation und Zeitgeschichte](repoground-expansion-thread-2-federation-time.md)
 - [Agentenprodukt und Ereignisfluss](repoground-expansion-thread-3-consumers.md)
 
+**Operativer P1-Querschnitt:** [Merge-to-Snapshot-Konvergenz](repoground-snapshot-convergence-plan.md) priorisiert schnelle, ressourcenschonende Aktualisierung nach `main`-Änderungen und einen nutzbaren Agenten-Fallback. Die vorhandene Fleet-/Grabowski-Infrastruktur wird repariert statt ersetzt; der strategische Ausbaufahrplan wird dadurch nicht um eine weitere globale Freigabesperre erweitert.
+
 Der frühere [Vision- und Agentenadoptionsplan](repoground-vision-and-agent-adoption.md) bleibt als fachlicher Referenzplan gültig, **seine frühere vorgelagerte Benchmark-/Adoptionssperre gilt nicht mehr**. Fehlende vollständige 20er-A/B-Messung blockiert keine unabhängige Implementierung. Dagegen bleiben konkrete Git-/Lease-/CI-/Review-/Sicherheits-/Versionsgates vor einer jeweiligen Integration verbindlich.
 
 Die Master-Roadmap ist weder alternative Taskstatusquelle noch Implementierungsbeleg; aktuelle Primärzustände, eigentümergebundene Grabowski-Writer-Lanes und kanonische Task-/PR-Belege sind weiter notwendig.

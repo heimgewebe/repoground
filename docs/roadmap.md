@@ -27,3 +27,4 @@ Die folgenden Planungsartefakte sind im Planungsindex registriert. Das allein er
 - `docs/roadmap/repoground-expansion-thread-2-federation-time.md`
 - `docs/roadmap/repoground-expansion-thread-3-consumers.md`
 - `docs/roadmap/repoground-agent-tool-selection-plan.md`
+- `docs/roadmap/repoground-snapshot-convergence-plan.md`
