@@ -6553,6 +6553,105 @@ def managed_build_retain_mode(
     return 0
 
 
+
+def _pending_fleet_head_reconciliation() -> dict[str, object]:
+    """Compare GitHub HEAD and the full output fingerprint without rebuilding.
+
+    Reuse the existing authority, transport, fleet-membership and state rules;
+    the canonical hourly publisher separately handles new same-SHA CI events,
+    retention and authenticated event backlog.
+    """
+    entries = discover()
+    membership = load_authoritative_fleet_membership()
+    selected, missing, _excluded = select_authoritative_fleet_entries(
+        entries, membership,
+    )
+    tool_sha, generator_sha = ensure_tool_worktree()
+    pending: list[str] = []
+    errors: list[dict[str, str]] = [
+        {"repo":key, "reason":"fleet_member_checkout_missing"} for key in missing
+    ]
+    for entry in prioritize_generator_repository(selected):
+        try:
+            _remote_ref, branch, source_sha = remote_head_for_entry(entry)
+            fingerprint, _identity = build_fingerprint(
+                source_sha=source_sha,
+                generator_inputs_sha=generator_sha,
+                publication_repository=publication_repository(entry),
+                config=publication_config(entry),
+            )
+            stored = load_state(state_path(entry, safe_segment(branch)))
+            if not stored or stored.get("fingerprint") != fingerprint:
+                pending.append(entry.key)
+        except (RuntimeError, ValueError, OSError) as exc:
+            errors.append({"repo":entry.key, "reason": str(exc)[:250]})
+    return {
+        "status": "ok" if not errors else "partial",
+        "count": len(selected) + len(missing),
+        "generator_commit": tool_sha,
+        "generator_inputs_sha": generator_sha,
+        "pending_repositories": pending,
+        "errors": errors,
+    }
+
+
+def reconcile_fleet_heads(*, retention: int, limit: int) -> int:
+    """Level-triggered cheap merge probe; use the existing writer for effects.
+
+    The probe owns the normal fleet lock only during its own Git/fingerprint
+    observation. The real publisher reacquires that same lock before changing
+    any publication. A busy result is a deferral, never a freshness ACK.
+    """
+    lock = acquire_lock()
+    if lock is None:
+        print(json.dumps({
+            "status": "busy", "mode": "head-reconcile",
+            "reason": "fleet publisher already running",
+            "needs_retry": True,
+        }, sort_keys=True))
+        return 0
+    try:
+        observed = _pending_fleet_head_reconciliation()
+    except Exception as exc:
+        print(json.dumps({
+            "status": "error", "mode": "head-reconcile",
+            "phase": "head_probe", "error": str(exc)[:1000],
+        }, sort_keys=True))
+        return 1
+    finally:
+        lock.close()
+
+    pending = observed["pending_repositories"]
+    errors = observed["errors"]
+    if not pending:
+        print(json.dumps({
+            **observed,
+            "status": "error" if errors else "unchanged",
+            "mode": "head-reconcile",
+            "published": 0,
+        }, sort_keys=True))
+        return 1 if errors else 0
+
+    log("HEAD-RECONCILE " + json.dumps({
+        "pending_repositories": pending,
+        "probe_errors": errors,
+        "generator_commit": observed["generator_commit"],
+    }, sort_keys=True))
+    publisher_args = ["--if-changed", "--retention", str(retention)]
+    if limit:
+        publisher_args.extend(["--limit", str(limit)])
+    for key in pending:
+        publisher_args.extend(["--repo", key])
+    result = main(publisher_args)
+    if errors:
+        print(json.dumps({
+            "status": "partial", "mode": "head-reconcile",
+            "probe_errors": errors, "publication_returncode": result,
+        }, sort_keys=True))
+        return result or 1
+    return result
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--inventory", action="store_true")
@@ -6562,6 +6661,7 @@ def main(argv: list[str]) -> int:
         help=argparse.SUPPRESS,
     )
     parser.add_argument("--if-changed", action="store_true")
+    parser.add_argument("--reconcile-heads", action="store_true")
     parser.add_argument("--force", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--force-republish", action="store_true")
     parser.add_argument("--record-managed-build-retain", action="store_true")
@@ -6641,6 +6741,14 @@ def main(argv: list[str]) -> int:
     )
     if args.apply_prune and not cleanup_requested:
         parser.error("--apply-prune requires a prune or reconciliation mode")
+    if args.reconcile_heads:
+        if (
+            args.inventory or args.repo_keys or args.force_republish
+            or args.record_managed_build_retain or args.if_changed
+            or cleanup_requested or args.apply_prune
+        ):
+            parser.error("--reconcile-heads requires only retention/limit options")
+        return reconcile_fleet_heads(retention=args.retention, limit=args.limit)
     if cleanup_requested:
         cleanup_lock = acquire_lock()
         if cleanup_lock is None:

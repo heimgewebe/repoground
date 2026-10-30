@@ -1,0 +1,9 @@
+[Unit]
+Description=Detect RepoGround Fleet HEAD changes and publish only changed bundles
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/repoground-publish-fleet --reconcile-heads --retention 3 --limit 8
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6

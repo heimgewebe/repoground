@@ -132,7 +132,9 @@ fi
 
 install -d -m 0755 "$BIN_DIR" "$UNIT_DIR"
 systemctl --user disable --now repoground-publish-fleet-watch.timer 2>/dev/null || true
+systemctl --user disable --now repoground-publish-head-watch.timer 2>/dev/null || true
 systemctl --user stop repoground-publish-fleet-watch.service 2>/dev/null || true
+systemctl --user stop repoground-publish-head-watch.service 2>/dev/null || true
 for unit in "${OLD_TIMERS[@]}"; do
   systemctl --user disable --now "$unit" 2>/dev/null || true
 done
@@ -170,8 +172,10 @@ done
 systemctl --user reset-failed repoground-publish-fleet-watch.service 2>/dev/null || true
 if (( ENABLE )); then
   systemctl --user enable --now repoground-publish-fleet-watch.timer
+  systemctl --user enable --now repoground-publish-head-watch.timer
   echo "INSTALL-REPOGROUND-PUBLISH-FLEET-RUNTIME: PASS enabled"
 else
   systemctl --user disable --now repoground-publish-fleet-watch.timer 2>/dev/null || true
+  systemctl --user disable --now repoground-publish-head-watch.timer 2>/dev/null || true
   echo "INSTALL-REPOGROUND-PUBLISH-FLEET-RUNTIME: PASS paused"
 fi
