@@ -8,11 +8,10 @@ import stat
 from pathlib import Path
 from typing import Any, BinaryIO
 
-from merger.repoground.core.bounded_artifact_read import (
-    MAX_REGISTERED_ARTIFACT_BYTES,
-)
-
-MAX_SQLITE_ARTIFACT_BYTES = MAX_REGISTERED_ARTIFACT_BYTES
+# Unlike in-memory artifact readers (256 MiB), SQLite is verified in 1 MiB
+# SHA-256 chunks and queried read-only via a pinned file descriptor. Keep a
+# finite, SQLite-specific budget large enough for real 50k+ chunk repositories.
+MAX_SQLITE_ARTIFACT_BYTES = 1024 * 1024 * 1024
 SQLITE_HASH_CHUNK_BYTES = 1024 * 1024
 
 
