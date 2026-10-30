@@ -2212,31 +2212,49 @@ def prepare_managed_worktree(
             safe_global_config=Path(raw_config_root) / "global.gitconfig",
         )
         if authenticated_remote is not None:
-            # A partial clone can lazily fetch missing blobs during worktree
-            # checkout. Reuse the same bounded GitHub SSH identity that was
-            # admitted for remote_head_for_entry, never ambient SSH config.
             transport_env = _authority_git_env()
-            assert_fleet_member_git_transport_safe(
-                expected_repo, env=transport_env,
-            )
-            observed = run(
+            local_config = run(
                 [
                     "git", "-C", str(expected_repo), "config", "--local",
-                    "--no-includes", "--get-all", "remote.origin.url",
+                    "--no-includes", "--null", "--list",
                 ],
                 check=False, env=transport_env,
             )
-            if (
-                observed.returncode != 0
-                or observed.stdout.splitlines() != [authenticated_remote]
-                or parse_github_remote(authenticated_remote) is None
-            ):
-                raise RuntimeError(
-                    "managed source repository origin changed before source worktree"
+            if local_config.returncode != 0:
+                raise RuntimeError("managed source repository local Git config unavailable")
+            entries = _parse_git_config_list_entries(
+                local_config.stdout, label="managed source repository local",
+            )
+            partial_clone = any(
+                key.strip().lower() in _FLEET_MEMBER_PARTIAL_CLONE_KEYS
+                for key, _value in entries
+            )
+            if partial_clone:
+                # A partial clone can lazily fetch blobs during checkout.
+                # Verify the original GitHub origin and reuse the bounded SSH
+                # identity already admitted by remote_head_for_entry. Full
+                # clones have no promisor source and need no additional route.
+                assert_fleet_member_git_transport_safe(
+                    expected_repo, env=transport_env,
                 )
-            env["GIT_SSH_COMMAND"] = _fleet_repo_ssh_env(
-                remote=authenticated_remote,
-            )["GIT_SSH_COMMAND"]
+                observed = run(
+                    [
+                        "git", "-C", str(expected_repo), "config", "--local",
+                        "--no-includes", "--get-all", "remote.origin.url",
+                    ],
+                    check=False, env=transport_env,
+                )
+                if (
+                    observed.returncode != 0
+                    or observed.stdout.splitlines() != [authenticated_remote]
+                    or parse_github_remote(authenticated_remote) is None
+                ):
+                    raise RuntimeError(
+                        "managed source repository origin changed before source worktree"
+                    )
+                env["GIT_SSH_COMMAND"] = _fleet_repo_ssh_env(
+                    remote=authenticated_remote,
+                )["GIT_SSH_COMMAND"]
         if path.exists() or path.is_symlink():
             cleanup_managed_disposable_artifacts(
                 path,
@@ -4946,7 +4964,7 @@ def ensure_source_worktree(entry: RepoEntry, ref_segment: str, sha: str) -> Path
             source_wt,
             expected_repo=entry.path,
             target=sha,
-            authenticated_remote=entry.remote,
+            authenticated_remote=getattr(entry, "remote", None),
         )
         return source_wt
     except ManagedWorktreeDirtyError as exc:
@@ -4971,7 +4989,7 @@ def ensure_source_worktree(entry: RepoEntry, ref_segment: str, sha: str) -> Path
         replacement,
         expected_repo=entry.path,
         target=sha,
-        authenticated_remote=entry.remote,
+        authenticated_remote=getattr(entry, "remote", None),
     )
     try:
         receipt_path = record_source_recovery(
