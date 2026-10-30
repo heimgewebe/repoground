@@ -230,6 +230,20 @@ def test_preserves_partial_pair_for_fail_closed_compiler(tmp_path):
     assert not result.entrypoints_path.exists()
 
 
+def test_oversized_chunk_index_skips_only_untrusted_graph_sources(tmp_path, monkeypatch):
+    repo = _repo(tmp_path)
+    index = _chunk_index(tmp_path, records=_contact_records(repo["root"], "repo1", "main.py"))
+    assert index.stat().st_size > 16
+    monkeypatch.setattr(bundle_sources, "_MAX_CHUNK_INDEX_BYTES", 16)
+    result = _ensure(tmp_path, summaries=[repo], chunk_index=index)
+    assert result.status == "skipped"
+    assert result.reason == "chunk index exceeds bounded source-contact limit"
+    assert not result.graph_path.exists()
+    assert not result.entrypoints_path.exists()
+    assert not (tmp_path / "bundle.relationship_projection.json").exists()
+    assert not (tmp_path / "bundle.graph_index.json").exists()
+
+
 def test_invalid_chunk_index_fails_closed(tmp_path):
     chunk_index = tmp_path / "bad.chunk_index.jsonl"
     chunk_index.write_text("{bad\n", encoding="utf-8")

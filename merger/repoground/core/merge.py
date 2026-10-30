@@ -1769,6 +1769,7 @@ REPO_ORDER = [
     "leitstand",
     "heimlern",
     "tools",
+    "commonthing",
     "weltgewebe",
     "vault-gewebe",
 ]
