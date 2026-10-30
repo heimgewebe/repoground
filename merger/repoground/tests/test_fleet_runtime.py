@@ -451,6 +451,78 @@ def test_partial_clone_worktree_rejects_origin_change_before_lazy_fetch(
     assert not list((tmp_path / "managed-sources").iterdir())
 
 
+@pytest.mark.parametrize("with_checkout_filter", [False, True])
+def test_https_partial_clone_source_preserves_bounded_credentials_and_filters(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, with_checkout_filter: bool,
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path, "member-https-partial")
+    remote = "https://github.com/heimgewebe/member.git"
+    git(repo, "remote", "add", "origin", remote)
+    git(repo, "config", "remote.origin.promisor", "true")
+    git(repo, "config", "remote.origin.partialclonefilter", "blob:none")
+
+    home = tmp_path / "https-home"
+    home.mkdir(mode=0o700)
+    global_config = (
+        '[credential "https://github.com"]\n'
+        "    helper = /bin/true\n"
+        '[url "ssh://attacker.invalid/"]\n'
+        "    insteadOf = https://github.com/\n"
+    )
+    if with_checkout_filter:
+        global_config += (
+            '[filter "probe"]\n'
+            "    clean = /bin/cat\n"
+            "    smudge = /bin/cat\n"
+            "    required = true\n"
+        )
+    (home / ".gitconfig").write_text(global_config, encoding="utf-8")
+    (home / ".gitconfig").chmod(0o600)
+    askpass = home / "askpass.sh"
+    askpass.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    askpass.chmod(0o700)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("GIT_ASKPASS", str(askpass))
+
+    observed: list[dict[str, str | None]] = []
+    original = module.run
+
+    def observed_run(argv, cwd=None, check=True, env=None):
+        if "worktree" in argv and "add" in argv:
+            assert isinstance(env, dict)
+
+            def config_value(key: str) -> str:
+                return subprocess.run(
+                    ["/usr/bin/git", "config", "--get-all", key],
+                    env=env, text=True, capture_output=True, check=False,
+                ).stdout.strip()
+
+            observed.append({
+                "helper": config_value("credential.https://github.com.helper"),
+                "filter": config_value("filter.probe.smudge"),
+                "redirect": config_value("url.ssh://attacker.invalid/.insteadof"),
+                "askpass": env.get("GIT_ASKPASS"),
+                "nosystem": env.get("GIT_CONFIG_NOSYSTEM"),
+            })
+        return original(argv, cwd=cwd, check=check, env=env)
+
+    monkeypatch.setattr(module, "run", observed_run)
+    target = tmp_path / "https-managed"
+    module.prepare_managed_worktree(
+        target, expected_repo=repo, target=sha,
+        authenticated_remote=remote,
+    )
+    assert git(target, "rev-parse", "HEAD") == sha
+    assert observed == [{
+        "helper": "/bin/true",
+        "filter": "/bin/cat" if with_checkout_filter else "",
+        "redirect": "",
+        "askpass": str(askpass),
+        "nosystem": "1",
+    }]
+
+
 def test_remote_head_for_entry_allows_separate_pushurl(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

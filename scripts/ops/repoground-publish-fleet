@@ -2207,10 +2207,8 @@ def prepare_managed_worktree(
         prefix="repoground-managed-worktree-gitconfig-",
         dir="/tmp",
     ) as raw_config_root:
-        env = _managed_worktree_git_env(
-            expected_repo,
-            safe_global_config=Path(raw_config_root) / "global.gitconfig",
-        )
+        include_https_auth = False
+        ssh_command: str | None = None
         if authenticated_remote is not None:
             transport_env = _authority_git_env()
             local_config = run(
@@ -2252,9 +2250,19 @@ def prepare_managed_worktree(
                     raise RuntimeError(
                         "managed source repository origin changed before source worktree"
                     )
-                env["GIT_SSH_COMMAND"] = _fleet_repo_ssh_env(
-                    remote=authenticated_remote,
-                )["GIT_SSH_COMMAND"]
+                if authenticated_remote.lower().startswith("https://"):
+                    include_https_auth = True
+                else:
+                    ssh_command = _fleet_repo_ssh_env(
+                        remote=authenticated_remote,
+                    )["GIT_SSH_COMMAND"]
+        env = _managed_worktree_git_env(
+            expected_repo,
+            safe_global_config=Path(raw_config_root) / "global.gitconfig",
+            include_https_auth=include_https_auth,
+        )
+        if ssh_command is not None:
+            env["GIT_SSH_COMMAND"] = ssh_command
         if path.exists() or path.is_symlink():
             cleanup_managed_disposable_artifacts(
                 path,
@@ -2902,25 +2910,32 @@ def _managed_worktree_git_env(
     repo_path: Path,
     *,
     safe_global_config: Path,
+    include_https_auth: bool = False,
 ) -> dict[str, str]:
-    env = _authority_git_env()
+    # Reuse the existing validated HTTPS credential/TLS constructor when
+    # a partial-commit source checkout may need a lazy GitHub blob fetch.
+    env = (
+        _fleet_repo_git_env(repo_path, safe_global_config=safe_global_config)
+        if include_https_auth else _authority_git_env()
+    )
     env["PATH"] = _fleet_member_credential_helper_path()
     entries = _global_system_checkout_filter_config(repo_path)
     if not entries:
         return env
     if not safe_global_config.is_absolute():
         raise RuntimeError("managed worktree scoped Git config path must be absolute")
-    try:
-        descriptor = os.open(
-            safe_global_config,
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC,
-            0o600,
-        )
-    except OSError as exc:
-        raise RuntimeError(
-            "managed worktree scoped Git configuration is unavailable"
-        ) from exc
-    os.close(descriptor)
+    if env.get("GIT_CONFIG_GLOBAL") != str(safe_global_config):
+        try:
+            descriptor = os.open(
+                safe_global_config,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC,
+                0o600,
+            )
+        except OSError as exc:
+            raise RuntimeError(
+                "managed worktree scoped Git configuration is unavailable"
+            ) from exc
+        os.close(descriptor)
 
     writer_env = _authority_git_env()
     for key, value in entries:
