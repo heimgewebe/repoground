@@ -9,10 +9,13 @@ import fcntl
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import tempfile
-from typing import Any, Mapping
+from collections.abc import Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
+from pathlib import Path
+from typing import Any
 
 from merger.repoground.core.agent_evidence_pack import build_evidence_pack
 
@@ -23,6 +26,28 @@ MAX_RECEIPT_BYTES = 96 * 1024
 _EVENT_ID = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._:@/-]{0,127}$")
 _REPO_ID = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 _ALLOWED_EVENTS = {"git.commit", "ci.completed"}
+
+# Per authenticated publisher handoff only. No global cache or durable state:
+# repeated CI check runs for one immutable source/manifest share the same pack.
+_BATCH_EVIDENCE_PACKS: ContextVar[
+    dict[tuple[str, str, str, str, str, int], dict[str, Any]] | None
+] = ContextVar("repoground_event_evidence_packs", default=None)
+
+
+@contextmanager
+def reuse_event_evidence_packs():
+    """Coalesce equal evidence builds in one publisher-authenticated event batch.
+
+    Event identity, payload collisions, provider authenticity, receipt locking and
+    per-event write/readback remain independently verified by publish_event.
+    """
+    token = _BATCH_EVIDENCE_PACKS.set({})
+    try:
+        yield
+    finally:
+        _BATCH_EVIDENCE_PACKS.reset(token)
+
+
 _CI_CONCLUSIONS = {"success", "failure", "cancelled", "skipped", "timed_out", "neutral", "action_required"}
 _FORBIDDEN_APPROVAL = ("approval", "merge", "patch", "review_verdict", "test_sufficiency")
 
@@ -258,14 +283,25 @@ def publish_event(
                 return {"status": "deduplicated", "receipt_path": str(path),
                         "event_key": key, "receipt": receipt}
             use_case = "explain-change" if item["event_type"] == "git.commit" else "find-related-tests"
-            pack = build_evidence_pack(
-                repo_root=repo,
-                base_revision=item["base_revision"],
-                target_revision=item["target_revision"],
-                bundle_manifest=bundle_manifest,
-                use_case=use_case,
-                context_budget_tokens=context_budget_tokens,
+            batch = _BATCH_EVIDENCE_PACKS.get()
+            # The publisher pins one manifest and one clean revision worktree
+            # for this batch. The use case differs for commits and CI events.
+            cache_key = (
+                str(repo), item["base_revision"], item["target_revision"],
+                str(bundle_manifest), use_case, context_budget_tokens,
             )
+            pack = batch.get(cache_key) if batch is not None else None
+            if pack is None:
+                pack = build_evidence_pack(
+                    repo_root=repo,
+                    base_revision=item["base_revision"],
+                    target_revision=item["target_revision"],
+                    bundle_manifest=bundle_manifest,
+                    use_case=use_case,
+                    context_budget_tokens=context_budget_tokens,
+                )
+                if batch is not None and pack.get("status") != "invalid":
+                    batch[cache_key] = pack
             if pack.get("status") == "invalid":
                 # A failed analysis is never committed as a completed handoff.
                 return {

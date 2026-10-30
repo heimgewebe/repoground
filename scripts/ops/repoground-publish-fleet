@@ -6100,7 +6100,9 @@ def _authenticated_fleet_event_handoff(
     The event adapter independently labels its input caller-supplied.
     """
     from merger.repoground.core.agent_evidence_pack import _bundle_identity
-    from merger.repoground.core.event_handoff import publish_event, read_event_receipt
+    from merger.repoground.core.event_handoff import (
+        publish_event, read_event_receipt, reuse_event_evidence_packs,
+    )
     from merger.repoground.core.manifest_snapshot import (
         manifest_snapshot, use_manifest_binding,
     )
@@ -6115,7 +6117,7 @@ def _authenticated_fleet_event_handoff(
         safe_segment(entry.owner) + "__" + safe_segment(entry.repo)
     )
     results: list[dict[str, object]] = []
-    with use_manifest_binding(snapshot.binding):
+    with use_manifest_binding(snapshot.binding), reuse_event_evidence_packs():
         # Public GitHub resources may be readable anonymously. GET /user must
         # succeed under the same gh credential context before the bridge
         # claims an authenticated provider API observation.
