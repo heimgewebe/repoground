@@ -6997,6 +6997,7 @@ def main(argv: list[str]) -> int:
                         }
                     )
                     continue
+                refresh_started = time.perf_counter()
                 (
                     data,
                     out_dir,
@@ -7015,6 +7016,8 @@ def main(argv: list[str]) -> int:
                         config=config,
                     )
                 )
+                refresh_seconds = round(time.perf_counter() - refresh_started, 3)
+                state_started = time.perf_counter()
                 write_state(
                     publication_state_path,
                     fingerprint=fingerprint,
@@ -7031,12 +7034,16 @@ def main(argv: list[str]) -> int:
                     published_now=True,
                 )
                 clear_active_publication_lease(active_lease)
+                state_seconds = round(time.perf_counter() - state_started, 3)
+                event_started = time.perf_counter()
                 event_result = _attempt_authenticated_fleet_handoff(
                     entry, source_sha=source_sha, source_wt=source_wt,
                     manifest_path=manifest_path,
                 )
+                event_seconds = round(time.perf_counter() - event_started, 3)
                 if event_result["status"] == "blocked":
                     event_blocked += 1
+                source_prune_started = time.perf_counter()
                 try:
                     source_prune_report = prune_obsolete_revision_source_worktrees(
                         entry, ref_segment, source_wt
@@ -7048,7 +7055,9 @@ def main(argv: list[str]) -> int:
                         "error": str(exc)[:2000],
                     }
                     log(f"SOURCE-PRUNE-FAILED {entry.key}: {exc}")
+                source_prune_seconds = round(time.perf_counter() - source_prune_started, 3)
                 published += 1
+                retention_started = time.perf_counter()
                 try:
                     prune_report = prune_current_group(
                         out_dir.parent,
@@ -7065,6 +7074,7 @@ def main(argv: list[str]) -> int:
                         "error": str(exc)[:2000],
                     }
                     log(f"PRUNE-FAILED {entry.key}: {exc}")
+                retention_seconds = round(time.perf_counter() - retention_started, 3)
                 generated = None
                 publication = data.get("publication")
                 if isinstance(publication, dict):
@@ -7077,6 +7087,13 @@ def main(argv: list[str]) -> int:
                     "source_sha": source_sha,
                     "fingerprint": fingerprint,
                     "generatedAt": generated,
+                    "phase_seconds": {
+                        "refresh": refresh_seconds,
+                        "publication_state": state_seconds,
+                        "authenticated_events": event_seconds,
+                        "source_worktree_prune": source_prune_seconds,
+                        "retention_prune": retention_seconds,
+                    },
                     "publication_dir": str(out_dir),
                     "prune": prune_report,
                     "source_worktree": str(source_wt),

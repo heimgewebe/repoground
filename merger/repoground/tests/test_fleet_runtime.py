@@ -6746,8 +6746,23 @@ def test_idempotent_second_run_does_not_publish_or_create_bundle(
     version_parent = publication_root / "bundles" / "heimgewebe__demo" / "main"
     assert [path.name for path in version_parent.iterdir()] == ["20260714T100000Z"]
     assert len(publish_calls) == 1
+    published_detail = json.loads((roots["log"] / "fleet-last.json").read_text(
+        encoding="utf-8"
+    ))["details"][0]
+    assert published_detail["status"] == "published"
+    phase_seconds = published_detail["phase_seconds"]
+    assert set(phase_seconds) == {
+        "refresh", "publication_state", "authenticated_events",
+        "source_worktree_prune", "retention_prune",
+    }
+    assert all(isinstance(value, float) and value >= 0 for value in phase_seconds.values())
 
     assert module.main(argv) == 0
+    unchanged_detail = json.loads((roots["log"] / "fleet-last.json").read_text(
+        encoding="utf-8"
+    ))["details"][0]
+    assert unchanged_detail["status"] == "unchanged"
+    assert "phase_seconds" not in unchanged_detail
     second = json.loads(state_file.read_text(encoding="utf-8"))
     assert len(publish_calls) == 1
     assert [path.name for path in version_parent.iterdir()] == ["20260714T100000Z"]
