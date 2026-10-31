@@ -35,7 +35,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from .citation_map import byte_range_to_line_range, normalize_canonical_range
+from .citation_map import (
+    _canonical_newline_offsets,
+    byte_range_to_line_range,
+    normalize_canonical_range,
+)
 from .claim_evidence_diagnostics import (
     claim_absence_reason_detail,
     claim_absence_reason_from_manifest,
@@ -319,10 +323,16 @@ def compute_top_files(
                 entry["start"] = min(entry["start"], start_byte)
                 entry["end"] = max(entry["end"], end_byte)
 
+    # Compute newline positions once for all aggregated spans. No index is
+    # retained beyond this pack calculation, and empty input avoids the scan.
+    newline_offsets = _canonical_newline_offsets(canonical_md_bytes) if agg else None
     top: List[TopFile] = []
     for entry in agg.values():
         start_line, end_line = byte_range_to_line_range(
-            canonical_md_bytes, entry["start"], entry["end"]
+            canonical_md_bytes,
+            entry["start"],
+            entry["end"],
+            newline_offsets=newline_offsets,
         )
         top.append(
             TopFile(
