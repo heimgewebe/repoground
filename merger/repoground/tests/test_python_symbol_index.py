@@ -138,3 +138,28 @@ def test_python_symbol_index_discovers_extensionless_shebang_scripts(tmp_path):
         ("scripts/manage", "main"),
     ]
     assert symbols[0]["range_ref"] == "file:scripts/agent#L2-L3"
+
+def test_python_shebang_scanner_skips_fifo_and_file_symlink(tmp_path):
+    fifo = tmp_path / "waiting"
+    try:
+        import os
+
+        os.mkfifo(fifo)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"FIFO unavailable on this platform: {exc}")
+    python_script = tmp_path / "runme"
+    python_script.write_text(
+        "#!/usr/bin/env python3\ndef runme():\n    return 1\n",
+        encoding="utf-8",
+    )
+    try:
+        (tmp_path / "linked_script").symlink_to(python_script)
+    except OSError as exc:
+        pytest.skip(f"File symlink unavailable on this platform: {exc}")
+
+    symbols, skipped, errors = extract_python_symbols(tmp_path)
+
+    assert skipped == 0 and errors == []
+    assert [(item["path"], item["qualified_name"]) for item in symbols] == [
+        ("runme", "runme")
+    ]

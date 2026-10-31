@@ -2746,3 +2746,38 @@ def test_call_graph_discovers_extensionless_python_entrypoint(tmp_path):
     assert calls[0]["callee_expression"] == "run"
     assert calls[0]["resolution_status"] == "resolved"
     assert calls[0]["resolved_target_ids"] == ["py:scripts:manage:function:run"]
+
+def test_extensionless_script_does_not_create_importable_module(tmp_path):
+    (tmp_path / "helper").write_text(
+        "#!/usr/bin/env python3\ndef run():\n    return 1\nrun()\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "helper.py").write_text(
+        "def run():\n    return 2\n", encoding="utf-8"
+    )
+    (tmp_path / "consumer.py").write_text(
+        "from helper import run\nrun()\n", encoding="utf-8"
+    )
+    (tmp_path / "cli").write_text(
+        "#!/usr/bin/python3\ndef entry():\n    return 1\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "not_importable.py").write_text(
+        "from cli import entry\nentry()\n", encoding="utf-8"
+    )
+
+    calls, skipped, errors = extract_python_calls(tmp_path, max_workers=1)
+
+    assert skipped == 0 and errors == []
+    local_call = next(
+        call for call in calls if call["path"] == "helper"
+        and call["callee_expression"] == "run"
+    )
+    assert local_call["resolution_status"] == "resolved"
+    assert local_call["resolved_target_ids"] == ["py:helper:function:run"]
+    imported_call = next(call for call in calls if call["path"] == "consumer.py")
+    assert imported_call["resolution_status"] == "resolved"
+    assert imported_call["resolved_target_ids"] == ["py:helper.py:function:run"]
+    unavailable = next(call for call in calls if call["path"] == "not_importable.py")
+    assert unavailable["resolution_status"] == "unresolved"
+    assert unavailable["resolved_target_ids"] == []

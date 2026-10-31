@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import os
 import re
+import stat
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -122,7 +123,11 @@ def _is_python_source_file(path: Path) -> bool:
     if path.suffix or path.is_symlink():
         return False
     try:
-        with path.open("rb") as source:
+        # A FIFO in os.walk(files) must never block the snapshot producer.
+        flags = os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0)
+        with os.fdopen(os.open(path, flags), "rb") as source:
+            if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+                return False
             first_line = source.readline(256)
     except OSError:
         return False
