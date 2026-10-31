@@ -530,6 +530,16 @@ _DEFINITION_INTENT_RE = re.compile(
 )
 
 
+# Only a single direct implementation-location question is symbol navigation.
+# Compound and explanatory questions keep the normal text route.
+_IMPLEMENTATION_LOCATION_RE = re.compile(
+    r"^\s*(?:where\s+is|wo\s+(?:ist|wird))\s+"
+    r"(?:`(?P<quoted>[A-Za-z_][A-Za-z0-9_]*)`|(?P<plain>[A-Za-z_][A-Za-z0-9_]*))\s+"
+    r"(?:implemented|implementiert)\s*\??\s*$",
+    re.IGNORECASE,
+)
+
+
 _CALLER_INTENT_PATTERNS = (
     re.compile(
         r"\b(?:who|(?:which|what)\s+(?:python\s+)?functions?)\s+"
@@ -610,7 +620,12 @@ def _call_navigation_intent(query: str) -> tuple[str, str] | None:
 
 def _symbol_definition_intent(query: str) -> str | None:
     """Extract one conservative identifier from an explicit definition question."""
-    if not isinstance(query, str) or not _DEFINITION_INTENT_RE.search(query):
+    if not isinstance(query, str):
+        return None
+    location = _IMPLEMENTATION_LOCATION_RE.fullmatch(query)
+    if location is not None:
+        return location.group("quoted") or location.group("plain")
+    if not _DEFINITION_INTENT_RE.search(query):
         return None
     for pattern in (
         _SYMBOL_IN_BACKTICKS_RE,
