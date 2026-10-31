@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from merger.repoground.tests.test_ask_context_cli import (
     _add_artifact,
     _complete_basic_bundle,
@@ -27,6 +29,18 @@ def test_symbol_definition_intent_is_conservative_and_bilingual():
         mcp_tools._symbol_definition_intent("Where is `snapshot_status` called?")
         is None
     )
+
+
+def test_implementation_location_rejects_broad_compound_and_unbalanced_queries():
+    for question in (
+        "Where is snapshot_status implemented and invoked?",
+        "Where is snapshot_status implemented in plugin startup?",
+        "How is the cache implemented?",
+        "Wo wird snapshot_status implementiert und aufgerufen?",
+        "Where is `snapshot_status implemented?",
+        "Where is `snapshot_status` called?",
+    ):
+        assert mcp_tools._symbol_definition_intent(question) is None
 
 
 def test_call_navigation_intent_is_conservative_and_bilingual():
@@ -318,7 +332,16 @@ def test_call_graph_intent_falls_back_to_text_when_navigation_is_unavailable(
     assert result["route"] == "text_retrieval"
 
 
-def test_query_routes_exact_definition_question_to_symbol_index(monkeypatch):
+@pytest.mark.parametrize(
+    "query",
+    [
+        "Wo ist die Funktion snapshot_status definiert?",
+        "Where is snapshot_status implemented?",
+        "Where is `snapshot_status` implemented?",
+        "Wo wird snapshot_status implementiert?",
+    ],
+)
+def test_query_routes_exact_definition_question_to_symbol_index(monkeypatch, query):
     monkeypatch.setattr(
         mcp_tools,
         "find_symbol",
@@ -367,7 +390,7 @@ def test_query_routes_exact_definition_question_to_symbol_index(monkeypatch):
 
     result = mcp_tools.query_existing_index(
         bundle_manifest="demo.bundle.manifest.json",
-        query="Wo ist die Funktion snapshot_status definiert?",
+        query=query,
         k=5,
     )
 
