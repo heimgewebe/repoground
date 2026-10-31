@@ -6739,7 +6739,8 @@ def test_idempotent_second_run_does_not_publish_or_create_bundle(
     monkeypatch.setattr(module, "prune_current_group", lambda *args, **kwargs: {})
     monkeypatch.setattr(module, "discover", lambda: [entry])
 
-    argv = ["--repo", "heimgewebe/demo"]
+    # This fake source manifest cannot establish authenticated event delivery.
+    argv = ["--repo", "heimgewebe/demo", "--no-authenticated-events"]
     assert module.main(argv) == 0
     state_file = roots["state"] / "heimgewebe__demo__main.state.json"
     first = json.loads(state_file.read_text(encoding="utf-8"))

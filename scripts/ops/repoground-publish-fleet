@@ -6297,9 +6297,18 @@ def _attempt_authenticated_fleet_handoff(
 
 
 
+def _disabled_authenticated_fleet_handoff() -> dict[str, object]:
+    return {
+        "status": "disabled_by_policy",
+        "reason": "automatic_authenticated_events_disabled",
+        "continuous_history_coverage": "not_claimed",
+        "historical_receipts": "preserved",
+    }
+
+
 def _unchanged_authenticated_event_with_prune(
     entry: RepoEntry, *, ref_segment: str, source_sha: str,
-    manifest_path: str | None,
+    manifest_path: str | None, authenticated_events_enabled: bool = True,
 ) -> dict[str, object]:
     """Reuse normal bounded revision-worktree cleanup after unchanged polls.
 
@@ -6307,7 +6316,16 @@ def _unchanged_authenticated_event_with_prune(
     reset the dirty source; prune only clean, idle and unleased *older*
     recovery worktrees through the already established publisher policy.
     This cleanup also runs when an authenticated event is blocked.
+    When disabled, no event-specific source worktree is needed or created.
     """
+    if not authenticated_events_enabled:
+        return {
+            "authenticated_events": _disabled_authenticated_fleet_handoff(),
+            "source_worktree_prune": {
+                "status": "not_needed", "reason": "event_handoff_disabled",
+            },
+            "prune_failed": False,
+        }
     current = ensure_source_worktree(entry, ref_segment, source_sha)
     event_result = _attempt_authenticated_fleet_handoff(
         entry, source_sha=source_sha,
@@ -6595,7 +6613,9 @@ def _pending_fleet_head_reconciliation() -> dict[str, object]:
     }
 
 
-def reconcile_fleet_heads(*, retention: int, limit: int) -> int:
+def reconcile_fleet_heads(
+    *, retention: int, limit: int, authenticated_events_enabled: bool = True,
+) -> int:
     """Level-triggered cheap merge probe; use the existing writer for effects.
 
     The probe owns the normal fleet lock only during its own Git/fingerprint
@@ -6638,6 +6658,8 @@ def reconcile_fleet_heads(*, retention: int, limit: int) -> int:
         "generator_commit": observed["generator_commit"],
     }, sort_keys=True))
     publisher_args = ["--if-changed", "--retention", str(retention)]
+    if not authenticated_events_enabled:
+        publisher_args.append("--no-authenticated-events")
     if limit:
         publisher_args.extend(["--limit", str(limit)])
     for key in pending:
@@ -6661,6 +6683,10 @@ def main(argv: list[str]) -> int:
         help=argparse.SUPPRESS,
     )
     parser.add_argument("--if-changed", action="store_true")
+    parser.add_argument(
+        "--no-authenticated-events", action="store_true",
+        help="Skip automatic Git/CI event handoff; preserve historical receipts",
+    )
     parser.add_argument("--reconcile-heads", action="store_true")
     parser.add_argument("--force", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--force-republish", action="store_true")
@@ -6748,7 +6774,10 @@ def main(argv: list[str]) -> int:
             or cleanup_requested or args.apply_prune
         ):
             parser.error("--reconcile-heads requires only retention/limit options")
-        return reconcile_fleet_heads(retention=args.retention, limit=args.limit)
+        return reconcile_fleet_heads(
+            retention=args.retention, limit=args.limit,
+            authenticated_events_enabled=not args.no_authenticated_events,
+        )
     if cleanup_requested:
         cleanup_lock = acquire_lock()
         if cleanup_lock is None:
@@ -6911,6 +6940,7 @@ def main(argv: list[str]) -> int:
             return 1
         changed = published = skipped = queued = retained = deferred = 0
         event_blocked = 0
+        event_partial = 0
         failed = len(missing_fleet_members)
         prune_failed = 0
         details: list[dict[str, object]] = [
@@ -6971,6 +7001,7 @@ def main(argv: list[str]) -> int:
                             entry, ref_segment=ref_segment,
                             source_sha=source_sha,
                             manifest_path=state.get("manifest_path"),
+                            authenticated_events_enabled=not args.no_authenticated_events,
                         )
                         event_result = outcome["authenticated_events"]
                         unchanged_detail["source_worktree_prune"] = outcome[
@@ -6983,6 +7014,8 @@ def main(argv: list[str]) -> int:
                     unchanged_detail["authenticated_events"] = event_result
                     if event_result["status"] == "blocked":
                         event_blocked += 1
+                    elif event_result["status"] == "partial":
+                        event_partial += 1
                     details.append(unchanged_detail)
                     continue
                 changed += 1
@@ -7036,13 +7069,19 @@ def main(argv: list[str]) -> int:
                 clear_active_publication_lease(active_lease)
                 state_seconds = round(time.perf_counter() - state_started, 3)
                 event_started = time.perf_counter()
-                event_result = _attempt_authenticated_fleet_handoff(
-                    entry, source_sha=source_sha, source_wt=source_wt,
-                    manifest_path=manifest_path,
+                event_result = (
+                    _disabled_authenticated_fleet_handoff()
+                    if args.no_authenticated_events
+                    else _attempt_authenticated_fleet_handoff(
+                        entry, source_sha=source_sha, source_wt=source_wt,
+                        manifest_path=manifest_path,
+                    )
                 )
                 event_seconds = round(time.perf_counter() - event_started, 3)
                 if event_result["status"] == "blocked":
                     event_blocked += 1
+                elif event_result["status"] == "partial":
+                    event_partial += 1
                 source_prune_started = time.perf_counter()
                 try:
                     source_prune_report = prune_obsolete_revision_source_worktrees(
@@ -7143,7 +7182,7 @@ def main(argv: list[str]) -> int:
                 details.append(failed_detail)
                 log(f"FAILED {entry.key}: {exc}")
         summary: dict[str, object] = {
-            "status": "warn" if failed or retained or deferred or event_blocked else "ok",
+            "status": "warn" if failed or retained or deferred or event_blocked or event_partial else "ok",
             "mode": mode,
             "count": total_count,
             "changed": changed,
@@ -7155,6 +7194,13 @@ def main(argv: list[str]) -> int:
             "failed": failed,
             "prune_failed": prune_failed,
             "authenticated_event_blocked": event_blocked,
+            "authenticated_event_partial": event_partial,
+            "authenticated_event_delivery": (
+                "disabled_by_policy" if args.no_authenticated_events
+                else "blocked" if event_blocked
+                else "partial" if event_partial
+                else "enabled_best_effort"
+            ),
             "retention": args.retention,
             "tool_sha": tool_sha,
             "generator_inputs_sha": generator_sha,
@@ -7188,7 +7234,9 @@ def main(argv: list[str]) -> int:
             )
         )
         print(json.dumps(summary, indent=2, sort_keys=True))
-        return 0 if failed == 0 else 1
+        # Activated event delivery is a separate required channel: a blocked
+        # outbox must not look like a successful systemd run.
+        return 0 if failed == 0 and event_blocked == 0 else 1
     finally:
         lock.close()
 

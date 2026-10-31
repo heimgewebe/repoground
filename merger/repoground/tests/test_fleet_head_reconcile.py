@@ -281,3 +281,38 @@ def test_monotonic_probe_timer_keeps_hourly_full_reconciliation() -> None:
         root.parents[2] / "scripts/ops/install_repoground_publish_fleet_runtime.sh"
     ).read_text()
     assert "systemctl --user stop repoground-publish-head-watch.service" in installer
+
+
+def test_changed_head_reconcile_forwards_disabled_event_policy(
+    observed_fleet, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module, entry, source, _generator = observed_fleet
+    source[0] = "f" * 40
+    monkeypatch.setattr(
+        module, "acquire_lock", lambda: SimpleNamespace(close=lambda: None),
+    )
+    monkeypatch.setattr(module, "log", lambda _message: None)
+    calls = []
+    monkeypatch.setattr(module, "main", lambda argv: calls.append(argv) or 0)
+    assert module.reconcile_fleet_heads(
+        retention=3, limit=8, authenticated_events_enabled=False,
+    ) == 0
+    assert calls == [[
+        "--if-changed", "--retention", "3", "--no-authenticated-events",
+        "--limit", "8", "--repo", entry.key,
+    ]]
+
+
+def test_head_watch_cli_accepts_disabled_event_policy(
+    observed_fleet, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module, _entry, _source, _generator = observed_fleet
+    seen = []
+    monkeypatch.setattr(
+        module, "reconcile_fleet_heads",
+        lambda **kwargs: seen.append(kwargs) or 0,
+    )
+    assert module.main(["--reconcile-heads", "--no-authenticated-events"]) == 0
+    assert seen == [{
+        "retention": 3, "limit": 0, "authenticated_events_enabled": False,
+    }]
