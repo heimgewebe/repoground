@@ -389,3 +389,129 @@ def test_authenticated_ci_batch_reuses_evidence_pack_only_within_one_handoff(
     assert read_event_receipt(
         outbox_root=outbox(m, entry), event_key=third["events"][-1]["event_key"],
     )["receipt"]["event"]["check_id"] == "123459"
+
+
+def single_repo_main_fixture(m, repo, head, bundle, tmp_path, monkeypatch, *, changed):
+    """Isolate both publisher branches while preserving a real bound outbox."""
+    entry = m.RepoEntry(
+        key="heimgewebe/demorepo", owner="heimgewebe", repo="demorepo",
+        path=repo, remote="git@github.com:heimgewebe/demorepo.git",
+    )
+    monkeypatch.setattr(m, "LOCK_PATH", tmp_path / "publisher.lock")
+    monkeypatch.setattr(m, "LOG_ROOT", tmp_path / "logs")
+    monkeypatch.setattr(m, "FLEET_LOG", tmp_path / "logs" / "publisher.log")
+    monkeypatch.setattr(m, "discover", lambda: [entry])
+    monkeypatch.setattr(
+        m, "prioritize_fleet_publication", lambda entries: (entries, {"status": "test"}),
+    )
+    monkeypatch.setattr(
+        m, "reconcile_prune_transactions",
+        lambda *, protected, apply: {"status": "ok"},
+    )
+    monkeypatch.setattr(m, "ensure_tool_worktree", lambda: ("e" * 40, "f" * 64))
+    monkeypatch.setattr(
+        m, "remote_head_for_entry", lambda _entry: ("origin/main", "main", head),
+    )
+    monkeypatch.setattr(
+        m, "publication_config",
+        lambda _entry: m.PublicationConfig(profile="full-max"),
+    )
+    monkeypatch.setattr(m, "publication_repository", lambda _entry: entry.key)
+    monkeypatch.setattr(m, "build_fingerprint", lambda **_kwargs: ("same", {}))
+    monkeypatch.setattr(m, "state_path", lambda *_args: tmp_path / "state.json")
+    monkeypatch.setattr(
+        m, "load_state",
+        lambda _path: None if changed else {
+            "fingerprint": "same", "source_commit": head,
+            "manifest_path": str(bundle),
+        },
+    )
+    monkeypatch.setattr(m, "write_state", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(m, "ensure_source_worktree", lambda *_args: repo)
+    monkeypatch.setattr(
+        m, "prune_obsolete_revision_source_worktrees",
+        lambda *_args: {"status": "ok", "removed": []},
+    )
+    monkeypatch.setattr(
+        m, "prune_current_group",
+        lambda *_args, **_kwargs: {"status": "ok", "removed": []},
+    )
+    monkeypatch.setattr(m, "clear_active_publication_lease", lambda *_args: None)
+    out_dir = tmp_path / "publication" / "generation"
+    monkeypatch.setattr(
+        m, "publish",
+        lambda *_args, **_kwargs: (
+            {"publication": {"published": [{"generatedAt": "test"}]}},
+            out_dir, None, str(bundle), "2026-10-31T18:00:00Z", repo,
+        ),
+    )
+    return entry
+
+
+@pytest.mark.parametrize("changed", [False, True])
+def test_policy_off_preserves_source_publication_and_existing_receipts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, changed: bool,
+) -> None:
+    m, event_entry, repo, _base, head, bundle, _values = checked_setup(
+        tmp_path, monkeypatch,
+    )
+    emit(m, event_entry, repo, head, bundle)
+    before = {p.name: p.read_bytes() for p in outbox(m, event_entry).glob("event-*.json")}
+    single_repo_main_fixture(m, repo, head, bundle, tmp_path, monkeypatch, changed=changed)
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("disabled event handoff reached authenticated GitHub API")
+
+    monkeypatch.setattr(m, "_github_event_api_get", forbidden)
+    monkeypatch.setattr(m, "_attempt_authenticated_fleet_handoff", forbidden)
+    monkeypatch.setattr(m, "ensure_source_worktree", forbidden)
+    assert m.main(["--repo", "heimgewebe/demorepo", "--no-authenticated-events"]) == 0
+    report = json.loads((tmp_path / "logs" / "fleet-last.json").read_text())
+    assert report["status"] == "ok"
+    assert report["published"] == int(changed)
+    assert report["skipped"] == int(not changed)
+    assert report["authenticated_event_blocked"] == 0
+    assert report["authenticated_event_delivery"] == "disabled_by_policy"
+    assert report["details"][0]["authenticated_events"] == {
+        "status": "disabled_by_policy",
+        "reason": "automatic_authenticated_events_disabled",
+        "continuous_history_coverage": "not_claimed",
+        "historical_receipts": "preserved",
+    }
+    assert {p.name: p.read_bytes() for p in outbox(m, event_entry).glob("event-*.json")} == before
+
+
+@pytest.mark.parametrize("changed", [False, True])
+def test_enabled_handoff_capacity_block_sets_service_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, changed: bool,
+) -> None:
+    m, _event_entry, repo, _base, head, bundle, _values = checked_setup(
+        tmp_path, monkeypatch,
+    )
+    single_repo_main_fixture(m, repo, head, bundle, tmp_path, monkeypatch, changed=changed)
+    monkeypatch.setattr(
+        m, "_attempt_authenticated_fleet_handoff",
+        lambda *_args, **_kwargs: {
+            "status": "blocked",
+            "reason": "event_outbox_capacity_requires_operator_retention",
+        },
+    )
+    assert m.main(["--repo", "heimgewebe/demorepo"]) == 1
+    report = json.loads((tmp_path / "logs" / "fleet-last.json").read_text())
+    assert report["failed"] == 0
+    assert report["authenticated_event_blocked"] == 1
+    assert report["authenticated_event_delivery"] == "blocked"
+    assert report["status"] == "warn"
+    assert report["details"][0]["authenticated_events"]["reason"] == (
+        "event_outbox_capacity_requires_operator_retention"
+    )
+
+
+def test_production_unit_policy_is_explicit_for_both_timers() -> None:
+    unit_root = PUBLISHER.parents[2] / "ops/systemd/repoground-fleet"
+    for unit in (
+        "repoground-publish-fleet-watch.service",
+        "repoground-publish-head-watch.service",
+    ):
+        contents = (unit_root / unit).read_text(encoding="utf-8")
+        assert "--no-authenticated-events" in contents

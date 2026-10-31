@@ -3,7 +3,7 @@ Description=Publish changed RepoGround fleet bundles with bounded retention
 
 [Service]
 Type=oneshot
-ExecStart=/home/alex/.local/bin/repoground-publish-fleet --if-changed --retention 3 --limit 8
+ExecStart=/home/alex/.local/bin/repoground-publish-fleet --if-changed --no-authenticated-events --retention 3 --limit 8
 Nice=10
 IOSchedulingClass=best-effort
 IOSchedulingPriority=6
