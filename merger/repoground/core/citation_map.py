@@ -11,6 +11,8 @@ import os
 import re
 import uuid
 import tempfile
+from array import array
+from bisect import bisect_left
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
@@ -433,21 +435,35 @@ def build_live_repo_address(
 # Byte-range verification
 # ---------------------------------------------------------------------------
 
+def _canonical_newline_offsets(canonical_md_bytes: bytes) -> array:
+    """Index newline byte positions once per chunk-index iteration."""
+    offsets = array("I" if len(canonical_md_bytes) < 2**32 else "Q")
+    pos = canonical_md_bytes.find(b"\n")
+    while pos != -1:
+        offsets.append(pos)
+        pos = canonical_md_bytes.find(b"\n", pos + 1)
+    return offsets
+
+
 def byte_range_to_line_range(
     canonical_md_bytes: bytes,
     start_byte: int,
     end_byte: int,
+    *,
+    newline_offsets: Optional[array] = None,
 ) -> Tuple[int, int]:
     """
     Compute 1-based global line numbers for [start_byte, end_byte) within canonical_md.
 
-    Counts b'\\n' bytes directly without decoding; does not allocate slices.
-    Assumes 0 <= start_byte < end_byte <= len(canonical_md_bytes).
-
-    start_line: line containing the byte at start_byte.
-    end_line:   line containing the last included byte (end_byte - 1).
-    A b'\\n' byte belongs to the line it terminates.
+    A b'\\n' byte belongs to the line it terminates; end_byte is exclusive.
+    For batch production, reuse one snapshot-local newline_offsets index.
+    Direct callers without an index retain the historical counting semantics.
     """
+    if newline_offsets is not None:
+        return (
+            1 + bisect_left(newline_offsets, start_byte),
+            1 + bisect_left(newline_offsets, end_byte - 1),
+        )
     start_line = 1 + canonical_md_bytes.count(b"\n", 0, start_byte)
     end_line = 1 + canonical_md_bytes.count(b"\n", 0, end_byte - 1)
     return start_line, end_line
@@ -606,11 +622,13 @@ def _build_chunk_base_row(
     canonical_md_sha256: str,
     snapshot: Dict[str, Any],
     lineno: int,
+    newline_offsets: Optional[array] = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     start_line, end_line = byte_range_to_line_range(
         canonical_md_bytes,
         resolved.start_byte,
         resolved.end_byte,
+        newline_offsets=newline_offsets,
     )
     try:
         citation_id = make_citation_id(
@@ -670,6 +688,8 @@ def iter_chunk_results(
         "canonical_md_sha256": canonical_md_sha256,
     }
 
+    # Build only if a valid chunk requires line lookup. Never retain globally.
+    newline_offsets: Optional[array] = None
     with chunk_index_path.open("r", encoding="utf-8") as f:
         for lineno, raw_line in enumerate(f, start=1):
             raw_line = raw_line.strip()
@@ -688,6 +708,8 @@ def iter_chunk_results(
                     canonical_md_rel,
                     lineno,
                 )
+                if newline_offsets is None:
+                    newline_offsets = _canonical_newline_offsets(canonical_md_bytes)
                 row, range_ref = _build_chunk_base_row(
                     resolved,
                     canonical_md_bytes,
@@ -695,6 +717,7 @@ def iter_chunk_results(
                     canonical_md_sha256,
                     snapshot,
                     lineno,
+                    newline_offsets=newline_offsets,
                 )
             except _ChunkLineError as e:
                 yield _ChunkResult(None, str(e), None)
