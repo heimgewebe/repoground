@@ -540,6 +540,18 @@ _IMPLEMENTATION_LOCATION_RE = re.compile(
 )
 
 
+# A negative symbol-index lookup is terminal only for explicit, single
+# definition-location questions. Broader explanation queries retain text search.
+_EXPLICIT_SYMBOL_LOCATION_RE = re.compile(
+    r"^\s*(?:where\s+is|wo\s+(?:ist|wird))\s+"
+    r"(?:(?:the|die|der)\s+)?"
+    r"(?:(?:function|class|method|funktion|klasse|methode)\s+)?"
+    r"(?:\x60[A-Za-z_][A-Za-z0-9_]*\x60|[A-Za-z_][A-Za-z0-9_]*)\s+"
+    r"(?:defined|definiert|implemented|implementiert)\s*\??\s*$",
+    re.IGNORECASE,
+)
+
+
 _CALLER_INTENT_PATTERNS = (
     re.compile(
         r"\b(?:who|(?:which|what)\s+(?:python\s+)?functions?)\s+"
@@ -1061,7 +1073,15 @@ def query_existing_index(
             verbose=verbose,
         )
         if routed is not None:
-            return routed
+            if (
+                routed.get("evidence_status") == "no_exact_symbol_match"
+                and not _EXPLICIT_SYMBOL_LOCATION_RE.fullmatch(query)
+            ):
+                # Heuristic symbol extraction is not enough to suppress normal
+                # explanation search on an empty definition lookup.
+                pass
+            else:
+                return routed
 
     pack = build_ask_context_pack(
         bundle_manifest,

@@ -648,3 +648,55 @@ def test_exact_symbol_miss_does_not_fall_back_to_fuzzy_text(monkeypatch, hits):
         caveat["kind"] == "no_exact_symbol_match"
         for caveat in result["answer_caveats"]
     )
+
+def test_explanatory_function_question_keeps_text_search_on_symbol_miss(monkeypatch):
+    query = "What is the function of the parity guard?"
+    assert not mcp_tools._EXPLICIT_SYMBOL_LOCATION_RE.fullmatch(query)
+    assert mcp_tools._EXPLICIT_SYMBOL_LOCATION_RE.fullmatch(
+        "Where is the function parity_guard defined?"
+    )
+    monkeypatch.setattr(
+        mcp_tools,
+        "find_symbol",
+        lambda **_arguments: {
+            "status": "available",
+            "result": {
+                "status": "available",
+                "availability": {"status": "pass"},
+                "freshness": {"status": "not_comparable"},
+                "hits": [],
+            },
+        },
+    )
+    monkeypatch.setattr(
+        ask_context,
+        "build_ask_context_pack",
+        lambda *_args, **_kwargs: {
+            "retrieval": {
+                "raw_query": query,
+                "fts_query": "parity guard",
+                "strategy": "or_relaxed",
+                "match_count": 1,
+            },
+            "retrieval_hits": [{"path": "src/parity.py"}],
+            "resolved_ranges": [],
+            "retrieval_infrastructure": {
+                "status": "available",
+                "index_resolved": True,
+            },
+            "budget": {"max_context_tokens": 500},
+            "availability": {"status": "available", "caveats": []},
+            "freshness": {"status": "fresh", "caveats": []},
+            "answer_scaffold": {"caveats_to_surface": []},
+        },
+    )
+
+    result = mcp_tools.query_existing_index(
+        bundle_manifest="demo.bundle.manifest.json",
+        query=query,
+        max_context_tokens=500,
+    )
+
+    assert result["route"] == "text_retrieval"
+    assert result["retrieval"]["match_count"] == 1
+    assert "evidence_status" not in result
