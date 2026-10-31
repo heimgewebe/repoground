@@ -17,6 +17,8 @@ import re
 import unicodedata
 import concurrent.futures
 import functools
+from array import array
+from bisect import bisect_left
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Any, Iterator, NamedTuple, Set
 from dataclasses import dataclass, asdict
@@ -564,13 +566,26 @@ def resolve_canonical_md(md_parts: List[Path]) -> Optional[Path]:  # lenskit:req
     return md_parts[0] if md_parts else None
 
 
-def _line_for_byte(data: bytes, byte_offset: int) -> int:
-    """Return the 1-based line number of the byte at byte_offset in data.
+def _canonical_newline_offsets(data: bytes) -> array:
+    """Index newline byte positions once for this canonical Markdown artifact."""
+    offsets = array("I" if len(data) < 2**32 else "Q")
+    position = data.find(b"\n")
+    while position != -1:
+        offsets.append(position)
+        position = data.find(b"\n", position + 1)
+    return offsets
 
-    Counts the number of newlines in data before byte_offset and adds 1.
-    For an exclusive end_byte, pass max(start_byte, end_byte - 1) to get
-    the line of the last byte in the range without underflowing empty chunks.
+
+def _line_for_byte(
+    data: bytes, byte_offset: int, *, newline_offsets: Optional[array] = None,
+) -> int:
+    """Return the 1-based line number, with optional snapshot-local indexing.
+
+    A newline at byte_offset belongs to the current line, not the next.
+    Negative offsets retain the historical bytes.count behavior.
     """
+    if newline_offsets is not None and byte_offset >= 0:
+        return bisect_left(newline_offsets, byte_offset) + 1
     return data.count(b"\n", 0, byte_offset) + 1
 
 def _validate_agent_json_dict(d: Dict[str, Any], allow_empty_primary: bool = False) -> None:
@@ -6166,6 +6181,7 @@ def _attach_canonical_range(
     md_file_name: str,
     md_start_byte: int,
     canonical_md_bytes: Optional[bytes],
+    canonical_newline_offsets: Optional[array] = None,
 ) -> None:
     """Point the chunk at its canonical Markdown byte range.
 
@@ -6181,8 +6197,13 @@ def _attach_canonical_range(
         # can_sha256 is the exact range hash for canonical_md_bytes[abs_start:abs_end].
         can_chunk = canonical_md_bytes[abs_start:abs_end]
         can_sha256 = hashlib.sha256(can_chunk).hexdigest()
-        can_start_line = _line_for_byte(canonical_md_bytes, abs_start)
-        can_end_line = _line_for_byte(canonical_md_bytes, max(abs_start, abs_end - 1))
+        can_start_line = _line_for_byte(
+            canonical_md_bytes, abs_start, newline_offsets=canonical_newline_offsets,
+        )
+        can_end_line = _line_for_byte(
+            canonical_md_bytes, max(abs_start, abs_end - 1),
+            newline_offsets=canonical_newline_offsets,
+        )
     else:
         # Fall back to source-local values when canonical bytes unavailable.
         can_sha256 = d["sha256"]
@@ -6260,6 +6281,7 @@ def _file_chunk_records(
     md_offsets: Dict[str, Tuple[str, int]],
     canonical_md_name: Optional[str],
     canonical_md_bytes: Optional[bytes],
+    canonical_newline_offsets: Optional[array],
 ) -> List[Dict[str, Any]]:
     """Chunk one included text file into fully annotated chunk rows."""
     # Read content for chunking using the same limit as report to ensure coherence
@@ -6305,6 +6327,7 @@ def _file_chunk_records(
                 md_file_name=offset[0],
                 md_start_byte=offset[1],
                 canonical_md_bytes=canonical_md_bytes,
+                canonical_newline_offsets=canonical_newline_offsets,
             )
 
         # Retrieval-only and noncanonical split chunks must carry
@@ -6339,6 +6362,10 @@ def generate_chunk_artifacts(
     can_md = resolve_canonical_md(md_paths) if md_paths else None
     canonical_md_name = can_md.name if can_md else None
     canonical_md_bytes = can_md.read_bytes() if (can_md and can_md.exists()) else None
+    canonical_newline_offsets = (
+        _canonical_newline_offsets(canonical_md_bytes)
+        if canonical_md_bytes is not None else None
+    )
 
     all_chunks: List[Dict[str, Any]] = []
 
@@ -6360,6 +6387,7 @@ def generate_chunk_artifacts(
                 md_offsets=md_offsets,
                 canonical_md_name=canonical_md_name,
                 canonical_md_bytes=canonical_md_bytes,
+                canonical_newline_offsets=canonical_newline_offsets,
             )
         )
 
