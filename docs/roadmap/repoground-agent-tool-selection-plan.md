@@ -1,6 +1,6 @@
 # RepoGround – Agentenwerkzeugwahl nach tatsächlichem Nutzwert
 
-**Stand:** 29. Oktober 2026 · **Priorität:** P1, gezielter Anschluss an die produktive Graph-Integration · **Status:** Umsetzungsplan, nicht implementiert.
+**Stand:** 30. Oktober 2026 · **Priorität:** P1, gezielter Anschluss an die produktive Graph-Integration · **Status:** R1-Quellintegration in Grabowski gemergt; R1-Clientabnahme und R2–R4 noch offen.
 
 **Ziel:** Coding-Agenten sollen RepoGround **dann** verwenden, wenn seine revisionsgebundenen Beziehungen gegenüber direkter Git-/Dateisuche zusätzliche, überprüfbare Information liefern. Bei einfachen Fragen bleibt der direkte Weg Standard. Wir optimieren die **gesamte Aufgabe**, nicht die Anzahl der Graphabfragen.
 
@@ -49,6 +49,8 @@ Die Auswahl geschieht **beim aufrufenden Agenten**, nicht durch einen neuen auto
 **Umsetzung:** In der bestehenden Grabowski-Aufgaben-/Agentenführung die obige Git-vs.-RepoGround-Auswahl als **kleine optionale Anweisung** integrieren; vorher die tatsächlich verwendete Konfigurations-/Prompt-Quelle prüfen. Keine zweite Routerbibliothek, kein neuer Dienst, keine verpflichtende MCP-Discovery für jede kleine Frage. Bestehende RepoGround-Frontdoor und Taskprofile wiederverwenden. Änderungen an `heimgewebe/grabowski` benötigen eine **eigene**, dort autorisierte Writer-Lane und einen eigenen PR.
 
 **Fertig, wenn:** Ein bekannter Datei-/Zeilenfall ohne RepoGround-Toolaufruf gelöst wird; bei einer unbekannten Rückwärtsbeziehung ein echter passender MCP-Aufruf mit korrekter Revision erfolgt; fehlendes oder altes Bundle einen funktionierenden Git-Fallback auslöst. Nachweis: tatsächliche Tool-Transcripts, keine Agenten-Selbstauskunft.
+
+**Implementierungsabgleich (30.10.2026):** [Grabowski PR #1678](https://github.com/heimgewebe/grabowski/pull/1678) wurde auf `main` gemergt (`4b322857c628af439b4d780da97a44f6d8fe9e57`). Die optionale Git-first-/RepoGround-Kandidat-Regel `selective-repoground-retrieval` liegt im tatsächlich verwendeten `src/grabowski_mcp.py:AGENT_INSTRUCTION_RULES`-Quellvertrag. Das belegt die **Quellintegration**, nicht automatisch die produktive Clientinstruktionsübernahme oder die drei oben beschriebenen echten Tool-/Fallback-Proben. R1 bleibt bis zum revisionsgebundenen Consumer-Ende-zu-Ende-Nachweis **teilweise abgenommen**; R2–R4 sind dadurch nicht erledigt.
 
 ### R2 – Unnötige Agenten-Toolschleifen beseitigen (P1, erst nach R1-Trace)
 
