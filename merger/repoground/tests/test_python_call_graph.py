@@ -2723,3 +2723,26 @@ def test_unavailable_process_pool_falls_back_to_complete_serial_build(
     assert report["parallel_files"] == 0
     assert report["serial_files"] == 12
     assert report["parallel_fallback_reason"] == "ProcessPoolExecutor unavailable"
+
+
+def test_call_graph_discovers_extensionless_python_entrypoint(tmp_path):
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "manage").write_text(
+        "#!/usr/bin/env python3\ndef run():\n    return 1\nrun()\n",
+        encoding="utf-8",
+    )
+    (scripts / "shell").write_text(
+        "#!/usr/bin/env bash\nrun()\n", encoding="utf-8"
+    )
+    (scripts / "notes").write_text("run()\n", encoding="utf-8")
+
+    calls, skipped, errors = extract_python_calls(tmp_path, max_workers=1)
+
+    assert skipped == 0
+    assert errors == []
+    assert len(calls) == 1
+    assert calls[0]["path"] == "scripts/manage"
+    assert calls[0]["callee_expression"] == "run"
+    assert calls[0]["resolution_status"] == "resolved"
+    assert calls[0]["resolved_target_ids"] == ["py:scripts:manage:function:run"]

@@ -113,3 +113,28 @@ def test_python_symbol_index_document_matches_schema(tmp_path):
     assert doc["language"] == "python"
     assert doc["symbols"][0]["qualified_name"] == "main"
     assert "runtime_behavior" in doc["does_not_establish"]
+
+
+def test_python_symbol_index_discovers_extensionless_shebang_scripts(tmp_path):
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "manage").write_text(
+        "#!/usr/bin/env -S python3 -I\ndef main():\n    return 1\n", encoding="utf-8"
+    )
+    (scripts / "agent").write_text(
+        "#!/usr/bin/python3.12\nasync def entry():\n    return 2\n", encoding="utf-8"
+    )
+    (scripts / "shell").write_text(
+        "#!/usr/bin/env bash\ndef not_python():\n    pass\n", encoding="utf-8"
+    )
+    (scripts / "notes").write_text("def not_a_script():\n    pass\n", encoding="utf-8")
+
+    symbols, skipped, errors = extract_python_symbols(tmp_path)
+
+    assert skipped == 0
+    assert errors == []
+    assert [(item["path"], item["qualified_name"]) for item in symbols] == [
+        ("scripts/agent", "entry"),
+        ("scripts/manage", "main"),
+    ]
+    assert symbols[0]["range_ref"] == "file:scripts/agent#L2-L3"

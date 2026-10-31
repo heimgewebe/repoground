@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import os
+import re
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -114,6 +115,34 @@ def _decorator_names(decorators: list[ast.expr]) -> list[str]:
     return sorted(set(names))
 
 
+def _is_python_source_file(path: Path) -> bool:
+    """Include .py and extensionless scripts with an explicit Python shebang."""
+    if path.name.endswith(".py"):
+        return True
+    if path.suffix or path.is_symlink():
+        return False
+    try:
+        with path.open("rb") as source:
+            first_line = source.readline(256)
+    except OSError:
+        return False
+    if not first_line.startswith(b"#!"):
+        return False
+    words = first_line[2:].split()
+    if not words:
+        return False
+    interpreter = words[0].rsplit(b"/", 1)[-1]
+    if interpreter == b"env":
+        words = words[1:]
+        if words and words[0] == b"-S":
+            words = words[1:]
+        if not words:
+            return False
+        interpreter = words[0].rsplit(b"/", 1)[-1]
+    pattern = rb"(?:python|pypy)(?:[0-9]+(?:\.[0-9]+)?)?"
+    return re.fullmatch(pattern, interpreter) is not None
+
+
 def extract_python_symbols(repo_root: Path) -> tuple[list[dict[str, Any]], int, list[str]]:
     symbols: list[dict[str, Any]] = []
     skipped_files_count = 0
@@ -125,9 +154,9 @@ def extract_python_symbols(repo_root: Path) -> tuple[list[dict[str, Any]], int, 
     for root, dirs, files in os.walk(repo_root, topdown=True):
         dirs[:] = sorted(d for d in dirs if d not in EXCLUDED_DIRS)
         for file_name in sorted(files):
-            if not file_name.endswith(".py"):
-                continue
             path = Path(root) / file_name
+            if not _is_python_source_file(path):
+                continue
             rel_path = path.relative_to(repo_root).as_posix()
             try:
                 tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
