@@ -593,3 +593,58 @@ def test_snapshot_status_surfaces_unhealthy_exact_manifest(tmp_path):
     assert result["health"]["health_status"] == "invalid"
     assert any("expected 'pass'" in reason for reason in result["health"]["reasons"])
     assert result["snapshot"]["health_status"] == "invalid"
+
+
+@pytest.mark.parametrize(
+    "hits",
+    [
+        [],
+        [
+            {
+                "name": "unrelated_frobnicate_interstellar_penguin_engine",
+                "qualified_name": "unrelated_frobnicate_interstellar_penguin_engine",
+                "path": "src/unrelated.py",
+            }
+        ],
+    ],
+)
+def test_exact_symbol_miss_does_not_fall_back_to_fuzzy_text(monkeypatch, hits):
+    query = "Where is frobnicate_interstellar_penguin_engine implemented?"
+    monkeypatch.setattr(
+        mcp_tools,
+        "find_symbol",
+        lambda **_arguments: {
+            "status": "available",
+            "result": {
+                "status": "available",
+                "availability": {"status": "pass"},
+                "freshness": {"status": "not_comparable"},
+                "hits": hits,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        ask_context,
+        "build_ask_context_pack",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("fuzzy text fallback must not fabricate symbol evidence")
+        ),
+    )
+
+    result = mcp_tools.query_existing_index(
+        bundle_manifest="demo.bundle.manifest.json",
+        query=query,
+        k=5,
+    )
+
+    assert result["status"] == "available"
+    assert result["route"] == "symbol_definition"
+    assert result["evidence_status"] == "no_exact_symbol_match"
+    assert result["retrieval"]["match_count"] == 0
+    assert result["navigation_hits"] == []
+    assert result["resolved_ranges"] == []
+    assert result["budget"]["context_bytes_used"] == 0
+    assert any(
+        caveat["kind"] == "no_exact_symbol_match"
+        for caveat in result["answer_caveats"]
+    )

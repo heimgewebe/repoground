@@ -722,12 +722,17 @@ def _symbol_query_result(
         k=max(k, 10),
         verbose=verbose,
     )
+    inner = symbol_result.get("result") if isinstance(symbol_result, dict) else None
+    if (
+        not isinstance(inner, dict)
+        or symbol_result.get("status") != "available"
+        or inner.get("status") != "available"
+    ):
+        # Unavailable or invalid symbol indexes may use the existing text path.
+        return None
     navigation_hits, exact_hit_count = _compact_symbol_hits(
         symbol_result, name=symbol_name, k=k
     )
-    if not navigation_hits:
-        return None
-    inner = symbol_result.get("result") if isinstance(symbol_result, dict) else {}
     from merger.repoground.core.ask_context import (
         _availability_block,
         _context_budget,
@@ -768,27 +773,32 @@ def _symbol_query_result(
         "omissions": [],
         "truncated": exact_hit_count > len(navigation_hits),
     }
-    manifest_path = resolve_manifest_path(bundle_manifest)
-    language_response = _filter_language_structure_for_exact_symbol(
-        load_language_structure_artifact(manifest_path), symbol_name=symbol_name
-    )
-    language_context = _language_structure_for_query(
-        manifest_path,
-        query=symbol_name,
-        k=k,
-        max_bytes=total_context_bytes,
-        preloaded=language_response,
-    )
     language_caveats: list[dict[str, Any]] = []
-    structured_evidence = _merge_language_context(
-        state, language_caveats, language_context
-    )
+    structured_evidence = None
+    if navigation_hits:
+        manifest_path = resolve_manifest_path(bundle_manifest)
+        language_response = _filter_language_structure_for_exact_symbol(
+            load_language_structure_artifact(manifest_path), symbol_name=symbol_name
+        )
+        language_context = _language_structure_for_query(
+            manifest_path,
+            query=symbol_name,
+            k=k,
+            max_bytes=total_context_bytes,
+            preloaded=language_response,
+        )
+        structured_evidence = _merge_language_context(
+            state, language_caveats, language_context
+        )
     result = {
         "kind": READ_ONLY_KIND,
         "version": READ_ONLY_VERSION,
         "tool": "query_existing_index",
         "status": "available",
         "route": "symbol_definition",
+        "evidence_status": (
+            "exact_symbol_match" if navigation_hits else "no_exact_symbol_match"
+        ),
         "intent": {"kind": "symbol_definition", "symbol": symbol_name},
         "retrieval": {
             "raw_query": query,
@@ -827,6 +837,20 @@ def _symbol_query_result(
                     "not source semantics or runtime behavior."
                 ),
             },
+            *(
+                [
+                    {
+                        "kind": "no_exact_symbol_match",
+                        "detail": (
+                            "No matching definition in the available Python symbol index; "
+                            "this does not establish repository absence, other-language "
+                            "coverage or runtime behavior."
+                        ),
+                    }
+                ]
+                if not navigation_hits
+                else []
+            ),
             *language_caveats,
         ],
         "result_semantics": "repobrief.query_existing_index.agent_frontdoor.v1",
