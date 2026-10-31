@@ -163,3 +163,21 @@ def test_python_shebang_scanner_skips_fifo_and_file_symlink(tmp_path):
     assert [(item["path"], item["qualified_name"]) for item in symbols] == [
         ("runme", "runme")
     ]
+
+def test_python_shebang_probe_without_optional_unix_flags(tmp_path, monkeypatch):
+    import os
+
+    monkeypatch.delattr(os, "O_NONBLOCK", raising=False)
+    monkeypatch.delattr(os, "O_NOFOLLOW", raising=False)
+    (tmp_path / "README").write_text("some text\n", encoding="utf-8")
+    (tmp_path / "runme").write_text(
+        "#!/usr/bin/env python3\ndef launch():\n    return 42\n",
+        encoding="utf-8",
+    )
+
+    symbols, skipped, errors = extract_python_symbols(tmp_path)
+
+    assert skipped == 0 and errors == []
+    assert [(item["path"], item["qualified_name"]) for item in symbols] == [
+        ("runme", "launch")
+    ]

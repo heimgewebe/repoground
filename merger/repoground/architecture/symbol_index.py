@@ -124,7 +124,7 @@ def _is_python_source_file(path: Path) -> bool:
         return False
     try:
         # A FIFO in os.walk(files) must never block the snapshot producer.
-        flags = os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0)
+        flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
         with os.fdopen(os.open(path, flags), "rb") as source:
             if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
                 return False
