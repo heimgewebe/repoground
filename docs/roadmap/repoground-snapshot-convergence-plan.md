@@ -1,8 +1,18 @@
 # RepoGround: Merge-to-Snapshot-Konvergenz
 
-**Stand:** 30. Oktober 2026 · **Priorität:** P1 (Betriebsnutzwert vor weiterem Retrieval-/Graph-Ausbau)
-**Status:** ausführbarer Plan, **keine** Implementierung oder Produktivabnahme.
+**Belegstand:** 31. Oktober 2026 · **Priorität:** P1 (Betriebsnutzwert vor weiterem Retrieval-/Graph-Ausbau)
+**Status:** **automatische GitHub-HEAD-Konvergenz implementiert und produktiv Ende-zu-Ende nachgewiesen**; die differenzierte Laufzeitmessung größerer Publikationen ist integriert, ihr erster produktiver `phase_seconds`-Beleg steht noch aus.
 **Verantwortung:** Grabowski ist alleiniger Writer/Operator. Änderungen an RepoGround, Grabowski und ggf. Heim-PC erhalten jeweils einen klar begrenzten, autorisierten Scope. Keine parallelen Writer für überlappende Pfade.
+
+## Produktiver Ist-Stand und Grenzen (31. Oktober 2026)
+
+Dieser Abschnitt aktualisiert den historischen Entwurf darunter. Die Abschnitte 1–6 enthalten die **Ausgangslage und ursprünglichen Akzeptanzziele vom 30.10.**, keine aktuelle Behauptung fehlender Implementierung.
+
+- **Integriert:** PR [#1373](https://github.com/heimgewebe/repoground/pull/1373) beseitigt redundante Berechnung identischer CI-Evidenz. PR [#1374](https://github.com/heimgewebe/repoground/pull/1374) ergänzt einen günstigen, level-triggered GitHub-HEAD-Abgleich und aktiviert den vorhandenen Publisher selektiv, ohne einen zweiten Generator. Die bereits stündliche vollständige Ereignis-/Retention-Wartung bleibt erhalten.
+- **Produktivnachweis:** heim-pc hat neue GitHub-`main`-Commits automatisch als geändert erkannt, veröffentlichte revisionsgebundene Bundles und lieferte anschließend via Grabowskis echtem `repoground_preflight`, `repoground_query` und `repoground_range_get` `fresh_exact`, Dateien, Zeilen und auflösbare Zitate. Einzelbelege und SHA-Bindungen stehen in den Produktivkommentaren von [PR #1374](https://github.com/heimgewebe/repoground/pull/1374).
+- **Nachmessung:** 169 abgeschlossene HEAD-Watch-Läufe: Median **22,04 s**, P95 **23,43 s** Wall-Clock; fünf längere Läufe. Diese Verteilung ist **kein** Merge→Agenten-P95. Am neuen Generator-Release `1621e8864883f37980057e7b060f80bb18ceb67c` meldete der automatische Timer am 31.10. um 07:36 CET **13/13 unverändert, 0 Neubauten, 22,545 s Wall, 2,388 s CPU** und `SUCCESS`. Ein anschließender Agentenreadback lieferte `fresh_exact` für denselben `main`-Commit mit auflösbarem Quellenbereich.
+- **Neue Messbarkeit:** [PR #1375](https://github.com/heimgewebe/repoground/pull/1375), regulär durch Captain gemergt, fügt fünf additive `phase_seconds`-Felder in das bestehende `published`-Receipt ein: `refresh`, `publication_state`, `authenticated_events`, `source_worktree_prune`, `retention_prune`. Das immutable Release `1621e886…` wurde Git- und archivgebunden geprüft und atomar aktiviert; der vorherige funktionierende Generator `1e8b817a…` bleibt als Rückfall erhalten.
+- **Noch nicht belegt:** statistischer P95 für Merge→Agentennutzbarkeit, genaue Verteilung der bis zu etwa sechsminütigen größeren Publisherläufe auf die fünf neuen Phasen, Reboot-/Abbruchabdeckung aller denkbaren Fälle und ein gepaarter vollständiger LLM-Agentenbenchmark. Diese Lücken rechtfertigen weder die Behauptung, die HEAD-Konvergenz fehle, noch ungezielte zusätzliche Scheduler.
 
 **Ziel:** Nach einer erfolgreichen Änderung des Default-Branches (derzeit `main`) erscheint ohne manuelles Eingreifen ein gesunder, revisionsgebundener RepoGround-Snapshot. Ein Agent findet danach aktuelle, prüfbare Quellenbelege; während des Aufbaus kann er mit klar gekennzeichneter Git-Live-Recherche weiterarbeiten.
 
@@ -19,7 +29,7 @@ Am 30.10.2026 wurde auf `heim-pc` festgestellt:
 - Reale Agentenabfragen lieferten zitierfähige Dateien/Zeilen; einige wurden während neuer Merges mit `stale_context_refused` abgelehnt. Dieses Fail-Closed-Verhalten verhindert falsche Aktualitätsbehauptungen, darf aber keinen unnötigen Arbeitsstillstand verursachen.
 - Historische PR-/Fehlerzustände (z. B. Partial Clones, große SQLite-Artefakte, absichtlich syntaktisch ungültige Parser-Fixtures) sind **keine** aktuellen Blocker ohne frischen Reproduktionsbeleg. Bestehende PR-Lanes werden nicht übernommen.
 
-**Unbekannt:** Zeitanteil der einzelnen No-op-Phasen, tatsächlicher Post-Merge-Abdeckungsgrad außerhalb von Grabowski, Triggerverlust über längere Lastphasen, veröffentlichte P95-Latenzen. Vor Codeänderungen genau diese Punkte gezielt messen.
+**Zum ursprünglichen Planzeitpunkt unbekannt:** Zeitanteil der einzelnen No-op-Phasen, Post-Merge-Abdeckungsgrad außerhalb von Grabowski, Triggerverlust über längere Lastphasen und veröffentlichte P95-Latenzen. Für den später verifizierten Stand gelten die Belege und offenen Grenzen im vorangestellten Produktivabschnitt.
 
 ## 2. Minimale Architektur und Wahrheiten
 
