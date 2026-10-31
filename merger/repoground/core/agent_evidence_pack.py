@@ -6,6 +6,8 @@ historical, never assertions about a changed target revision.
 from __future__ import annotations
 
 from collections import Counter
+from contextlib import contextmanager
+from contextvars import ContextVar
 import hashlib
 import json
 import os
@@ -58,6 +60,22 @@ NOT_ESTABLISHED = [
     "cross_repository_impact_completeness",
     "merge_authorization",
 ]
+
+# Only the authenticated publisher's bounded event batch enables this cache.
+# No global or persistent report reuse: each new batch revalidates the source.
+_BATCH_REVISION_IMPACTS: ContextVar[
+    dict[tuple[str, str, str], dict[str, Any]] | None
+] = ContextVar("repoground_batch_revision_impacts", default=None)
+
+
+@contextmanager
+def reuse_revision_impact_reports():
+    """Share an immutable Git-revision graph, not use-case-specific evidence."""
+    token = _BATCH_REVISION_IMPACTS.set({})
+    try:
+        yield
+    finally:
+        _BATCH_REVISION_IMPACTS.reset(token)
 
 
 def _json_bytes(value: Any) -> bytes:
@@ -484,9 +502,28 @@ def _structural_report(
     if problem or checked_out is None or checked_out.strip() != target:
         return None, {"reason": "structural_target_not_checked_out", "evidence_level": "S0"}
     try:
-        return compile_revision_impact(
+        batch = _BATCH_REVISION_IMPACTS.get()
+        key = (str(root), base, target)
+        if batch is not None and key in batch:
+            # A prior clean checkout is not authority for current source bytes.
+            # Repeat the real compiler's Git, index and ignored-source guards;
+            # only the costly symbol/relation graph may be reused.
+            from merger.repoground.core import revision_graph_impact as graph
+            cached = batch[key]
+            identity = graph._identity(root, base, target)
+            graph._source_inventory_safe(root)
+            if identity != cached["source_provenance"]:
+                raise ValueError("cached_revision_source_identity_changed")
+            graph._source_inventory_safe(root)
+            if graph._identity(root, base, target) != identity:
+                raise ValueError("cached_revision_source_changed_during_check")
+            return cached, None
+        report = compile_revision_impact(
             repo_root=root, base_sha=base, head_sha=target, max_items=200,
-        ), None
+        )
+        if batch is not None and isinstance(report.get("source_provenance"), dict):
+            batch[key] = report
+        return report, None
     except (OSError, UnicodeError, ValueError) as exc:
         return None, {"reason": "structural_revision_unavailable", "detail": str(exc)[:240],
                       "evidence_level": "S0"}
