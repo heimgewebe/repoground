@@ -17,7 +17,9 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
-from merger.repoground.core.agent_evidence_pack import build_evidence_pack
+from merger.repoground.core.agent_evidence_pack import (
+    build_evidence_pack, reuse_revision_impact_reports,
+)
 
 KIND = "repoground.publisher_event_handoff"
 VERSION = 1
@@ -43,7 +45,8 @@ def reuse_event_evidence_packs():
     """
     token = _BATCH_EVIDENCE_PACKS.set({})
     try:
-        yield
+        with reuse_revision_impact_reports():
+            yield
     finally:
         _BATCH_EVIDENCE_PACKS.reset(token)
 
