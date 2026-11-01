@@ -1,0 +1,3473 @@
+{
+  "blocks": [
+    {
+      "case_id": "boundary-invented-symbol",
+      "complete": false,
+      "reasons": [
+        "git_only",
+        "repoground_mandatory",
+        "repoground_selective"
+      ],
+      "repetition": 1
+    },
+    {
+      "case_id": "boundary-invented-symbol",
+      "complete": false,
+      "reasons": [
+        "git_only",
+        "repoground_mandatory",
+        "repoground_selective"
+      ],
+      "repetition": 2
+    },
+    {
+      "case_id": "impact-shebang-tests",
+      "complete": false,
+      "reasons": [
+        "git_only",
+        "repoground_mandatory",
+        "repoground_selective"
+      ],
+      "repetition": 1
+    },
+    {
+      "case_id": "impact-shebang-tests",
+      "complete": false,
+      "reasons": [
+        "git_only",
+        "repoground_mandatory",
+        "repoground_selective"
+      ],
+      "repetition": 2
+    },
+    {
+      "case_id": "impact-symbol-miss-tests",
+      "complete": false,
+      "reasons": [
+        "git_only",
+        "repoground_mandatory",
+        "repoground_selective"
+      ],
+      "repetition": 1
+    },
+    {
+      "case_id": "impact-symbol-miss-tests",
+      "complete": false,
+      "reasons": [
+        "git_only",
+        "repoground_mandatory",
+        "repoground_selective"
+      ],
+      "repetition": 2
+    },
+    {
+      "case_id": "known-fleet-entrypoint",
+      "complete": false,
+      "reasons": [
+        "git_only",
+        "repoground_mandatory",
+        "repoground_selective"
+      ],
+      "repetition": 1
+    },
+    {
+      "case_id": "known-fleet-entrypoint",
+      "complete": false,
+      "reasons": [
+        "git_only",
+        "repoground_mandatory",
+        "repoground_selective"
+      ],
+      "repetition": 2
+    },
+    {
+      "case_id": "reverse-grabowski-agent",
+      "complete": false,
+      "reasons": [
+        "git_only",
+        "repoground_mandatory",
+        "repoground_selective"
+      ],
+      "repetition": 1
+    },
+    {
+      "case_id": "reverse-grabowski-agent",
+      "complete": false,
+      "reasons": [
+        "git_only",
+        "repoground_mandatory",
+        "repoground_selective"
+      ],
+      "repetition": 2
+    },
+    {
+      "case_id": "reverse-python-shebang",
+      "complete": false,
+      "reasons": [
+        "git_only",
+        "repoground_mandatory",
+        "repoground_selective"
+      ],
+      "repetition": 1
+    },
+    {
+      "case_id": "reverse-python-shebang",
+      "complete": false,
+      "reasons": [
+        "git_only",
+        "repoground_mandatory",
+        "repoground_selective"
+      ],
+      "repetition": 2
+    }
+  ],
+  "by_class": {
+    "boundary": {
+      "complete_tasks": 0,
+      "condition_summaries": {
+        "git_only": {
+          "human_correct": 0,
+          "median_duration_ms": null,
+          "valid_success": 0
+        },
+        "repoground_mandatory": {
+          "human_correct": 0,
+          "median_duration_ms": 32679,
+          "valid_success": 1
+        },
+        "repoground_selective": {
+          "human_correct": 0,
+          "median_duration_ms": 18727.5,
+          "valid_success": 2
+        }
+      },
+      "paired_duration_ms": {
+        "mandatory_vs_git": null,
+        "selective_vs_git": null,
+        "selective_vs_mandatory": null
+      },
+      "planned_trials": 6,
+      "valid_success_trials": 3
+    },
+    "impact_tests": {
+      "complete_tasks": 0,
+      "condition_summaries": {
+        "git_only": {
+          "human_correct": 0,
+          "median_duration_ms": 20151.5,
+          "valid_success": 4
+        },
+        "repoground_mandatory": {
+          "human_correct": 0,
+          "median_duration_ms": 33455.0,
+          "valid_success": 4
+        },
+        "repoground_selective": {
+          "human_correct": 0,
+          "median_duration_ms": 29490.0,
+          "valid_success": 4
+        }
+      },
+      "paired_duration_ms": {
+        "mandatory_vs_git": null,
+        "selective_vs_git": null,
+        "selective_vs_mandatory": null
+      },
+      "planned_trials": 12,
+      "valid_success_trials": 12
+    },
+    "known_target": {
+      "complete_tasks": 0,
+      "condition_summaries": {
+        "git_only": {
+          "human_correct": 0,
+          "median_duration_ms": 17272.0,
+          "valid_success": 2
+        },
+        "repoground_mandatory": {
+          "human_correct": 0,
+          "median_duration_ms": 27064.0,
+          "valid_success": 2
+        },
+        "repoground_selective": {
+          "human_correct": 0,
+          "median_duration_ms": 17657.5,
+          "valid_success": 2
+        }
+      },
+      "paired_duration_ms": {
+        "mandatory_vs_git": null,
+        "selective_vs_git": null,
+        "selective_vs_mandatory": null
+      },
+      "planned_trials": 6,
+      "valid_success_trials": 6
+    },
+    "reverse_relations": {
+      "complete_tasks": 0,
+      "condition_summaries": {
+        "git_only": {
+          "human_correct": 0,
+          "median_duration_ms": 22442.0,
+          "valid_success": 4
+        },
+        "repoground_mandatory": {
+          "human_correct": 0,
+          "median_duration_ms": 29733.5,
+          "valid_success": 4
+        },
+        "repoground_selective": {
+          "human_correct": 0,
+          "median_duration_ms": 19925.5,
+          "valid_success": 4
+        }
+      },
+      "paired_duration_ms": {
+        "mandatory_vs_git": null,
+        "selective_vs_git": null,
+        "selective_vs_mandatory": null
+      },
+      "planned_trials": 12,
+      "valid_success_trials": 12
+    }
+  },
+  "complete_blocks": 0,
+  "conditions": {
+    "git_only": {
+      "cached_input_tokens_total": 1326976,
+      "cost_billed_total": null,
+      "duration_ms": {
+        "mean": 21925.6,
+        "median": 18543.5,
+        "p95": 33851.2
+      },
+      "failed_or_invalid": 2,
+      "grades_complete": 0,
+      "input_tokens_total": 1571020,
+      "negative_false_confidence": 0,
+      "output_tokens_total": 20428,
+      "planned": 12,
+      "quality_correct": 0,
+      "quality_incorrect": 0,
+      "repoground_calls_total": 0,
+      "repoground_failures_total": 0,
+      "resource_accounted_trials": 12,
+      "tool_breakdown": [
+        {
+          "bytes_sum": 403342,
+          "calls": 6,
+          "duration_ms_sum": 7,
+          "failures": 1,
+          "name": "codex_file_command"
+        },
+        {
+          "bytes_sum": 1842460,
+          "calls": 60,
+          "duration_ms_sum": 83,
+          "failures": 0,
+          "name": "codex_git_command"
+        }
+      ],
+      "tool_bytes_total": 2245802,
+      "tool_calls_total": 66,
+      "tool_failures_total": 1,
+      "tool_time_ms_total": 90,
+      "unsupported_paths": 0,
+      "valid_success": 10
+    },
+    "repoground_mandatory": {
+      "cached_input_tokens_total": 2473728,
+      "cost_billed_total": null,
+      "duration_ms": {
+        "mean": 31242.1818,
+        "median": 29798,
+        "p95": 38808.5
+      },
+      "failed_or_invalid": 1,
+      "grades_complete": 0,
+      "input_tokens_total": 2796803,
+      "negative_false_confidence": 1,
+      "output_tokens_total": 24874,
+      "planned": 12,
+      "quality_correct": 0,
+      "quality_incorrect": 0,
+      "repoground_calls_total": 41,
+      "repoground_failures_total": 5,
+      "resource_accounted_trials": 12,
+      "tool_breakdown": [
+        {
+          "bytes_sum": 490227,
+          "calls": 7,
+          "duration_ms_sum": 12,
+          "failures": 0,
+          "name": "codex_file_command"
+        },
+        {
+          "bytes_sum": 291024,
+          "calls": 51,
+          "duration_ms_sum": 12,
+          "failures": 0,
+          "name": "codex_git_command"
+        },
+        {
+          "bytes_sum": 31998,
+          "calls": 20,
+          "duration_ms_sum": 86,
+          "failures": 2,
+          "name": "repoground_bundle_discover"
+        },
+        {
+          "bytes_sum": 36015,
+          "calls": 2,
+          "duration_ms_sum": 7050,
+          "failures": 0,
+          "name": "repoground_find_references"
+        },
+        {
+          "bytes_sum": 52520,
+          "calls": 4,
+          "duration_ms_sum": 7775,
+          "failures": 0,
+          "name": "repoground_find_symbol"
+        },
+        {
+          "bytes_sum": 51540,
+          "calls": 3,
+          "duration_ms_sum": 7282,
+          "failures": 0,
+          "name": "repoground_get_callers"
+        },
+        {
+          "bytes_sum": 5733,
+          "calls": 3,
+          "duration_ms_sum": 4294,
+          "failures": 3,
+          "name": "repoground_live_freshness"
+        },
+        {
+          "bytes_sum": 760885,
+          "calls": 9,
+          "duration_ms_sum": 15285,
+          "failures": 0,
+          "name": "repoground_query_existing_index"
+        }
+      ],
+      "tool_bytes_total": 1719942,
+      "tool_calls_total": 99,
+      "tool_failures_total": 5,
+      "tool_time_ms_total": 41796,
+      "unsupported_paths": 0,
+      "valid_success": 11
+    },
+    "repoground_selective": {
+      "cached_input_tokens_total": 1868160,
+      "cost_billed_total": null,
+      "duration_ms": {
+        "mean": 24275.8333,
+        "median": 19715.5,
+        "p95": 43837.75
+      },
+      "failed_or_invalid": 0,
+      "grades_complete": 0,
+      "input_tokens_total": 2133219,
+      "negative_false_confidence": 1,
+      "output_tokens_total": 22366,
+      "planned": 12,
+      "quality_correct": 0,
+      "quality_incorrect": 0,
+      "repoground_calls_total": 0,
+      "repoground_failures_total": 0,
+      "resource_accounted_trials": 12,
+      "tool_breakdown": [
+        {
+          "bytes_sum": 720362,
+          "calls": 14,
+          "duration_ms_sum": 15,
+          "failures": 1,
+          "name": "codex_file_command"
+        },
+        {
+          "bytes_sum": 2372368,
+          "calls": 60,
+          "duration_ms_sum": 76,
+          "failures": 1,
+          "name": "codex_git_command"
+        }
+      ],
+      "tool_bytes_total": 3092730,
+      "tool_calls_total": 74,
+      "tool_failures_total": 2,
+      "tool_time_ms_total": 91,
+      "unsupported_paths": 5,
+      "valid_success": 12
+    }
+  },
+  "created_at": "2026-11-01T12:06:07.508969+00:00",
+  "decision": {
+    "default_promoted": false,
+    "does_not_establish": [
+      "causal_usefulness_without_design_checks",
+      "automatic_rollout_authority"
+    ],
+    "limits": {
+      "maximum_false_confidence_delta": 0,
+      "maximum_incorrect_delta": 0,
+      "minimum_complete_tasks": 12,
+      "minimum_repetitions": 2
+    },
+    "quality_review_complete": false,
+    "status": "not_established"
+  },
+  "effects": {
+    "mandatory_vs_git": {
+      "complete_tasks": 0,
+      "duration_delta_ms_bootstrap_95ci": null,
+      "duration_delta_ms_mean_of_task_means": null,
+      "duration_delta_ms_median_of_task_means": null,
+      "paired_blocks": 0,
+      "paired_metrics": {
+        "duration_ms": {
+          "bootstrap_95ci": null,
+          "mean_delta": null,
+          "median_delta": null
+        },
+        "input_tokens": {
+          "bootstrap_95ci": null,
+          "mean_delta": null,
+          "median_delta": null
+        },
+        "output_tokens": {
+          "bootstrap_95ci": null,
+          "mean_delta": null,
+          "median_delta": null
+        },
+        "repoground_calls": {
+          "bootstrap_95ci": null,
+          "mean_delta": null,
+          "median_delta": null
+        },
+        "tool_calls": {
+          "bootstrap_95ci": null,
+          "mean_delta": null,
+          "median_delta": null
+        },
+        "tool_failures": {
+          "bootstrap_95ci": null,
+          "mean_delta": null,
+          "median_delta": null
+        },
+        "tool_input_bytes": {
+          "bootstrap_95ci": null,
+          "mean_delta": null,
+          "median_delta": null
+        },
+        "tool_output_bytes": {
+          "bootstrap_95ci": null,
+          "mean_delta": null,
+          "median_delta": null
+        }
+      },
+      "tasks_equal": 0,
+      "tasks_faster": 0,
+      "tasks_slower": 0
+    },
+    "selective_vs_git": {
+      "complete_tasks": 0,
+      "duration_delta_ms_bootstrap_95ci": null,
+      "duration_delta_ms_mean_of_task_means": null,
+      "duration_delta_ms_median_of_task_means": null,
+      "paired_blocks": 0,
+      "paired_metrics": {
+        "duration_ms": {
+          "bootstrap_95ci": null,
+          "mean_delta": null,
+          "median_delta": null
+        },
+        "input_tokens": {
+          "bootstrap_95ci": null,
+          "mean_delta": null,
+          "median_delta": null
+        },
+        "output_tokens": {
+          "bootstrap_95ci": null,
+          "mean_delta": null,
+          "median_delta": null
+        },
+        "repoground_calls": {
+          "bootstrap_95ci": null,
+          "mean_delta": null,
+          "median_delta": null
+        },
+        "tool_calls": {
+          "bootstrap_95ci": null,
+          "mean_delta": null,
+          "median_delta": null
+        },
+        "tool_failures": {
+          "bootstrap_95ci": null,
+          "mean_delta": null,
+          "median_delta": null
+        },
+        "tool_input_bytes": {
+          "bootstrap_95ci": null,
+          "mean_delta": null,
+          "median_delta": null
+        },
+        "tool_output_bytes": {
+          "bootstrap_95ci": null,
+          "mean_delta": null,
+          "median_delta": null
+        }
+      },
+      "tasks_equal": 0,
+      "tasks_faster": 0,
+      "tasks_slower": 0
+    },
+    "selective_vs_mandatory": {
+      "complete_tasks": 0,
+      "duration_delta_ms_bootstrap_95ci": null,
+      "duration_delta_ms_mean_of_task_means": null,
+      "duration_delta_ms_median_of_task_means": null,
+      "paired_blocks": 0,
+      "paired_metrics": {
+        "duration_ms": {
+          "bootstrap_95ci": null,
+          "mean_delta": null,
+          "median_delta": null
+        },
+        "input_tokens": {
+          "bootstrap_95ci": null,
+          "mean_delta": null,
+          "median_delta": null
+        },
+        "output_tokens": {
+          "bootstrap_95ci": null,
+          "mean_delta": null,
+          "median_delta": null
+        },
+        "repoground_calls": {
+          "bootstrap_95ci": null,
+          "mean_delta": null,
+          "median_delta": null
+        },
+        "tool_calls": {
+          "bootstrap_95ci": null,
+          "mean_delta": null,
+          "median_delta": null
+        },
+        "tool_failures": {
+          "bootstrap_95ci": null,
+          "mean_delta": null,
+          "median_delta": null
+        },
+        "tool_input_bytes": {
+          "bootstrap_95ci": null,
+          "mean_delta": null,
+          "median_delta": null
+        },
+        "tool_output_bytes": {
+          "bootstrap_95ci": null,
+          "mean_delta": null,
+          "median_delta": null
+        }
+      },
+      "tasks_equal": 0,
+      "tasks_faster": 0,
+      "tasks_slower": 0
+    }
+  },
+  "generator_commits": {
+    "commonthing": "0fe8e5fd972c69b0d816b6bf124e10e6f5a43112",
+    "grabowski": "0fe8e5fd972c69b0d816b6bf124e10e6f5a43112",
+    "repoground": "0fe8e5fd972c69b0d816b6bf124e10e6f5a43112"
+  },
+  "graded_trials": 0,
+  "kind": "repoground.agent_study_report",
+  "measurement_scope": "real_runner_reported",
+  "planned_trials": 36,
+  "protocol_key": "7bd39c8bbb7f5e5f60e8aee2005a6b856057e56182a2788ff7a5479d77e70ab7",
+  "repetitions": 2,
+  "run_id": "study-20261101-codex-r3",
+  "suite": "pilot",
+  "supplied_trials": 36,
+  "taskset_sha256": "c09d2ed62456b1ad385f82e906be38ffc2a6ba02205b535d0ef4935ba9c59980",
+  "trials": [
+    {
+      "case_id": "known-fleet-entrypoint",
+      "class": "known_target",
+      "condition": "git_only",
+      "errors": [],
+      "metrics": {
+        "billed_cost": null,
+        "cached_input_tokens": 101632,
+        "cpu_ms": null,
+        "duration_ms": 17423,
+        "input_tokens": 133522,
+        "output_tokens": 1290,
+        "peak_rss_kib": null,
+        "repoground_calls": 0,
+        "repoground_failures": 0,
+        "tool_breakdown": [
+          {
+            "bytes": 108,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 392486,
+            "duration_ms": 11,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 7914,
+            "duration_ms": 1,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 4832,
+            "duration_ms": 1,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 9628,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          }
+        ],
+        "tool_calls": 5,
+        "tool_duration_ms": 13,
+        "tool_failures": 0,
+        "tool_input_bytes": 944,
+        "tool_output_bytes": 414024
+      },
+      "order": 1,
+      "repetition": 1,
+      "request_id": "study-20261101-codex-r3--known-fleet-entrypoint--r1--git_only",
+      "score": {
+        "expected_outcome": "answer",
+        "human_grade": null,
+        "human_verified_citations": null,
+        "missing_gold_paths": 0,
+        "negative_false_confidence": false,
+        "outcome_match": true,
+        "path_recall": 1.0,
+        "quality_success": null,
+        "unsupported_paths": 0
+      },
+      "status": "success",
+      "valid": true
+    },
+    {
+      "case_id": "known-fleet-entrypoint",
+      "class": "known_target",
+      "condition": "repoground_mandatory",
+      "errors": [],
+      "metrics": {
+        "billed_cost": null,
+        "cached_input_tokens": 189568,
+        "cpu_ms": null,
+        "duration_ms": 25128,
+        "input_tokens": 211118,
+        "output_tokens": 1337,
+        "peak_rss_kib": null,
+        "repoground_calls": 2,
+        "repoground_failures": 0,
+        "tool_breakdown": [
+          {
+            "bytes": 1679,
+            "duration_ms": 3,
+            "name": "repoground_bundle_discover",
+            "status": "success"
+          },
+          {
+            "bytes": 120,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 47517,
+            "duration_ms": 1206,
+            "name": "repoground_query_existing_index",
+            "status": "success"
+          },
+          {
+            "bytes": 235,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 3517,
+            "duration_ms": 0,
+            "name": "codex_file_command",
+            "status": "success"
+          },
+          {
+            "bytes": 12399,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 2507,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          }
+        ],
+        "tool_calls": 7,
+        "tool_duration_ms": 1209,
+        "tool_failures": 0,
+        "tool_input_bytes": 951,
+        "tool_output_bytes": 67023
+      },
+      "order": 2,
+      "repetition": 1,
+      "request_id": "study-20261101-codex-r3--known-fleet-entrypoint--r1--repoground_mandatory",
+      "score": {
+        "expected_outcome": "answer",
+        "human_grade": null,
+        "human_verified_citations": null,
+        "missing_gold_paths": 0,
+        "negative_false_confidence": false,
+        "outcome_match": true,
+        "path_recall": 1.0,
+        "quality_success": null,
+        "unsupported_paths": 0
+      },
+      "status": "success",
+      "valid": true
+    },
+    {
+      "case_id": "known-fleet-entrypoint",
+      "class": "known_target",
+      "condition": "repoground_selective",
+      "errors": [],
+      "metrics": {
+        "billed_cost": null,
+        "cached_input_tokens": 149504,
+        "cpu_ms": null,
+        "duration_ms": 15650,
+        "input_tokens": 172616,
+        "output_tokens": 1268,
+        "peak_rss_kib": null,
+        "repoground_calls": 0,
+        "repoground_failures": 0,
+        "tool_breakdown": [
+          {
+            "bytes": 108,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 392476,
+            "duration_ms": 11,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 10721,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 2220,
+            "duration_ms": 0,
+            "name": "codex_file_command",
+            "status": "success"
+          },
+          {
+            "bytes": 21106,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 3705,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          }
+        ],
+        "tool_calls": 6,
+        "tool_duration_ms": 11,
+        "tool_failures": 0,
+        "tool_input_bytes": 923,
+        "tool_output_bytes": 429413
+      },
+      "order": 3,
+      "repetition": 1,
+      "request_id": "study-20261101-codex-r3--known-fleet-entrypoint--r1--repoground_selective",
+      "score": {
+        "expected_outcome": "answer",
+        "human_grade": null,
+        "human_verified_citations": null,
+        "missing_gold_paths": 0,
+        "negative_false_confidence": false,
+        "outcome_match": true,
+        "path_recall": 1.0,
+        "quality_success": null,
+        "unsupported_paths": 0
+      },
+      "status": "success",
+      "valid": true
+    },
+    {
+      "case_id": "reverse-python-shebang",
+      "class": "reverse_relations",
+      "condition": "git_only",
+      "errors": [],
+      "metrics": {
+        "billed_cost": null,
+        "cached_input_tokens": 56192,
+        "cpu_ms": null,
+        "duration_ms": 16935,
+        "input_tokens": 73715,
+        "output_tokens": 1621,
+        "peak_rss_kib": null,
+        "repoground_calls": 0,
+        "repoground_failures": 0,
+        "tool_breakdown": [
+          {
+            "bytes": 120,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 707,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 6892,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 5985,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          }
+        ],
+        "tool_calls": 4,
+        "tool_duration_ms": 0,
+        "tool_failures": 0,
+        "tool_input_bytes": 1091,
+        "tool_output_bytes": 12613
+      },
+      "order": 1,
+      "repetition": 1,
+      "request_id": "study-20261101-codex-r3--reverse-python-shebang--r1--git_only",
+      "score": {
+        "expected_outcome": "answer",
+        "human_grade": null,
+        "human_verified_citations": null,
+        "missing_gold_paths": 0,
+        "negative_false_confidence": false,
+        "outcome_match": true,
+        "path_recall": 1.0,
+        "quality_success": null,
+        "unsupported_paths": 0
+      },
+      "status": "success",
+      "valid": true
+    },
+    {
+      "case_id": "reverse-python-shebang",
+      "class": "reverse_relations",
+      "condition": "repoground_selective",
+      "errors": [],
+      "metrics": {
+        "billed_cost": null,
+        "cached_input_tokens": 70656,
+        "cpu_ms": null,
+        "duration_ms": 19372,
+        "input_tokens": 79731,
+        "output_tokens": 1931,
+        "peak_rss_kib": null,
+        "repoground_calls": 0,
+        "repoground_failures": 0,
+        "tool_breakdown": [
+          {
+            "bytes": 471,
+            "duration_ms": 0,
+            "name": "codex_file_command",
+            "status": "success"
+          },
+          {
+            "bytes": 6597,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 9154,
+            "duration_ms": 1,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 7661,
+            "duration_ms": 1,
+            "name": "codex_git_command",
+            "status": "success"
+          }
+        ],
+        "tool_calls": 4,
+        "tool_duration_ms": 2,
+        "tool_failures": 0,
+        "tool_input_bytes": 1187,
+        "tool_output_bytes": 22696
+      },
+      "order": 2,
+      "repetition": 1,
+      "request_id": "study-20261101-codex-r3--reverse-python-shebang--r1--repoground_selective",
+      "score": {
+        "expected_outcome": "answer",
+        "human_grade": null,
+        "human_verified_citations": null,
+        "missing_gold_paths": 0,
+        "negative_false_confidence": false,
+        "outcome_match": true,
+        "path_recall": 1.0,
+        "quality_success": null,
+        "unsupported_paths": 1
+      },
+      "status": "success",
+      "valid": true
+    },
+    {
+      "case_id": "reverse-python-shebang",
+      "class": "reverse_relations",
+      "condition": "repoground_mandatory",
+      "errors": [],
+      "metrics": {
+        "billed_cost": null,
+        "cached_input_tokens": 181632,
+        "cpu_ms": null,
+        "duration_ms": 37720,
+        "input_tokens": 213882,
+        "output_tokens": 2940,
+        "peak_rss_kib": null,
+        "repoground_calls": 7,
+        "repoground_failures": 1,
+        "tool_breakdown": [
+          {
+            "bytes": 243,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 1816,
+            "duration_ms": 3,
+            "name": "repoground_bundle_discover",
+            "status": "success"
+          },
+          {
+            "bytes": 1838,
+            "duration_ms": 58,
+            "name": "repoground_live_freshness",
+            "status": "failed"
+          },
+          {
+            "bytes": 13365,
+            "duration_ms": 1146,
+            "name": "repoground_find_symbol",
+            "status": "success"
+          },
+          {
+            "bytes": 17898,
+            "duration_ms": 2963,
+            "name": "repoground_find_references",
+            "status": "success"
+          },
+          {
+            "bytes": 21360,
+            "duration_ms": 3316,
+            "name": "repoground_get_callers",
+            "status": "success"
+          },
+          {
+            "bytes": 165657,
+            "duration_ms": 3718,
+            "name": "repoground_query_existing_index",
+            "status": "success"
+          },
+          {
+            "bytes": 4768,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 8601,
+            "duration_ms": 132,
+            "name": "repoground_get_callers",
+            "status": "success"
+          },
+          {
+            "bytes": 5519,
+            "duration_ms": 1,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 1862,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          }
+        ],
+        "tool_calls": 11,
+        "tool_duration_ms": 11337,
+        "tool_failures": 1,
+        "tool_input_bytes": 1699,
+        "tool_output_bytes": 241228
+      },
+      "order": 3,
+      "repetition": 1,
+      "request_id": "study-20261101-codex-r3--reverse-python-shebang--r1--repoground_mandatory",
+      "score": {
+        "expected_outcome": "answer",
+        "human_grade": null,
+        "human_verified_citations": null,
+        "missing_gold_paths": 0,
+        "negative_false_confidence": false,
+        "outcome_match": true,
+        "path_recall": 1.0,
+        "quality_success": null,
+        "unsupported_paths": 0
+      },
+      "status": "success",
+      "valid": true
+    },
+    {
+      "case_id": "reverse-grabowski-agent",
+      "class": "reverse_relations",
+      "condition": "repoground_mandatory",
+      "errors": [],
+      "metrics": {
+        "billed_cost": null,
+        "cached_input_tokens": 287872,
+        "cpu_ms": null,
+        "duration_ms": 30275,
+        "input_tokens": 327531,
+        "output_tokens": 2464,
+        "peak_rss_kib": null,
+        "repoground_calls": 3,
+        "repoground_failures": 0,
+        "tool_breakdown": [
+          {
+            "bytes": 1668,
+            "duration_ms": 4,
+            "name": "repoground_bundle_discover",
+            "status": "success"
+          },
+          {
+            "bytes": 1668,
+            "duration_ms": 3,
+            "name": "repoground_bundle_discover",
+            "status": "success"
+          },
+          {
+            "bytes": 255,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 35578,
+            "duration_ms": 1403,
+            "name": "repoground_query_existing_index",
+            "status": "success"
+          },
+          {
+            "bytes": 31007,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 23288,
+            "duration_ms": 1,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 694,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 927,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 8249,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          }
+        ],
+        "tool_calls": 9,
+        "tool_duration_ms": 1411,
+        "tool_failures": 0,
+        "tool_input_bytes": 1186,
+        "tool_output_bytes": 102148
+      },
+      "order": 1,
+      "repetition": 1,
+      "request_id": "study-20261101-codex-r3--reverse-grabowski-agent--r1--repoground_mandatory",
+      "score": {
+        "expected_outcome": "answer",
+        "human_grade": null,
+        "human_verified_citations": null,
+        "missing_gold_paths": 0,
+        "negative_false_confidence": false,
+        "outcome_match": true,
+        "path_recall": 1.0,
+        "quality_success": null,
+        "unsupported_paths": 0
+      },
+      "status": "success",
+      "valid": true
+    },
+    {
+      "case_id": "reverse-grabowski-agent",
+      "class": "reverse_relations",
+      "condition": "git_only",
+      "errors": [],
+      "metrics": {
+        "billed_cost": null,
+        "cached_input_tokens": 86656,
+        "cpu_ms": null,
+        "duration_ms": 19664,
+        "input_tokens": 97582,
+        "output_tokens": 1404,
+        "peak_rss_kib": null,
+        "repoground_calls": 0,
+        "repoground_failures": 0,
+        "tool_breakdown": [
+          {
+            "bytes": 119,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 2871,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 6493,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 12270,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 10227,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          }
+        ],
+        "tool_calls": 5,
+        "tool_duration_ms": 0,
+        "tool_failures": 0,
+        "tool_input_bytes": 670,
+        "tool_output_bytes": 31310
+      },
+      "order": 2,
+      "repetition": 1,
+      "request_id": "study-20261101-codex-r3--reverse-grabowski-agent--r1--git_only",
+      "score": {
+        "expected_outcome": "answer",
+        "human_grade": null,
+        "human_verified_citations": null,
+        "missing_gold_paths": 0,
+        "negative_false_confidence": false,
+        "outcome_match": true,
+        "path_recall": 1.0,
+        "quality_success": null,
+        "unsupported_paths": 0
+      },
+      "status": "success",
+      "valid": true
+    },
+    {
+      "case_id": "reverse-grabowski-agent",
+      "class": "reverse_relations",
+      "condition": "repoground_selective",
+      "errors": [],
+      "metrics": {
+        "billed_cost": null,
+        "cached_input_tokens": 87552,
+        "cpu_ms": null,
+        "duration_ms": 20479,
+        "input_tokens": 95900,
+        "output_tokens": 1597,
+        "peak_rss_kib": null,
+        "repoground_calls": 0,
+        "repoground_failures": 0,
+        "tool_breakdown": [
+          {
+            "bytes": 107,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 2923,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 9236,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 7111,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 2131,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          }
+        ],
+        "tool_calls": 5,
+        "tool_duration_ms": 0,
+        "tool_failures": 0,
+        "tool_input_bytes": 691,
+        "tool_output_bytes": 20817
+      },
+      "order": 3,
+      "repetition": 1,
+      "request_id": "study-20261101-codex-r3--reverse-grabowski-agent--r1--repoground_selective",
+      "score": {
+        "expected_outcome": "answer",
+        "human_grade": null,
+        "human_verified_citations": null,
+        "missing_gold_paths": 0,
+        "negative_false_confidence": false,
+        "outcome_match": true,
+        "path_recall": 1.0,
+        "quality_success": null,
+        "unsupported_paths": 0
+      },
+      "status": "success",
+      "valid": true
+    },
+    {
+      "case_id": "impact-shebang-tests",
+      "class": "impact_tests",
+      "condition": "repoground_mandatory",
+      "errors": [],
+      "metrics": {
+        "billed_cost": null,
+        "cached_input_tokens": 417024,
+        "cpu_ms": null,
+        "duration_ms": 39897,
+        "input_tokens": 453540,
+        "output_tokens": 2804,
+        "peak_rss_kib": null,
+        "repoground_calls": 3,
+        "repoground_failures": 0,
+        "tool_breakdown": [
+          {
+            "bytes": 1679,
+            "duration_ms": 3,
+            "name": "repoground_bundle_discover",
+            "status": "success"
+          },
+          {
+            "bytes": 1679,
+            "duration_ms": 3,
+            "name": "repoground_bundle_discover",
+            "status": "success"
+          },
+          {
+            "bytes": 262,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 112349,
+            "duration_ms": 1345,
+            "name": "repoground_query_existing_index",
+            "status": "success"
+          },
+          {
+            "bytes": 384770,
+            "duration_ms": 11,
+            "name": "codex_file_command",
+            "status": "success"
+          },
+          {
+            "bytes": 1071,
+            "duration_ms": 0,
+            "name": "codex_file_command",
+            "status": "success"
+          },
+          {
+            "bytes": 2338,
+            "duration_ms": 0,
+            "name": "codex_file_command",
+            "status": "success"
+          },
+          {
+            "bytes": 7676,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 1729,
+            "duration_ms": 0,
+            "name": "codex_file_command",
+            "status": "success"
+          },
+          {
+            "bytes": 3591,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 1092,
+            "duration_ms": 6,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 6545,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          }
+        ],
+        "tool_calls": 12,
+        "tool_duration_ms": 1368,
+        "tool_failures": 0,
+        "tool_input_bytes": 2373,
+        "tool_output_bytes": 522408
+      },
+      "order": 1,
+      "repetition": 1,
+      "request_id": "study-20261101-codex-r3--impact-shebang-tests--r1--repoground_mandatory",
+      "score": {
+        "expected_outcome": "answer",
+        "human_grade": null,
+        "human_verified_citations": null,
+        "missing_gold_paths": 0,
+        "negative_false_confidence": false,
+        "outcome_match": true,
+        "path_recall": 1.0,
+        "quality_success": null,
+        "unsupported_paths": 0
+      },
+      "status": "success",
+      "valid": true
+    },
+    {
+      "case_id": "impact-shebang-tests",
+      "class": "impact_tests",
+      "condition": "repoground_selective",
+      "errors": [],
+      "metrics": {
+        "billed_cost": null,
+        "cached_input_tokens": 209152,
+        "cpu_ms": null,
+        "duration_ms": 25400,
+        "input_tokens": 241656,
+        "output_tokens": 1956,
+        "peak_rss_kib": null,
+        "repoground_calls": 0,
+        "repoground_failures": 0,
+        "tool_breakdown": [
+          {
+            "bytes": 108,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 220920,
+            "duration_ms": 4,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 337999,
+            "duration_ms": 6,
+            "name": "codex_file_command",
+            "status": "success"
+          },
+          {
+            "bytes": 3500,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "failed"
+          },
+          {
+            "bytes": 1701,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 7238,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 6247,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          }
+        ],
+        "tool_calls": 7,
+        "tool_duration_ms": 10,
+        "tool_failures": 1,
+        "tool_input_bytes": 1686,
+        "tool_output_bytes": 576027
+      },
+      "order": 2,
+      "repetition": 1,
+      "request_id": "study-20261101-codex-r3--impact-shebang-tests--r1--repoground_selective",
+      "score": {
+        "expected_outcome": "answer",
+        "human_grade": null,
+        "human_verified_citations": null,
+        "missing_gold_paths": 0,
+        "negative_false_confidence": false,
+        "outcome_match": true,
+        "path_recall": 1.0,
+        "quality_success": null,
+        "unsupported_paths": 0
+      },
+      "status": "success",
+      "valid": true
+    },
+    {
+      "case_id": "impact-shebang-tests",
+      "class": "impact_tests",
+      "condition": "git_only",
+      "errors": [],
+      "metrics": {
+        "billed_cost": null,
+        "cached_input_tokens": 172800,
+        "cpu_ms": null,
+        "duration_ms": 23100,
+        "input_tokens": 204003,
+        "output_tokens": 2043,
+        "peak_rss_kib": null,
+        "repoground_calls": 0,
+        "repoground_failures": 0,
+        "tool_breakdown": [
+          {
+            "bytes": 108,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 277488,
+            "duration_ms": 6,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 106431,
+            "duration_ms": 1,
+            "name": "codex_file_command",
+            "status": "failed"
+          },
+          {
+            "bytes": 4947,
+            "duration_ms": 0,
+            "name": "codex_file_command",
+            "status": "success"
+          },
+          {
+            "bytes": 2914,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 12979,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          }
+        ],
+        "tool_calls": 6,
+        "tool_duration_ms": 7,
+        "tool_failures": 1,
+        "tool_input_bytes": 1497,
+        "tool_output_bytes": 403370
+      },
+      "order": 3,
+      "repetition": 1,
+      "request_id": "study-20261101-codex-r3--impact-shebang-tests--r1--git_only",
+      "score": {
+        "expected_outcome": "answer",
+        "human_grade": null,
+        "human_verified_citations": null,
+        "missing_gold_paths": 0,
+        "negative_false_confidence": false,
+        "outcome_match": true,
+        "path_recall": 1.0,
+        "quality_success": null,
+        "unsupported_paths": 0
+      },
+      "status": "success",
+      "valid": true
+    },
+    {
+      "case_id": "impact-symbol-miss-tests",
+      "class": "impact_tests",
+      "condition": "repoground_selective",
+      "errors": [],
+      "metrics": {
+        "billed_cost": null,
+        "cached_input_tokens": 274176,
+        "cpu_ms": null,
+        "duration_ms": 33580,
+        "input_tokens": 305161,
+        "output_tokens": 2457,
+        "peak_rss_kib": null,
+        "repoground_calls": 0,
+        "repoground_failures": 0,
+        "tool_breakdown": [
+          {
+            "bytes": 439,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 62407,
+            "duration_ms": 1,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 2978,
+            "duration_ms": 0,
+            "name": "codex_file_command",
+            "status": "success"
+          },
+          {
+            "bytes": 160,
+            "duration_ms": 0,
+            "name": "codex_file_command",
+            "status": "success"
+          },
+          {
+            "bytes": 185,
+            "duration_ms": 0,
+            "name": "codex_file_command",
+            "status": "success"
+          },
+          {
+            "bytes": 22224,
+            "duration_ms": 0,
+            "name": "codex_file_command",
+            "status": "success"
+          },
+          {
+            "bytes": 5767,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 10070,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 9008,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 7453,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          }
+        ],
+        "tool_calls": 10,
+        "tool_duration_ms": 1,
+        "tool_failures": 0,
+        "tool_input_bytes": 1959,
+        "tool_output_bytes": 118732
+      },
+      "order": 1,
+      "repetition": 1,
+      "request_id": "study-20261101-codex-r3--impact-symbol-miss-tests--r1--repoground_selective",
+      "score": {
+        "expected_outcome": "answer",
+        "human_grade": null,
+        "human_verified_citations": null,
+        "missing_gold_paths": 0,
+        "negative_false_confidence": false,
+        "outcome_match": true,
+        "path_recall": 1.0,
+        "quality_success": null,
+        "unsupported_paths": 0
+      },
+      "status": "success",
+      "valid": true
+    },
+    {
+      "case_id": "impact-symbol-miss-tests",
+      "class": "impact_tests",
+      "condition": "git_only",
+      "errors": [],
+      "metrics": {
+        "billed_cost": null,
+        "cached_input_tokens": 109568,
+        "cpu_ms": null,
+        "duration_ms": 17203,
+        "input_tokens": 143796,
+        "output_tokens": 1302,
+        "peak_rss_kib": null,
+        "repoground_calls": 0,
+        "repoground_failures": 0,
+        "tool_breakdown": [
+          {
+            "bytes": 108,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 412600,
+            "duration_ms": 11,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 9684,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 26285,
+            "duration_ms": 1,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 2607,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          }
+        ],
+        "tool_calls": 5,
+        "tool_duration_ms": 12,
+        "tool_failures": 0,
+        "tool_input_bytes": 986,
+        "tool_output_bytes": 450298
+      },
+      "order": 2,
+      "repetition": 1,
+      "request_id": "study-20261101-codex-r3--impact-symbol-miss-tests--r1--git_only",
+      "score": {
+        "expected_outcome": "answer",
+        "human_grade": null,
+        "human_verified_citations": null,
+        "missing_gold_paths": 0,
+        "negative_false_confidence": false,
+        "outcome_match": true,
+        "path_recall": 1.0,
+        "quality_success": null,
+        "unsupported_paths": 0
+      },
+      "status": "success",
+      "valid": true
+    },
+    {
+      "case_id": "impact-symbol-miss-tests",
+      "class": "impact_tests",
+      "condition": "repoground_mandatory",
+      "errors": [],
+      "metrics": {
+        "billed_cost": null,
+        "cached_input_tokens": 284416,
+        "cpu_ms": null,
+        "duration_ms": 27994,
+        "input_tokens": 333640,
+        "output_tokens": 2197,
+        "peak_rss_kib": null,
+        "repoground_calls": 3,
+        "repoground_failures": 0,
+        "tool_breakdown": [
+          {
+            "bytes": 1679,
+            "duration_ms": 3,
+            "name": "repoground_bundle_discover",
+            "status": "success"
+          },
+          {
+            "bytes": 1679,
+            "duration_ms": 3,
+            "name": "repoground_bundle_discover",
+            "status": "success"
+          },
+          {
+            "bytes": 233,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 130537,
+            "duration_ms": 1331,
+            "name": "repoground_query_existing_index",
+            "status": "success"
+          },
+          {
+            "bytes": 81779,
+            "duration_ms": 1,
+            "name": "codex_file_command",
+            "status": "success"
+          },
+          {
+            "bytes": 12663,
+            "duration_ms": 1,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 11013,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 7239,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 2212,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          }
+        ],
+        "tool_calls": 9,
+        "tool_duration_ms": 1339,
+        "tool_failures": 0,
+        "tool_input_bytes": 1696,
+        "tool_output_bytes": 247338
+      },
+      "order": 3,
+      "repetition": 1,
+      "request_id": "study-20261101-codex-r3--impact-symbol-miss-tests--r1--repoground_mandatory",
+      "score": {
+        "expected_outcome": "answer",
+        "human_grade": null,
+        "human_verified_citations": null,
+        "missing_gold_paths": 0,
+        "negative_false_confidence": false,
+        "outcome_match": true,
+        "path_recall": 1.0,
+        "quality_success": null,
+        "unsupported_paths": 0
+      },
+      "status": "success",
+      "valid": true
+    },
+    {
+      "case_id": "boundary-invented-symbol",
+      "class": "boundary",
+      "condition": "repoground_selective",
+      "errors": [],
+      "metrics": {
+        "billed_cost": null,
+        "cached_input_tokens": 38272,
+        "cpu_ms": null,
+        "duration_ms": 17689,
+        "input_tokens": 54774,
+        "output_tokens": 1375,
+        "peak_rss_kib": null,
+        "repoground_calls": 0,
+        "repoground_failures": 0,
+        "tool_breakdown": [
+          {
+            "bytes": 387,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 738,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 1555,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          }
+        ],
+        "tool_calls": 3,
+        "tool_duration_ms": 0,
+        "tool_failures": 0,
+        "tool_input_bytes": 877,
+        "tool_output_bytes": 1803
+      },
+      "order": 1,
+      "repetition": 1,
+      "request_id": "study-20261101-codex-r3--boundary-invented-symbol--r1--repoground_selective",
+      "score": {
+        "expected_outcome": "abstain",
+        "human_grade": null,
+        "human_verified_citations": null,
+        "missing_gold_paths": 0,
+        "negative_false_confidence": true,
+        "outcome_match": false,
+        "path_recall": null,
+        "quality_success": null,
+        "unsupported_paths": 1
+      },
+      "status": "success",
+      "valid": true
+    },
+    {
+      "case_id": "boundary-invented-symbol",
+      "class": "boundary",
+      "condition": "repoground_mandatory",
+      "errors": [],
+      "metrics": {
+        "billed_cost": null,
+        "cached_input_tokens": 150016,
+        "cpu_ms": null,
+        "duration_ms": 28904,
+        "input_tokens": 161787,
+        "output_tokens": 1800,
+        "peak_rss_kib": null,
+        "repoground_calls": 3,
+        "repoground_failures": 1,
+        "tool_breakdown": [
+          {
+            "bytes": 773,
+            "duration_ms": 3,
+            "name": "repoground_bundle_discover",
+            "status": "failed"
+          },
+          {
+            "bytes": 1679,
+            "duration_ms": 3,
+            "name": "repoground_bundle_discover",
+            "status": "success"
+          },
+          {
+            "bytes": 536,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 1504,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 12789,
+            "duration_ms": 1110,
+            "name": "repoground_find_symbol",
+            "status": "success"
+          },
+          {
+            "bytes": 2389,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 2635,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          }
+        ],
+        "tool_calls": 7,
+        "tool_duration_ms": 1116,
+        "tool_failures": 1,
+        "tool_input_bytes": 1540,
+        "tool_output_bytes": 20765
+      },
+      "order": 2,
+      "repetition": 1,
+      "request_id": "study-20261101-codex-r3--boundary-invented-symbol--r1--repoground_mandatory",
+      "score": {
+        "expected_outcome": "abstain",
+        "human_grade": null,
+        "human_verified_citations": null,
+        "missing_gold_paths": 0,
+        "negative_false_confidence": false,
+        "outcome_match": false,
+        "path_recall": null,
+        "quality_success": null,
+        "unsupported_paths": 0
+      },
+      "status": "failed",
+      "valid": true
+    },
+    {
+      "case_id": "boundary-invented-symbol",
+      "class": "boundary",
+      "condition": "git_only",
+      "errors": [],
+      "metrics": {
+        "billed_cost": null,
+        "cached_input_tokens": 64384,
+        "cpu_ms": null,
+        "duration_ms": 27873,
+        "input_tokens": 71072,
+        "output_tokens": 1220,
+        "peak_rss_kib": null,
+        "repoground_calls": 0,
+        "repoground_failures": 0,
+        "tool_breakdown": [
+          {
+            "bytes": 708,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 1504,
+            "duration_ms": 1,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 2220,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 2205,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          }
+        ],
+        "tool_calls": 4,
+        "tool_duration_ms": 1,
+        "tool_failures": 0,
+        "tool_input_bytes": 1072,
+        "tool_output_bytes": 5565
+      },
+      "order": 3,
+      "repetition": 1,
+      "request_id": "study-20261101-codex-r3--boundary-invented-symbol--r1--git_only",
+      "score": {
+        "expected_outcome": "abstain",
+        "human_grade": null,
+        "human_verified_citations": null,
+        "missing_gold_paths": 0,
+        "negative_false_confidence": false,
+        "outcome_match": false,
+        "path_recall": null,
+        "quality_success": null,
+        "unsupported_paths": 0
+      },
+      "status": "failed",
+      "valid": true
+    },
+    {
+      "case_id": "known-fleet-entrypoint",
+      "class": "known_target",
+      "condition": "repoground_mandatory",
+      "errors": [],
+      "metrics": {
+        "billed_cost": null,
+        "cached_input_tokens": 221696,
+        "cpu_ms": null,
+        "duration_ms": 29000,
+        "input_tokens": 248336,
+        "output_tokens": 1541,
+        "peak_rss_kib": null,
+        "repoground_calls": 3,
+        "repoground_failures": 0,
+        "tool_breakdown": [
+          {
+            "bytes": 1679,
+            "duration_ms": 4,
+            "name": "repoground_bundle_discover",
+            "status": "success"
+          },
+          {
+            "bytes": 1679,
+            "duration_ms": 3,
+            "name": "repoground_bundle_discover",
+            "status": "success"
+          },
+          {
+            "bytes": 18414,
+            "duration_ms": 1231,
+            "name": "repoground_query_existing_index",
+            "status": "success"
+          },
+          {
+            "bytes": 22310,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 13584,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 3830,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 15756,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 3910,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          }
+        ],
+        "tool_calls": 8,
+        "tool_duration_ms": 1238,
+        "tool_failures": 0,
+        "tool_input_bytes": 1114,
+        "tool_output_bytes": 80048
+      },
+      "order": 1,
+      "repetition": 2,
+      "request_id": "study-20261101-codex-r3--known-fleet-entrypoint--r2--repoground_mandatory",
+      "score": {
+        "expected_outcome": "answer",
+        "human_grade": null,
+        "human_verified_citations": null,
+        "missing_gold_paths": 0,
+        "negative_false_confidence": false,
+        "outcome_match": true,
+        "path_recall": 1.0,
+        "quality_success": null,
+        "unsupported_paths": 0
+      },
+      "status": "success",
+      "valid": true
+    },
+    {
+      "case_id": "known-fleet-entrypoint",
+      "class": "known_target",
+      "condition": "repoground_selective",
+      "errors": [],
+      "metrics": {
+        "billed_cost": null,
+        "cached_input_tokens": 114048,
+        "cpu_ms": null,
+        "duration_ms": 19665,
+        "input_tokens": 132892,
+        "output_tokens": 1123,
+        "peak_rss_kib": null,
+        "repoground_calls": 0,
+        "repoground_failures": 0,
+        "tool_breakdown": [
+          {
+            "bytes": 108,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 392480,
+            "duration_ms": 11,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 6920,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 4508,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 9173,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          }
+        ],
+        "tool_calls": 5,
+        "tool_duration_ms": 11,
+        "tool_failures": 0,
+        "tool_input_bytes": 818,
+        "tool_output_bytes": 412371
+      },
+      "order": 2,
+      "repetition": 2,
+      "request_id": "study-20261101-codex-r3--known-fleet-entrypoint--r2--repoground_selective",
+      "score": {
+        "expected_outcome": "answer",
+        "human_grade": null,
+        "human_verified_citations": null,
+        "missing_gold_paths": 0,
+        "negative_false_confidence": false,
+        "outcome_match": true,
+        "path_recall": 1.0,
+        "quality_success": null,
+        "unsupported_paths": 0
+      },
+      "status": "success",
+      "valid": true
+    },
+    {
+      "case_id": "known-fleet-entrypoint",
+      "class": "known_target",
+      "condition": "git_only",
+      "errors": [],
+      "metrics": {
+        "billed_cost": null,
+        "cached_input_tokens": 117632,
+        "cpu_ms": null,
+        "duration_ms": 17121,
+        "input_tokens": 137548,
+        "output_tokens": 1298,
+        "peak_rss_kib": null,
+        "repoground_calls": 0,
+        "repoground_failures": 0,
+        "tool_breakdown": [
+          {
+            "bytes": 108,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 427672,
+            "duration_ms": 11,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 10741,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 3902,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 9865,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          }
+        ],
+        "tool_calls": 5,
+        "tool_duration_ms": 11,
+        "tool_failures": 0,
+        "tool_input_bytes": 882,
+        "tool_output_bytes": 451406
+      },
+      "order": 3,
+      "repetition": 2,
+      "request_id": "study-20261101-codex-r3--known-fleet-entrypoint--r2--git_only",
+      "score": {
+        "expected_outcome": "answer",
+        "human_grade": null,
+        "human_verified_citations": null,
+        "missing_gold_paths": 0,
+        "negative_false_confidence": false,
+        "outcome_match": true,
+        "path_recall": 1.0,
+        "quality_success": null,
+        "unsupported_paths": 0
+      },
+      "status": "success",
+      "valid": true
+    },
+    {
+      "case_id": "reverse-python-shebang",
+      "class": "reverse_relations",
+      "condition": "repoground_selective",
+      "errors": [],
+      "metrics": {
+        "billed_cost": null,
+        "cached_input_tokens": 105216,
+        "cpu_ms": null,
+        "duration_ms": 30305,
+        "input_tokens": 130789,
+        "output_tokens": 2421,
+        "peak_rss_kib": null,
+        "repoground_calls": 0,
+        "repoground_failures": 0,
+        "tool_breakdown": [
+          {
+            "bytes": 108,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 537,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 6073,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 5153,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 4759,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 571,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 1724,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          }
+        ],
+        "tool_calls": 7,
+        "tool_duration_ms": 0,
+        "tool_failures": 0,
+        "tool_input_bytes": 1716,
+        "tool_output_bytes": 17209
+      },
+      "order": 1,
+      "repetition": 2,
+      "request_id": "study-20261101-codex-r3--reverse-python-shebang--r2--repoground_selective",
+      "score": {
+        "expected_outcome": "answer",
+        "human_grade": null,
+        "human_verified_citations": null,
+        "missing_gold_paths": 0,
+        "negative_false_confidence": false,
+        "outcome_match": true,
+        "path_recall": 1.0,
+        "quality_success": null,
+        "unsupported_paths": 1
+      },
+      "status": "success",
+      "valid": true
+    },
+    {
+      "case_id": "reverse-python-shebang",
+      "class": "reverse_relations",
+      "condition": "git_only",
+      "errors": [],
+      "metrics": {
+        "billed_cost": null,
+        "cached_input_tokens": 106880,
+        "cpu_ms": null,
+        "duration_ms": 26380,
+        "input_tokens": 116642,
+        "output_tokens": 2525,
+        "peak_rss_kib": null,
+        "repoground_calls": 0,
+        "repoground_failures": 0,
+        "tool_breakdown": [
+          {
+            "bytes": 108,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 979,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 1911,
+            "duration_ms": 0,
+            "name": "codex_file_command",
+            "status": "success"
+          },
+          {
+            "bytes": 4044,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 5976,
+            "duration_ms": 1,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 3715,
+            "duration_ms": 3,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 2724,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 4439,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 814,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          }
+        ],
+        "tool_calls": 9,
+        "tool_duration_ms": 4,
+        "tool_failures": 0,
+        "tool_input_bytes": 1683,
+        "tool_output_bytes": 23027
+      },
+      "order": 2,
+      "repetition": 2,
+      "request_id": "study-20261101-codex-r3--reverse-python-shebang--r2--git_only",
+      "score": {
+        "expected_outcome": "answer",
+        "human_grade": null,
+        "human_verified_citations": null,
+        "missing_gold_paths": 0,
+        "negative_false_confidence": false,
+        "outcome_match": true,
+        "path_recall": 1.0,
+        "quality_success": null,
+        "unsupported_paths": 0
+      },
+      "status": "success",
+      "valid": true
+    },
+    {
+      "case_id": "reverse-python-shebang",
+      "class": "reverse_relations",
+      "condition": "repoground_mandatory",
+      "errors": [],
+      "metrics": {
+        "billed_cost": null,
+        "cached_input_tokens": 85248,
+        "cpu_ms": null,
+        "duration_ms": 24869,
+        "input_tokens": 103633,
+        "output_tokens": 1860,
+        "peak_rss_kib": null,
+        "repoground_calls": 6,
+        "repoground_failures": 1,
+        "tool_breakdown": [
+          {
+            "bytes": 1679,
+            "duration_ms": 10,
+            "name": "repoground_bundle_discover",
+            "status": "success"
+          },
+          {
+            "bytes": 120,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 537,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 44219,
+            "duration_ms": 1455,
+            "name": "repoground_query_existing_index",
+            "status": "success"
+          },
+          {
+            "bytes": 21579,
+            "duration_ms": 3834,
+            "name": "repoground_get_callers",
+            "status": "success"
+          },
+          {
+            "bytes": 13584,
+            "duration_ms": 3959,
+            "name": "repoground_find_symbol",
+            "status": "success"
+          },
+          {
+            "bytes": 18117,
+            "duration_ms": 4087,
+            "name": "repoground_find_references",
+            "status": "success"
+          },
+          {
+            "bytes": 2057,
+            "duration_ms": 4144,
+            "name": "repoground_live_freshness",
+            "status": "failed"
+          },
+          {
+            "bytes": 7777,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          }
+        ],
+        "tool_calls": 9,
+        "tool_duration_ms": 17489,
+        "tool_failures": 1,
+        "tool_input_bytes": 1936,
+        "tool_output_bytes": 107733
+      },
+      "order": 3,
+      "repetition": 2,
+      "request_id": "study-20261101-codex-r3--reverse-python-shebang--r2--repoground_mandatory",
+      "score": {
+        "expected_outcome": "answer",
+        "human_grade": null,
+        "human_verified_citations": null,
+        "missing_gold_paths": 0,
+        "negative_false_confidence": false,
+        "outcome_match": true,
+        "path_recall": 1.0,
+        "quality_success": null,
+        "unsupported_paths": 0
+      },
+      "status": "success",
+      "valid": true
+    },
+    {
+      "case_id": "reverse-grabowski-agent",
+      "class": "reverse_relations",
+      "condition": "repoground_selective",
+      "errors": [],
+      "metrics": {
+        "billed_cost": null,
+        "cached_input_tokens": 54656,
+        "cpu_ms": null,
+        "duration_ms": 14655,
+        "input_tokens": 64683,
+        "output_tokens": 1131,
+        "peak_rss_kib": null,
+        "repoground_calls": 0,
+        "repoground_failures": 0,
+        "tool_breakdown": [
+          {
+            "bytes": 3435,
+            "duration_ms": 0,
+            "name": "codex_file_command",
+            "status": "success"
+          },
+          {
+            "bytes": 6875,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 19439,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          }
+        ],
+        "tool_calls": 3,
+        "tool_duration_ms": 0,
+        "tool_failures": 0,
+        "tool_input_bytes": 572,
+        "tool_output_bytes": 29177
+      },
+      "order": 1,
+      "repetition": 2,
+      "request_id": "study-20261101-codex-r3--reverse-grabowski-agent--r2--repoground_selective",
+      "score": {
+        "expected_outcome": "answer",
+        "human_grade": null,
+        "human_verified_citations": null,
+        "missing_gold_paths": 0,
+        "negative_false_confidence": false,
+        "outcome_match": true,
+        "path_recall": 1.0,
+        "quality_success": null,
+        "unsupported_paths": 0
+      },
+      "status": "success",
+      "valid": true
+    },
+    {
+      "case_id": "reverse-grabowski-agent",
+      "class": "reverse_relations",
+      "condition": "repoground_mandatory",
+      "errors": [],
+      "metrics": {
+        "billed_cost": null,
+        "cached_input_tokens": 197504,
+        "cpu_ms": null,
+        "duration_ms": 29192,
+        "input_tokens": 221721,
+        "output_tokens": 1706,
+        "peak_rss_kib": null,
+        "repoground_calls": 3,
+        "repoground_failures": 0,
+        "tool_breakdown": [
+          {
+            "bytes": 1668,
+            "duration_ms": 7,
+            "name": "repoground_bundle_discover",
+            "status": "success"
+          },
+          {
+            "bytes": 1668,
+            "duration_ms": 6,
+            "name": "repoground_bundle_discover",
+            "status": "success"
+          },
+          {
+            "bytes": 70037,
+            "duration_ms": 1772,
+            "name": "repoground_query_existing_index",
+            "status": "success"
+          },
+          {
+            "bytes": 3684,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 10615,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 2744,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 3537,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          }
+        ],
+        "tool_calls": 7,
+        "tool_duration_ms": 1785,
+        "tool_failures": 0,
+        "tool_input_bytes": 788,
+        "tool_output_bytes": 93165
+      },
+      "order": 2,
+      "repetition": 2,
+      "request_id": "study-20261101-codex-r3--reverse-grabowski-agent--r2--repoground_mandatory",
+      "score": {
+        "expected_outcome": "answer",
+        "human_grade": null,
+        "human_verified_citations": null,
+        "missing_gold_paths": 0,
+        "negative_false_confidence": false,
+        "outcome_match": true,
+        "path_recall": 1.0,
+        "quality_success": null,
+        "unsupported_paths": 0
+      },
+      "status": "success",
+      "valid": true
+    },
+    {
+      "case_id": "reverse-grabowski-agent",
+      "class": "reverse_relations",
+      "condition": "git_only",
+      "errors": [],
+      "metrics": {
+        "billed_cost": null,
+        "cached_input_tokens": 79360,
+        "cpu_ms": null,
+        "duration_ms": 25220,
+        "input_tokens": 96187,
+        "output_tokens": 1361,
+        "peak_rss_kib": null,
+        "repoground_calls": 0,
+        "repoground_failures": 0,
+        "tool_breakdown": [
+          {
+            "bytes": 107,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 2808,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 8836,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 8555,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 4354,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          }
+        ],
+        "tool_calls": 5,
+        "tool_duration_ms": 0,
+        "tool_failures": 0,
+        "tool_input_bytes": 673,
+        "tool_output_bytes": 23987
+      },
+      "order": 3,
+      "repetition": 2,
+      "request_id": "study-20261101-codex-r3--reverse-grabowski-agent--r2--git_only",
+      "score": {
+        "expected_outcome": "answer",
+        "human_grade": null,
+        "human_verified_citations": null,
+        "missing_gold_paths": 0,
+        "negative_false_confidence": false,
+        "outcome_match": true,
+        "path_recall": 1.0,
+        "quality_success": null,
+        "unsupported_paths": 0
+      },
+      "status": "success",
+      "valid": true
+    },
+    {
+      "case_id": "impact-shebang-tests",
+      "class": "impact_tests",
+      "condition": "git_only",
+      "errors": [],
+      "metrics": {
+        "billed_cost": null,
+        "cached_input_tokens": 248576,
+        "cpu_ms": null,
+        "duration_ms": 39964,
+        "input_tokens": 280855,
+        "output_tokens": 2943,
+        "peak_rss_kib": null,
+        "repoground_calls": 0,
+        "repoground_failures": 0,
+        "tool_breakdown": [
+          {
+            "bytes": 461,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 11799,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 219085,
+            "duration_ms": 5,
+            "name": "codex_file_command",
+            "status": "success"
+          },
+          {
+            "bytes": 1731,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 1401,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 20440,
+            "duration_ms": 1,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 1080,
+            "duration_ms": 0,
+            "name": "codex_file_command",
+            "status": "success"
+          },
+          {
+            "bytes": 22836,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 8247,
+            "duration_ms": 1,
+            "name": "codex_git_command",
+            "status": "success"
+          }
+        ],
+        "tool_calls": 9,
+        "tool_duration_ms": 7,
+        "tool_failures": 0,
+        "tool_input_bytes": 2308,
+        "tool_output_bytes": 284772
+      },
+      "order": 1,
+      "repetition": 2,
+      "request_id": "study-20261101-codex-r3--impact-shebang-tests--r2--git_only",
+      "score": {
+        "expected_outcome": "answer",
+        "human_grade": null,
+        "human_verified_citations": null,
+        "missing_gold_paths": 0,
+        "negative_false_confidence": false,
+        "outcome_match": true,
+        "path_recall": 1.0,
+        "quality_success": null,
+        "unsupported_paths": 0
+      },
+      "status": "success",
+      "valid": true
+    },
+    {
+      "case_id": "impact-shebang-tests",
+      "class": "impact_tests",
+      "condition": "repoground_mandatory",
+      "errors": [],
+      "metrics": {
+        "billed_cost": null,
+        "cached_input_tokens": 106752,
+        "cpu_ms": null,
+        "duration_ms": 29798,
+        "input_tokens": 126424,
+        "output_tokens": 1913,
+        "peak_rss_kib": null,
+        "repoground_calls": 1,
+        "repoground_failures": 0,
+        "tool_breakdown": [
+          {
+            "bytes": 1679,
+            "duration_ms": 5,
+            "name": "repoground_bundle_discover",
+            "status": "success"
+          },
+          {
+            "bytes": 191,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 6877,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 11440,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 15023,
+            "duration_ms": 0,
+            "name": "codex_file_command",
+            "status": "success"
+          }
+        ],
+        "tool_calls": 5,
+        "tool_duration_ms": 5,
+        "tool_failures": 0,
+        "tool_input_bytes": 701,
+        "tool_output_bytes": 34509
+      },
+      "order": 2,
+      "repetition": 2,
+      "request_id": "study-20261101-codex-r3--impact-shebang-tests--r2--repoground_mandatory",
+      "score": {
+        "expected_outcome": "answer",
+        "human_grade": null,
+        "human_verified_citations": null,
+        "missing_gold_paths": 0,
+        "negative_false_confidence": false,
+        "outcome_match": true,
+        "path_recall": 1.0,
+        "quality_success": null,
+        "unsupported_paths": 0
+      },
+      "status": "success",
+      "valid": true
+    },
+    {
+      "case_id": "impact-shebang-tests",
+      "class": "impact_tests",
+      "condition": "repoground_selective",
+      "errors": [],
+      "metrics": {
+        "billed_cost": null,
+        "cached_input_tokens": 540160,
+        "cpu_ms": null,
+        "duration_ms": 56375,
+        "input_tokens": 582803,
+        "output_tokens": 4082,
+        "peak_rss_kib": null,
+        "repoground_calls": 0,
+        "repoground_failures": 0,
+        "tool_breakdown": [
+          {
+            "bytes": 108,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 126978,
+            "duration_ms": 2,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 301321,
+            "duration_ms": 8,
+            "name": "codex_file_command",
+            "status": "failed"
+          },
+          {
+            "bytes": 1107,
+            "duration_ms": 0,
+            "name": "codex_file_command",
+            "status": "success"
+          },
+          {
+            "bytes": 1397,
+            "duration_ms": 1,
+            "name": "codex_file_command",
+            "status": "success"
+          },
+          {
+            "bytes": 8397,
+            "duration_ms": 1,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 11688,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 6255,
+            "duration_ms": 1,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 5414,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 4619,
+            "duration_ms": 0,
+            "name": "codex_file_command",
+            "status": "success"
+          },
+          {
+            "bytes": 5815,
+            "duration_ms": 0,
+            "name": "codex_file_command",
+            "status": "success"
+          },
+          {
+            "bytes": 1861,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 6672,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 6268,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          }
+        ],
+        "tool_calls": 14,
+        "tool_duration_ms": 13,
+        "tool_failures": 1,
+        "tool_input_bytes": 2649,
+        "tool_output_bytes": 485251
+      },
+      "order": 3,
+      "repetition": 2,
+      "request_id": "study-20261101-codex-r3--impact-shebang-tests--r2--repoground_selective",
+      "score": {
+        "expected_outcome": "answer",
+        "human_grade": null,
+        "human_verified_citations": null,
+        "missing_gold_paths": 0,
+        "negative_false_confidence": false,
+        "outcome_match": true,
+        "path_recall": 1.0,
+        "quality_success": null,
+        "unsupported_paths": 1
+      },
+      "status": "success",
+      "valid": true
+    },
+    {
+      "case_id": "impact-symbol-miss-tests",
+      "class": "impact_tests",
+      "condition": "git_only",
+      "errors": [],
+      "metrics": {
+        "billed_cost": null,
+        "cached_input_tokens": 114560,
+        "cpu_ms": null,
+        "duration_ms": 16246,
+        "input_tokens": 142479,
+        "output_tokens": 1377,
+        "peak_rss_kib": null,
+        "repoground_calls": 0,
+        "repoground_failures": 0,
+        "tool_breakdown": [
+          {
+            "bytes": 192,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 6248,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 69888,
+            "duration_ms": 1,
+            "name": "codex_file_command",
+            "status": "success"
+          },
+          {
+            "bytes": 35952,
+            "duration_ms": 1,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 12059,
+            "duration_ms": 1,
+            "name": "codex_git_command",
+            "status": "success"
+          }
+        ],
+        "tool_calls": 5,
+        "tool_duration_ms": 3,
+        "tool_failures": 0,
+        "tool_input_bytes": 1153,
+        "tool_output_bytes": 123186
+      },
+      "order": 1,
+      "repetition": 2,
+      "request_id": "study-20261101-codex-r3--impact-symbol-miss-tests--r2--git_only",
+      "score": {
+        "expected_outcome": "answer",
+        "human_grade": null,
+        "human_verified_citations": null,
+        "missing_gold_paths": 0,
+        "negative_false_confidence": false,
+        "outcome_match": true,
+        "path_recall": 1.0,
+        "quality_success": null,
+        "unsupported_paths": 0
+      },
+      "status": "success",
+      "valid": true
+    },
+    {
+      "case_id": "impact-symbol-miss-tests",
+      "class": "impact_tests",
+      "condition": "repoground_selective",
+      "errors": [],
+      "metrics": {
+        "billed_cost": null,
+        "cached_input_tokens": 173312,
+        "cpu_ms": null,
+        "duration_ms": 18374,
+        "input_tokens": 202697,
+        "output_tokens": 1638,
+        "peak_rss_kib": null,
+        "repoground_calls": 0,
+        "repoground_failures": 0,
+        "tool_breakdown": [
+          {
+            "bytes": 108,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 904700,
+            "duration_ms": 41,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 36431,
+            "duration_ms": 0,
+            "name": "codex_file_command",
+            "status": "success"
+          },
+          {
+            "bytes": 13065,
+            "duration_ms": 1,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 4065,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 4563,
+            "duration_ms": 1,
+            "name": "codex_git_command",
+            "status": "success"
+          }
+        ],
+        "tool_calls": 6,
+        "tool_duration_ms": 43,
+        "tool_failures": 0,
+        "tool_input_bytes": 1283,
+        "tool_output_bytes": 961649
+      },
+      "order": 2,
+      "repetition": 2,
+      "request_id": "study-20261101-codex-r3--impact-symbol-miss-tests--r2--repoground_selective",
+      "score": {
+        "expected_outcome": "answer",
+        "human_grade": null,
+        "human_verified_citations": null,
+        "missing_gold_paths": 0,
+        "negative_false_confidence": false,
+        "outcome_match": true,
+        "path_recall": 1.0,
+        "quality_success": null,
+        "unsupported_paths": 0
+      },
+      "status": "success",
+      "valid": true
+    },
+    {
+      "case_id": "impact-symbol-miss-tests",
+      "class": "impact_tests",
+      "condition": "repoground_mandatory",
+      "errors": [],
+      "metrics": {
+        "billed_cost": null,
+        "cached_input_tokens": 195840,
+        "cpu_ms": null,
+        "duration_ms": 37112,
+        "input_tokens": 227035,
+        "output_tokens": 2012,
+        "peak_rss_kib": null,
+        "repoground_calls": 3,
+        "repoground_failures": 0,
+        "tool_breakdown": [
+          {
+            "bytes": 1679,
+            "duration_ms": 4,
+            "name": "repoground_bundle_discover",
+            "status": "success"
+          },
+          {
+            "bytes": 1679,
+            "duration_ms": 5,
+            "name": "repoground_bundle_discover",
+            "status": "success"
+          },
+          {
+            "bytes": 136577,
+            "duration_ms": 1824,
+            "name": "repoground_query_existing_index",
+            "status": "success"
+          },
+          {
+            "bytes": 2817,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 17797,
+            "duration_ms": 1,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 4405,
+            "duration_ms": 1,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 1996,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          }
+        ],
+        "tool_calls": 7,
+        "tool_duration_ms": 1835,
+        "tool_failures": 0,
+        "tool_input_bytes": 1266,
+        "tool_output_bytes": 165684
+      },
+      "order": 3,
+      "repetition": 2,
+      "request_id": "study-20261101-codex-r3--impact-symbol-miss-tests--r2--repoground_mandatory",
+      "score": {
+        "expected_outcome": "answer",
+        "human_grade": null,
+        "human_verified_citations": null,
+        "missing_gold_paths": 0,
+        "negative_false_confidence": false,
+        "outcome_match": true,
+        "path_recall": 1.0,
+        "quality_success": null,
+        "unsupported_paths": 0
+      },
+      "status": "success",
+      "valid": true
+    },
+    {
+      "case_id": "boundary-invented-symbol",
+      "class": "boundary",
+      "condition": "repoground_mandatory",
+      "errors": [],
+      "metrics": {
+        "billed_cost": null,
+        "cached_input_tokens": 156160,
+        "cpu_ms": null,
+        "duration_ms": 32679,
+        "input_tokens": 168156,
+        "output_tokens": 2300,
+        "peak_rss_kib": null,
+        "repoground_calls": 4,
+        "repoground_failures": 2,
+        "tool_breakdown": [
+          {
+            "bytes": 773,
+            "duration_ms": 6,
+            "name": "repoground_bundle_discover",
+            "status": "failed"
+          },
+          {
+            "bytes": 666,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 1816,
+            "duration_ms": 5,
+            "name": "repoground_bundle_discover",
+            "status": "success"
+          },
+          {
+            "bytes": 1838,
+            "duration_ms": 92,
+            "name": "repoground_live_freshness",
+            "status": "failed"
+          },
+          {
+            "bytes": 12782,
+            "duration_ms": 1560,
+            "name": "repoground_find_symbol",
+            "status": "success"
+          },
+          {
+            "bytes": 1162,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 1789,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 1817,
+            "duration_ms": 1,
+            "name": "codex_git_command",
+            "status": "success"
+          }
+        ],
+        "tool_calls": 8,
+        "tool_duration_ms": 1664,
+        "tool_failures": 2,
+        "tool_input_bytes": 1439,
+        "tool_output_bytes": 21204
+      },
+      "order": 1,
+      "repetition": 2,
+      "request_id": "study-20261101-codex-r3--boundary-invented-symbol--r2--repoground_mandatory",
+      "score": {
+        "expected_outcome": "abstain",
+        "human_grade": null,
+        "human_verified_citations": null,
+        "missing_gold_paths": 0,
+        "negative_false_confidence": true,
+        "outcome_match": false,
+        "path_recall": null,
+        "quality_success": null,
+        "unsupported_paths": 0
+      },
+      "status": "success",
+      "valid": true
+    },
+    {
+      "case_id": "boundary-invented-symbol",
+      "class": "boundary",
+      "condition": "git_only",
+      "errors": [],
+      "metrics": {
+        "billed_cost": null,
+        "cached_input_tokens": 68736,
+        "cpu_ms": null,
+        "duration_ms": 28655,
+        "input_tokens": 73619,
+        "output_tokens": 2044,
+        "peak_rss_kib": null,
+        "repoground_calls": 0,
+        "repoground_failures": 0,
+        "tool_breakdown": [
+          {
+            "bytes": 666,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 3520,
+            "duration_ms": 30,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 3162,
+            "duration_ms": 1,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 1937,
+            "duration_ms": 1,
+            "name": "codex_git_command",
+            "status": "success"
+          }
+        ],
+        "tool_calls": 4,
+        "tool_duration_ms": 32,
+        "tool_failures": 0,
+        "tool_input_bytes": 1736,
+        "tool_output_bytes": 7549
+      },
+      "order": 2,
+      "repetition": 2,
+      "request_id": "study-20261101-codex-r3--boundary-invented-symbol--r2--git_only",
+      "score": {
+        "expected_outcome": "abstain",
+        "human_grade": null,
+        "human_verified_citations": null,
+        "missing_gold_paths": 0,
+        "negative_false_confidence": false,
+        "outcome_match": false,
+        "path_recall": null,
+        "quality_success": null,
+        "unsupported_paths": 0
+      },
+      "status": "failed",
+      "valid": true
+    },
+    {
+      "case_id": "boundary-invented-symbol",
+      "class": "boundary",
+      "condition": "repoground_selective",
+      "errors": [],
+      "metrics": {
+        "billed_cost": null,
+        "cached_input_tokens": 51456,
+        "cpu_ms": null,
+        "duration_ms": 19766,
+        "input_tokens": 69517,
+        "output_tokens": 1387,
+        "peak_rss_kib": null,
+        "repoground_calls": 0,
+        "repoground_failures": 0,
+        "tool_breakdown": [
+          {
+            "bytes": 108,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 687,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 2086,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          },
+          {
+            "bytes": 343,
+            "duration_ms": 0,
+            "name": "codex_git_command",
+            "status": "success"
+          }
+        ],
+        "tool_calls": 4,
+        "tool_duration_ms": 0,
+        "tool_failures": 0,
+        "tool_input_bytes": 699,
+        "tool_output_bytes": 2525
+      },
+      "order": 3,
+      "repetition": 2,
+      "request_id": "study-20261101-codex-r3--boundary-invented-symbol--r2--repoground_selective",
+      "score": {
+        "expected_outcome": "abstain",
+        "human_grade": null,
+        "human_verified_citations": null,
+        "missing_gold_paths": 0,
+        "negative_false_confidence": false,
+        "outcome_match": true,
+        "path_recall": null,
+        "quality_success": null,
+        "unsupported_paths": 1
+      },
+      "status": "success",
+      "valid": true
+    }
+  ],
+  "unexpected_or_duplicate_ids": [],
+  "valid_success_trials": 33,
+  "version": "1.0"
+}
