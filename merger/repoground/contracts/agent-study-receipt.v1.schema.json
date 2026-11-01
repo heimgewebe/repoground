@@ -23,7 +23,8 @@
     "trace",
     "billed_cost",
     "resources",
-    "error"
+    "error",
+    "execution_context"
   ],
   "properties": {
     "kind": {
@@ -173,6 +174,45 @@
           "output_bytes": {
             "type": "integer",
             "minimum": 0
+          },
+          "repoground_evidence": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "repo",
+              "source_commit",
+              "generator_commit",
+              "manifest_sha256",
+              "observed_status",
+              "freshness"
+            ],
+            "properties": {
+              "repo": {
+                "type": "string",
+                "minLength": 3
+              },
+              "source_commit": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{40}$"
+              },
+              "generator_commit": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{40}$"
+              },
+              "manifest_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "observed_status": {
+                "const": "available"
+              },
+              "freshness": {
+                "enum": [
+                  "fresh_exact",
+                  "pinned_exact"
+                ]
+              }
+            }
           }
         }
       }
@@ -360,6 +400,37 @@
           }
         }
       ]
+    },
+    "execution_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agent_version",
+        "host_class",
+        "cache_policy",
+        "tool_contract"
+      ],
+      "properties": {
+        "agent_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "host_class": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cache_policy": {
+          "enum": [
+            "cold",
+            "warm",
+            "controlled"
+          ]
+        },
+        "tool_contract": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
     }
   }
 }

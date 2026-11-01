@@ -63,19 +63,19 @@ Provider-, Modell- oder Agentenausführung.
 
 | Merkmal | Nachweis |
 | --- | --- |
-| Eingefrorener Taskset-Digest | 103dfb9be83aec59b010141d064f62b59228ba7f47626f3844410b43ae89917b |
+| Eingefrorener Taskset-Digest | c09d2ed62456b1ad385f82e906be38ffc2a6ba02205b535d0ef4935ba9c59980 |
 | Revisionsgebundene Quellpfade | RepoGround 9, Grabowski 2, Commonthing 2 |
 | Gesunde Snapshot-/Generator-Identität | Alle drei auf Generator 0fe8e5fd972c69b0d816b6bf124e10e6f5a43112 |
 | Erstellte Pilot-Requests | 36 (6 Fragen × 3 Arme × 2 Wiederholungen) |
 | Real ausgeführte Agentenläufe | **0** |
 | Fehlende Agenten-Receipts | **36**, vollständig sichtbar |
 | Auswertung/Trend | not_established; eine Probe-Vergleichsgruppe |
-| Vertragstest und Bestandstests | 166 PASS, Ruff PASS; einzig vorhandener pytest-asyncio-Konfigurationshinweis |
-| Technischer Prüfbeleg | Grabowski-Jobs 8579e3309cc0 (Tests) und 593b826b5962 (Plan/Leerauswertung) |
+| Vertragstest und Bestandstests | 175 PASS, Ruff PASS und CI-Komplexitätsratchet PASS; einzig vorhandener pytest-asyncio-Konfigurationshinweis |
+| Technischer Prüfbeleg | Grabowski-Jobs fb7ed57d4812 (Tests samt CI-Ratchet) und 950743924ac4 (Plan/Leerauswertung) |
 
 Die Planung erfolgte absichtlich mit einer als **planning-only**
 gekennzeichneten Profilidentität ohne echten Provider. Ihr
-Protokollschlüssel 56fcecbc004e04dd9435821492de1b079ba3ed462ed5fbde1db1622610a9c041
+Protokollschlüssel a2f926440a61edd7a94f44c6bb20fc5fb762f532ca17041e7ad5176b6e005739
 ist **kein** Langzeitprotokoll realer Agentenläufe und wird nicht
 mit späteren Providerdaten zusammengeführt. Die vertraulichen
 Laufplan- und Rohdateien verblieben außerhalb des Repositories im

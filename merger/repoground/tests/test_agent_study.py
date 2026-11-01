@@ -72,6 +72,19 @@ def sample_receipt(req: dict, case: dict, root: Path, *, duration_ms: int = 1500
         use_repoground = req["condition"] == "repoground_mandatory"
     if use_repoground:
         tool = req["repoground_tool_names"][0]
+    tool_evidence = {}
+    if use_repoground:
+        ref_name, manifest = next(iter(req["repoground"].items()))
+        tool_evidence = {
+            "repoground_evidence": {
+                "repo": ref_name,
+                "source_commit": manifest["source_commit"],
+                "generator_commit": manifest["generator_commit"],
+                "manifest_sha256": manifest["manifest_sha256"],
+                "observed_status": "available",
+                "freshness": "pinned_exact",
+            }
+        }
     paths = deepcopy(case["oracle"]["required_paths"])
     now = datetime(2026, 11, 1, 8, 0, tzinfo=timezone.utc)
     stamp = now.isoformat()
@@ -93,13 +106,14 @@ def sample_receipt(req: dict, case: dict, root: Path, *, duration_ms: int = 1500
         "request_id": req["request_id"], "request_sha256": study.sha256_json(req),
         "condition": req["condition"],
         "session_id": req["session_id"], "workspace_id": req["workspace_id"],
-        "runner": req["runner"], "status": status,
+        "runner": req["runner"], "execution_context": req["execution_context"], "status": status,
         "started_at": stamp, "ended_at": later, "duration_ms": duration_ms,
         "usage": {"source": "provider_reported", "input_tokens": 250,
                   "output_tokens": 80, "cached_input_tokens": 110},
         "tool_calls": [{
             "sequence": 1, "name": tool, "status": "success",
             "duration_ms": 200, "input_bytes": 25, "output_bytes": 150,
+            **tool_evidence,
         }],
         "answer": {
             "outcome": case["oracle"]["outcome"],
@@ -127,6 +141,7 @@ def sample_data(plan: dict, root: Path) -> tuple[list[dict], list[dict]]:
         receipts.append(receipt)
         grades.append({
             "request_id": req["request_id"], "reviewer": "independent-test-reviewer",
+            "receipt_sha256": study.sha256_json(receipt),
             "verdict": "correct", "citations_checked": True,
             "reviewed_at": "2026-11-01T08:00:00Z",
             "evidence_ref": "synthetic:test-only",
@@ -207,6 +222,13 @@ def test_mandatory_requires_actual_successful_repoground_call(planned, tmp_path)
     rec = sample_receipt(req, g[req["case_id"]], tmp_path, use_repoground=False)
     assert "mandatory" in " ".join(study.validate_receipt(req, rec, trace_root=tmp_path))
     rec["tool_calls"][0]["name"] = req["repoground_tool_names"][0]
+    ref_name, manifest = next(iter(req["repoground"].items()))
+    rec["tool_calls"][0]["repoground_evidence"] = {
+        "repo": ref_name, "source_commit": manifest["source_commit"],
+        "generator_commit": manifest["generator_commit"],
+        "manifest_sha256": manifest["manifest_sha256"],
+        "observed_status": "available", "freshness": "pinned_exact",
+    }
     assert study.validate_receipt(req, rec, trace_root=tmp_path) == []
 
 
@@ -250,7 +272,7 @@ def test_tampered_receipt_rejected(planned, tmp_path, mutation):
 
 def test_evaluation_counts_missing_trials_and_never_calls_them_wins(planned, tmp_path):
     receipt, grades = sample_data(planned, tmp_path)
-    report = study.evaluate(planned, gold(), receipt[:-1], grades,
+    report = study.evaluate(planned, gold(), receipt[:-1], grades[:-1],
                             trace_root=tmp_path, measurement_scope="real_runner_reported")
     assert report["planned_trials"] == 36
     assert report["valid_success_trials"] == 35
@@ -279,6 +301,8 @@ def test_outside_oracle_paths_and_negative_false_confidence_are_visible(planned,
     r["answer"]["outcome"] = "answer"
     r["answer"]["asserted_sufficient_evidence"] = True
     r["answer"]["reported_paths"] = [{"repo": "repoground", "path": "merger/repoground/core/mcp_tools.py"}]
+    review = next(g for g in grades if g["request_id"] == r["request_id"])
+    review["receipt_sha256"] = study.sha256_json(r)
     result = study.evaluate(planned, gold(), receipts, grades, trace_root=tmp_path,
                             measurement_scope="synthetic_contract_fixture")
     score = next(x["score"] for x in result["trials"] if x["request_id"] == r["request_id"])
@@ -526,3 +550,51 @@ def test_serial_run_batch_skips_only_verified_existing_receipts(planned, tmp_pat
     with pytest.raises(study.AgentBenchmarkError, match="existing invalid receipt"):
         cli.run_batch(args)
     assert len(called) == 2
+
+
+def test_run_batch_persists_runner_failure_and_refuses_silent_retry(planned, tmp_path, monkeypatch):
+    """A timeout or malformed agent result must not quietly become another trial."""
+    plan_path = tmp_path / "plan.json"
+    study.write_json_atomic(plan_path, planned)
+    command = tmp_path / "command.json"
+    command.write_text(json.dumps(["not-really-a-provider"]))
+    trace_root = tmp_path / "traces"
+    receipts = tmp_path / "receipts"
+    calls = []
+
+    def failed_runner(_command, request, **_kwargs):
+        calls.append(request["request_id"])
+        raise study.AgentBenchmarkError("runner timed out")
+
+    monkeypatch.setattr(study, "execute_runner", failed_runner)
+    args = cli.build_parser().parse_args([
+        "run-batch", "--plan", str(plan_path), "--runner-command", str(command),
+        "--trace-root", str(trace_root), "--receipts", str(receipts),
+        "--max-runs", "1",
+    ])
+    request = planned["requests"][0]
+    with pytest.raises(study.AgentBenchmarkError, match="runner timed out"):
+        cli.run_batch(args)
+    marker = receipts / ".attempts" / (request["request_id"] + ".json")
+    assert marker.is_file()
+    attempt = study.load_json(marker)
+    assert attempt["status"] == "runner_failed_without_receipt"
+    assert attempt["request_sha256"] == study.sha256_json(request)
+    assert attempt["error_class"] == "AgentBenchmarkError"
+    assert "usage" not in attempt and "input_tokens" not in attempt
+    assert not list(receipts.glob("*.json"))
+
+    with pytest.raises(study.AgentBenchmarkError, match="prior attempt exists"):
+        cli.run_batch(args)
+    assert calls == [request["request_id"]]
+
+
+def test_started_attempt_without_receipt_stays_non_retryable(planned, tmp_path):
+    """A killed process has unknown outcome; rerun may not erase this attempt."""
+    request = planned["requests"][0]
+    target = tmp_path / "receipts" / (request["request_id"] + ".json")
+    marker = cli._reserve_attempt(request, target)
+    assert study.load_json(marker)["status"] == "started"
+    with pytest.raises(study.AgentBenchmarkError, match="prior attempt exists"):
+        cli._reserve_attempt(request, target)
+    assert not target.exists()

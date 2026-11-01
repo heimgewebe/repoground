@@ -126,7 +126,7 @@ als neuer Agentenrouter oder Publisher vor:
   Git-/Generator-/Manifest-Fingerprints, Provider-Tokens, Tool-Bytes und
   Latenzen. Der Vergleichsschlüssel bindet konstante Messbedingungen; die
   Generatorrevision bleibt als bewusst veränderlicher Eingriff erhalten.
-- Reale Git-Quellpfade überprüft, **166 Regressions-/Bestandstests bestanden**
+- Reale Git-Quellpfade überprüft, **175 Regressions-/Bestandstests bestanden**
   und Ruff erfolgreich (Prüflauf am 01.11.2026). Ein tatsächlicher
   CLI-Plan-Durchlauf mit gesunden veröffentlichten Manifests für alle drei
   Repositories erzeugte 36 Pilot-Requests. Die Leerauswertung weist

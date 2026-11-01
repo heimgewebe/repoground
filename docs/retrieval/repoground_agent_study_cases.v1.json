@@ -376,7 +376,7 @@
       "repositories": [
         "repoground"
       ],
-      "question": "Ein Programm hat kein .py-Suffix. Kann es trotzdem als Python-Quelle von RepoGround erkannt werden? Finde die tatsächliche Erkennung und mindestens ein solches versioniertes Skript; benenne Bedingungen.",
+      "question": "Kann ein versioniertes Programm ohne .py-Suffix trotzdem als Python-Quelle von RepoGround erkannt werden? Erkläre die tatsächliche Erkennung und belege sie insbesondere an scripts/ops/repoground-legacy-source-inventory (nicht nur irgendeinem Python-Skript).",
       "oracle": {
         "outcome": "answer",
         "required_paths": [
@@ -401,9 +401,13 @@
           {
             "repo": "repoground",
             "path": "merger/repoground/tests/test_python_symbol_index.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "scripts/ops/repoground-publish-fleet"
           }
         ],
-        "rationale": "Das echte extensionless Skript besitzt eine Python-Shebang, und der Symbolindex verarbeitet solche Dateien unter gebundenem Quellstand."
+        "rationale": "Die Quelle scripts/ops/repoground-legacy-source-inventory besitzt die konkrete Python-Shebang und die symbol_index.py-Erkennung verarbeitet solche Dateien. Auch repoground-publish-fleet ist ein gültiges zusätzliches Python-Shebang-Beispiel, aber die Frage benennt das primäre Prüfziels ausdrücklich."
       }
     }
   ],

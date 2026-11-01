@@ -145,7 +145,7 @@ Schreibt einen unveränderlichen Plan und genau einen Auftrag pro Lauf. Die Ausg
 
 ### 5. Echte Läufe mit einem externen Agentenadapter durchführen
 
-runner-command.json enthält ein JSON-Array von Argumenten (exaktes argv, **keine Shell-Zeichenkette**). Der externe Runner liest einen JSON-Request von stdin, führt die Agentenaufgabe in der isolierten Umgebung durch, speichert den vollständigen echten Trace außerhalb des Repos und gibt ein JSON-Receipt gemäß Schema zurück.
+runner-command.json enthält ein JSON-Array von Argumenten (exaktes argv, **keine Shell-Zeichenkette**). Der externe Runner liest einen JSON-Request von stdin, führt die Agentenaufgabe in der isolierten Umgebung durch, speichert den vollständigen echten Trace außerhalb des Repos und gibt ein JSON-Receipt gemäß Schema zurück. Das Receipt muss `execution_context` (Agentenrevision, Hostklasse, Cachemodus, Toolvertrag) an den Auftrag binden. Jeder erfolgreiche RepoGround-Toolcall muss die tatsächlich beobachtete Quellrevision, Generatorrevision, Manifest-SHA und Freshness als `repoground_evidence` tragen. Ein bloßer Toolname ist kein revisionsgenauer Beleg.
 
 ~~~bash
 python -m merger.repoground.cli.agent_study run \
@@ -154,6 +154,28 @@ python -m merger.repoground.cli.agent_study run \
   --trace-root /abs/pfad/traces \
   --out /abs/pfad/receipts/REQUEST.json
 ~~~
+
+Alternativ kann der Plan seriell mit `run-batch` ausgeführt werden; vorhandene Receipts werden nur nach erneuter vollständiger Prüfung übersprungen. Bei dem ersten ungültigen Receipt bricht die Ausführung ab, ohne Dateien zu überschreiben:
+
+~~~bash
+python -m merger.repoground.cli.agent_study run-batch \
+  --plan /abs/pfad/study-20261101-01/plan.json \
+  --runner-command /abs/pfad/runner-command.json \
+  --trace-root /abs/pfad/traces --receipts /abs/pfad/receipts
+~~~
+
+**Wiederanlauf ohne Erfolgsverzerrung:** Vor dem Start eines einzelnen
+externen Agentenlaufs wird atomar unter receipts/.attempts/REQUEST.json
+eine quell-/requestgebundene Startquittung angelegt. Bei Timeout,
+Runner-Absturz, fehlerhaftem JSON oder anderen Ausführungsfehlern bleibt
+sie mit Fehlerklasse und ohne erfundene Provider-Tokens erhalten.
+Fehlt später das eigentliche Receipt, wird derselbe Versuch **nicht**
+automatisch noch einmal gestartet, auch wenn run-batch erneut aufgerufen
+wird. Ein abgebrochener/unklarer Versuch erfordert eine dokumentierte
+Operatorentscheidung; eine neue Messung nutzt eine **neue Run-ID**.
+Erfolgreiche bestehende Receipts werden nur nach vollständiger Prüfung
+übersprungen. Die versteckte .attempts-Struktur wird nicht als gültiges
+Provider-Receipt oder Messergebnis eingelesen.
 
 Den Aufruf entsprechend der im Plan vorgegebenen Reihenfolge wiederholen. Fehlgeschlagene Läufe mit derselben Identität nicht heimlich durch neue ersetzen. RepoGround mandatory benötigt mindestens einen dokumentierten erfolgreichen RepoGround-Toolcall. Bei git_only darf kein RepoGround-Tool im zugelassenen Werkzeugvertrag vorkommen. Bei selective sind null RepoGround-Aufrufe erlaubt.
 
@@ -167,6 +189,7 @@ grades.json ist eine JSON-Liste, deren Einträge **echte** Bewertungen gebundene
 [
   {
     "request_id": "study-20261101-01--known-fleet-entrypoint--r1--git_only",
+    "receipt_sha256": "EXACT_64_HEX_CANONICAL_RECEIPT",
     "reviewer": "external-source-auditor",
     "verdict": "correct",
     "citations_checked": true,
@@ -176,7 +199,7 @@ grades.json ist eine JSON-Liste, deren Einträge **echte** Bewertungen gebundene
 ]
 ~~~
 
-Dies ist eine **Formatvorlage, keine durchgeführte Bewertung**. Auswertung der Antwort möglichst vor Kenntnis des Arms, gleiche Rubrik und möglichst gleiche Reviewer über Zeit. Fehlendes Review = unbekannte Qualität.
+Dies ist eine **Formatvorlage, keine durchgeführte Bewertung**. Der `receipt_sha256` ist SHA-256 über die kanonische JSON-Serialisierung des **exakt bewerteten** Receipts. Wird die Agentenantwort später geändert, ist auch das Urteil nicht mehr gültig. Auswertung der Antwort möglichst vor Kenntnis des Arms, gleiche Rubrik und möglichst gleiche Reviewer über Zeit. Fehlendes Review = unbekannte Qualität.
 
 ~~~bash
 python -m merger.repoground.cli.agent_study evaluate \

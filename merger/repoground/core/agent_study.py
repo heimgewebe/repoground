@@ -298,6 +298,10 @@ def create_plan(taskset: Mapping[str, Any], profile: Mapping[str, Any],
                     "workspace_id": f"workspace-{token}",
                     "runner": {"provider": p["provider"], "model": p["model"],
                                "sampling": p["sampling"], "runner_version": p["runner_version"]},
+                    "execution_context": {
+                        "agent_version": p["agent_version"], "host_class": p["host_class"],
+                        "cache_policy": p["cache_policy"], "tool_contract": p["tool_contract"],
+                    },
                     "tools_allowed": sorted(p["tool_names"]["git"] + p["tool_names"]["file"] +
                                             ([] if arm == "git_only" else p["tool_names"]["repoground"])),
                     "git_file_tool_names": sorted(p["tool_names"]["git"] + p["tool_names"]["file"]),
@@ -337,6 +341,81 @@ def _trace(receipt: Mapping[str, Any], trace_root: Path) -> None:
     _need(sha == trace["sha256"], "trace hash mismatch")
 
 
+def _validate_receipt_tools(request: Mapping[str, Any], receipt: Mapping[str, Any]) -> None:
+    calls = receipt.get("tool_calls")
+    _need(isinstance(calls, list) and len(calls) <= MAX_CALLS, "tool_calls invalid or too long")
+    declared_repo_tools = set(request.get("repoground_tool_names", []))
+    direct_tools = set(request.get("git_file_tool_names", []))
+    _need(bool(direct_tools) and not direct_tools.intersection(declared_repo_tools),
+          "run request has missing or overlapping tool inventory")
+    _need(set(request["tools_allowed"]) == direct_tools.union(declared_repo_tools),
+          "run request allowlist is inconsistent")
+    if request["condition"] == "git_only":
+        _need(not declared_repo_tools and request["repoground"] is None,
+              "baseline must not expose RepoGround")
+    else:
+        _need(bool(declared_repo_tools) and isinstance(request["repoground"], dict),
+              "treatment needs source-bound RepoGround tools")
+    repoground_success = 0
+    for i, call in enumerate(calls):
+        c = _object(call, "tool call")
+        _need(c.get("sequence") == i + 1, "tool-call sequence gap")
+        name = c.get("name")
+        _need(isinstance(name, str) and name in request["tools_allowed"], f"unauthorized tool {name}")
+        _need(c.get("status") in ("success", "failed", "blocked", "timeout"), "tool-call status invalid")
+        for field in ("duration_ms", "input_bytes", "output_bytes"):
+            _nonnegative(c.get(field), f"tool.{field}")
+        if name in declared_repo_tools and c["status"] == "success":
+            evidence = _object(c.get("repoground_evidence"), "successful RepoGround tool evidence")
+            bound = _object(request["repoground"].get(evidence.get("repo")), "bound RepoGround repository")
+            _need(
+                evidence.get("source_commit") == bound["source_commit"]
+                and evidence.get("generator_commit") == bound["generator_commit"]
+                and evidence.get("manifest_sha256") == bound["manifest_sha256"]
+                and evidence.get("observed_status") == "available"
+                and evidence.get("freshness") in ("fresh_exact", "pinned_exact"),
+                "successful RepoGround call lacks exact source/manifest/freshness identity",
+            )
+            repoground_success += 1
+    if request["condition"] == "repoground_mandatory" and receipt["status"] == "success":
+        _need(repoground_success >= 1, "mandatory condition had no successful RepoGround call")
+
+
+def _validate_receipt_answer(request: Mapping[str, Any], receipt: Mapping[str, Any]) -> None:
+    answer = _object(receipt.get("answer"), "answer")
+    _need(answer.get("outcome") in ("answer", "abstain", "unavailable"), "answer.outcome invalid")
+    _need(isinstance(answer.get("asserted_sufficient_evidence"), bool), "answer confidence required")
+    paths = answer.get("reported_paths")
+    _need(isinstance(paths, list), "answer.reported_paths must be array")
+    got = [_ref(v, request["repositories"], "reported path") for v in paths]
+    _need(len(got) == len(set(got)), "duplicate reported path")
+    citation = answer.get("citations")
+    _need(isinstance(citation, list), "citations required (may be empty)")
+    for ref in citation:
+        obj = _object(ref, "citation")
+        rp = _ref({"repo": obj.get("repo"), "path": obj.get("path")}, request["repositories"], "citation")
+        _need(obj.get("commit") == request["repositories"][rp[0]]["commit"], "citation revision mismatch")
+        _need(_nonnegative(obj.get("start_line"), "start_line") >= 1 and
+              _nonnegative(obj.get("end_line"), "end_line") >= obj["start_line"], "citation lines invalid")
+
+
+def _validate_receipt_resources(receipt: Mapping[str, Any]) -> None:
+    cost = receipt.get("billed_cost")
+    if cost is not None:
+        c = _object(cost, "billed_cost")
+        _need(c.get("source") == "provider_billed" and c.get("currency") in ("USD", "EUR"),
+              "cost must be provider-billed; no rate-card estimate")
+        amount = c.get("amount")
+        _need(type(amount) in (int, float) and math.isfinite(amount) and amount >= 0,
+              "billed cost amount invalid")
+    resources = receipt.get("resources")
+    if resources is not None:
+        rec = _object(resources, "resources")
+        for key in ("peak_rss_kib", "cpu_ms"):
+            if rec.get(key) is not None:
+                _nonnegative(rec[key], key)
+
+
 def validate_receipt(request: Mapping[str, Any], receipt: Mapping[str, Any],
                      *, trace_root: str | Path) -> list[str]:
     try:
@@ -347,6 +426,8 @@ def validate_receipt(request: Mapping[str, Any], receipt: Mapping[str, Any],
         _need(receipt.get("session_id") == request["session_id"], "session mismatch")
         _need(receipt.get("workspace_id") == request["workspace_id"], "workspace mismatch")
         _need(receipt.get("runner") == request["runner"], "provider/model/sampling/runner identity mismatch")
+        _need(receipt.get("execution_context") == request["execution_context"],
+              "agent/host/cache/tool execution context mismatch")
         _need(receipt.get("status") in ("success", "failed", "timeout"), "invalid run status")
         duration = _nonnegative(receipt.get("duration_ms"), "duration_ms")
         start = _iso(receipt.get("started_at"), "started_at")
@@ -360,67 +441,14 @@ def validate_receipt(request: Mapping[str, Any], receipt: Mapping[str, Any],
         if usage.get("cached_input_tokens") is not None:
             _need(_nonnegative(usage["cached_input_tokens"], "cached_input_tokens") <= usage["input_tokens"],
                   "cached tokens cannot exceed input")
-        calls = receipt.get("tool_calls")
-        _need(isinstance(calls, list) and len(calls) <= MAX_CALLS, "tool_calls invalid or too long")
-        declared_repo_tools = set(request.get("repoground_tool_names", []))
-        direct_tools = set(request.get("git_file_tool_names", []))
-        _need(bool(direct_tools) and not direct_tools.intersection(declared_repo_tools),
-              "run request has missing or overlapping tool inventory")
-        _need(set(request["tools_allowed"]) == direct_tools.union(declared_repo_tools),
-              "run request allowlist is inconsistent")
-        if request["condition"] == "git_only":
-            _need(not declared_repo_tools and request["repoground"] is None,
-                  "baseline must not expose RepoGround")
-        else:
-            _need(bool(declared_repo_tools) and isinstance(request["repoground"], dict),
-                  "treatment needs source-bound RepoGround tools")
-        repoground_success = 0
-        for i, call in enumerate(calls):
-            c = _object(call, "tool call")
-            _need(c.get("sequence") == i + 1, "tool-call sequence gap")
-            name = c.get("name")
-            _need(isinstance(name, str) and name in request["tools_allowed"], f"unauthorized tool {name}")
-            _need(c.get("status") in ("success", "failed", "blocked", "timeout"), "tool-call status invalid")
-            for field in ("duration_ms", "input_bytes", "output_bytes"):
-                _nonnegative(c.get(field), f"tool.{field}")
-            if name in declared_repo_tools and c["status"] == "success":
-                repoground_success += 1
-        if request["condition"] == "repoground_mandatory" and receipt["status"] == "success":
-            _need(repoground_success >= 1, "mandatory condition had no successful RepoGround call")
+        _validate_receipt_tools(request, receipt)
         if receipt["status"] == "success":
             _need(receipt.get("error") is None, "successful run carries error")
         else:
             err = _object(receipt.get("error"), "error")
             _need(isinstance(err.get("class"), str) and err["class"], "failed run error class required")
-        answer = _object(receipt.get("answer"), "answer")
-        _need(answer.get("outcome") in ("answer", "abstain", "unavailable"), "answer.outcome invalid")
-        _need(isinstance(answer.get("asserted_sufficient_evidence"), bool), "answer confidence required")
-        paths = answer.get("reported_paths")
-        _need(isinstance(paths, list), "answer.reported_paths must be array")
-        got = [_ref(v, request["repositories"], "reported path") for v in paths]
-        _need(len(got) == len(set(got)), "duplicate reported path")
-        citation = answer.get("citations")
-        _need(isinstance(citation, list), "citations required (may be empty)")
-        for ref in citation:
-            obj = _object(ref, "citation")
-            rp = _ref({"repo": obj.get("repo"), "path": obj.get("path")}, request["repositories"], "citation")
-            _need(obj.get("commit") == request["repositories"][rp[0]]["commit"], "citation revision mismatch")
-            _need(_nonnegative(obj.get("start_line"), "start_line") >= 1 and
-                  _nonnegative(obj.get("end_line"), "end_line") >= obj["start_line"], "citation lines invalid")
-        cost = receipt.get("billed_cost")
-        if cost is not None:
-            c = _object(cost, "billed_cost")
-            _need(c.get("source") == "provider_billed" and c.get("currency") in ("USD", "EUR"),
-                  "cost must be provider-billed; no rate-card estimate")
-            amount = c.get("amount")
-            _need(type(amount) in (int, float) and math.isfinite(amount) and amount >= 0,
-                  "billed cost amount invalid")
-        resources = receipt.get("resources")
-        if resources is not None:
-            rec = _object(resources, "resources")
-            for key in ("peak_rss_kib", "cpu_ms"):
-                if rec.get(key) is not None:
-                    _nonnegative(rec[key], key)
+        _validate_receipt_answer(request, receipt)
+        _validate_receipt_resources(receipt)
         _trace(receipt, Path(trace_root))
         return []
     except (AgentBenchmarkError, OSError, ValueError, TypeError, KeyError) as exc:
@@ -458,7 +486,11 @@ def _score(case: Mapping[str, Any], receipt: Mapping[str, Any], grade: Mapping[s
     return result
 
 
-def _grade_index(grades: Sequence[Mapping[str, Any]], requests: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
+def _grade_index(
+    grades: Sequence[Mapping[str, Any]],
+    requests: Mapping[str, Any],
+    receipts: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Mapping[str, Any]]:
     known = set(requests)
     out = {}
     for value in grades:
@@ -469,6 +501,13 @@ def _grade_index(grades: Sequence[Mapping[str, Any]], requests: Mapping[str, Any
         _need(type(g.get("citations_checked")) is bool, "citation review boolean required")
         _need(isinstance(g.get("reviewer"), str) and 2 <= len(g["reviewer"]) <= 120, "independent reviewer id required")
         _need(isinstance(g.get("evidence_ref"), str) and len(g["evidence_ref"]) >= 8, "review evidence pointer required")
+        receipt = receipts.get(rid)
+        _need(receipt is not None, "review grade cannot attest a missing receipt")
+        _need(
+            isinstance(g.get("receipt_sha256"), str)
+            and g["receipt_sha256"] == sha256_json(receipt),
+            "review verdict is not cryptographically bound to exact evaluated receipt",
+        )
         _iso(g.get("reviewed_at"), "grade.reviewed_at")
         out[rid] = g
     return out
@@ -503,9 +542,7 @@ def _bootstrap_delta(per_task: Mapping[str, Sequence[float]], protocol_key: str)
     return [_percentile(draws, 0.025), _percentile(draws, 0.975)]
 
 
-def evaluate(plan: Mapping[str, Any], taskset: Mapping[str, Any],
-             receipts: Sequence[Mapping[str, Any]], grades: Sequence[Mapping[str, Any]],
-             *, trace_root: str | Path, measurement_scope: str) -> dict[str, Any]:
+def _validate_study_plan(plan: Mapping[str, Any], taskset: Mapping[str, Any], measurement_scope: str) -> None:
     taskset_valid(taskset)
     _need(plan.get("kind") == PLAN_KIND and plan.get("version") == VERSION, "invalid study plan")
     _need(plan.get("study_sha256") == sha256_json(taskset), "taskset drift relative to plan")
@@ -538,6 +575,9 @@ def evaluate(plan: Mapping[str, Any], taskset: Mapping[str, Any],
               "plan request source revision drift")
         _need(req.get("runner") == {k: plan["profile"][k] for k in ("provider", "model", "sampling", "runner_version")},
               "plan runner identity drift")
+        _need(req.get("execution_context") == {
+            k: plan["profile"][k] for k in ("agent_version", "host_class", "cache_policy", "tool_contract")
+        }, "plan execution context drift")
         tools = plan["profile"]["tool_names"]
         wanted_direct = sorted(tools["git"] + tools["file"])
         wanted_rg = [] if req["condition"] == "git_only" else sorted(tools["repoground"])
@@ -556,6 +596,9 @@ def evaluate(plan: Mapping[str, Any], taskset: Mapping[str, Any],
             )
             expected_order = sorted(enumerate(PERMUTATIONS[(idx + (rep - 1) * 3) % 6], 1))
             _need(got == expected_order, "plan treatment order manipulated")
+
+
+def _collect_study_trials(plan: Mapping[str, Any], taskset: Mapping[str, Any], receipts: Sequence[Mapping[str, Any]], grades: Sequence[Mapping[str, Any]], trace_root: str | Path) -> tuple[list[dict[str, Any]], dict[str, Mapping[str, Any]], list[str], dict[str, Any]]:
     expected = {r["request_id"]: r for r in plan["requests"]}
     _need(len(expected) == len(plan["requests"]), "duplicate plan request IDs")
     supplied: dict[str, Mapping[str, Any]] = {}
@@ -566,7 +609,7 @@ def evaluate(plan: Mapping[str, Any], taskset: Mapping[str, Any],
             extras.append(str(rid))
         else:
             supplied[rid] = item
-    grades_by_id = _grade_index(grades, expected)
+    grades_by_id = _grade_index(grades, expected, supplied)
     cases = {c["id"]: c for c in taskset["cases"]}
     rows = []
     for request in plan["requests"]:
@@ -609,6 +652,10 @@ def evaluate(plan: Mapping[str, Any], taskset: Mapping[str, Any],
             record["score"] = _score(cases[request["case_id"]], receipt, grades_by_id.get(rid))
         rows.append(record)
 
+    return rows, supplied, extras, cases
+
+
+def _summarize_study_arms(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     by_arm = {}
     for arm in ARMS:
         subset = [x for x in rows if x["condition"] == arm]
@@ -659,6 +706,10 @@ def evaluate(plan: Mapping[str, Any], taskset: Mapping[str, Any],
                 "amount": round(sum(c["amount"] for c in costs), 6),
             }
 
+    return by_arm
+
+
+def _aggregate_study_pairs(rows: Sequence[Mapping[str, Any]], cases: Mapping[str, Any], plan: Mapping[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
     grouped: dict[tuple[str, int], dict[str, Any]] = defaultdict(dict)
     for row in rows:
         grouped[(row["case_id"], row["repetition"])][row["condition"]] = row
@@ -763,6 +814,10 @@ def evaluate(plan: Mapping[str, Any], taskset: Mapping[str, Any],
             },
         }
 
+    return blocks, effects, by_class
+
+
+def _select_study_decision(rows: Sequence[Mapping[str, Any]], extras: Sequence[str], plan: Mapping[str, Any], by_arm: Mapping[str, Any], effects: Mapping[str, Any], measurement_scope: str) -> tuple[str, bool]:
     valid_all = len(extras) == 0 and all(x["valid"] and x["status"] == "success" for x in rows)
     grades_complete = valid_all and all(x["score"]["human_grade"] not in (None, "uncertain") for x in rows)
     full = plan["suite"] == "full" and plan["repetitions"] >= DECISION_LIMITS["minimum_repetitions"]
@@ -780,6 +835,17 @@ def evaluate(plan: Mapping[str, Any], taskset: Mapping[str, Any],
             decision = "selective_benefit_candidate"
         else:
             decision = "no_selective_benefit_established"
+    return decision, grades_complete
+
+
+def evaluate(plan: Mapping[str, Any], taskset: Mapping[str, Any],
+             receipts: Sequence[Mapping[str, Any]], grades: Sequence[Mapping[str, Any]],
+             *, trace_root: str | Path, measurement_scope: str) -> dict[str, Any]:
+    _validate_study_plan(plan, taskset, measurement_scope)
+    rows, supplied, extras, cases = _collect_study_trials(plan, taskset, receipts, grades, trace_root)
+    by_arm = _summarize_study_arms(rows)
+    blocks, effects, by_class = _aggregate_study_pairs(rows, cases, plan)
+    decision, grades_complete = _select_study_decision(rows, extras, plan, by_arm, effects, measurement_scope)
     return {
         "kind": REPORT_KIND, "version": VERSION,
         "run_id": plan["run_id"], "created_at": datetime.now(timezone.utc).isoformat(),

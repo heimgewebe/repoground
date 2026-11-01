@@ -7,6 +7,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
+from datetime import datetime, timezone
 from pathlib import Path
 import sys
 from typing import Any
@@ -88,18 +91,93 @@ def plan(args: argparse.Namespace) -> int:
     return 0
 
 
+def _reserve_attempt(request: dict[str, Any], target: Path) -> Path:
+    """Persist the decision to launch *before* the external model can run.
+
+    A missing receipt with an existing attempt remains an explicit failed or
+    unknown execution. A batch resume must never silently redo that trial.
+    """
+    identifier = request.get("request_id")
+    if not isinstance(identifier, str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{1,200}", identifier) is None:
+        raise study.AgentBenchmarkError("unsafe request id for durable attempt")
+    if target.exists() or target.is_symlink():
+        raise study.AgentBenchmarkError(f"existing receipt cannot be overwritten: {target.name}")
+    parent = target.parent
+    if parent.is_symlink():
+        raise study.AgentBenchmarkError("receipt directory must not be symlinked")
+    parent.mkdir(parents=True, exist_ok=True)
+    ledger = parent / ".attempts"
+    if ledger.is_symlink():
+        raise study.AgentBenchmarkError("attempt ledger must not be symlinked")
+    ledger.mkdir(mode=0o700, exist_ok=True)
+    marker = ledger / (identifier + ".json")
+    record = {
+        "kind": "repoground.agent_study_attempt",
+        "version": "1.0",
+        "request_id": identifier,
+        "request_sha256": study.sha256_json(request),
+        "status": "started",
+        "started_at": datetime.now(timezone.utc).isoformat(),
+    }
+    content = (json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(marker, flags, 0o600)
+    except FileExistsError as exc:
+        raise study.AgentBenchmarkError(
+            f"prior attempt exists, no automatic re-execution: {identifier}"
+        ) from exc
+    with os.fdopen(fd, "wb") as output:
+        output.write(content)
+        output.flush()
+        os.fsync(output.fileno())
+    return marker
+
+
+def _finish_attempt(marker: Path, request: dict[str, Any], status: str,
+                    *, receipt_sha256: str | None = None,
+                    error_class: str | None = None) -> None:
+    """Write a terminal observation without manufacturing provider usage."""
+    study.write_json_atomic(marker, {
+        "kind": "repoground.agent_study_attempt",
+        "version": "1.0",
+        "request_id": request["request_id"],
+        "request_sha256": study.sha256_json(request),
+        "status": status,
+        "finished_at": datetime.now(timezone.utc).isoformat(),
+        "receipt_sha256": receipt_sha256,
+        "error_class": error_class,
+        "does_not_establish": ["provider_usage", "answer_correctness", "automatic_retry_authority"],
+    })
+
+
+def _execute_attempt(request: dict[str, Any], command: list[str],
+                     target: Path, trace_root: str | Path,
+                     timeout_seconds: int) -> list[str]:
+    marker = _reserve_attempt(request, target)
+    try:
+        receipt = study.execute_runner(
+            command, request,
+            timeout_seconds=timeout_seconds,
+            max_stdout_bytes=16 * 1024 * 1024,
+        )
+    except Exception as exc:
+        _finish_attempt(marker, request, "runner_failed_without_receipt",
+                        error_class=type(exc).__name__)
+        raise
+    errors = study.validate_receipt(request, receipt, trace_root=trace_root)
+    _write_new(target, receipt)
+    _finish_attempt(marker, request, "invalid_receipt" if errors else "receipt_written",
+                    receipt_sha256=study.sha256_json(receipt))
+    return errors
+
+
 def run(args: argparse.Namespace) -> int:
     request = study.load_json(args.request)
     command = _load_argv(args.runner_command)
     # The runner must write its own durable trace into trace_root and provide a
     # provider-reported, matching request SHA; the wrapper cannot forge that.
-    result = study.execute_runner(
-        command, request,
-        timeout_seconds=args.timeout_seconds,
-        max_stdout_bytes=16 * 1024 * 1024,
-    )
-    errors = study.validate_receipt(request, result, trace_root=args.trace_root)
-    _write_new(args.out, result)
+    errors = _execute_attempt(request, command, Path(args.out), args.trace_root, args.timeout_seconds)
     _print({"status": "valid" if not errors else "invalid",
             "request_id": request["request_id"], "receipt": str(args.out),
             "errors": errors})
@@ -129,12 +207,7 @@ def run_batch(args: argparse.Namespace) -> int:
                 )
             outcomes.append({"request_id": request["request_id"], "status": "existing_verified"})
             continue
-        result = study.execute_runner(
-            command, request, timeout_seconds=args.timeout_seconds,
-            max_stdout_bytes=16 * 1024 * 1024,
-        )
-        errors = study.validate_receipt(request, result, trace_root=args.trace_root)
-        _write_new(target, result)
+        errors = _execute_attempt(request, command, target, args.trace_root, args.timeout_seconds)
         outcomes.append({"request_id": request["request_id"],
                          "status": "valid" if not errors else "invalid"})
         if errors:
