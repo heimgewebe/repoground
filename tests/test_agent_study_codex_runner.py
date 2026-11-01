@@ -28,6 +28,30 @@ class CodexStudyRunnerTest(unittest.TestCase):
         self.assertEqual(len(runner.MCP_TOOLS), len(set(runner.MCP_TOOLS)))
         self.assertEqual(set(runner.TOOL_NAMES), {"git", "file", "repoground"})
 
+    def test_a1_selective_retrieval_is_not_a_new_mandatory_mcp_gate(self):
+        base = {"question": "Wo verwenden Aufrufer das unbekannte Symbol?", "repositories": {
+            "repoground": {"commit": "a" * 40},
+        }}
+        git_only = runner._prompt({**base, "condition": "git_only"})
+        mandatory = runner._prompt({**base, "condition": "repoground_mandatory"})
+        selective = runner._prompt({**base, "condition": "repoground_selective"})
+        self.assertIn("AUFGABE (in allen drei Armen bytegleich):\n" + base["question"], git_only)
+        self.assertTrue(all(base["question"] in prompt for prompt in (mandatory, selective)))
+        self.assertNotIn("bundle_discover", git_only)
+        self.assertNotIn("RepoGround-Read", git_only)
+        self.assertIn("mindestens einen tatsächlich erfolgreichen", mandatory)
+        self.assertIn("null RepoGround-Aufrufe sind ausdrücklich erlaubt", selective)
+        for treatment in (mandatory, selective):
+            self.assertIn("bundle_discover, snapshot_status und live_freshness sind keine Pflicht-Vorabaufrufe", treatment)
+            self.assertIn("max_context_tokens<=800", treatment)
+            self.assertIn("Git-Zitatzeilen am fixierten Commit", treatment)
+            self.assertIn("Git-Fallback", treatment)
+            self.assertIn("aus fehlenden Kanten niemals Nichtexistenz", treatment)
+        self.assertEqual(git_only.split("AUFGABE (in allen drei Armen bytegleich):\n")[1],
+                         selective.split("AUFGABE (in allen drei Armen bytegleich):\n")[1])
+        self.assertEqual(mandatory.split("AUFGABE (in allen drei Armen bytegleich):\n")[1],
+                         selective.split("AUFGABE (in allen drei Armen bytegleich):\n")[1])
+
     def test_provider_usage_only_from_terminal_provider_event(self):
         usage = {"input_tokens": 120, "output_tokens": 17, "cached_input_tokens": 80}
         events = [(event("turn.completed", usage=usage), 3)]
@@ -130,7 +154,7 @@ class CodexStudyRunnerTest(unittest.TestCase):
             fallback, valid = runner._answer(json.dumps(broken), repositories)
             self.assertFalse(valid)
             self.assertEqual(fallback["explanation"], "")
-        self.assertEqual(runner.AGENT_VERSION, "codex-study-prompt-v2")
+        self.assertEqual(runner.AGENT_VERSION, "codex-study-prompt-v3-selective-retrieval-a1")
 
     def test_mcp_success_depends_on_specific_tool_contract(self):
         available = {"status": "available"}

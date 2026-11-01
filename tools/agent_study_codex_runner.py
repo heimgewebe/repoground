@@ -34,7 +34,7 @@ TOOL_NAMES = {
     "file": ["codex_file_command"],
     "repoground": ["repoground_" + tool for tool in MCP_TOOLS],
 }
-AGENT_VERSION = "codex-study-prompt-v2"
+AGENT_VERSION = "codex-study-prompt-v3-selective-retrieval-a1"
 PROVIDER = "openai-codex-cli"
 MAX_TRACE_BYTES = 32 * 1024 * 1024
 MAX_TOOL_CALLS = 160
@@ -457,6 +457,23 @@ def _prompt(req: dict[str, Any]) -> str:
         lines.append("RepoGround-MCP ist verfügbar, aber freiwillig; null RepoGround-Aufrufe sind ausdrücklich erlaubt.")
     else:
         lines.append("RepoGround ist in dieser Kontrollbedingung nicht verfügbar; benutze Git und normale Dateisuche.")
+    if req["condition"] != "git_only":
+        lines.extend((
+            "Werkzeugwahl: Bekannte Dateien/Zeilen und negative Grenzen sind meist mit Git direkter belegbar. "
+            "Bei unbekannten eingehenden Aufrufern, Beziehungen oder mehrteiligen Test-/Änderungsfolgen "
+            "kann ein gezielter RepoGround-Read die initiale breite Git-Suche ersetzen.",
+            "Das RepoGround-MCP ist auf ein zuvor hashgeprüftes eingefrorenes Manifest gebunden. "
+            "bundle_discover, snapshot_status und live_freshness sind keine Pflicht-Vorabaufrufe "
+            "für find_symbol, get_callers, find_references oder query_existing_index.",
+            "Wenn ein Graph-Read sinnvoll ist, beginne mit höchstens einer gezielten Suchabfrage: "
+            "für exakt benannte Python-Symbole find_symbol oder get_callers/find_references, "
+            "sonst query_existing_index mit k<=3 und max_context_tokens<=800. "
+            "Keine großen ask_context-Pakete oder wiederholte breite Suchabfragen ohne neue Teilfrage.",
+            "Lies anschließend nur die für die Antwort notwendigen Git-Zitatzeilen am fixierten Commit. "
+            "Wiederhole nicht dieselbe breite Git-Suche, wenn die gefundene Quelle bereits eindeutig "
+            "ist. Bei ungeeignetem, altem oder unvollständigem Graphen direkt Git-Fallback nutzen; "
+            "aus fehlenden Kanten niemals Nichtexistenz oder Testvollständigkeit ableiten.",
+        ))
     return "\n".join(lines) + "\n\nAUFGABE (in allen drei Armen bytegleich):\n" + req["question"]
 
 
