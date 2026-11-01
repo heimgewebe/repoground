@@ -1,0 +1,544 @@
+"""Contract tests for the external real-provider adapter; no synthetic quality claim."""
+import importlib.util
+import json
+import stat
+from pathlib import Path
+import tempfile
+import unittest
+
+SCRIPT = Path(__file__).resolve().parents[1] / "tools" / "agent_study_codex_runner.py"
+spec = importlib.util.spec_from_file_location("agent_study_codex_runner", SCRIPT)
+runner = importlib.util.module_from_spec(spec)
+assert spec and spec.loader
+spec.loader.exec_module(runner)
+
+
+def event(kind, item=None, usage=None):
+    payload = {"type": kind}
+    if item is not None:
+        payload["item"] = item
+    if usage is not None:
+        payload["usage"] = usage
+    return payload
+
+
+class CodexStudyRunnerTest(unittest.TestCase):
+    def test_tool_inventory_has_no_mutating_snapshot_create(self):
+        self.assertNotIn("repoground_snapshot_create", runner.TOOL_NAMES["repoground"])
+        self.assertEqual(len(runner.MCP_TOOLS), len(set(runner.MCP_TOOLS)))
+        self.assertEqual(set(runner.TOOL_NAMES), {"git", "file", "repoground"})
+
+    def test_provider_usage_only_from_terminal_provider_event(self):
+        usage = {"input_tokens": 120, "output_tokens": 17, "cached_input_tokens": 80}
+        events = [(event("turn.completed", usage=usage), 3)]
+        self.assertEqual(runner._usage(events), {
+            "source": "provider_reported", "input_tokens": 120,
+            "output_tokens": 17, "cached_input_tokens": 80,
+        })
+        self.assertIsNone(runner._usage([]))
+        self.assertIsNone(runner._usage([(event("turn.completed", usage={
+            "input_tokens": 10, "output_tokens": 2, "cached_input_tokens": 11,
+        }), 2)]))
+
+    def test_tool_duration_measured_from_start_end(self):
+        started = {"id": "tool-7", "type": "command_execution",
+                   "command": "git -C repos/repoground rev-parse HEAD",
+                   "status": "in_progress"}
+        finished = {**started, "status": "completed",
+                    "exit_code": 0, "aggregated_output": "0fe8\n"}
+        calls, answer = runner._tool_receipts([
+            (event("item.started", started), 1.0),
+            (event("item.completed", finished), 1.165),
+        ], {})
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["name"], "codex_git_command")
+        self.assertEqual(calls[0]["duration_ms"], 165)
+        self.assertEqual(calls[0]["output_bytes"], 5)
+        self.assertEqual(answer, "")
+
+    def test_unpaired_tool_event_is_not_given_fake_zero_latency(self):
+        item = {"id": "t", "type": "command_execution", "command": "rg foo", "exit_code": 0}
+        with self.assertRaisesRegex(ValueError, "unmeasured"):
+            runner._tool_receipts([(event("item.completed", item), 2)], {})
+
+    def test_successful_mcp_requires_observed_available(self):
+        evidence = {"repo": "repoground", "source_commit": "a" * 40,
+                    "generator_commit": "b" * 40, "manifest_sha256": "c" * 64,
+                    "observed_status": "available", "freshness": "pinned_exact"}
+        item = {"id": "m1", "type": "mcp_tool_call", "server": "study_repoground",
+                "tool": "query_existing_index", "arguments": {"query": "foo"},
+                "result": {"structured_content": {"status": "available"}},
+                "error": None, "status": "completed"}
+        calls, _ = runner._tool_receipts([
+            (event("item.started", item), 1),
+            (event("item.completed", item), 1.1),
+        ], {"repoground": evidence})
+        self.assertEqual(calls[0]["status"], "success")
+        self.assertEqual(calls[0]["repoground_evidence"], evidence)
+        absent = {**item, "result": {"structured_content": {"status": "unavailable"}}}
+        calls, _ = runner._tool_receipts([
+            (event("item.started", absent), 1),
+            (event("item.completed", absent), 1.1),
+        ], {"repoground": evidence})
+        self.assertEqual(calls[0]["status"], "failed")
+        self.assertNotIn("repoground_evidence", calls[0])
+
+    def test_builtin_empty_codex_discovery_is_not_treatment(self):
+        item = {"id": "m1", "type": "mcp_tool_call", "server": "codex",
+                "tool": "list_mcp_resources", "arguments": {},
+                "result": {"structured_content": {"resources": []}},
+                "status": "completed"}
+        self.assertTrue(runner._builtin_empty_mcp(item))
+        calls, _ = runner._tool_receipts([
+            (event("item.started", item), 1),
+            (event("item.completed", item), 1.1),
+        ], {})
+        self.assertEqual(calls, [])
+        invalid = {**item, "result": {"structured_content": {"resources": ["foreign"]}}}
+        self.assertFalse(runner._builtin_empty_mcp(invalid))
+
+    def test_malformed_answer_not_cast_into_success(self):
+        fallback, ok = runner._answer("not JSON", {"repoground": {"commit": "a" * 40}})
+        self.assertFalse(ok)
+        self.assertEqual(fallback["outcome"], "unavailable")
+        self.assertEqual(fallback["reported_paths"], [])
+        self.assertFalse(fallback["asserted_sufficient_evidence"])
+
+    def test_mcp_success_depends_on_specific_tool_contract(self):
+        available = {"status": "available"}
+        self.assertTrue(runner._mcp_evidence_available("bundle_discover", available))
+        self.assertTrue(runner._mcp_evidence_available("find_symbol", available))
+        self.assertTrue(runner._mcp_evidence_available("ask_context", {
+            "status": "ok", "context_pack": {
+                "availability": {"status": "available"},
+            },
+        }))
+        self.assertFalse(runner._mcp_evidence_available("ask_context", {
+            "status": "ok", "context_pack": {
+                "availability": {"status": "unavailable"},
+            },
+        }))
+        self.assertFalse(runner._mcp_evidence_available("ask_context", {"status": "ok"}))
+        self.assertTrue(runner._mcp_evidence_available("grounding_verify", {"status": "pass"}))
+        self.assertFalse(runner._mcp_evidence_available("grounding_verify", {"status": "fail"}))
+        self.assertTrue(runner._mcp_evidence_available("live_freshness", {"status": "fresh"}))
+        self.assertFalse(runner._mcp_evidence_available("live_freshness", {"status": "stale"}))
+        self.assertFalse(runner._mcp_evidence_available("live_freshness", {"status": "unknown"}))
+        self.assertFalse(runner._mcp_evidence_available("find_symbol", {"status": "invalid"}))
+
+    def test_actual_mcp_response_status_and_iserror_affect_receipt(self):
+        evidence = {
+            "repo": "repoground", "source_commit": "a" * 40,
+            "generator_commit": "b" * 40, "manifest_sha256": "c" * 64,
+            "observed_status": "available", "freshness": "pinned_exact",
+        }
+        item = {
+            "id": "m1", "type": "mcp_tool_call", "server": "study_repoground",
+            "tool": "ask_context", "arguments": {"query": "where"},
+            "result": {"structured_content": {
+                "status": "ok", "context_pack": {
+                    "availability": {"status": "available"},
+                },
+            }},
+            "error": None, "status": "completed",
+        }
+        call = runner._mcp_tool_receipt(item, 1, 11, {"repoground": evidence})
+        self.assertEqual(call["status"], "success")
+        self.assertEqual(call["repoground_evidence"], evidence)
+        item["result"]["isError"] = True
+        call = runner._mcp_tool_receipt(item, 1, 11, {"repoground": evidence})
+        self.assertEqual(call["status"], "failed")
+        self.assertNotIn("repoground_evidence", call)
+
+    def test_mcp_exposure_whitelists_only_frozen_tools(self):
+        request = {
+            "condition": "repoground_mandatory", "question": "Exact source question",
+            "runner": {"model": "gpt-5.6-sol"},
+            "repoground": {"repoground": {
+                "manifest_path": "/fake/bundle/manifest.json",
+            }},
+        }
+        config = {
+            "codex_bin": "/fake/codex", "mcp_script": "/fake/mcp.py",
+            "mcp_python": "/fake/python",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            argv = runner._codex_argv(
+                request, config, workspace, {"repoground": workspace},
+            )
+        self.assertTrue(any(
+            part.startswith("mcp_servers.study_repoground.enabled_tools=")
+            and json.loads(part.partition("=")[2]) == list(runner.MCP_TOOLS)
+            for part in argv
+        ))
+        self.assertNotIn("repoground_change_evidence_pack", runner.TOOL_NAMES["repoground"])
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            private_manifest = workspace / "pinned.bundle.manifest.json"
+            argv = runner._codex_argv(
+                request, config, workspace,
+                {"repoground": workspace}, {"repoground": private_manifest},
+            )
+            self.assertTrue(any(str(private_manifest) in arg for arg in argv))
+            self.assertFalse(any("/fake/bundle/manifest.json" in arg for arg in argv))
+
+
+    def test_foreign_mcp_server_cannot_hide_as_repo_tool(self):
+        call = {"id": "m2", "type": "mcp_tool_call",
+                "server": "evil", "tool": "query_existing_index",
+                "arguments": {}, "result": {"structured_content": {"status": "available"}},
+                "error": None, "status": "completed"}
+        evidence = {"repoground": {
+            "repo": "repoground", "source_commit": "a" * 40,
+            "generator_commit": "b" * 40, "manifest_sha256": "c" * 64,
+            "observed_status": "available", "freshness": "pinned_exact",
+        }}
+        with self.assertRaisesRegex(ValueError, "unregistered"):
+            runner._tool_receipts([
+                (event("item.started", call), 1.0),
+                (event("item.completed", call), 1.2),
+            ], evidence)
+        call["server"] = "study_repoground"
+        call["tool"] = "snapshot_create"
+        with self.assertRaisesRegex(ValueError, "unregistered"):
+            runner._tool_receipts([
+                (event("item.started", call), 1.0),
+                (event("item.completed", call), 1.2),
+            ], evidence)
+
+    def test_invalid_model_path_is_failed_not_fabricated_success(self):
+        repositories = {"repoground": {"commit": "a" * 40}}
+        invalid = json.dumps({
+            "outcome": "abstain",
+            "reported_paths": [{"repo": "repoground", "path": "."}],
+            "citations": [],
+            "asserted_sufficient_evidence": False,
+        })
+        answer, parsed = runner._answer(invalid, repositories)
+        self.assertFalse(parsed)
+        self.assertEqual(answer, {
+            "outcome": "unavailable", "reported_paths": [],
+            "citations": [], "asserted_sufficient_evidence": False,
+        })
+        valid = json.dumps({
+            "outcome": "abstain", "reported_paths": [],
+            "citations": [], "asserted_sufficient_evidence": False,
+        })
+        answer, parsed = runner._answer(valid, repositories)
+        self.assertTrue(parsed)
+        self.assertEqual(answer["outcome"], "abstain")
+
+    def test_broken_citation_revision_keeps_original_trace_not_quality(self):
+        repositories = {"repoground": {"commit": "a" * 40}}
+        response = json.dumps({
+            "outcome": "answer", "reported_paths": [{"repo": "repoground", "path": "src/a.py"}],
+            "citations": [{
+                "repo": "repoground", "path": "src/a.py",
+                "commit": "b" * 40, "start_line": 1, "end_line": 4,
+            }],
+            "asserted_sufficient_evidence": True,
+        })
+        sanitized, parsed = runner._answer(response, repositories)
+        self.assertFalse(parsed)
+        self.assertFalse(sanitized["asserted_sufficient_evidence"])
+
+    def test_each_arm_shares_exact_same_question_bytes(self):
+        question = "Where is the concrete source definition of Foo?"
+        bodies = [runner._prompt({"condition": arm, "question": question})
+                  for arm in ("git_only", "repoground_mandatory", "repoground_selective")]
+        self.assertTrue(all(body.split("AUFGABE (in allen drei Armen bytegleich):\n")[1] == question
+                            for body in bodies))
+        self.assertIn("null RepoGround-Aufrufe", bodies[2])
+
+    def test_request_fails_if_runner_or_tool_identity_drifts(self):
+        fingerprint = {"runner_version": "exact-runner", "tool_contract": "exact-contract"}
+        req = {"kind": "repoground.agent_study_request", "version": "1.0",
+               "request_id": "study-trial-a", "workspace_id": "workspace-abc",
+               "condition": "git_only",
+               "runner": {"provider": "openai-codex-cli", "model": "gpt-5.6-sol",
+                          "sampling": {"model_reasoning_effort": "medium"},
+                          "runner_version": "exact-runner"},
+               "execution_context": {"agent_version": runner.AGENT_VERSION,
+                                     "host_class": "heim-pc", "cache_policy": "controlled",
+                                     "tool_contract": "exact-contract"},
+               "repositories": {"repoground": {"commit": "a" * 40,
+                                               "slug": "heimgewebe/repoground"}},
+               "question": "Find me a code symbol", "repoground": None,
+               "tools_allowed": sorted(runner.TOOL_NAMES["git"] + runner.TOOL_NAMES["file"]),
+               "git_file_tool_names": sorted(runner.TOOL_NAMES["git"] + runner.TOOL_NAMES["file"]),
+               "repoground_tool_names": [],
+               "isolation": {"fresh_session": True, "fresh_workspace": True,
+                             "no_prior_arm_transcripts": True, "disable_unlisted_plugins": True}}
+        runner._validate_request(req, fingerprint)
+        req["runner"]["runner_version"] = "forged-runner"
+        with self.assertRaisesRegex(ValueError, "drift"):
+            runner._validate_request(req, fingerprint)
+
+    def test_nonempty_native_codex_resource_discovery_is_metadata_not_failed_treatment(self):
+        for tool, collection in (
+            ("list_mcp_resources", {"resources": [{"uri": "repoground://example"}]}),
+            ("list_mcp_resource_templates", {
+                "resourceTemplates": [{"uriTemplate": "repoground://source/{ref}"}],
+            }),
+        ):
+            with self.subTest(tool=tool):
+                item = {
+                    "id": "resource", "type": "mcp_tool_call", "server": "codex",
+                    "tool": tool, "arguments": {}, "status": "completed",
+                    "result": {"structured_content": collection},
+                }
+                # B/C can inspect registered metadata, but discovery alone
+                # is not a successful RepoGround retrieval.
+                calls, answer = runner._tool_receipts([
+                    (event("item.started", item), 1.0),
+                    (event("item.completed", item), 1.2),
+                ], {"repoground": {}})
+                self.assertEqual(calls, [])
+                self.assertEqual(answer, "")
+                # Git-only must reject nonempty discovery: a hidden source
+                # would invalidate its A/B/C isolation even without a read.
+                with self.assertRaisesRegex(ValueError, "MCP discovery in git_only"):
+                    runner._tool_receipts([
+                        (event("item.started", item), 1.0),
+                        (event("item.completed", item), 1.2),
+                    ], {})
+        empty = {**item, "tool": "list_mcp_resources", "result": {
+            "structured_content": {"resources": []},
+        }}
+        calls, _ = runner._tool_receipts([
+            (event("item.started", empty), 1.0),
+            (event("item.completed", empty), 1.1),
+        ], {})
+        self.assertEqual(calls, [])
+        unknown = {**item, "tool": "read_mcp_resource"}
+        with self.assertRaisesRegex(ValueError, "unregistered"):
+            runner._tool_receipts([
+                (event("item.started", unknown), 1.0),
+                (event("item.completed", unknown), 1.2),
+            ], {})
+
+    def test_pinned_manifest_survives_source_replacement_without_forged_health(self):
+        import hashlib
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            publisher = root / "published"
+            publisher.mkdir()
+            source = publisher / "test.bundle.manifest.json"
+            raw = json.dumps({"links": {"post_emit_health_path": "health.json"}}).encode()
+            source.write_bytes(raw)
+            (publisher / "health.json").write_text(json.dumps({
+                "status": "pass", "bundle_manifest_path": str(source),
+            }))
+            (publisher / "role.txt").write_text("original immutable content")
+            bound = {
+                "manifest_path": str(source),
+                "manifest_sha256": hashlib.sha256(raw).hexdigest(),
+            }
+            request = {"repoground": {"repoground": bound}}
+            ws = root / "worktree"
+            ws.mkdir()
+            pinned = runner._pin_snapshot_manifests(request, ws)
+            target = pinned["repoground"]
+            self.assertEqual(target.read_bytes(), raw)
+            self.assertNotEqual(source, target)
+            self.assertEqual(json.loads((target.parent / "health.json").read_text())[
+                "bundle_manifest_sha256"
+            ], bound["manifest_sha256"])
+            self.assertNotIn("bundle_manifest_sha256", json.loads(
+                (publisher / "health.json").read_text()
+            ))
+            self.assertEqual((target.parent / "role.txt").read_text(), "original immutable content")
+            source.write_bytes(b"substituted publication manifest")
+            runner._assert_pinned_manifests(request, pinned)
+            self.assertEqual(target.read_bytes(), raw)
+            target.chmod(0o600)
+            target.write_bytes(b"mutated private manifest")
+            with self.assertRaisesRegex(ValueError, "private manifest changed"):
+                runner._assert_pinned_manifests(request, pinned)
+
+    def test_private_pin_preserves_declared_nested_roles(self):
+        import hashlib
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            publisher = root / "published"
+            (publisher / "artifacts" / "docs").mkdir(parents=True)
+            (publisher / "artifacts" / "docs" / "demo.md").write_text("nested source proof")
+            source = publisher / "nested.bundle.manifest.json"
+            raw = json.dumps({
+                "links": {"post_emit_health_path": "health.json"},
+                "artifacts": [{"path": "artifacts/docs/demo.md"}],
+            }).encode()
+            source.write_bytes(raw)
+            (publisher / "health.json").write_text(json.dumps({
+                "status": "pass", "bundle_manifest_path": str(source),
+            }))
+            work = root / "workspace"
+            work.mkdir()
+            copied = runner._pin_snapshot_manifests({"repoground": {
+                "repoground": {
+                    "manifest_path": str(source),
+                    "manifest_sha256": hashlib.sha256(raw).hexdigest(),
+                },
+            }}, work)["repoground"]
+            self.assertEqual(
+                (copied.parent / "artifacts" / "docs" / "demo.md").read_text(),
+                "nested source proof",
+            )
+
+    def test_private_pin_falls_back_to_copy_on_cross_filesystem(self):
+        import errno
+        import hashlib
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            pub = root / "published"
+            pub.mkdir()
+            source = pub / "test.bundle.manifest.json"
+            raw = json.dumps({"links": {"post_emit_health_path": "health.json"}}).encode()
+            source.write_bytes(raw)
+            (pub / "health.json").write_text(json.dumps({
+                "status": "pass", "bundle_manifest_path": str(source),
+            }))
+            role = pub / "role.txt"
+            role.write_bytes(b"preserve original bundle role bytes\x00\xfe")
+            ws = root / "workspace"
+            ws.mkdir()
+            with patch.object(runner.os, "link", side_effect=OSError(
+                errno.EXDEV, "cross-device link",
+            )) as linked:
+                copied = runner._pin_snapshot_manifests({"repoground": {
+                    "repoground": {
+                        "manifest_path": str(source),
+                        "manifest_sha256": hashlib.sha256(raw).hexdigest(),
+                    },
+                }}, ws)["repoground"]
+            self.assertGreaterEqual(linked.call_count, 1)
+            self.assertEqual((copied.parent / "role.txt").read_bytes(), role.read_bytes())
+            self.assertNotEqual(
+                (copied.parent / "role.txt").stat().st_ino, role.stat().st_ino,
+            )
+            self.assertEqual(stat.S_IMODE((copied.parent / "role.txt").stat().st_mode), 0o600)
+
+    def test_nested_artifact_traversal_and_symlink_not_pinned(self):
+        import hashlib
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            pub = root / "published"
+            pub.mkdir()
+            (pub / "health.json").write_text(json.dumps({"status": "pass"}))
+            source = pub / "a.bundle.manifest.json"
+            ws = root / "workspace"
+            ws.mkdir()
+            for suffix, invalid in enumerate(("x/../secret", "x//bad", "/abs/no", "dir\\bad")):
+                raw = json.dumps({"links": {"post_emit_health_path": "health.json"},
+                                  "artifacts": [{"path": invalid}]}).encode()
+                source.write_bytes(raw)
+                request = {"repoground": {"repoground": {
+                    "manifest_path": str(source),
+                    "manifest_sha256": hashlib.sha256(raw).hexdigest(),
+                }}}
+                work = ws / str(suffix)
+                work.mkdir()
+                with self.assertRaisesRegex(ValueError, "unsafe manifest"):
+                    runner._pin_snapshot_manifests(request, work)
+            (pub / "artifacts").symlink_to(root, target_is_directory=True)
+            raw = json.dumps({"links": {"post_emit_health_path": "health.json"},
+                              "artifacts": [{"path": "artifacts/demo.md"}]}).encode()
+            source.write_bytes(raw)
+            request = {"repoground": {"repoground": {
+                "manifest_path": str(source),
+                "manifest_sha256": hashlib.sha256(raw).hexdigest(),
+            }}}
+            work = ws / "symlink"
+            work.mkdir()
+            with self.assertRaisesRegex(ValueError, "unsafe"):
+                runner._pin_snapshot_manifests(request, work)
+
+    def test_mcp_digest_changes_when_imported_module_changes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "scripts").mkdir()
+            (root / "merger" / "repoground" / "cli").mkdir(parents=True)
+            (root / "merger" / "repoground" / "core").mkdir(parents=True)
+            thin_launcher = root / "scripts" / "mcp_stdio.py"
+            thin_launcher.write_text("from merger.repoground.cli import mcp_stdio\\n")
+            transport = root / "merger" / "repoground" / "cli" / "mcp_stdio.py"
+            tools = root / "merger" / "repoground" / "core" / "mcp_tools.py"
+            transport.write_text("PROTOCOL = 1\\n")
+            tools.write_text("STATUS = 'available'\\n")
+            first, count = runner._mcp_implementation_digest(str(thin_launcher))
+            self.assertEqual(count, 2)
+            self.assertEqual(first, runner._mcp_implementation_digest(str(thin_launcher))[0])
+            tools.write_text("STATUS = 'ok'\\n")
+            second, new_count = runner._mcp_implementation_digest(str(thin_launcher))
+            self.assertEqual(new_count, 2)
+            self.assertNotEqual(first, second)
+            self.assertEqual(thin_launcher.read_text(), "from merger.repoground.cli import mcp_stdio\\n")
+
+    def test_malformed_jsonl_still_persists_complete_raw_bytes(self):
+        import sys
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = "print('{not-json', flush=True)"
+            raw_path = root / "malformed.jsonl"
+            with self.assertRaises(ValueError):
+                runner._capture(
+                    [sys.executable, "-B", "-c", source],
+                    root, root / "malformed.stderr", raw_path,
+                )
+            self.assertEqual(raw_path.read_bytes(), b"{not-json\n")
+            self.assertEqual(stat.S_IMODE(raw_path.stat().st_mode), 0o600)
+            self.assertEqual(stat.S_IMODE((root / "malformed.stderr").stat().st_mode), 0o600)
+
+    def test_timeout_retains_valid_event_and_incomplete_tail(self):
+        import sys
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            script = (
+                "import time,json; "
+                "print(json.dumps({'type':'turn.started'}),flush=True); "
+                "print('{\\\"type\\\":',end='',flush=True); time.sleep(3)"
+            )
+            trace_path = root / "timeout.jsonl"
+            previous_timeout = runner.MODEL_TIMEOUT
+            runner.MODEL_TIMEOUT = 0.13
+            try:
+                raw, events, code, timed_out, *_ = runner._capture(
+                    [sys.executable, "-B", "-c", script],
+                    root, root / "timeout.stderr", trace_path,
+                )
+            finally:
+                runner.MODEL_TIMEOUT = previous_timeout
+            self.assertTrue(timed_out)
+            self.assertIn(b"turn.started", raw)
+            self.assertTrue(raw.endswith(b'{"type":'))
+            self.assertEqual(raw, trace_path.read_bytes())
+            self.assertNotEqual(code, 0)
+            self.assertEqual(events[0][0]["type"], "turn.started")
+
+    def test_capture_records_real_time_with_streamed_tool_events(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            script = ("import json,time; "
+                      "i={'id':'x','type':'command_execution','command':'rg foo',"
+                      "'status':'in_progress'}; "
+                      "print(json.dumps({'type':'item.started','item':i}),flush=True); "
+                      "time.sleep(0.03); "
+                      "i.update({'status':'completed','exit_code':0,'aggregated_output':'foo'}); "
+                      "print(json.dumps({'type':'item.completed','item':i}),flush=True)")
+            import sys
+            raw, events, code, timed_out, start, end, duration = runner._capture(
+                [sys.executable, "-B", "-c", script], path, path / "stderr.txt", path / "trace.jsonl",
+            )
+            calls, _ = runner._tool_receipts(events, {})
+            self.assertEqual(code, 0)
+            self.assertFalse(timed_out)
+            self.assertGreater(duration, 20)
+            self.assertGreaterEqual(calls[0]["duration_ms"], 20)
+            self.assertIn(b"item.completed", raw)
+            self.assertGreaterEqual(end, start)
+
+
+if __name__ == "__main__":
+    unittest.main()

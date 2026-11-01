@@ -8,7 +8,7 @@ Dieses Register trennt drei Evidenzniveaus, damit künftige Messungen nicht vers
 
 1. **Produktionsverfügbarkeit und technische Funktion:** Git-, Generator-, Health- und echte MCP-Abfragen.
 2. **Historische echte Agentenläufe mit anderem Design:** relevant als Ausgangsvermutung; nicht in neue statistische Blöcke aufnehmen.
-3. **Neue dreifach gepaarte Agentenstudien:** nur nach vollständiger Ausführung, Traceprüfung und unabhängiger Qualitätsbewertung.
+3. **Neue dreifach gepaarte Agentenstudien:** echte Provider-/Tracebelege auch bei ausstehendem Review gesondert ausweisen; einen **qualitätsgeprüften Nutzen** erst nach unabhängiger Qualitätsbewertung behaupten.
 
 ## Historische externe/ältere Belege – keine Protokollgleichheit
 
@@ -36,7 +36,7 @@ Die alten Laufdaten liegen teilweise in einem *hostlokalen* Grabowski-State-Verz
 - **Sichtbarer Umfang:** 12 Fälle (6 Pilot), vier Aufgabenklassen, mindestens zwei negative Grenzfälle; Goldpfade aus tatsächlichen Git-Blobs am fixierten Commit validiert.
 - **Bedingungen:** A git_only, B repoground_mandatory, C repoground_selective.
 - **Vergleich:** gleiches Quellmaterial und Agent-/Runner-/Host-/Sampling-/Cache-Profil; neuer Generator darf variieren; zwei vollständige Wiederholungen vor jeder stabileren Interpretation.
-- **Bisherige A/B/C-Run-Receipts:** **keine**. Das Register dokumentiert keine erfundenen Messwerte.
+- **A/B/C-Run-Receipts zum Zeitpunkt T0:** **0**. Erst die unten beschriebene getrennte **R3-Kohorte** enthält später echte Providerläufe; T0 bleibt unverändert Planung.
 
 Das maschinelle Protokoll berechnet eine taskset_sha256 für jede Taskset-Datei und je Wiederholung einen protocol_key, der die konstant zu haltenden Vergleichsgrößen umfasst. Künftige Reportergebnisse bekommen eine eindeutige Run-ID (beispielsweise study-20261101-01), und jede spätere Run-ID muss bei **gleichen** Modell-/Datenbedingungen zu demselben Vergleichsschlüssel führen. Andernfalls trennt die Trendfunktion automatisch die Serie.
 
@@ -53,7 +53,7 @@ Pro durchgeführter Studie im Register **ein kurzer Abschnitt** mit:
 
 Jeder rohe Run-Trace gehört zunächst in einen privaten, kontrollierten State-Bereich und nicht in Git. Keine Secrets, persönlichen Chatlogs, Tokeninhalte oder Provider-Anmeldedaten in ein öffentliches Ergebnisartefakt kopieren.
 
-**Aktueller Forschungsstand:** RepoGround ist als aktueller deterministischer Quellenindex über 13 Repositories technisch nachgewiesen. Ein Vorteil bei den gesamten Aufgaben des Coding-Agenten **bleibt eine zu messende Hypothese**. Der nächste echte Schritt ist der 6-Fälle-A/B/C-Pilot an dem unveränderlichen Ausgangstaskset, nicht ein weiterer synthetischer „Erfolgsbenchmark“.
+**Forschungsstand vor R3:** RepoGround war als deterministischer Quellenindex über 13 Repositories technisch nachgewiesen. Der damals noch ausstehende sechs Fälle umfassende A/B/C-Pilot wurde später als **R3** tatsächlich durchgeführt; sein ungeprüfter Ergebnisscope steht unten. Die semantische Qualitätsbewertung bleibt offen.
 
 
 ## T0 – überprüfter Infrastruktur-Smoketest vom 01.11.2026
@@ -87,3 +87,37 @@ quellengebunden eingetragen werden.
 von gültigen Daten und lässt sich mit aktuellen Snapshot-Manifesten
 ausführen. Damit ist der Prüfstand technisch brauchbar, aber eine
 qualitätsgeprüfte Verbesserung des Coding-Agenten noch **nicht belegt**.
+
+## R3 – erster vollständiger echter Codex-A/B/C-Pilot vom 01.11.2026
+
+**Originalnachweis:** [Ausführlicher Ergebnis- und Hashbeleg](../proofs/repoground-agent-study-codex-pilot-20261101.md)
+
+| Merkmal | Gemessener Stand |
+| --- | --- |
+| Run-ID / Protokoll | `study-20261101-codex-r3` / `7bd39c8bbb7f5e5f60e8aee2005a6b856057e56182a2788ff7a5479d77e70ab7` |
+| Taskset | `c09d2ed62456b1ad385f82e906be38ffc2a6ba02205b535d0ef4935ba9c59980` |
+| Tatsächliche Agenten-Sitzungen | **36/36**, alle gültigen Provider-/Trace-Receipts |
+| Ergebnisstatus | **33 erfolgreiche strukturierte Antworten, 3 fehlgeschlagene** im erfundenen Symbol-Grenzfall |
+| Reale RepoGround-Aufrufe | A: **0**, B: **41**, C: **0** |
+| Durchschnittliche Gesamtdauer einschließlich Fehler | A **22,982 s**, B **31,047 s**, C **24,276 s** |
+| Gegenüber A, vollständig gepaarte Rohzeit | B **+8,065 s** (10/12 langsamer), C **+1,294 s** (8/12 langsamer) |
+| Rein strukturelle Outcome-/Goldpfad-Korrespondenz | A **10/12**, B **10/12**, C **7/12** (kein semantischer Korrektheitsbeweis) |
+| Mechanisch existierende Git-Zitatzeilen | **135/135** |
+| Unabhängige qualitative Grades | **0**; keine qualitätsgeprüften Vergleichsblöcke |
+| Messurteil | `not_established` (keine Default-Förderung) |
+
+**Wichtige Interpretation:** Der optionale Agent hat RepoGround
+tatsächlich **in keinem** der zwölf C-Läufe verwendet, obwohl es
+zugelassen war. Eine messbare selektive Verbesserung ist somit
+nicht gezeigt. Die B-Pflicht verschlechterte in dieser kleinen
+Stichprobe die durchschnittliche Gesamtlaufzeit und erhöhte die
+gemeldeten Input-Tokens. Kein Kausal- oder Qualitätsurteil aus
+bloßen Zeitdifferenzen ohne unabhängige Source-Bewertung ableiten.
+
+Die vorangegangenen R1/R2-Instrumentierungsfehler sind ausdrücklich
+**andere Protokollkohorten** und gehen nicht in R3 ein. Die
+36 Originalreceipts und Transkripte bleiben ausschließlich im
+privaten Host-State; das Repository enthält bewusst nur
+einen bereinigten, SHA-gebundenen Auszug. Jeder zukünftige
+Runner-Refactor benötigt eine neue Fingerprint- und
+`protocol_key`-Identität; ältere Zahlen werden nicht verändert.
