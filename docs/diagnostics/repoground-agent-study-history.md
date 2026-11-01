@@ -121,3 +121,40 @@ privaten Host-State; das Repository enthält bewusst nur
 einen bereinigten, SHA-gebundenen Auszug. Jeder zukünftige
 Runner-Refactor benötigt eine neue Fingerprint- und
 `protocol_key`-Identität; ältere Zahlen werden nicht verändert.
+
+## R5 – vollständige Codex-v2-A/B/C-Qualitätsstudie vom 01.11.2026
+
+**Originalnachweis:** [R5 – Agentenantworten, Quellreviews, Frozen-Artefakte und Hashbindung](../proofs/repoground-agent-study-codex-v2-r5-20261101.md). Die **originalen nativen JSON-Auswertungen** sind für maschinelle Trendvergleiche nun gemeinsam versioniert, aber ausdrücklich getrennt nach Protokoll:
+
+- [R3: Originalbericht ohne semantische Grades](agent-study-reports/codex-r3-20261101.json), SHA256 `313829977906a6ddc15a22c88938ced29b362f359c9b37fd9c5e1873bd1224c6`;
+- [R5: Originalbericht mit 36 verblindeten Quellgrades](agent-study-reports/codex-v2-r5-20261101.json), SHA256 `aa1a31ac7503738a0173dac52a92042be10435cd530c106376f69b7fc7eecce6`.
+
+| Dimension | Tatsächlich geprüfter R5-Stand |
+| --- | --- |
+| Run-ID | `study-20261101-codex-v2-r5` |
+| Neuer `protocol_key` | `8d33c6baaad6464fc62b42a0a5bfb88b7352ad67e1900f136b64b37b7238778c` |
+| Unverändertes Taskset | `c09d2ed62456b1ad385f82e906be38ffc2a6ba02205b535d0ef4935ba9c59980` |
+| Echte v2-Codex-Läufe | **36/36** erfolgreich strukturiert, mit überprüftem Original-JSONL und Erklärungstext |
+| Frozen Git-Quellen | RepoGround `0fe8e5fd`; Grabowski `3fbe93d2`; Commonthing `8dbc8c53`, jeweils mit unabhängig archiviertem SHA-gebundenem Snapshot |
+| Gesonderter Generator-Commit | `040ab8b7bddc8e19a1459fe16374ae1934f72e77` |
+| Verblindete Source-Reviews | **36/36** nach tatsächlichen Modellantworten und Frozen-Git-Quellen: 31 `correct`, 5 `partial` |
+| Strengere native Qualitäts-Erfolge | **A 9/12, B 8/12, C 9/12** |
+| RepoGround-MCP | A **0**, B **39**, C **0** erfolgreiche Aufrufe |
+| Durchschnittliche End-to-End-Dauer | A **24,633 s**, B **34,353 s**, C **27,252 s** |
+| Gepaarte B−A-Dauer | **+9,720 s**; task-geclustertes 95-%-Bootstrap-Intervall **[+6,148; +12,809] s** |
+| Gepaarte C−A-Dauer | **+2,619 s**; Intervall **[−1,019; +8,611] s** |
+| Beurteilbare Aufgabenblöcke | **12/12** (sechs Aufgaben × zwei Wiederholungen) |
+| Native Wiederberechnung | Originaler SHA-gebundener Bericht in allen Feldern außer neuer `created_at`-Erzeugungszeit reproduziert |
+| Urteil | **`not_established`**; kein verpflichtender RepoGround-Einsatz begründbar |
+
+**Wichtige Einordnung:** Das R5-Quellenreview erfolgte unabhängig vom gemessenen Codex-Modell durch GPT-6, **aber im selben Operator-Thread**, nicht als unabhängiges menschliches Panel. Der Reviewer kann echte Belege anhand der alten Git-Blobs prüfen; aus einer `citations_checked=true`-Kennzeichnung allein folgt trotzdem keine automatisch beweisbare Aussagewahrheit. Im optionalen Arm **C wurde RepoGround in keinem einzigen Lauf eingesetzt**. Die R5-Verbesserung gegenüber R3 betrifft die **Bewertbarkeit**, nicht einen durch R3/R5 identisch nachgewiesenen Agentennutzen. **R3 und R5 niemals statistisch poolen.**
+
+Zur reproduzierbaren Trendprobe genügt die bestehende Studien-CLI mit den zwei versionierten Originalberichten:
+
+~~~bash
+python3 -B -m merger.repoground.cli.agent_study trend \
+  --reports docs/diagnostics/agent-study-reports \
+  --out /PRIVAT/NEUER-TREND-R3-R5.json
+~~~
+
+Erwarteter Readback: `total_runs=2`, `comparison_groups=2`, kein `cross_run_causal_claim`. Das Ergebnis wurde mit der nativen `history`-Funktion anhand beider echten JSON-Dateien gegengeprüft. Neue Repositorystände, Runner, Prompt, Modell, Cache- oder Toolverträge verlangen eigene Berichtseinträge und gegebenenfalls eigene `protocol_key`-Gruppen. Rohtraces, Blindkarten, Mapping, Gutachten, Tokeninhalte und persönliche Pfade bleiben **privat**; das Git-Register enthält nur bereinigte Ergebnisse und die dazugehörigen SHA256-Belegidentitäten.
