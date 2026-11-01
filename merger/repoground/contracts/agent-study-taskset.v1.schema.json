@@ -1,0 +1,189 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "heimgewebe/repoground/agent-study-taskset.v1",
+  "title": "Frozen RepoGround three-arm longitudinal benchmark v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "version",
+    "id",
+    "measurement_scope",
+    "default_promoted",
+    "arms",
+    "repositories",
+    "cases",
+    "does_not_establish"
+  ],
+  "properties": {
+    "kind": {
+      "const": "repoground.agent_study_taskset"
+    },
+    "version": {
+      "const": "1.0"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{2,79}$"
+    },
+    "measurement_scope": {
+      "const": "frozen_three_arm_agent_study"
+    },
+    "default_promoted": {
+      "const": false
+    },
+    "arms": {
+      "const": [
+        "git_only",
+        "repoground_mandatory",
+        "repoground_selective"
+      ]
+    },
+    "repositories": {
+      "type": "object",
+      "minProperties": 2,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "slug",
+          "commit"
+        ],
+        "properties": {
+          "slug": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$"
+          },
+          "commit": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$"
+          }
+        }
+      }
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 12,
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "class",
+          "pilot",
+          "repositories",
+          "question",
+          "oracle"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{2,79}$"
+          },
+          "class": {
+            "enum": [
+              "known_target",
+              "reverse_relations",
+              "impact_tests",
+              "boundary"
+            ]
+          },
+          "pilot": {
+            "type": "boolean"
+          },
+          "repositories": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string"
+            }
+          },
+          "question": {
+            "type": "string",
+            "minLength": 12,
+            "maxLength": 1200
+          },
+          "oracle": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "outcome",
+              "required_paths",
+              "allowed_paths",
+              "rationale"
+            ],
+            "properties": {
+              "outcome": {
+                "enum": [
+                  "answer",
+                  "abstain",
+                  "unavailable"
+                ]
+              },
+              "required_paths": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "repo",
+                    "path"
+                  ],
+                  "properties": {
+                    "repo": {
+                      "type": "string",
+                      "minLength": 3
+                    },
+                    "path": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?/)[^\\\\\\r\\n]+$"
+                    }
+                  }
+                }
+              },
+              "allowed_paths": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "repo",
+                    "path"
+                  ],
+                  "properties": {
+                    "repo": {
+                      "type": "string",
+                      "minLength": 3
+                    },
+                    "path": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?/)[^\\\\\\r\\n]+$"
+                    }
+                  }
+                }
+              },
+              "rationale": {
+                "type": "string",
+                "minLength": 12
+              }
+            }
+          }
+        }
+      }
+    },
+    "does_not_establish": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}
