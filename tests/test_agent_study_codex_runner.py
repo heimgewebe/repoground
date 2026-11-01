@@ -2,9 +2,9 @@
 import importlib.util
 import json
 import stat
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[1] / "tools" / "agent_study_codex_runner.py"
 spec = importlib.util.spec_from_file_location("agent_study_codex_runner", SCRIPT)
@@ -103,6 +103,34 @@ class CodexStudyRunnerTest(unittest.TestCase):
         self.assertEqual(fallback["outcome"], "unavailable")
         self.assertEqual(fallback["reported_paths"], [])
         self.assertFalse(fallback["asserted_sufficient_evidence"])
+
+    def test_real_answer_explanation_is_mandatory_and_bounded(self):
+        import json
+        schema = runner._output_schema()
+        self.assertIn("explanation", schema["required"])
+        self.assertEqual(schema["properties"]["explanation"], {"type": "string"})
+        self.assertIn("Ergänze explanation", runner._prompt({
+            "condition": "git_only", "question": "Where is function Foo defined?",
+        }))
+        repositories = {"repoground": {"commit": "a" * 40}}
+        answer = {
+            "outcome": "abstain", "reported_paths": [], "citations": [],
+            "asserted_sufficient_evidence": False,
+            "explanation": "Die eingefrorene Revision enthält keinen belegbaren Treffer.",
+        }
+        parsed, valid = runner._answer(json.dumps(answer), repositories)
+        self.assertTrue(valid)
+        self.assertEqual(parsed["explanation"], answer["explanation"])
+        for text in (None, "kurz", "", "x" * 8001, "Eine längere Erklärung mit echtem NUL\x00 im Modelltext."):
+            broken = {**answer}
+            if text is None:
+                del broken["explanation"]
+            else:
+                broken["explanation"] = text
+            fallback, valid = runner._answer(json.dumps(broken), repositories)
+            self.assertFalse(valid)
+            self.assertEqual(fallback["explanation"], "")
+        self.assertEqual(runner.AGENT_VERSION, "codex-study-prompt-v2")
 
     def test_mcp_success_depends_on_specific_tool_contract(self):
         available = {"status": "available"}
@@ -220,10 +248,12 @@ class CodexStudyRunnerTest(unittest.TestCase):
         self.assertEqual(answer, {
             "outcome": "unavailable", "reported_paths": [],
             "citations": [], "asserted_sufficient_evidence": False,
+            "explanation": "",
         })
         valid = json.dumps({
             "outcome": "abstain", "reported_paths": [],
             "citations": [], "asserted_sufficient_evidence": False,
+            "explanation": "Die eingefrorene Quelle reicht für diese Antwort nicht aus.",
         })
         answer, parsed = runner._answer(valid, repositories)
         self.assertTrue(parsed)
@@ -238,6 +268,7 @@ class CodexStudyRunnerTest(unittest.TestCase):
                 "commit": "b" * 40, "start_line": 1, "end_line": 4,
             }],
             "asserted_sufficient_evidence": True,
+            "explanation": "Die zitierte Revision gehört nicht zum eingefrorenen Quellstand.",
         })
         sanitized, parsed = runner._answer(response, repositories)
         self.assertFalse(parsed)

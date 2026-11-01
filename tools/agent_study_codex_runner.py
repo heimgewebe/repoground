@@ -9,18 +9,18 @@ from __future__ import annotations
 
 import argparse
 import errno
-from datetime import datetime, timezone
 import hashlib
 import json
 import os
-from pathlib import Path, PurePosixPath
 import re
 import selectors
-import signal
 import shutil
+import signal
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 MCP_TOOLS = (
@@ -34,7 +34,7 @@ TOOL_NAMES = {
     "file": ["codex_file_command"],
     "repoground": ["repoground_" + tool for tool in MCP_TOOLS],
 }
-AGENT_VERSION = "codex-study-prompt-v1"
+AGENT_VERSION = "codex-study-prompt-v2"
 PROVIDER = "openai-codex-cli"
 MAX_TRACE_BYTES = 32 * 1024 * 1024
 MAX_TOOL_CALLS = 160
@@ -426,8 +426,9 @@ def _output_schema() -> dict[str, Any]:
             "reported_paths": {"type": "array", "items": path},
             "citations": {"type": "array", "items": citation},
             "asserted_sufficient_evidence": {"type": "boolean"},
+            "explanation": {"type": "string"},
         },
-        "required": ["outcome", "reported_paths", "citations", "asserted_sufficient_evidence"],
+        "required": ["outcome", "reported_paths", "citations", "asserted_sufficient_evidence", "explanation"],
         "additionalProperties": False,
     }
 
@@ -441,6 +442,8 @@ def _prompt(req: dict[str, Any]) -> str:
         "Antworte nur mit dem vorgegebenen strukturierten JSON.",
         "reported_paths und citations benutzen Repo-Kürzel und zum Repository relative Pfade.",
         "Zitate müssen konkrete, tatsächlich gelesene Zeilen des eingefrorenen Commits tragen.",
+        "Ergänze explanation: eine inhaltliche, quellengestützte Begründung (24 bis 8000 Zeichen).",
+        "Erkläre auch bei abstain/unavailable, welche Evidenz fehlt; erfinde keine Fakten.",
         "Wenn eine Behauptung nicht belegbar ist, verwende abstain oder unavailable.",
     ]
     if req["condition"] == "repoground_mandatory":
@@ -749,7 +752,7 @@ def _answer(text: str, repositories: dict[str, Any]) -> tuple[dict[str, Any], bo
     """Preserve every invalid model answer in raw trace, never mark it successful."""
     fallback = {
         "outcome": "unavailable", "reported_paths": [], "citations": [],
-        "asserted_sufficient_evidence": False,
+        "asserted_sufficient_evidence": False, "explanation": "",
     }
     try:
         answer = json.loads(text)
@@ -757,12 +760,17 @@ def _answer(text: str, repositories: dict[str, Any]) -> tuple[dict[str, Any], bo
         return fallback, False
     if not isinstance(answer, dict) or set(answer) != {
         "outcome", "reported_paths", "citations", "asserted_sufficient_evidence",
+        "explanation",
     }:
         return fallback, False
     if (answer["outcome"] not in ("answer", "abstain", "unavailable")
             or type(answer["asserted_sufficient_evidence"]) is not bool
             or not isinstance(answer["reported_paths"], list)
-            or not isinstance(answer["citations"], list)):
+            or not isinstance(answer["citations"], list)
+            or not isinstance(answer["explanation"], str)
+            or not 24 <= len(answer["explanation"]) <= 8000
+            or not answer["explanation"].strip()
+            or any(ord(c) < 32 and c not in "\n\t" for c in answer["explanation"])):
         return fallback, False
     seen_paths: set[tuple[str, str]] = set()
     for raw in answer["reported_paths"]:

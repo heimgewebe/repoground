@@ -4,17 +4,17 @@ Synthetic traces exercise the contract and must never become real evidence.
 """
 from __future__ import annotations
 
-from copy import deepcopy
-from datetime import datetime, timedelta, timezone
 import hashlib
 import json
-from pathlib import Path
 import subprocess
+from copy import deepcopy
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
-from merger.repoground.core import agent_study as study
 from merger.repoground.cli import agent_study as cli
+from merger.repoground.core import agent_study as study
 
 TASKSET = (
     Path(__file__).resolve().parents[3]
@@ -216,6 +216,46 @@ def test_protocol_key_stable_with_new_run_id_and_generator_change(monkeypatch, p
     assert not_comparable["protocol_key"] != planned["protocol_key"]
 
 
+def test_v2_explanation_required_bounded_and_v1_remains_valid(planned, tmp_path):
+    cases = {case["id"]: case for case in gold()["cases"]}
+    legacy_req = next(r for r in planned["requests"] if r["condition"] == "git_only")
+    old = sample_receipt(legacy_req, cases[legacy_req["case_id"]], tmp_path)
+    assert study.validate_receipt(legacy_req, old, trace_root=tmp_path) == []
+    req = deepcopy(legacy_req)
+    req["execution_context"]["agent_version"] = "codex-study-prompt-v2"
+    receipt = sample_receipt(req, cases[req["case_id"]], tmp_path)
+    assert "explanation" in " ".join(study.validate_receipt(req, receipt, trace_root=tmp_path))
+    receipt["answer"]["explanation"] = "Die geprüfte Quelle enthält keine verifizierbare Definition."
+    trace = (json.dumps({
+        "type": "item.completed",
+        "item": {"type": "agent_message", "text": json.dumps(
+            receipt["answer"], ensure_ascii=False,
+        )},
+    }, ensure_ascii=False) + "\n").encode("utf-8")
+    trace_path = tmp_path / receipt["trace"]["path"]
+    trace_path.write_bytes(trace)
+    receipt["trace"].update(bytes=len(trace), sha256=hashlib.sha256(trace).hexdigest())
+    assert study.validate_receipt(req, receipt, trace_root=tmp_path) == []
+    forged = deepcopy(receipt)
+    forged["answer"]["explanation"] = "Eine zusätzliche angeblich geprüfte Erklärung ohne Modellbeleg."
+    assert "differs" in " ".join(study.validate_receipt(req, forged, trace_root=tmp_path))
+    failed = deepcopy(receipt)
+    failed["status"] = "failed"
+    failed["error"] = {"class": "invalid_agent_answer"}
+    failed["answer"]["explanation"] = ""
+    assert study.validate_receipt(req, failed, trace_root=tmp_path) == []
+    for wrong in (None, "", "zu kurz", 7, "x" * 8001, "Langer Text mit null\x00 und ungültigem Steuerzeichen."):
+        broken = deepcopy(receipt)
+        if wrong is None:
+            del broken["answer"]["explanation"]
+        else:
+            broken["answer"]["explanation"] = wrong
+        assert "explanation" in " ".join(study.validate_receipt(req, broken, trace_root=tmp_path))
+    broken = deepcopy(old)
+    broken["answer"]["explanation"] = "kurz"
+    assert "explanation" in " ".join(study.validate_receipt(legacy_req, broken, trace_root=tmp_path))
+
+
 def test_mandatory_requires_actual_successful_repoground_call(planned, tmp_path):
     g = {c["id"]: c for c in gold()["cases"]}
     req = next(r for r in planned["requests"] if r["condition"] == "repoground_mandatory")
@@ -329,6 +369,114 @@ def test_pilot_never_proves_default_promotion_even_if_all_runs_were_correct(plan
     assert result["conditions"]["repoground_selective"]["valid_success"] == 12
     assert result["conditions"]["repoground_mandatory"]["valid_success"] == 12
     assert result["decision"]["default_promoted"] is False
+
+
+def test_blind_review_export_and_import_is_arm_neutral_and_receipt_bound(planned, tmp_path):
+    import stat
+    from types import SimpleNamespace
+    g = gold()
+    p = profile()
+    p["agent_version"] = "codex-study-prompt-v2"
+    v2_plan = study.create_plan(
+        g, p, snap(g), run_id="synthetic-v2-blind-audit",
+        suite="pilot", repetitions=2, roots={},
+    )
+    request = v2_plan["requests"][0]
+    case = next(c for c in g["cases"] if c["id"] == request["case_id"])
+    receipt = sample_receipt(request, case, tmp_path)
+    receipt["answer"]["explanation"] = "Der Quellstand stützt genau diese eingegrenzte Antwort."
+    raw = (json.dumps({
+        "type": "item.completed", "item": {
+            "type": "agent_message",
+            "text": json.dumps(receipt["answer"], ensure_ascii=False),
+        },
+    }, ensure_ascii=False) + "\n").encode("utf-8")
+    (tmp_path / receipt["trace"]["path"]).write_bytes(raw)
+    receipt["trace"].update(bytes=len(raw), sha256=hashlib.sha256(raw).hexdigest())
+    assert study.validate_receipt(request, receipt, trace_root=tmp_path) == []
+    plan_path = tmp_path / "plan.json"
+    taskset_path = tmp_path / "gold.json"
+    receipt_dir = tmp_path / "receipts"
+    receipt_dir.mkdir()
+    plan_path.write_text(json.dumps(v2_plan))
+    taskset_path.write_text(json.dumps(g))
+    receipt_path = receipt_dir / (request["request_id"] + ".json")
+    receipt_path.write_text(json.dumps(receipt))
+    out = tmp_path / "review" / "packet.json"
+    mapping = tmp_path / "owner-only" / "mapping.json"
+    inputs = SimpleNamespace(plan=str(plan_path), taskset=str(taskset_path),
+        receipts=str(receipt_dir), trace_root=str(tmp_path),
+        out=str(out), mapping_out=str(mapping))
+    with pytest.raises(study.AgentBenchmarkError, match="another directory"):
+        cli.review_export(SimpleNamespace(**{
+            **vars(inputs), "mapping_out": str(tmp_path / "review" / "key.json"),
+        }))
+    with pytest.raises(study.AgentBenchmarkError, match="another directory"):
+        cli.review_export(SimpleNamespace(**{
+            **vars(inputs),
+            "mapping_out": str(tmp_path / "review" / "nested-private" / "key.json"),
+        }))
+    assert cli.review_export(inputs) == 0
+    pack = json.loads(out.read_text())
+    private = json.loads(mapping.read_text())
+    assert len(pack["cases"]) == len(private["entries"]) == 1
+    card = pack["cases"][0]
+    assert card["answer"]["explanation"] == receipt["answer"]["explanation"]
+    assert card["oracle"] == case["oracle"]
+    assert "condition" not in json.dumps(pack)
+    assert request["condition"] not in json.dumps(pack)
+    assert stat.S_IMODE(mapping.stat().st_mode) == 0o600
+    assert stat.S_IMODE(out.stat().st_mode) == 0o600
+    grade_path = tmp_path / "review" / "grades-from-external-reviewer.json"
+    grade_path.write_text(json.dumps([{
+        "blind_id": card["blind_id"], "verdict": "correct",
+        "citations_checked": True, "reviewer": "independent-test-fixture",
+        "reviewed_at": "2026-11-01T08:00:00Z",
+        "evidence_ref": "synthetic:test-only-review-evidence",
+    }]))
+    output = tmp_path / "owner-only" / "bound-grades.json"
+    importer = SimpleNamespace(**{key: getattr(inputs, key) for key in
+        ("plan", "taskset", "receipts", "trace_root")},
+        mapping=str(mapping), packet=str(out), grades=str(grade_path), out=str(output))
+    assert cli.review_import(importer) == 0
+    bound_grades = json.loads(output.read_text())
+    assert len(bound_grades) == 1
+    assert bound_grades[0]["request_id"] == request["request_id"]
+    assert bound_grades[0]["receipt_sha256"] == study.sha256_json(receipt)
+    assert "blind_id" not in bound_grades[0]
+    # The established evaluator, not a new scoring system, consumes grades.
+    evaluated = study.evaluate(v2_plan, g, [receipt], bound_grades,
+        trace_root=tmp_path, measurement_scope="synthetic_contract_fixture")
+    assert evaluated["decision"]["status"] == "not_established"
+    mutated = deepcopy(receipt)
+    mutated["answer"]["explanation"] = "Fälschlich nachträglich ersetzte Behauptung mit Quellbeleg."
+    receipt_path.write_text(json.dumps(mutated))
+    with pytest.raises(study.AgentBenchmarkError, match="invalid receipt"):
+        cli.review_import(importer)
+
+
+def test_legacy_receipts_without_prose_are_not_exported_as_gradeable(planned, tmp_path):
+    from types import SimpleNamespace
+    g = gold()
+    req = planned["requests"][0]
+    case = next(c for c in g["cases"] if c["id"] == req["case_id"])
+    receipt = sample_receipt(req, case, tmp_path)
+    plan_path = tmp_path / "plan.json"
+    taskset_path = tmp_path / "taskset.json"
+    receipts = tmp_path / "receipts"
+    receipts.mkdir()
+    plan_path.write_text(json.dumps(planned))
+    taskset_path.write_text(json.dumps(g))
+    (receipts / (req["request_id"] + ".json")).write_text(json.dumps(receipt))
+    dest = tmp_path / "review" / "legacy.json"
+    secret = tmp_path / "private" / "lookup.json"
+    assert cli.review_export(SimpleNamespace(
+        plan=str(plan_path), taskset=str(taskset_path),
+        receipts=str(receipts), trace_root=str(tmp_path),
+        out=str(dest), mapping_out=str(secret),
+    )) == 0
+    assert json.loads(dest.read_text())["cases"] == []
+    assert json.loads(secret.read_text())["entries"] == []
 
 
 def test_history_groups_only_equivalent_protocols(planned, tmp_path):

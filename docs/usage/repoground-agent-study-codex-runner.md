@@ -216,3 +216,30 @@ erforderlich: `agent_study` nutzt bereits ein allgemeines JSON-stdio-
 Runnerinterface. Ein anderer Provider benötigt allerdings seinen
 eigenen tatsächlich instrumentierten Adapter und einen **anderen**
 Protokollschlüssel.
+
+## Antwortformat v2 (vorwärtskompatibel mit historischer R3-Evidenz)
+
+Der neue reale Runner `codex-study-prompt-v2` verlangt neben Outcome,
+Pfaden, Zitaten und Evidenzkennzeichen das Feld `explanation`: die
+**tatsächliche, begründete Agentenantwort** (24–8000 Zeichen).
+Auch bei begründetem `abstain`/`unavailable` muss der Agent die fehlende
+Evidenz erläutern. Dieses Feld wird unverändert aus dem letzten tatsächlichen
+`agent_message` gewonnen und bei erfolgreichem Receipt gegen die private
+SHA-gebundene Codex-JSONL-Trace geprüft. Die Validierung lehnt fehlende,
+zu kurze, zu lange, nicht-stringförmige oder nachträglich abweichende
+Erklärungen ab.
+
+Fehlgeschlagene, syntaktisch ungültige Agentenantworten verlieren ihren
+Fehlversuch-Beleg nicht; statt erfundener Erklärungen bleibt der
+Antworttext leer und der Status fehlerhaft. Die früheren R3-Receipts
+sind unabhängig davon unverändert valide. Sie bleiben eine eigene
+Vergleichsgruppe ohne nachträglich erfundene semantische Qualitätsgrade.
+
+Die unabhängige, bedingungsverblindete Quellenprüfung erfolgt über
+`agent_study review-export` und `review-import` wie im
+[Studienprotokoll](repoground-agent-study-v1.md#ergänzung-v2--antwortqualität-und-langlebige-studienquellen)
+beschrieben. Public-Share-Datei und private Arm-Zuordnung sind in
+unterschiedlichen Verzeichnissen. Vor erneuten Providerläufen können
+bestehende immutable Snapshot-Artefakte per
+`tools.agent_study_freeze_snapshots` unabhängig von der
+Publisher-Retention festgehalten werden.

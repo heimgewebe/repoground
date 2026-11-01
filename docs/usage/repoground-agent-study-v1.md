@@ -242,3 +242,100 @@ Historische 20-Paar-Runs vom 29.10.2026 bleiben im separaten [Messregister](../d
 ## Aktuell belegte Grenze
 
 Die 12 Git-belegten Aufgaben, JSON-Schemas, isolierte Vertrags-Tests und CLI sind **Messinfrastruktur**. Ohne echten providerseitigen Adapter samt unabhängiger Qualitätsbewertung wird absichtlich weder eine neue Latenz- noch eine neue Korrektheits- oder Kostenverbesserung behauptet. Der frühere produktive 13/13-Snapshot-Nachweis ist ein technischer Verfügbarkeitsbefund, kein Ersatz für diesen Agentenversuch.
+
+## Ergänzung v2 – Antwortqualität und langlebige Studienquellen
+
+**Abgrenzung zu R3:** Die ursprünglichen 36 Codex-Läufe lieferten echte
+Zeiten, Tokens und Quellenpfade, aber im strukturierten Receipt **keinen
+erklärenden Antworttext**. Die unveränderten Rohtraces und Receipts dürfen
+nicht nachträglich zu unabhängigen Qualitätsurteilen umetikettiert werden.
+Mit `codex-study-prompt-v2` werden tatsächliche begründete Agentenantworten
+als begrenztes `answer.explanation` (24–8000 Zeichen) im privaten Receipt
+gespeichert und mit dem letzten tatsächlichen Codex-`agent_message` im
+SHA-gebundenen Original-JSONL abgeglichen. Fehlgeschlagene/ungültige
+Providerantworten bleiben als **Fehlversuche** gültig, ohne erfundenen
+Ersatztext. Runner-SHA und `agent_version` ergeben eine **neue**
+`protocol_key`-Gruppe. Ein direkter Leistungsanstieg gegenüber R3 ist damit
+**nicht** belegt; zunächst v2-Baseline unter fixierten Bedingungen erheben.
+
+**Publisher-Retention:** Vor jeder geplanten Wiederholungsserie muss ein
+gesundes Manifest für **exakt die Git-Quellcommits des Frozen-Tasksets**
+vorliegen. Die Quell- und Generatoridentität in der tatsächlichen
+Manifestdatei, Hash, post-emit Health und Export-Gates müssen passen.
+Nicht mehr vorhandene historische Manifeste mit dem **bestehenden**
+RepoGround-Generator aus den alten Commits neu erstellen – niemals einfach
+aktuelle `main`-Snapshots bei unverändertem Goldset einsetzen.
+
+Anschließend die exakt gebundenen Publikationen **vor dem nächsten
+Publisher-GC** unabhängig archivieren:
+
+```bash
+python3 -B -m tools.agent_study_freeze_snapshots \
+  --taskset docs/retrieval/repoground_agent_study_cases.v1.json \
+  --snapshots /PRIVAT/study/snapshots.json \
+  --out /PRIVAT/study/frozen-snapshot-archive
+```
+
+Die neu erzeugte Datei
+`/PRIVAT/study/frozen-snapshot-archive/snapshots.json` wird direkt als
+`plan --snapshots` verwendet. Archiv und Originalmanifest sind bytegleich.
+Für immutable Rollenartefakte werden Hardlinks, bei getrennten Volumes
+private Bytekopien benutzt; verschachtelte Artefakte bleiben erhalten.
+Nach Entfernen der öffentlichen Generation bleiben die eigenen
+Verzeichniseinträge bestehen. Die Freigabe umfasst **keine** Garantie gegen
+nachträgliche Manipulation durch Programme mit denselben Schreibrechten.
+Keine Testtraces oder Providergeheimnisse in Git versionieren.
+
+**Armunabhängiges Qualitätsreview:** Nach echten providerseitigen Läufen
+und validierten Receipts:
+
+```bash
+python3 -B -m merger.repoground.cli.agent_study review-export \
+  --plan /PRIVAT/study/plan/plan.json \
+  --taskset docs/retrieval/repoground_agent_study_cases.v1.json \
+  --receipts /PRIVAT/study/receipts --trace-root /PRIVAT/study/traces \
+  --out /PRIVAT/study/share/answers-blind.json \
+  --mapping-out /PRIVAT/study/owner-only/private-map.json
+```
+
+Nur `answers-blind.json` dem unabhängigen Reviewer zugänglich machen.
+Sie enthält Fragen, Goldoracle, eingefrorene Commits, tatsächlich
+zurückgelieferte Antworttexte und Zitate, **nicht** Toolzähler,
+Versuchsbedingungen oder Laufzeiten. Die nur intern gehaltene
+`private-map.json` verknüpft zufällige Blind-IDs mit den originalen
+Receipt-SHAs. Sprachliche Selbstoffenbarung von RepoGround durch ein
+Modell kann die Verblindung trotzdem schwächen; Reviewer sollen diese
+Fälle kennzeichnen. Echte Reviewer müssen die Aussagen und Zitatpassung
+an den eingefrorenen Git-Commits beurteilen.
+
+Ein Reviewer liefert eine **selbst erstellte** JSON-Liste je bewerteter
+Blind-ID mit `verdict` (`correct`, `partial`, `incorrect`,
+`uncertain`), `citations_checked`, `reviewer`, `reviewed_at`
+(ISO-Zeit) und `evidence_ref`. Die Software erzeugt **keine**
+Qualitätsbewertungen:
+
+```bash
+python3 -B -m merger.repoground.cli.agent_study review-import \
+  --plan /PRIVAT/study/plan/plan.json \
+  --taskset docs/retrieval/repoground_agent_study_cases.v1.json \
+  --receipts /PRIVAT/study/receipts --trace-root /PRIVAT/study/traces \
+  --packet /PRIVAT/study/share/answers-blind.json \
+  --mapping /PRIVAT/study/owner-only/private-map.json \
+  --grades /PRIVAT/study/share/independent-verdicts.json \
+  --out /PRIVAT/study/owner-only/grades.json
+```
+
+Die Ausgabe `grades.json` ist direkt mit dem existierenden
+`evaluate --grades` verwendbar. Kartentext, Quellen, Packet-Hash,
+Studienplan und jedes einzelne Receipt werden vor der Umwandlung
+nachgeprüft. Unbekannte/mehrfach benutzte Blind-IDs, nachträglich
+veränderte Quellen, fehlende Modelltexte und ungültige Receipts werden
+nicht als gültige Qualitätsbelege gezählt.
+
+**V2-Erfolgskriterium:** tatsächliche A/B/C-Runs vollständig und mit
+identischem Goldset, Archivbelegen und unterschiedlichen einzelnen
+Providertraces; unabhängig überprüfte Antworttexte und Git-Zitatzeilen;
+vergleichbare Report-/Trend-Gruppen und eine ausdrücklich gegen
+`not_established` geprüfte Qualitätsentscheidung. Ein grüner
+Adaptertest, ein 0-MCP-Selective-Arm oder ein Git-Merge allein erfüllen
+dieses Kriterium nicht.

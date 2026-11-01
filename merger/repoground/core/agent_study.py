@@ -5,15 +5,16 @@ correctness from token matches. Synthetic receipts cannot establish utility.
 """
 from __future__ import annotations
 
-from collections import Counter, defaultdict
-from datetime import datetime, timezone
 import hashlib
 import itertools
+import json
 import math
-from pathlib import Path, PurePosixPath
 import random
 import re
 import statistics
+from collections import Counter, defaultdict
+from datetime import datetime, timezone
+from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, Sequence
 
 from merger.repoground.core.agent_benchmark import (
@@ -385,6 +386,22 @@ def _validate_receipt_answer(request: Mapping[str, Any], receipt: Mapping[str, A
     answer = _object(receipt.get("answer"), "answer")
     _need(answer.get("outcome") in ("answer", "abstain", "unavailable"), "answer.outcome invalid")
     _need(isinstance(answer.get("asserted_sufficient_evidence"), bool), "answer confidence required")
+    # Historical v1 receipts stay valid and untouched; v2 cannot be scored
+    # without the actual bounded natural-language answer under review.
+    explanation = answer.get("explanation")
+    needs_explanation = (
+        request.get("execution_context", {}).get("agent_version") == "codex-study-prompt-v2"
+        and receipt.get("status") == "success"
+    )
+    # Failed malformed-model answers remain valid failure receipts; never
+    # synthesize a substantive explanation for an invalid model response.
+    if needs_explanation or ("explanation" in answer and answer["explanation"] != ""):
+        _need(
+            isinstance(explanation, str) and 24 <= len(explanation) <= 8000
+            and bool(explanation.strip())
+            and not any(ord(c) < 32 and c not in "\\n\\t" for c in explanation),
+            "answer.explanation must be bounded nonempty actual agent text",
+        )
     paths = answer.get("reported_paths")
     _need(isinstance(paths, list), "answer.reported_paths must be array")
     got = [_ref(v, request["repositories"], "reported path") for v in paths]
@@ -397,6 +414,46 @@ def _validate_receipt_answer(request: Mapping[str, Any], receipt: Mapping[str, A
         _need(obj.get("commit") == request["repositories"][rp[0]]["commit"], "citation revision mismatch")
         _need(_nonnegative(obj.get("start_line"), "start_line") >= 1 and
               _nonnegative(obj.get("end_line"), "end_line") >= obj["start_line"], "citation lines invalid")
+
+
+def _validate_v2_trace_answer(
+    request: Mapping[str, Any], receipt: Mapping[str, Any],
+    trace_root: Path,
+) -> None:
+    """For successful v2, compare the receipt to the actual last Codex reply.
+
+    This is a byte-bound provenance check, not an assertion of correctness.
+    Legacy v1 traces and failed/invalid provider answers are left unchanged.
+    """
+    if (
+        request.get("execution_context", {}).get("agent_version") != "codex-study-prompt-v2"
+        or receipt.get("status") != "success"
+    ):
+        return
+    last = None
+    path = trace_root / receipt["trace"]["path"]
+    with path.open("rb") as handle:
+        for line in handle:
+            _need(len(line) <= MAX_TRACE, "v2 trace event oversized")
+            try:
+                event = json.loads(line)
+            except ValueError as exc:
+                raise AgentBenchmarkError("v2 successful trace contains invalid JSONL") from exc
+            if (
+                isinstance(event, dict) and event.get("type") == "item.completed"
+                and isinstance(event.get("item"), dict)
+                and event["item"].get("type") == "agent_message"
+            ):
+                last = event["item"].get("text")
+    _need(isinstance(last, str), "v2 trace lacks an actual final agent message")
+    try:
+        model_answer = json.loads(last)
+    except ValueError as exc:
+        raise AgentBenchmarkError("v2 final model answer not valid JSON") from exc
+    _need(
+        model_answer == receipt["answer"],
+        "v2 receipt answer differs from source-bound provider trace",
+    )
 
 
 def _validate_receipt_resources(receipt: Mapping[str, Any]) -> None:
@@ -450,6 +507,7 @@ def validate_receipt(request: Mapping[str, Any], receipt: Mapping[str, Any],
         _validate_receipt_answer(request, receipt)
         _validate_receipt_resources(receipt)
         _trace(receipt, Path(trace_root))
+        _validate_v2_trace_answer(request, receipt, Path(trace_root))
         return []
     except (AgentBenchmarkError, OSError, ValueError, TypeError, KeyError) as exc:
         return [str(exc)]
