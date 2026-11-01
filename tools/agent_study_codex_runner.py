@@ -73,11 +73,15 @@ def _private_dir(path: Path) -> None:
         raise ValueError("study state directory unavailable")
 
 
-def _create_once(path: Path, content: bytes) -> None:
+def _open_private_create(path: Path) -> Any:
     if path.is_symlink():
         raise ValueError("refusing symlink output")
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-    with os.fdopen(fd, "wb") as output:
+    return os.fdopen(fd, "wb")
+
+
+def _create_once(path: Path, content: bytes) -> None:
+    with _open_private_create(path) as output:
         output.write(content)
         output.flush()
         os.fsync(output.fileno())
@@ -105,21 +109,53 @@ def _config(path: Path) -> dict[str, Any]:
     return cfg
 
 
+def _mcp_implementation_digest(mcp_script: str) -> tuple[str, int]:
+    """Bind importable MCP implementation sources, not just its thin launcher.
+
+    Deployed releases have no .git directory: use a source-content digest
+    rather than inventing a Git SHA. Exclude test/fixture-only Python modules.
+    """
+    launcher = Path(mcp_script).resolve(strict=True)
+    root = launcher.parents[1]
+    paths: list[Path] = []
+    for relative in ("merger/repoground", "repoground"):
+        package = root / relative
+        if package.is_dir():
+            paths.extend(
+                file for file in package.rglob("*.py")
+                if not {"tests", "fixtures", "__pycache__"}.intersection(file.relative_to(root).parts)
+            )
+    if not paths or len(paths) > 2000:
+        raise ValueError("MCP implementation source inventory unavailable or oversized")
+    hasher = hashlib.sha256()
+    for source in sorted(paths, key=lambda file: file.relative_to(root).as_posix()):
+        if source.is_symlink() or not source.is_file() or source.stat().st_size > 8 * 1024 * 1024:
+            raise ValueError("MCP implementation source unsafe")
+        hasher.update(
+            source.relative_to(root).as_posix().encode("utf-8")
+            + b"\x00" + hashlib.sha256(source.read_bytes()).digest()
+        )
+    return hasher.hexdigest(), len(paths)
+
+
 def _fingerprint(cfg: dict[str, Any]) -> dict[str, Any]:
     cli = _exec([cfg["codex_bin"], "--version"]).replace(" ", "-").strip()
     if not cli or len(cli) > 120:
         raise ValueError("unbounded Codex CLI version")
     script_sha = _digest(Path(__file__).read_bytes())
     mcp_sha = _digest(Path(cfg["mcp_script"]).read_bytes())
+    implementation_sha, implementation_count = _mcp_implementation_digest(cfg["mcp_script"])
     return {
         "runner_version": "codex-jsonl-study-v1-" + script_sha[:16] + "-" + cli,
-        "tool_contract": "codex-study-readonly-v1-mcp-" + mcp_sha[:16],
+        "tool_contract": "codex-study-readonly-v1-mcp-" + mcp_sha[:12] + "-impl-" + implementation_sha[:16],
         "agent_version": AGENT_VERSION,
         "tool_names": TOOL_NAMES,
         "provider": PROVIDER,
         "codex_version": cli,
         "runner_script_sha256": script_sha,
         "mcp_script_sha256": mcp_sha,
+        "mcp_implementation_sha256": implementation_sha,
+        "mcp_implementation_source_count": implementation_count,
     }
 
 
@@ -318,9 +354,9 @@ def _codex_argv(req: dict[str, Any], cfg: dict[str, Any],
             "-c", "mcp_servers." + server + ".enabled=true",
             "-c", "mcp_servers." + server + ".required=true",
             "-c", "mcp_servers." + server + ".args=" + json.dumps(mcp_argv, separators=(",", ":")),
-            # The RepoGround MCP server exposes change_evidence_pack whenever
-            # --repo-root is supplied. It is deliberately outside this study.
-            "-c", "mcp_servers." + server + ".disabled_tools=" + json.dumps(["change_evidence_pack"]),
+            # An allowlist also excludes future server tools not in the frozen
+            # study contract; disabling just one known extra would not.
+            "-c", "mcp_servers." + server + ".enabled_tools=" + json.dumps(list(MCP_TOOLS)),
         ]
     argv.append(_prompt(req))
     return argv
@@ -336,7 +372,7 @@ def _record_codex_event(events: list[tuple[dict[str, Any], float]], line: bytes)
 
 
 def _collect_codex_stream(
-    process: subprocess.Popen[bytes], start: float,
+    process: subprocess.Popen[bytes], start: float, trace_file: Any,
 ) -> tuple[bytes, list[tuple[dict[str, Any], float]], bool]:
     """Capture real bytes plus local event arrival timestamps without guesses."""
     assert process.stdout is not None
@@ -364,22 +400,25 @@ def _collect_codex_stream(
             fragment = os.read(process.stdout.fileno(), 65536)
             if not fragment:
                 break
-            size += len(fragment)
-            if size > MAX_TRACE_BYTES:
+            if size + len(fragment) > MAX_TRACE_BYTES:
+                trace_file.write(fragment[:max(0, MAX_TRACE_BYTES - size)])
                 raise ValueError("Codex trace over maximum byte budget")
+            trace_file.write(fragment)
+            size += len(fragment)
             chunks.append(fragment)
             buffer += fragment
             while b"\n" in buffer:
                 line, buffer = buffer.split(b"\n", 1)
                 _record_codex_event(events, line)
-        _record_codex_event(events, buffer)
+        if not timed_out:
+            _record_codex_event(events, buffer)
     finally:
         selector.close()
         process.stdout.close()
     return b"".join(chunks), events, timed_out
 
 
-def _capture(argv: list[str], cwd: Path, stderr_path: Path) -> tuple[bytes, list[tuple[dict[str, Any], float]], int, bool, datetime, datetime, int]:
+def _capture(argv: list[str], cwd: Path, stderr_path: Path, trace_path: Path) -> tuple[bytes, list[tuple[dict[str, Any], float]], int, bool, datetime, datetime, int]:
     env = os.environ.copy()
     for key in ("OPENAI_API_KEY", "CODEX_API_KEY", "ANTHROPIC_API_KEY", "XAI_API_KEY"):
         env.pop(key, None)
@@ -387,16 +426,20 @@ def _capture(argv: list[str], cwd: Path, stderr_path: Path) -> tuple[bytes, list
     env["GIT_OPTIONAL_LOCKS"] = "0"
     started_at = datetime.now(timezone.utc)
     start = time.monotonic()
-    with stderr_path.open("xb") as error_log:
+    with _open_private_create(stderr_path) as error_log, _open_private_create(trace_path) as raw_file:
         process = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
                                    stdout=subprocess.PIPE, stderr=error_log,
                                    start_new_session=True)
         try:
-            raw, events, timed_out = _collect_codex_stream(process, start)
+            raw, events, timed_out = _collect_codex_stream(process, start, raw_file)
         except (OSError, ValueError, json.JSONDecodeError):
             os.killpg(process.pid, signal.SIGKILL)
             process.wait(timeout=10)
             raise
+        finally:
+            # Own the raw evidence before any JSON validation can fail.
+            raw_file.flush()
+            os.fsync(raw_file.fileno())
         if timed_out:
             os.killpg(process.pid, signal.SIGKILL)
         code = process.wait(timeout=15)
@@ -635,10 +678,11 @@ def run(req: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
     stderr_path = trace_root / (req["request_id"] + ".stderr.txt")
     if trace_path.exists() or stderr_path.exists():
         raise ValueError("refusing prior trial trace or stderr")
-    raw, events, exitcode, timeout, started, ended, duration = _capture(argv, workspace, stderr_path)
+    raw, events, exitcode, timeout, started, ended, duration = _capture(
+        argv, workspace, stderr_path, trace_path,
+    )
     if not raw or not events:
         raise RuntimeError("no actual Codex JSONL events")
-    _create_once(trace_path, raw)
     usage = _usage(events)
     if usage is None:
         # A missing provider receipt is not a claim of zero token consumption.

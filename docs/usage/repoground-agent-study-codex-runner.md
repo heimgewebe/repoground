@@ -26,7 +26,7 @@ auf stdout zurück. Der vorhandene
   (`--ephemeral`) und einen neuen privaten Workspace. Git-Quellen werden
   von den explizit gebundenen Repositories nach dem eingefrorenen Commit
   geklont, ohne den aktuellen HEAD als Ersatz zu verwenden.
-- **Exakter MCP-Werkzeugumfang:** Mit `--repo-root` bietet der Server zusätzlich `change_evidence_pack` an. Der Codex-Client blendet dieses nicht zum eingefrorenen Messvertrag gehörende Werkzeug ausdrücklich über `mcp_servers.<server>.disabled_tools` aus. Der installierte Codex-CLI-Client 0.164.0 hat den gesetzten Ausschluss im lokalen Konfigurations-Readback bestätigt.
+- **Exakter MCP-Werkzeugumfang:** Mit `--repo-root` bietet der Server unter anderem `change_evidence_pack` an. Codex erhält ausschließlich die zwölf im Experiment vorgesehenen Read-Tools über `mcp_servers.<server>.enabled_tools`. Der lokale Codex-CLI-Client 0.164.0 bestätigte diese Whitelist im Konfigurations-Readback; nachträglich hinzugefügte Serverwerkzeuge sind nicht automatisch verfügbar.
 - **Unveränderliche Belege:** Die verwendeten Bundle-Manifeste, Generator-,
   Quell- und Health-Identitäten werden vor dem Providerstart geprüft.
   Ein erfolgreich beobachteter MCP-Aufruf bekommt den passenden
@@ -57,9 +57,11 @@ Unregistrierte Apps/Plugins sind ausgeschlossen, und die Arbeitsräume
 dürfen keine fremden Chat- oder Lauftranskripte enthalten.
 
 Das Adapterprofil wird vor einer Messreihe unveränderlich festgelegt.
-Modell, Codex-Version, Adapter-Dateihash, MCP-Skripthash, Sampling,
-Hostklasse, Cachemodus und Werkzeugnamen gehören zum
-`protocol_key`. Bei einer Adapteränderung startet eine neue
+Modell, Codex-Version, Adapter-Dateihash, MCP-Skripthash **und**
+SHA256 des installierten MCP-Implementationsquellbaums (ohne Tests/Fixtures),
+Sampling, Hostklasse, Cachemodus und Werkzeugnamen gehören zum
+`protocol_key`. Der dünne MCP-Launcher allein identifiziert
+die tatsächlich ausgeführten Handler nicht. Bei einer Adapteränderung startet eine neue
 Studienkohorte mit **neuer Run-ID**; eine abgebrochene Position darf
 nicht heimlich als Wiederholung erneut laufen.
 
@@ -132,8 +134,13 @@ python3 -B -m merger.repoground.cli.agent_study run-batch \
 Der nächste Aufruf ohne `--max-runs` fährt nur fort, wo noch kein
 Versuch gestartet wurde. Bereits gültige Receipts werden nochmals
 vollständig geprüft. Jede begonnene Position besitzt eine create-only
-`.attempts`-Quittung. Ein Fehler ohne gültiges Receipt bleibt als
-Versuch erhalten; er wird **niemals automatisch erneut gestartet**.
+`.attempts`-Quittung. Auch bei fehlerhaftem JSONL,
+abgebrochener Ausgabe oder Timeout speichert der Adapter die bis dahin
+empfangenen, auf 32 MiB begrenzten Originalbytes zunächst mit Dateimodus
+`0600` und `fsync` im privaten Trace-Verzeichnis. Ein Fehler ohne
+gültiges Receipt bleibt als Versuch erhalten; er wird **niemals
+automatisch erneut gestartet**. Ein Rawtrace allein ist kein
+gültiges Provider-/Qualitäts-Receipt.
 
 ## Bewertung und Langzeitvergleich
 

@@ -1,6 +1,7 @@
 """Contract tests for the external real-provider adapter; no synthetic quality claim."""
 import importlib.util
 import json
+import stat
 from pathlib import Path
 import tempfile
 import unittest
@@ -149,7 +150,7 @@ class CodexStudyRunnerTest(unittest.TestCase):
         self.assertEqual(call["status"], "failed")
         self.assertNotIn("repoground_evidence", call)
 
-    def test_mcp_exposure_disables_additional_change_evidence_tool(self):
+    def test_mcp_exposure_whitelists_only_frozen_tools(self):
         request = {
             "condition": "repoground_mandatory", "question": "Exact source question",
             "runner": {"model": "gpt-5.6-sol"},
@@ -167,8 +168,8 @@ class CodexStudyRunnerTest(unittest.TestCase):
                 request, config, workspace, {"repoground": workspace},
             )
         self.assertTrue(any(
-            part.startswith("mcp_servers.study_repoground.disabled_tools=")
-            and json.loads(part.partition("=")[2]) == ["change_evidence_pack"]
+            part.startswith("mcp_servers.study_repoground.enabled_tools=")
+            and json.loads(part.partition("=")[2]) == list(runner.MCP_TOOLS)
             for part in argv
         ))
         self.assertNotIn("repoground_change_evidence_pack", runner.TOOL_NAMES["repoground"])
@@ -264,6 +265,68 @@ class CodexStudyRunnerTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "drift"):
             runner._validate_request(req, fingerprint)
 
+    def test_mcp_digest_changes_when_imported_module_changes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "scripts").mkdir()
+            (root / "merger" / "repoground" / "cli").mkdir(parents=True)
+            (root / "merger" / "repoground" / "core").mkdir(parents=True)
+            thin_launcher = root / "scripts" / "mcp_stdio.py"
+            thin_launcher.write_text("from merger.repoground.cli import mcp_stdio\\n")
+            transport = root / "merger" / "repoground" / "cli" / "mcp_stdio.py"
+            tools = root / "merger" / "repoground" / "core" / "mcp_tools.py"
+            transport.write_text("PROTOCOL = 1\\n")
+            tools.write_text("STATUS = 'available'\\n")
+            first, count = runner._mcp_implementation_digest(str(thin_launcher))
+            self.assertEqual(count, 2)
+            self.assertEqual(first, runner._mcp_implementation_digest(str(thin_launcher))[0])
+            tools.write_text("STATUS = 'ok'\\n")
+            second, new_count = runner._mcp_implementation_digest(str(thin_launcher))
+            self.assertEqual(new_count, 2)
+            self.assertNotEqual(first, second)
+            self.assertEqual(thin_launcher.read_text(), "from merger.repoground.cli import mcp_stdio\\n")
+
+    def test_malformed_jsonl_still_persists_complete_raw_bytes(self):
+        import sys
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = "print('{not-json', flush=True)"
+            raw_path = root / "malformed.jsonl"
+            with self.assertRaises(ValueError):
+                runner._capture(
+                    [sys.executable, "-B", "-c", source],
+                    root, root / "malformed.stderr", raw_path,
+                )
+            self.assertEqual(raw_path.read_bytes(), b"{not-json\n")
+            self.assertEqual(stat.S_IMODE(raw_path.stat().st_mode), 0o600)
+            self.assertEqual(stat.S_IMODE((root / "malformed.stderr").stat().st_mode), 0o600)
+
+    def test_timeout_retains_valid_event_and_incomplete_tail(self):
+        import sys
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            script = (
+                "import time,json; "
+                "print(json.dumps({'type':'turn.started'}),flush=True); "
+                "print('{\\\"type\\\":',end='',flush=True); time.sleep(3)"
+            )
+            trace_path = root / "timeout.jsonl"
+            previous_timeout = runner.MODEL_TIMEOUT
+            runner.MODEL_TIMEOUT = 0.13
+            try:
+                raw, events, code, timed_out, *_ = runner._capture(
+                    [sys.executable, "-B", "-c", script],
+                    root, root / "timeout.stderr", trace_path,
+                )
+            finally:
+                runner.MODEL_TIMEOUT = previous_timeout
+            self.assertTrue(timed_out)
+            self.assertIn(b"turn.started", raw)
+            self.assertTrue(raw.endswith(b'{"type":'))
+            self.assertEqual(raw, trace_path.read_bytes())
+            self.assertNotEqual(code, 0)
+            self.assertEqual(events[0][0]["type"], "turn.started")
+
     def test_capture_records_real_time_with_streamed_tool_events(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)
@@ -276,7 +339,7 @@ class CodexStudyRunnerTest(unittest.TestCase):
                       "print(json.dumps({'type':'item.completed','item':i}),flush=True)")
             import sys
             raw, events, code, timed_out, start, end, duration = runner._capture(
-                [sys.executable, "-B", "-c", script], path, path / "stderr.txt",
+                [sys.executable, "-B", "-c", script], path, path / "stderr.txt", path / "trace.jsonl",
             )
             calls, _ = runner._tool_receipts(events, {})
             self.assertEqual(code, 0)
