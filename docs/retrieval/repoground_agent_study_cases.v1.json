@@ -1,0 +1,417 @@
+{
+  "kind": "repoground.agent_study_taskset",
+  "version": "1.0",
+  "id": "repoground-agent-study-frozen-20261101-v1",
+  "measurement_scope": "frozen_three_arm_agent_study",
+  "default_promoted": false,
+  "arms": [
+    "git_only",
+    "repoground_mandatory",
+    "repoground_selective"
+  ],
+  "repositories": {
+    "repoground": {
+      "slug": "heimgewebe/repoground",
+      "commit": "0fe8e5fd972c69b0d816b6bf124e10e6f5a43112"
+    },
+    "grabowski": {
+      "slug": "heimgewebe/grabowski",
+      "commit": "3fbe93d2f4c7a99c3c1aaf2c35952bac3541d98f"
+    },
+    "commonthing": {
+      "slug": "heimgewebe/commonthing",
+      "commit": "8dbc8c53ea7f26e218d419ac401eef44b29f9333"
+    }
+  },
+  "cases": [
+    {
+      "id": "known-fleet-entrypoint",
+      "class": "known_target",
+      "pilot": true,
+      "repositories": [
+        "repoground"
+      ],
+      "question": "Finde die Implementierung des RepoGround-Fleet-Publishers, der die geänderten Repositories veröffentlicht. Gib den belegten Quellpfad an.",
+      "oracle": {
+        "outcome": "answer",
+        "required_paths": [
+          {
+            "repo": "repoground",
+            "path": "scripts/ops/repoground-publish-fleet"
+          }
+        ],
+        "allowed_paths": [
+          {
+            "repo": "repoground",
+            "path": "scripts/ops/repoground-publish-fleet"
+          },
+          {
+            "repo": "repoground",
+            "path": "scripts/ops/repoground-cli-wrapper"
+          }
+        ],
+        "rationale": "Der ausführbare Python-Fleet-Publisher ist am fixierten Git-Commit als versionskontrollierte Datei vorhanden; der Wrapper delegiert an ihn."
+      }
+    },
+    {
+      "id": "known-query-frontdoor",
+      "class": "known_target",
+      "pilot": false,
+      "repositories": [
+        "repoground"
+      ],
+      "question": "Wo ist die RepoGround-Implementierung von query_existing_index und ihr konkreter MCP-Routing-Einstieg?",
+      "oracle": {
+        "outcome": "answer",
+        "required_paths": [
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/core/mcp_tools.py"
+          }
+        ],
+        "allowed_paths": [
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/core/mcp_tools.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/tests/test_mcp_query_routing.py"
+          }
+        ],
+        "rationale": "Die Pythonfunktion query_existing_index ist im gebundenen MCP-Core implementiert und die Routertests liegen im gefrorenen Testpfad."
+      }
+    },
+    {
+      "id": "known-commonthing-docs",
+      "class": "known_target",
+      "pilot": false,
+      "repositories": [
+        "commonthing"
+      ],
+      "question": "Finde in Commonthing die versionierten Einstiegserklärungen für Menschen und die Projektanweisungen für Agenten. Belege die beiden Dateien.",
+      "oracle": {
+        "outcome": "answer",
+        "required_paths": [
+          {
+            "repo": "commonthing",
+            "path": "README.md"
+          },
+          {
+            "repo": "commonthing",
+            "path": "AGENTS.md"
+          }
+        ],
+        "allowed_paths": [
+          {
+            "repo": "commonthing",
+            "path": "README.md"
+          },
+          {
+            "repo": "commonthing",
+            "path": "AGENTS.md"
+          }
+        ],
+        "rationale": "Beide Dokumente sind im fixierten Commonthing-Git-Tree vorhanden; Inhaltsinterpretation wird zusätzlich menschlich geprüft."
+      }
+    },
+    {
+      "id": "reverse-python-shebang",
+      "class": "reverse_relations",
+      "pilot": true,
+      "repositories": [
+        "repoground"
+      ],
+      "question": "Finde die tatsächlichen Nutzer der Funktion _is_python_source_file im Symbolindex und im statischen Aufrufgraphen. Nenne die Quellpfade und mögliche Grenzen der Beziehung.",
+      "oracle": {
+        "outcome": "answer",
+        "required_paths": [
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/architecture/symbol_index.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/architecture/call_graph.py"
+          }
+        ],
+        "allowed_paths": [
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/architecture/symbol_index.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/architecture/call_graph.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/tests/test_python_call_graph.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/tests/test_python_symbol_index.py"
+          }
+        ],
+        "rationale": "Die Erkennung wird in symbol_index definiert und in call_graph für die Python-Eingabesammlung wiederverwendet; dies ist eine nachprüfbare statische Beziehung."
+      }
+    },
+    {
+      "id": "reverse-grabowski-agent",
+      "class": "reverse_relations",
+      "pilot": true,
+      "repositories": [
+        "grabowski"
+      ],
+      "question": "Welche Stellen des Grabowski-Agentenpfades verwenden _repoground_agent_query, und welche RepoGround-Abfragefunktion wird im gleichen Consumer angeboten? Nenne die Source-Datei.",
+      "oracle": {
+        "outcome": "answer",
+        "required_paths": [
+          {
+            "repo": "grabowski",
+            "path": "src/grabowski_mcp.py"
+          }
+        ],
+        "allowed_paths": [
+          {
+            "repo": "grabowski",
+            "path": "src/grabowski_mcp.py"
+          },
+          {
+            "repo": "grabowski",
+            "path": "src/grabowski_repoground_catalog.py"
+          }
+        ],
+        "rationale": "Der fixierte Grabowski-MCP-Quellcode enthält den Agentenabfrage-Wrapper und die verbraucherseitige Frontdoor; genaues Verhalten erfordert einen Codecheck."
+      }
+    },
+    {
+      "id": "reverse-script-importability",
+      "class": "reverse_relations",
+      "pilot": false,
+      "repositories": [
+        "repoground"
+      ],
+      "question": "Wo trennt der statische Python-Call-Graph ausführbare Scripts ohne .py von regulär importierbaren .py-Modulen? Finde Umsetzung und Test der Importkollision.",
+      "oracle": {
+        "outcome": "answer",
+        "required_paths": [
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/architecture/call_graph.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/tests/test_python_call_graph.py"
+          }
+        ],
+        "allowed_paths": [
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/architecture/call_graph.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/tests/test_python_call_graph.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/architecture/symbol_index.py"
+          }
+        ],
+        "rationale": "Resolver und Importability-Regression liegen im gefrorenen Call-Graph-Quellcode und -Test."
+      }
+    },
+    {
+      "id": "impact-shebang-tests",
+      "class": "impact_tests",
+      "pilot": true,
+      "repositories": [
+        "repoground"
+      ],
+      "question": "Die Python-Shebang-Erkennung für ausführbare Dateien ohne .py soll geändert werden. Welche bereits vorhandenen Tests prüfen die Symbolerfassung, Dateiarten und Aufrufbeziehungen?",
+      "oracle": {
+        "outcome": "answer",
+        "required_paths": [
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/tests/test_python_symbol_index.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/tests/test_python_call_graph.py"
+          }
+        ],
+        "allowed_paths": [
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/tests/test_python_symbol_index.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/tests/test_python_call_graph.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/architecture/symbol_index.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/architecture/call_graph.py"
+          }
+        ],
+        "rationale": "Die beiden Regressionstestdateien wurden mit der Shebang-Korrektur im gebundenen Quellstand ergänzt; keine Behauptung vollständiger Regressionstestabdeckung."
+      }
+    },
+    {
+      "id": "impact-symbol-miss-tests",
+      "class": "impact_tests",
+      "pilot": true,
+      "repositories": [
+        "repoground"
+      ],
+      "question": "Die MCP-Symbolsuche meldet für einen unbekannten Namen zuversichtliche Fuzzy-Fundstellen. Finde die Implementierung und den Test, der exakte Fehlanzeige von allgemeiner Erklärfrage unterscheidet.",
+      "oracle": {
+        "outcome": "answer",
+        "required_paths": [
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/core/mcp_tools.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/tests/test_mcp_query_routing.py"
+          }
+        ],
+        "allowed_paths": [
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/core/mcp_tools.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/tests/test_mcp_query_routing.py"
+          }
+        ],
+        "rationale": "Die Korrektur für direkte Symbolabfragen und ihre Regressionen stehen im gebundenen Core und zugehörigen Test."
+      }
+    },
+    {
+      "id": "impact-cross-consumer",
+      "class": "impact_tests",
+      "pilot": false,
+      "repositories": [
+        "repoground",
+        "grabowski"
+      ],
+      "question": "Bei Änderung des RepoGround-MCP-Abfrageformats: In welchen versionierten Quelldateien von RepoGround und Grabowski liegen die erzeugerseitige Abfrage und der echte Agentenverbrauch? Belege beide Repositories.",
+      "oracle": {
+        "outcome": "answer",
+        "required_paths": [
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/core/mcp_tools.py"
+          },
+          {
+            "repo": "grabowski",
+            "path": "src/grabowski_mcp.py"
+          }
+        ],
+        "allowed_paths": [
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/core/mcp_tools.py"
+          },
+          {
+            "repo": "grabowski",
+            "path": "src/grabowski_mcp.py"
+          },
+          {
+            "repo": "grabowski",
+            "path": "src/grabowski_repoground_catalog.py"
+          }
+        ],
+        "rationale": "Ein gebundener Query-Core in RepoGround und ein separater Agentenconsumer in Grabowski bilden die überprüfbaren Komponenten dieser Schnittstelle."
+      }
+    },
+    {
+      "id": "boundary-invented-symbol",
+      "class": "boundary",
+      "pilot": true,
+      "repositories": [
+        "repoground"
+      ],
+      "question": "Wo ist die Funktion frobnicate_interstellar_penguin_engine in RepoGround-Python definiert? Wenn sich keine exakte Definition belegen lässt, nenne ausdrücklich die Suchabdeckung und erfinde keinen Pfad.",
+      "oracle": {
+        "outcome": "abstain",
+        "required_paths": [],
+        "allowed_paths": [],
+        "rationale": "Der absichtlich erfundene Symbolname wird im unabhängigen fixierten Python-Quellstand nicht als Definition verwendet; daraus folgt keine allsprachige Repository-Abwesenheit."
+      }
+    },
+    {
+      "id": "boundary-graph-runtime",
+      "class": "boundary",
+      "pilot": false,
+      "repositories": [
+        "repoground"
+      ],
+      "question": "Beweist eine statisch erkannte Python-Aufrufkante, dass die Funktion produktiv tatsächlich aufgerufen wird? Vermeide eine unbelegte Laufzeitbehauptung und begründe die Grenze.",
+      "oracle": {
+        "outcome": "abstain",
+        "required_paths": [],
+        "allowed_paths": [
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/architecture/call_graph.py"
+          }
+        ],
+        "rationale": "Ein statischer AST-Aufrufgraph kann Laufzeitbeobachtung nicht beweisen; die korrekte Antwort ist begrenzte Aussage/Abstinenz zu tatsächlichem Produktionsverhalten."
+      }
+    },
+    {
+      "id": "boundary-extensionless-python",
+      "class": "boundary",
+      "pilot": false,
+      "repositories": [
+        "repoground"
+      ],
+      "question": "Ein Programm hat kein .py-Suffix. Kann es trotzdem als Python-Quelle von RepoGround erkannt werden? Finde die tatsächliche Erkennung und mindestens ein solches versioniertes Skript; benenne Bedingungen.",
+      "oracle": {
+        "outcome": "answer",
+        "required_paths": [
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/architecture/symbol_index.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "scripts/ops/repoground-legacy-source-inventory"
+          }
+        ],
+        "allowed_paths": [
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/architecture/symbol_index.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "scripts/ops/repoground-legacy-source-inventory"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/tests/test_python_symbol_index.py"
+          }
+        ],
+        "rationale": "Das echte extensionless Skript besitzt eine Python-Shebang, und der Symbolindex verarbeitet solche Dateien unter gebundenem Quellstand."
+      }
+    }
+  ],
+  "does_not_establish": [
+    "oracle_completeness",
+    "actual_agent_correctness",
+    "runtime_behavior",
+    "semantic_generalization",
+    "causal_benefit_without_agent_runs"
+  ]
+}

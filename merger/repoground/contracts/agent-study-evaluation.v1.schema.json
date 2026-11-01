@@ -1,0 +1,960 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "heimgewebe/repoground/agent-study-evaluation.v1",
+  "title": "Run-stable three-arm RepoGround study report",
+  "type": "object",
+  "required": [
+    "kind",
+    "version",
+    "run_id",
+    "created_at",
+    "measurement_scope",
+    "taskset_sha256",
+    "protocol_key",
+    "suite",
+    "repetitions",
+    "generator_commits",
+    "planned_trials",
+    "supplied_trials",
+    "unexpected_or_duplicate_ids",
+    "valid_success_trials",
+    "graded_trials",
+    "complete_blocks",
+    "blocks",
+    "conditions",
+    "effects",
+    "trials",
+    "decision",
+    "by_class"
+  ],
+  "properties": {
+    "kind": {
+      "const": "repoground.agent_study_report"
+    },
+    "version": {
+      "const": "1.0"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "measurement_scope": {
+      "enum": [
+        "synthetic_contract_fixture",
+        "real_runner_reported"
+      ]
+    },
+    "taskset_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "protocol_key": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "suite": {
+      "enum": [
+        "pilot",
+        "full"
+      ]
+    },
+    "repetitions": {
+      "enum": [
+        1,
+        2
+      ]
+    },
+    "generator_commits": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{40}$"
+      }
+    },
+    "planned_trials": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "supplied_trials": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "unexpected_or_duplicate_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "valid_success_trials": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "graded_trials": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "complete_blocks": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "blocks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "case_id",
+          "repetition",
+          "complete",
+          "reasons"
+        ],
+        "properties": {
+          "case_id": {
+            "type": "string"
+          },
+          "repetition": {
+            "type": "integer"
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "conditions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "git_only",
+        "repoground_mandatory",
+        "repoground_selective"
+      ],
+      "properties": {
+        "git_only": {
+          "type": "object",
+          "required": [
+            "planned",
+            "valid_success",
+            "failed_or_invalid",
+            "grades_complete",
+            "quality_correct",
+            "unsupported_paths",
+            "negative_false_confidence",
+            "duration_ms",
+            "input_tokens_total",
+            "output_tokens_total",
+            "tool_calls_total",
+            "tool_failures_total",
+            "tool_bytes_total",
+            "cost_billed_total"
+          ],
+          "properties": {
+            "planned": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "valid_success": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "failed_or_invalid": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "grades_complete": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "quality_correct": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "unsupported_paths": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "negative_false_confidence": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "duration_ms": {
+              "type": "object",
+              "required": [
+                "mean",
+                "median",
+                "p95"
+              ],
+              "properties": {
+                "mean": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "median": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "p95": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "input_tokens_total": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "output_tokens_total": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "tool_calls_total": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "tool_failures_total": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "tool_bytes_total": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "cost_billed_total": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "currency",
+                    "amount"
+                  ],
+                  "properties": {
+                    "currency": {
+                      "type": "string"
+                    },
+                    "amount": {
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "repoground_mandatory": {
+          "type": "object",
+          "required": [
+            "planned",
+            "valid_success",
+            "failed_or_invalid",
+            "grades_complete",
+            "quality_correct",
+            "unsupported_paths",
+            "negative_false_confidence",
+            "duration_ms",
+            "input_tokens_total",
+            "output_tokens_total",
+            "tool_calls_total",
+            "tool_failures_total",
+            "tool_bytes_total",
+            "cost_billed_total"
+          ],
+          "properties": {
+            "planned": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "valid_success": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "failed_or_invalid": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "grades_complete": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "quality_correct": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "unsupported_paths": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "negative_false_confidence": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "duration_ms": {
+              "type": "object",
+              "required": [
+                "mean",
+                "median",
+                "p95"
+              ],
+              "properties": {
+                "mean": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "median": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "p95": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "input_tokens_total": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "output_tokens_total": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "tool_calls_total": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "tool_failures_total": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "tool_bytes_total": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "cost_billed_total": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "currency",
+                    "amount"
+                  ],
+                  "properties": {
+                    "currency": {
+                      "type": "string"
+                    },
+                    "amount": {
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "repoground_selective": {
+          "type": "object",
+          "required": [
+            "planned",
+            "valid_success",
+            "failed_or_invalid",
+            "grades_complete",
+            "quality_correct",
+            "unsupported_paths",
+            "negative_false_confidence",
+            "duration_ms",
+            "input_tokens_total",
+            "output_tokens_total",
+            "tool_calls_total",
+            "tool_failures_total",
+            "tool_bytes_total",
+            "cost_billed_total"
+          ],
+          "properties": {
+            "planned": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "valid_success": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "failed_or_invalid": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "grades_complete": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "quality_correct": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "unsupported_paths": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "negative_false_confidence": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "duration_ms": {
+              "type": "object",
+              "required": [
+                "mean",
+                "median",
+                "p95"
+              ],
+              "properties": {
+                "mean": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "median": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "p95": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "input_tokens_total": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "output_tokens_total": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "tool_calls_total": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "tool_failures_total": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "tool_bytes_total": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "cost_billed_total": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "currency",
+                    "amount"
+                  ],
+                  "properties": {
+                    "currency": {
+                      "type": "string"
+                    },
+                    "amount": {
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "effects": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mandatory_vs_git",
+        "selective_vs_git",
+        "selective_vs_mandatory"
+      ],
+      "properties": {
+        "mandatory_vs_git": {
+          "type": "object",
+          "required": [
+            "complete_tasks",
+            "paired_blocks",
+            "duration_delta_ms_mean_of_task_means",
+            "duration_delta_ms_median_of_task_means",
+            "duration_delta_ms_bootstrap_95ci",
+            "tasks_faster",
+            "tasks_slower",
+            "tasks_equal"
+          ],
+          "properties": {
+            "complete_tasks": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "paired_blocks": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "duration_delta_ms_mean_of_task_means": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "duration_delta_ms_median_of_task_means": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "duration_delta_ms_bootstrap_95ci": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "minItems": 2,
+              "maxItems": 2,
+              "items": {
+                "type": "number"
+              }
+            },
+            "tasks_faster": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "tasks_slower": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "tasks_equal": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "selective_vs_git": {
+          "type": "object",
+          "required": [
+            "complete_tasks",
+            "paired_blocks",
+            "duration_delta_ms_mean_of_task_means",
+            "duration_delta_ms_median_of_task_means",
+            "duration_delta_ms_bootstrap_95ci",
+            "tasks_faster",
+            "tasks_slower",
+            "tasks_equal"
+          ],
+          "properties": {
+            "complete_tasks": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "paired_blocks": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "duration_delta_ms_mean_of_task_means": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "duration_delta_ms_median_of_task_means": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "duration_delta_ms_bootstrap_95ci": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "minItems": 2,
+              "maxItems": 2,
+              "items": {
+                "type": "number"
+              }
+            },
+            "tasks_faster": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "tasks_slower": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "tasks_equal": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "selective_vs_mandatory": {
+          "type": "object",
+          "required": [
+            "complete_tasks",
+            "paired_blocks",
+            "duration_delta_ms_mean_of_task_means",
+            "duration_delta_ms_median_of_task_means",
+            "duration_delta_ms_bootstrap_95ci",
+            "tasks_faster",
+            "tasks_slower",
+            "tasks_equal"
+          ],
+          "properties": {
+            "complete_tasks": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "paired_blocks": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "duration_delta_ms_mean_of_task_means": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "duration_delta_ms_median_of_task_means": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "duration_delta_ms_bootstrap_95ci": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "minItems": 2,
+              "maxItems": 2,
+              "items": {
+                "type": "number"
+              }
+            },
+            "tasks_faster": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "tasks_slower": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "tasks_equal": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    },
+    "trials": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "request_id",
+          "case_id",
+          "class",
+          "condition",
+          "repetition",
+          "order",
+          "valid",
+          "errors",
+          "status",
+          "metrics",
+          "score"
+        ],
+        "properties": {
+          "request_id": {
+            "type": "string"
+          },
+          "case_id": {
+            "type": "string"
+          },
+          "class": {
+            "type": "string"
+          },
+          "condition": {
+            "enum": [
+              "git_only",
+              "repoground_mandatory",
+              "repoground_selective"
+            ]
+          },
+          "repetition": {
+            "type": "integer"
+          },
+          "order": {
+            "type": "integer"
+          },
+          "valid": {
+            "type": "boolean"
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "string"
+          },
+          "metrics": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "score": {
+            "type": [
+              "object",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "decision": {
+      "type": "object",
+      "required": [
+        "status",
+        "default_promoted",
+        "quality_review_complete",
+        "limits",
+        "does_not_establish"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "not_established",
+            "selective_benefit_candidate",
+            "no_selective_benefit_established"
+          ]
+        },
+        "default_promoted": {
+          "const": false
+        },
+        "quality_review_complete": {
+          "type": "boolean"
+        },
+        "limits": {
+          "type": "object"
+        },
+        "does_not_establish": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "by_class": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "known_target",
+        "reverse_relations",
+        "impact_tests",
+        "boundary"
+      ],
+      "properties": {
+        "known_target": {
+          "type": "object",
+          "required": [
+            "planned_trials",
+            "valid_success_trials",
+            "complete_tasks",
+            "condition_summaries",
+            "paired_duration_ms"
+          ],
+          "properties": {
+            "planned_trials": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "valid_success_trials": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "complete_tasks": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "condition_summaries": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object"
+              }
+            },
+            "paired_duration_ms": {
+              "type": "object",
+              "additionalProperties": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
+        "reverse_relations": {
+          "type": "object",
+          "required": [
+            "planned_trials",
+            "valid_success_trials",
+            "complete_tasks",
+            "condition_summaries",
+            "paired_duration_ms"
+          ],
+          "properties": {
+            "planned_trials": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "valid_success_trials": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "complete_tasks": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "condition_summaries": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object"
+              }
+            },
+            "paired_duration_ms": {
+              "type": "object",
+              "additionalProperties": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
+        "impact_tests": {
+          "type": "object",
+          "required": [
+            "planned_trials",
+            "valid_success_trials",
+            "complete_tasks",
+            "condition_summaries",
+            "paired_duration_ms"
+          ],
+          "properties": {
+            "planned_trials": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "valid_success_trials": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "complete_tasks": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "condition_summaries": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object"
+              }
+            },
+            "paired_duration_ms": {
+              "type": "object",
+              "additionalProperties": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
+        "boundary": {
+          "type": "object",
+          "required": [
+            "planned_trials",
+            "valid_success_trials",
+            "complete_tasks",
+            "condition_summaries",
+            "paired_duration_ms"
+          ],
+          "properties": {
+            "planned_trials": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "valid_success_trials": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "complete_tasks": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "condition_summaries": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object"
+              }
+            },
+            "paired_duration_ms": {
+              "type": "object",
+              "additionalProperties": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -62,6 +62,22 @@ Die Auswahl geschieht **beim aufrufenden Agenten**, nicht durch einen neuen auto
 
 ### R3 – Passenden Aufgabenmix statt Graph-Selbsttest messen (P1, nach R1)
 
+**Messinfrastruktur ab 01.11.2026:** Für Wiederholungen über Releases liegt jetzt ein
+[versioniertes A/B/C-Instrument mit fixer Git-Quelle, zwölf vorregistrierten
+Aufgaben, sechs Pilotfällen, zwei Wiederholungen, exakten Trace-/Token-/Manifest-
+Nachweisen, externem Quellreview und Protokoll-getrenntem Zeitvergleich]
+(../usage/repoground-agent-study-v1.md) vor.
+Der tatsächliche Vergleich ist **A = Git-only**, **B = verpflichtender
+RepoGround-Einsatz**, **C = selektive Werkzeugwahl**. Bestehende
+[24-Fälle-A/B-Verträge](../architecture/repobrief-agent-benchmark-v1.md)
+werden weiter genutzt und nicht umgedeutet. Das
+[historische Messregister](../diagnostics/repoground-agent-study-history.md)
+trennt echte alte 20-Paar-Läufe von künftigen A/B/C-Ergebnissen.
+Der Teststand belegt die Messwerkzeuge und einen quellengebundenen
+36-Lauf-Plan, **keinen** neuen realen Agentennutzen. R3 bleibt bis zu
+authentischen Läufen und unabhängiger Qualitätsbewertung offen.
+
+
 **Pilot:** Vor Messbeginn **12 reale Aufgaben** aus wenigstens zwei Heimgewebe-Repositories fixieren: 3 einfache bekannte Ziele (Negativkontrolle), 3 unbekannte eingehende Bezüge, 3 Change-Impact-/Testauswahlfragen und 3 repoübergreifende oder revisionshistorische Fragen. Wo Artefakte für Letzteres fehlen, dies offen als `unavailable`/Abstinenzfall registrieren und nicht künstlich Erfolg erzwingen. Mindestens zwei negative/unsichere Fälle aufnehmen. Goldziele und Quellbelege vorher unabhängig vom Treatment festlegen.
 
 **Vergleich:** Gleiche Aufgabe, Git-Revision, Modell, Prompt, erlaubte Werkzeuge und Laufbudget; isolierte Codex-/Consumer-Läufe mit **(A) normaler Git-Navigation** und **(B) optionalem selektivem Routing**. Reihenfolge abwechseln. Zuerst sechs Paare als günstige Diagnose, die restlichen sechs nur bei brauchbaren Ergebnissen. Für aussichtsreiche Aufgabenklassen eine zweite balancierte Wiederholung, bevor von stabiler Verbesserung gesprochen wird. Das bestehende [Agent-Benchmark-Modell](../architecture/repobrief-agent-benchmark-v1.md) für Traces, echte Provider-Tokens und Bewertung wiederverwenden; vorhandene 20 alten Paare nur als **separaten historischen Vergleich**, nicht in dieselbe Stichprobe mischen.
@@ -91,3 +107,39 @@ Die Auswahl geschieht **beim aufrufenden Agenten**, nicht durch einen neuen auto
 - **Änderungsgrenze dieses Plan-PRs:** Nur diese Roadmap und ihr Eintrag im vorhandenen Planungsindex. **Keine Runtime-, MCP-, Schema-, Prompt- oder Hoständerung.** Eine spätere Ausführung braucht je Slice echte Code-/CI-/Runtimebelege.
 
 **Abschlussdefinition:** Das Git-first/RepoGround-kandidat-Routing ist bei einem realen Agenten nachgewiesen, die kleine aufgabenklassenspezifische Gegenprobe bewertet fachliche Richtigkeit und Gesamtaufwand, und die Entscheidung lautet transparent entweder **selektiv fördern**, **Git beibehalten** oder **mit Begründung unentschieden**. Keine Architekturvermehrung ist dafür notwendig.
+
+
+## R3-Messinstrumentarium – Implementierungsbeleg vom 01.11.2026
+
+Die für R3 geforderte reproduzierbare Messstrecke liegt als eigenständige,
+kleine CLI-Schicht **auf dem vorhandenen JSON-stdio-Agentenbenchmark**, nicht
+als neuer Agentenrouter oder Publisher vor:
+
+- [Vertrags- und Messhandbuch](../usage/repoground-agent-study-v1.md),
+  [eingefrorener 12-Fälle-Goldsatz](../retrieval/repoground_agent_study_cases.v1.json)
+  und [langfristiges Messregister](../diagnostics/repoground-agent-study-history.md).
+- Drei Arme: **A Git-only**, **B RepoGround verpflichtend**, **C RepoGround
+  selektiv** (auch null MCP-Aufrufe); pro Klasse drei Aufgaben, zwei
+  Negativfälle, sechs Pilotaufgaben. Pilot 36, Vollstudie 72 isolierte Läufe
+  bei je zwei Wiederholungen.
+- Maschinenlesbare, versionsgebundene Quittungen mit echtem Transcript,
+  Git-/Generator-/Manifest-Fingerprints, Provider-Tokens, Tool-Bytes und
+  Latenzen. Der Vergleichsschlüssel bindet konstante Messbedingungen; die
+  Generatorrevision bleibt als bewusst veränderlicher Eingriff erhalten.
+- Reale Git-Quellpfade überprüft, **166 Regressions-/Bestandstests bestanden**
+  und Ruff erfolgreich (Prüflauf am 01.11.2026). Ein tatsächlicher
+  CLI-Plan-Durchlauf mit gesunden veröffentlichten Manifests für alle drei
+  Repositories erzeugte 36 Pilot-Requests. Die Leerauswertung weist
+  **36 fehlende Receipts und 0 gültige Läufe** korrekt als
+  **not_established** aus; keine künstlichen Agentenerfolge.
+- Die früheren 20 Git-vs.-MCP-Livepaare bleiben historische Evidenz
+  **anderer Methodik**. Ihr negatives Zeit-/Token-Ergebnis darf nicht
+  mit der neuen selektiven Dreiarmstudie statistisch vermischt werden.
+
+**Offen, und ausdrücklich nicht durch Werkzeugtests erledigt:** einen
+instrumentierten echten Provider-/Agenten-Runner anbinden, die eingefrorenen
+A/B/C-Aufgaben unter tatsächlich isolierten Sitzungen durchführen, unabhängige
+Antwort-/Quellenreviews erstellen und die daraus gewonnenen
+vergleichbaren Laufberichte versionieren. Bis dahin gibt es keine neue
+Aussage über Agentennutzen, Kostenersparnis oder eine automatische
+Standardumstellung.
