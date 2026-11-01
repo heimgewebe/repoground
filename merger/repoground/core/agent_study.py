@@ -667,6 +667,7 @@ def _summarize_study_arms(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             "failed_or_invalid": len(subset) - len(valid),
             "grades_complete": len([x for x in valid if x["score"]["human_grade"] is not None]),
             "quality_correct": len([x for x in valid if x["score"]["quality_success"] is True]),
+            "quality_incorrect": sum(x["score"]["human_grade"] == "incorrect" for x in valid),
             "unsupported_paths": sum(x["score"]["unsupported_paths"] for x in valid),
             "negative_false_confidence": sum(x["score"]["negative_false_confidence"] for x in valid),
             "duration_ms": {
@@ -734,14 +735,16 @@ def _aggregate_study_pairs(rows: Sequence[Mapping[str, Any]], cases: Mapping[str
         complete = len(group) == 3 and all(
             group[a]["valid"] and group[a]["status"] == "success" and
             group[a]["score"]["human_grade"] is not None and
-            group[a]["score"]["human_grade"] != "uncertain" for a in ARMS
+            group[a]["score"]["human_grade"] != "uncertain" and
+            group[a]["score"]["human_verified_citations"] is True for a in ARMS
         )
         blocks.append({
             "case_id": case_id, "repetition": rep, "complete": complete,
             "reasons": [] if complete else [
                 a for a in ARMS if a not in group or not group[a]["valid"] or
                 group[a]["status"] != "success" or
-                group[a]["score"] is None or group[a]["score"]["human_grade"] in (None, "uncertain")
+                group[a]["score"] is None or group[a]["score"]["human_grade"] in (None, "uncertain") or
+                group[a]["score"]["human_verified_citations"] is not True
             ],
         })
         if not complete:
@@ -821,7 +824,11 @@ def _aggregate_study_pairs(rows: Sequence[Mapping[str, Any]], cases: Mapping[str
 
 def _select_study_decision(rows: Sequence[Mapping[str, Any]], extras: Sequence[str], plan: Mapping[str, Any], by_arm: Mapping[str, Any], effects: Mapping[str, Any], measurement_scope: str) -> tuple[str, bool]:
     valid_all = len(extras) == 0 and all(x["valid"] and x["status"] == "success" for x in rows)
-    grades_complete = valid_all and all(x["score"]["human_grade"] not in (None, "uncertain") for x in rows)
+    grades_complete = valid_all and all(
+        x["score"]["human_grade"] not in (None, "uncertain")
+        and x["score"]["human_verified_citations"] is True
+        for x in rows
+    )
     full = plan["suite"] == "full" and plan["repetitions"] >= DECISION_LIMITS["minimum_repetitions"]
     decision = "not_established"
     if (measurement_scope == "real_runner_reported" and full and valid_all and grades_complete
@@ -830,6 +837,8 @@ def _select_study_decision(rows: Sequence[Mapping[str, Any]], extras: Sequence[s
         select = by_arm["repoground_selective"]
         # Quality gate prevents a fast but less accurate condition from winning.
         if (select["quality_correct"] >= base["quality_correct"]
+            and select["quality_incorrect"] - base["quality_incorrect"]
+            <= DECISION_LIMITS["maximum_incorrect_delta"]
             and select["unsupported_paths"] <= base["unsupported_paths"]
             and select["negative_false_confidence"] <= base["negative_false_confidence"]
             and effects["selective_vs_git"]["duration_delta_ms_bootstrap_95ci"] is not None

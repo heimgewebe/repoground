@@ -148,6 +148,7 @@
             "failed_or_invalid",
             "grades_complete",
             "quality_correct",
+            "quality_incorrect",
             "unsupported_paths",
             "negative_false_confidence",
             "duration_ms",
@@ -259,6 +260,10 @@
               ]
             },
             "resource_accounted_trials": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "quality_incorrect": {
               "type": "integer",
               "minimum": 0
             }
@@ -273,6 +278,7 @@
             "failed_or_invalid",
             "grades_complete",
             "quality_correct",
+            "quality_incorrect",
             "unsupported_paths",
             "negative_false_confidence",
             "duration_ms",
@@ -384,6 +390,10 @@
               ]
             },
             "resource_accounted_trials": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "quality_incorrect": {
               "type": "integer",
               "minimum": 0
             }
@@ -398,6 +408,7 @@
             "failed_or_invalid",
             "grades_complete",
             "quality_correct",
+            "quality_incorrect",
             "unsupported_paths",
             "negative_false_confidence",
             "duration_ms",
@@ -509,6 +520,10 @@
               ]
             },
             "resource_accounted_trials": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "quality_incorrect": {
               "type": "integer",
               "minimum": 0
             }

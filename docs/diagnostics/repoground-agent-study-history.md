@@ -70,8 +70,8 @@ Provider-, Modell- oder Agentenausführung.
 | Real ausgeführte Agentenläufe | **0** |
 | Fehlende Agenten-Receipts | **36**, vollständig sichtbar |
 | Auswertung/Trend | not_established; eine Probe-Vergleichsgruppe |
-| Vertragstest und Bestandstests | 175 PASS, Ruff PASS und CI-Komplexitätsratchet PASS; einzig vorhandener pytest-asyncio-Konfigurationshinweis |
-| Technischer Prüfbeleg | Grabowski-Jobs fb7ed57d4812 (Tests samt CI-Ratchet) und 950743924ac4 (Plan/Leerauswertung) |
+| Vertragstest und Bestandstests | 178 PASS, Ruff PASS und CI-Komplexitätsratchet PASS; einzig vorhandener pytest-asyncio-Konfigurationshinweis |
+| Technischer Prüfbeleg | Grabowski-Jobs c5bc062941bb (Tests samt CI-Ratchet) und 950743924ac4 (Plan/Leerauswertung) |
 
 Die Planung erfolgte absichtlich mit einer als **planning-only**
 gekennzeichneten Profilidentität ohne echten Provider. Ihr

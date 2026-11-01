@@ -632,3 +632,59 @@ def test_valid_timeout_consumption_is_counted_without_quality_credit(planned, tm
     assert arm["tool_time_ms_total"] == 2400
     assert evaluation["valid_success_trials"] == 35
     assert evaluation["decision"]["status"] == "not_established"
+
+
+def test_incorrect_review_regression_blocks_faster_selective_candidate(
+    planned, tmp_path,
+):
+    """Repeated speed wins must never trump *more* incorrect graded answers."""
+    taskset = gold()
+    full = study.create_plan(
+        taskset, profile(), snap(taskset),
+        run_id="synthetic-incorrect-review-safety",
+        suite="full", repetitions=2, roots={},
+    )
+    receipts, grades = sample_data(full, tmp_path)
+    by_request = {x["request_id"]: x for x in full["requests"]}
+    for grade in grades:
+        condition = by_request[grade["request_id"]]["condition"]
+        grade["verdict"] = "incorrect" if condition == "repoground_selective" else "partial"
+
+    # This is synthetic control input for a verdict guard, never live evidence.
+    report = study.evaluate(
+        full, taskset, receipts, grades, trace_root=tmp_path,
+        measurement_scope="real_runner_reported",
+    )
+    assert report["effects"]["selective_vs_git"]["complete_tasks"] == 12
+    assert report["effects"]["selective_vs_git"]["duration_delta_ms_bootstrap_95ci"][1] < 0
+    assert report["conditions"]["git_only"]["quality_correct"] == 0
+    assert report["conditions"]["repoground_selective"]["quality_correct"] == 0
+    assert report["conditions"]["git_only"]["quality_incorrect"] == 0
+    assert report["conditions"]["repoground_selective"]["quality_incorrect"] == 24
+    assert report["decision"]["limits"]["maximum_incorrect_delta"] == 0
+    assert report["decision"]["status"] == "no_selective_benefit_established"
+    assert report["decision"]["default_promoted"] is False
+
+
+def test_unchecked_citations_block_candidate_even_when_fast(planned, tmp_path):
+    """Full paired study cannot pass review by accepting unverified citations."""
+    taskset = gold()
+    full = study.create_plan(
+        taskset, profile(), snap(taskset),
+        run_id="synthetic-unchecked-citations-safety",
+        suite="full", repetitions=2, roots={},
+    )
+    receipts, grades = sample_data(full, tmp_path)
+    for grade in grades:
+        grade["citations_checked"] = False
+    report = study.evaluate(
+        full, taskset, receipts, grades,
+        trace_root=tmp_path, measurement_scope="real_runner_reported",
+    )
+    assert report["effects"]["selective_vs_git"]["complete_tasks"] == 0
+    assert report["effects"]["selective_vs_git"]["duration_delta_ms_bootstrap_95ci"] is None
+    assert report["complete_blocks"] == 0
+    assert report["decision"]["quality_review_complete"] is False
+    assert report["conditions"]["repoground_selective"]["quality_correct"] == 0
+    assert report["decision"]["status"] == "not_established"
+    assert report["decision"]["default_promoted"] is False
