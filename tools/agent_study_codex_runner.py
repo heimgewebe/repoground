@@ -288,6 +288,80 @@ def _manifest_evidence(req: dict[str, Any], sources: dict[str, Path]) -> dict[st
     return evidence
 
 
+def _pin_bundle_sibling(
+    source: Path, original: Path, directory: Path,
+    post_name: str, expected_sha: str,
+) -> None:
+    if source.is_dir() and not source.is_symlink():
+        return  # Generation metadata is not a manifest role.
+    if source.is_symlink() or not source.is_file():
+        raise ValueError("source bundle contains unsafe entry")
+    if source.name == original.name:
+        return
+    if source.name == post_name:
+        # Preserve the health attestation's original publication path, but
+        # also hash-bind its private copy to exactly the pinned manifest bytes.
+        post = _read_json(source)
+        if post.get("bundle_manifest_sha256") not in (None, expected_sha):
+            raise ValueError("source post-health SHA conflicts with frozen manifest")
+        post["bundle_manifest_sha256"] = expected_sha
+        _create_once(directory / post_name, _json_bytes(post) + b"\n")
+        return
+    # Immutable artifacts can be linked without rewriting published bytes.
+    os.link(source, directory / source.name, follow_symlinks=False)
+
+
+def _pin_bundle_manifest(bound: dict[str, Any], directory: Path) -> Path:
+    original = Path(bound["manifest_path"])
+    if original.is_symlink() or not original.is_file():
+        raise ValueError("source manifest is not an ordinary file")
+    raw = original.read_bytes()
+    if _digest(raw) != bound["manifest_sha256"]:
+        raise ValueError("source manifest changed before private pin")
+    post_name = json.loads(raw).get("links", {}).get("post_emit_health_path")
+    if not isinstance(post_name, str) or Path(post_name).name != post_name:
+        raise ValueError("source bundle post-emit health name invalid")
+    directory.mkdir(mode=0o700, exist_ok=False)
+    for source in original.parent.iterdir():
+        _pin_bundle_sibling(source, original, directory, post_name, bound["manifest_sha256"])
+    manifest = directory / original.name
+    _create_once(manifest, raw)
+    manifest.chmod(0o400)
+    if _digest(manifest.read_bytes()) != bound["manifest_sha256"]:
+        raise ValueError("private manifest digest mismatch")
+    return manifest
+
+
+def _pin_snapshot_manifests(
+    req: dict[str, Any], workspace: Path,
+) -> dict[str, Path]:
+    """Pin exact manifest bytes outside the publisher's mutable path.
+
+    The producer can atomically replace its source manifest without changing
+    any consumer-visible bytes used in this fresh, read-only trial workspace.
+    """
+    manifests = req.get("repoground") or {}
+    if not manifests:
+        return {}
+    root = workspace / "pinned-bundles"
+    root.mkdir(mode=0o700, exist_ok=False)
+    return {
+        repo: _pin_bundle_manifest(bound, root / repo)
+        for repo, bound in sorted(manifests.items())
+    }
+
+
+
+def _assert_pinned_manifests(
+    request: dict[str, Any], pinned: dict[str, Path],
+) -> None:
+    if set(pinned) != set(request.get("repoground") or {}):
+        raise ValueError("private manifest inventory mismatch")
+    for repo, manifest in pinned.items():
+        if manifest.is_symlink() or _digest(manifest.read_bytes()) != request["repoground"][repo]["manifest_sha256"]:
+            raise ValueError("private manifest changed while MCP was running")
+
+
 def _output_schema() -> dict[str, Any]:
     path = {"type": "object", "properties": {
         "repo": {"type": "string"}, "path": {"type": "string"},
@@ -332,7 +406,8 @@ def _prompt(req: dict[str, Any]) -> str:
 
 
 def _codex_argv(req: dict[str, Any], cfg: dict[str, Any],
-                workspace: Path, sources: dict[str, Path]) -> list[str]:
+                workspace: Path, sources: dict[str, Path],
+                pinned: dict[str, Path] | None = None) -> list[str]:
     schema_path = workspace / "answer.schema.json"
     _create_once(schema_path, _json_bytes(_output_schema()) + b"\n")
     argv = [
@@ -346,7 +421,7 @@ def _codex_argv(req: dict[str, Any], cfg: dict[str, Any],
     for name, bound in sorted((req.get("repoground") or {}).items()):
         server = "study_" + name.replace("-", "_")
         mcp_argv = [
-            cfg["mcp_script"], "--bundle-root", bound["manifest_path"],
+            cfg["mcp_script"], "--bundle-root", str((pinned or {}).get(name, bound["manifest_path"])),
             "--repo-root", str(sources[name]),
         ]
         argv += [
@@ -545,8 +620,13 @@ def _mcp_tool_receipt(
 def _measured_tool_item(item: dict[str, Any]) -> bool:
     if item.get("type") not in ("command_execution", "mcp_tool_call"):
         return False
-    if item.get("type") == "mcp_tool_call" and _builtin_empty_mcp(item):
-        return False
+    if item.get("type") == "mcp_tool_call" and item.get("server") == "codex":
+        # Codex's own MCP resource/template listing returns metadata, not
+        # a source read. It may legitimately be NONEMPTY for this server.
+        # Preserve it in the raw JSONL trace, never credit it as a
+        # RepoGround retrieval or count it as an unauthorized tool call.
+        if item.get("tool") in ("list_mcp_resources", "list_mcp_resource_templates"):
+            return False
     return True
 
 
@@ -671,7 +751,8 @@ def run(req: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
     _validate_request(req, fingerprint)
     workspace, sources = _prepare_sources(req, cfg)
     manifest_evidence = _manifest_evidence(req, sources)
-    argv = _codex_argv(req, cfg, workspace, sources)
+    pinned = _pin_snapshot_manifests(req, workspace)
+    argv = _codex_argv(req, cfg, workspace, sources, pinned)
     trace_root = Path(cfg["trace_root"])
     _private_dir(trace_root)
     trace_path = trace_root / (req["request_id"] + ".jsonl")
@@ -683,6 +764,7 @@ def run(req: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
     )
     if not raw or not events:
         raise RuntimeError("no actual Codex JSONL events")
+    _assert_pinned_manifests(req, pinned)
     usage = _usage(events)
     if usage is None:
         # A missing provider receipt is not a claim of zero token consumption.

@@ -29,8 +29,24 @@ auf stdout zurück. Der vorhandene
 - **Exakter MCP-Werkzeugumfang:** Mit `--repo-root` bietet der Server unter anderem `change_evidence_pack` an. Codex erhält ausschließlich die zwölf im Experiment vorgesehenen Read-Tools über `mcp_servers.<server>.enabled_tools`. Der lokale Codex-CLI-Client 0.164.0 bestätigte diese Whitelist im Konfigurations-Readback; nachträglich hinzugefügte Serverwerkzeuge sind nicht automatisch verfügbar.
 - **Unveränderliche Belege:** Die verwendeten Bundle-Manifeste, Generator-,
   Quell- und Health-Identitäten werden vor dem Providerstart geprüft.
-  Ein erfolgreich beobachteter MCP-Aufruf bekommt den passenden
-  `pinned_exact`-Nachweis.
+  Danach bekommt jeder Agentenlauf eine **private Kopie der exakten
+  Manifestbytes** im frischen Workspace; referenzierte, unveränderliche
+  Bundle-Artefakte werden ohne erneutes Kopieren per Hardlink eingebunden.
+  Eine lokale Kopie des Post-Emit-Health-Dokuments wird zusätzlich an den
+  originalen Manifest-SHA256 gebunden, weil der ursprüngliche absolute
+  Publikationspfad kein Pfad zur privaten Kopie ist. Das MCP startet
+  ausschließlich mit dieser privaten Manifestdatei und prüft den Hash
+  nach dem Providerlauf erneut. Damit kann das spätere Ersetzen eines
+  öffentlichen Manifestpfads keinen anderen Snapshot unter derselben
+  `pinned_exact`-Quittung einschleusen. Der Original-Health-Beleg
+  und das ursprüngliche Bundle bleiben unverändert.
+- **MCP-Ressourcenmetadaten:** Die Codex-eigenen Aufrufe
+  `list_mcp_resources` und `list_mcp_resource_templates` dürfen
+  nichtleere Ressourcenlisten liefern. Diese Aufrufe bleiben im
+  unveränderten JSONL-Trace erhalten, zählen aber weder als
+  RepoGround-Abfrage noch als fehlgeschlagener unregistrierter Read.
+  Ein tatsächliches nicht zugelassenes Ressourcen-Lesewerkzeug wird
+  hingegen weiterhin abgewiesen.
 - **Echte Messwerte:** Input-/Output-/Cache-Tokens werden ausschließlich
   aus dem tatsächlichen `turn.completed.usage` des Codex-JSONL übernommen.
   Die Zeit umfasst den gesamten Codex-Aufruf. Tool-Ein-/Ausgabebytes

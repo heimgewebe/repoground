@@ -173,6 +173,16 @@ class CodexStudyRunnerTest(unittest.TestCase):
             for part in argv
         ))
         self.assertNotIn("repoground_change_evidence_pack", runner.TOOL_NAMES["repoground"])
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            private_manifest = workspace / "pinned.bundle.manifest.json"
+            argv = runner._codex_argv(
+                request, config, workspace,
+                {"repoground": workspace}, {"repoground": private_manifest},
+            )
+            self.assertTrue(any(str(private_manifest) in arg for arg in argv))
+            self.assertFalse(any("/fake/bundle/manifest.json" in arg for arg in argv))
+
 
     def test_foreign_mcp_server_cannot_hide_as_repo_tool(self):
         call = {"id": "m2", "type": "mcp_tool_call",
@@ -264,6 +274,71 @@ class CodexStudyRunnerTest(unittest.TestCase):
         req["runner"]["runner_version"] = "forged-runner"
         with self.assertRaisesRegex(ValueError, "drift"):
             runner._validate_request(req, fingerprint)
+
+    def test_nonempty_native_codex_resource_discovery_is_metadata_not_failed_treatment(self):
+        for tool, collection in (
+            ("list_mcp_resources", {"resources": [{"uri": "repoground://example"}]}),
+            ("list_mcp_resource_templates", {
+                "resourceTemplates": [{"uriTemplate": "repoground://source/{ref}"}],
+            }),
+        ):
+            with self.subTest(tool=tool):
+                item = {
+                    "id": "resource", "type": "mcp_tool_call", "server": "codex",
+                    "tool": tool, "arguments": {}, "status": "completed",
+                    "result": {"structured_content": collection},
+                }
+                calls, answer = runner._tool_receipts([
+                    (event("item.started", item), 1.0),
+                    (event("item.completed", item), 1.2),
+                ], {})
+                self.assertEqual(calls, [])
+                self.assertEqual(answer, "")
+        unknown = {**item, "tool": "read_mcp_resource"}
+        with self.assertRaisesRegex(ValueError, "unregistered"):
+            runner._tool_receipts([
+                (event("item.started", unknown), 1.0),
+                (event("item.completed", unknown), 1.2),
+            ], {})
+
+    def test_pinned_manifest_survives_source_replacement_without_forged_health(self):
+        import hashlib
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            publisher = root / "published"
+            publisher.mkdir()
+            source = publisher / "test.bundle.manifest.json"
+            raw = json.dumps({"links": {"post_emit_health_path": "health.json"}}).encode()
+            source.write_bytes(raw)
+            (publisher / "health.json").write_text(json.dumps({
+                "status": "pass", "bundle_manifest_path": str(source),
+            }))
+            (publisher / "role.txt").write_text("original immutable content")
+            bound = {
+                "manifest_path": str(source),
+                "manifest_sha256": hashlib.sha256(raw).hexdigest(),
+            }
+            request = {"repoground": {"repoground": bound}}
+            ws = root / "worktree"
+            ws.mkdir()
+            pinned = runner._pin_snapshot_manifests(request, ws)
+            target = pinned["repoground"]
+            self.assertEqual(target.read_bytes(), raw)
+            self.assertNotEqual(source, target)
+            self.assertEqual(json.loads((target.parent / "health.json").read_text())[
+                "bundle_manifest_sha256"
+            ], bound["manifest_sha256"])
+            self.assertNotIn("bundle_manifest_sha256", json.loads(
+                (publisher / "health.json").read_text()
+            ))
+            self.assertEqual((target.parent / "role.txt").read_text(), "original immutable content")
+            source.write_bytes(b"substituted publication manifest")
+            runner._assert_pinned_manifests(request, pinned)
+            self.assertEqual(target.read_bytes(), raw)
+            target.chmod(0o600)
+            target.write_bytes(b"mutated private manifest")
+            with self.assertRaisesRegex(ValueError, "private manifest changed"):
+                runner._assert_pinned_manifests(request, pinned)
 
     def test_mcp_digest_changes_when_imported_module_changes(self):
         with tempfile.TemporaryDirectory() as directory:
