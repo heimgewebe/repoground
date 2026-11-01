@@ -475,6 +475,14 @@ def _mcp_tool_receipt(
     return call
 
 
+def _measured_tool_item(item: dict[str, Any]) -> bool:
+    if item.get("type") not in ("command_execution", "mcp_tool_call"):
+        return False
+    if item.get("type") == "mcp_tool_call" and _builtin_empty_mcp(item):
+        return False
+    return True
+
+
 def _tool_receipts(events: list[tuple[dict[str, Any], float]],
                    expected: dict[str, dict[str, Any]]) -> tuple[list[dict[str, Any]], str]:
     starts: dict[str, float] = {}
@@ -493,9 +501,7 @@ def _tool_receipts(events: list[tuple[dict[str, Any], float]],
         if item.get("type") == "agent_message":
             last_answer = str(item.get("text") or "")
             continue
-        if item.get("type") not in ("command_execution", "mcp_tool_call"):
-            continue
-        if item.get("type") == "mcp_tool_call" and _builtin_empty_mcp(item):
+        if not _measured_tool_item(item):
             continue
         if not isinstance(item_id, str) or item_id not in starts:
             raise ValueError("unmeasured tool start/end pair")
