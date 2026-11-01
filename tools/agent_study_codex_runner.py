@@ -1,0 +1,639 @@
+#!/usr/bin/env python3
+"""Read-only Codex JSONL adapter for RepoGround's existing three-arm study CLI.
+
+This is one external JSON-stdio runner, not a new benchmark service. All Codex
+events are preserved in a private trace; usage is copied only from turn.completed.
+No model result, cost, citation, tool time, or quality grade is manufactured.
+"""
+from __future__ import annotations
+
+import argparse
+from datetime import datetime, timezone
+import hashlib
+import json
+import os
+from pathlib import Path, PurePosixPath
+import re
+import selectors
+import signal
+import subprocess
+import sys
+import time
+from typing import Any
+
+MCP_TOOLS = (
+    "bundle_discover", "snapshot_status", "ask_context", "query_existing_index",
+    "range_get", "grounding_verify", "live_freshness", "find_symbol",
+    "find_references", "get_callers", "get_callees",
+    "get_structure_neighborhood",
+)
+TOOL_NAMES = {
+    "git": ["codex_git_command"],
+    "file": ["codex_file_command"],
+    "repoground": ["repoground_" + tool for tool in MCP_TOOLS],
+}
+AGENT_VERSION = "codex-study-prompt-v1"
+PROVIDER = "openai-codex-cli"
+MAX_TRACE_BYTES = 32 * 1024 * 1024
+MAX_TOOL_CALLS = 160
+MODEL_TIMEOUT = 290
+ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{1,200}\Z")
+HEX40 = re.compile(r"[a-f0-9]{40}\Z")
+HEX64 = re.compile(r"[a-f0-9]{64}\Z")
+
+
+def _json_bytes(value: Any) -> bytes:
+    return json.dumps(value, sort_keys=True, ensure_ascii=False,
+                      separators=(",", ":"), allow_nan=False).encode("utf-8")
+
+
+def _digest(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError("JSON object required")
+    return value
+
+
+def _exec(argv: list[str], *, cwd: Path | None = None) -> str:
+    p = subprocess.run(argv, cwd=cwd, capture_output=True, timeout=45, check=False)
+    if p.returncode != 0:
+        raise RuntimeError("source/runner command failed: " + argv[0])
+    return p.stdout.decode("utf-8").strip()
+
+
+def _private_dir(path: Path) -> None:
+    if path.is_symlink():
+        raise ValueError("private study directory may not be a symlink")
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if not path.is_dir():
+        raise ValueError("study state directory unavailable")
+
+
+def _create_once(path: Path, content: bytes) -> None:
+    if path.is_symlink():
+        raise ValueError("refusing symlink output")
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "wb") as output:
+        output.write(content)
+        output.flush()
+        os.fsync(output.fileno())
+
+
+def _config(path: Path) -> dict[str, Any]:
+    cfg = _read_json(path)
+    if set(cfg) != {
+        "codex_bin", "mcp_python", "mcp_script",
+        "source_roots", "workspaces_root", "trace_root",
+    }:
+        raise ValueError("runner configuration must have exact known fields")
+    for key in ("codex_bin", "mcp_python", "mcp_script", "workspaces_root", "trace_root"):
+        if not isinstance(cfg[key], str) or not Path(cfg[key]).is_absolute():
+            raise ValueError("runner configuration needs absolute paths")
+    roots = cfg["source_roots"]
+    if not isinstance(roots, dict) or not roots:
+        raise ValueError("source_roots required")
+    if any(not isinstance(k, str) or not isinstance(v, str)
+           or not Path(v).is_absolute() for k, v in roots.items()):
+        raise ValueError("source_roots require absolute paths")
+    for key in ("codex_bin", "mcp_python", "mcp_script"):
+        if not Path(cfg[key]).is_file():
+            raise ValueError("runner executable/script unavailable: " + key)
+    return cfg
+
+
+def _fingerprint(cfg: dict[str, Any]) -> dict[str, Any]:
+    cli = _exec([cfg["codex_bin"], "--version"]).replace(" ", "-").strip()
+    if not cli or len(cli) > 120:
+        raise ValueError("unbounded Codex CLI version")
+    script_sha = _digest(Path(__file__).read_bytes())
+    mcp_sha = _digest(Path(cfg["mcp_script"]).read_bytes())
+    return {
+        "runner_version": "codex-jsonl-study-v1-" + script_sha[:16] + "-" + cli,
+        "tool_contract": "codex-study-readonly-v1-mcp-" + mcp_sha[:16],
+        "agent_version": AGENT_VERSION,
+        "tool_names": TOOL_NAMES,
+        "provider": PROVIDER,
+        "codex_version": cli,
+        "runner_script_sha256": script_sha,
+        "mcp_script_sha256": mcp_sha,
+    }
+
+
+def _validate_request(req: dict[str, Any], fingerprint: dict[str, Any]) -> None:
+    if req.get("kind") != "repoground.agent_study_request" or req.get("version") != "1.0":
+        raise ValueError("study request kind/version mismatch")
+    if not isinstance(req.get("request_id"), str) or not ID.fullmatch(req["request_id"]):
+        raise ValueError("invalid request id")
+    if not isinstance(req.get("workspace_id"), str) or not ID.fullmatch(req["workspace_id"]):
+        raise ValueError("invalid workspace id")
+    if req.get("condition") not in ("git_only", "repoground_mandatory", "repoground_selective"):
+        raise ValueError("unknown study arm")
+    run = req.get("runner")
+    ctx = req.get("execution_context")
+    if not isinstance(run, dict) or not isinstance(ctx, dict):
+        raise ValueError("runner and execution_context required")
+    if run.get("provider") != PROVIDER or run.get("runner_version") != fingerprint["runner_version"]:
+        raise ValueError("runner executable or version drift")
+    if not isinstance(run.get("model"), str) or not run["model"]:
+        raise ValueError("exact model identifier missing")
+    if run.get("sampling") != {"model_reasoning_effort": "medium"}:
+        raise ValueError("unsupported Codex sampling configuration")
+    if ctx.get("agent_version") != AGENT_VERSION or ctx.get("tool_contract") != fingerprint["tool_contract"]:
+        raise ValueError("agent/tool contract drift")
+    if ctx.get("cache_policy") != "controlled" or not isinstance(ctx.get("host_class"), str):
+        raise ValueError("cache/host profile mismatch")
+    if not isinstance(req.get("repositories"), dict) or not req["repositories"]:
+        raise ValueError("frozen repository set missing")
+    if not isinstance(req.get("question"), str) or not req["question"]:
+        raise ValueError("study question missing")
+    requested_tools = TOOL_NAMES["git"] + TOOL_NAMES["file"]
+    if req["condition"] != "git_only":
+        requested_tools += TOOL_NAMES["repoground"]
+    if req.get("tools_allowed") != sorted(requested_tools):
+        raise ValueError("tool inventory does not match actual runner contract")
+    if req.get("git_file_tool_names") != sorted(TOOL_NAMES["git"] + TOOL_NAMES["file"]):
+        raise ValueError("Git/file tool inventory drift")
+    expected_rg = [] if req["condition"] == "git_only" else sorted(TOOL_NAMES["repoground"])
+    if req.get("repoground_tool_names") != expected_rg:
+        raise ValueError("RepoGround tool inventory drift")
+    if (req.get("repoground") is None) != (req["condition"] == "git_only"):
+        raise ValueError("baseline/treatment snapshot access mismatch")
+    if req.get("isolation") != {
+        "fresh_session": True, "fresh_workspace": True,
+        "no_prior_arm_transcripts": True, "disable_unlisted_plugins": True,
+    }:
+        raise ValueError("required isolation flags absent")
+
+
+def _prepare_sources(req: dict[str, Any], cfg: dict[str, Any]) -> tuple[Path, dict[str, Path]]:
+    root = Path(cfg["workspaces_root"])
+    _private_dir(root)
+    workspace = root / req["workspace_id"]
+    workspace.mkdir(mode=0o700, exist_ok=False)
+    repositories = workspace / "repos"
+    repositories.mkdir(mode=0o700)
+    result: dict[str, Path] = {}
+    for name, bound in req["repositories"].items():
+        if not re.fullmatch(r"[a-z][a-z0-9-]{1,60}", name):
+            raise ValueError("unsafe repository identifier")
+        if not isinstance(bound, dict) or not HEX40.fullmatch(str(bound.get("commit", ""))):
+            raise ValueError("frozen SHA missing")
+        if name not in cfg["source_roots"]:
+            raise ValueError("no registered source root for " + name)
+        source = Path(cfg["source_roots"][name]).resolve(strict=True)
+        if _exec(["git", "-C", str(source), "rev-parse", "--show-toplevel"]) != str(source):
+            raise ValueError("registered source root is not canonical checkout")
+        origin = _exec(["git", "-C", str(source), "remote", "get-url", "origin"])
+        slug = str(bound.get("slug", ""))
+        if not origin.rstrip("/").removesuffix(".git").endswith("/" + slug) and not origin.removesuffix(".git").endswith(":" + slug):
+            raise ValueError("registered source remote does not match frozen repository")
+        _exec(["git", "-C", str(source), "cat-file", "-e", bound["commit"] + "^{commit}"])
+        dest = repositories / name
+        _exec(["git", "clone", "--quiet", "--shared", "--no-checkout", "--", str(source), str(dest)])
+        _exec(["git", "-C", str(dest), "checkout", "--quiet", "--detach", bound["commit"]])
+        _exec(["git", "-C", str(dest), "remote", "set-url", "origin", origin])
+        if _exec(["git", "-C", str(dest), "rev-parse", "HEAD"]) != bound["commit"]:
+            raise ValueError("cloned source revision drift")
+        if _exec(["git", "-C", str(dest), "status", "--porcelain", "--untracked-files=normal"]):
+            raise ValueError("frozen source clone not clean")
+        result[name] = dest
+    return workspace, result
+
+
+def _manifest_evidence(req: dict[str, Any], sources: dict[str, Path]) -> dict[str, dict[str, Any]]:
+    evidence = {}
+    for name, bound in (req.get("repoground") or {}).items():
+        path = Path(bound["manifest_path"])
+        if path.is_symlink() or not path.is_file() or _digest(path.read_bytes()) != bound["manifest_sha256"]:
+            raise ValueError("published bundle SHA drift")
+        manifest = _read_json(path)
+        generator = manifest.get("generator", {}).get("runtime", {})
+        provenance = manifest.get("snapshot_provenance", {}).get("repositories", [])
+        links = manifest.get("links", {})
+        if not isinstance(provenance, list) or len(provenance) != 1:
+            raise ValueError("bundle source ambiguity")
+        observed = provenance[0]
+        health_path = path.parent / links.get("post_emit_health_path", "")
+        if (
+            generator.get("git_commit") != bound["generator_commit"]
+            or generator.get("git_dirty") is not False
+            or observed.get("git_commit") != bound["source_commit"]
+            or observed.get("git_dirty") is not False
+            or observed.get("provenance_status") != "present"
+            or links.get("agent_export_gate_status") != "pass"
+            or links.get("bundle_surface_validation_status") != "pass"
+            or not health_path.is_file() or health_path.is_symlink()
+            or _read_json(health_path).get("status") != "pass"
+            or _exec(["git", "-C", str(sources[name]), "rev-parse", "HEAD"]) != bound["source_commit"]
+        ):
+            raise ValueError("bundle health/source/generated revision mismatch")
+        evidence[name] = {
+            "repo": name, "source_commit": bound["source_commit"],
+            "generator_commit": bound["generator_commit"],
+            "manifest_sha256": bound["manifest_sha256"],
+            "observed_status": "available",
+            "freshness": "pinned_exact",
+        }
+    return evidence
+
+
+def _output_schema() -> dict[str, Any]:
+    path = {"type": "object", "properties": {
+        "repo": {"type": "string"}, "path": {"type": "string"},
+    }, "required": ["repo", "path"], "additionalProperties": False}
+    citation = {"type": "object", "properties": {
+        "repo": {"type": "string"}, "path": {"type": "string"},
+        "commit": {"type": "string"}, "start_line": {"type": "integer"},
+        "end_line": {"type": "integer"},
+    }, "required": ["repo", "path", "commit", "start_line", "end_line"],
+        "additionalProperties": False}
+    return {
+        "type": "object",
+        "properties": {
+            "outcome": {"type": "string", "enum": ["answer", "abstain", "unavailable"]},
+            "reported_paths": {"type": "array", "items": path},
+            "citations": {"type": "array", "items": citation},
+            "asserted_sufficient_evidence": {"type": "boolean"},
+        },
+        "required": ["outcome", "reported_paths", "citations", "asserted_sufficient_evidence"],
+        "additionalProperties": False,
+    }
+
+
+def _prompt(req: dict[str, Any]) -> str:
+    lines = [
+        "Du bearbeitest eine kontrollierte, ausschließlich lesende Coding-Agenten-Aufgabe.",
+        "Die eingefrorenen Git-Repositories stehen unter repos/REPO. Verwende nur diese.",
+        "Prüfe Belege direkt an den jeweils angegebenen Git-Commits.",
+        "Keine Bearbeitung, kein Netzwerkabruf, keine ungeprüften Behauptungen.",
+        "Antworte nur mit dem vorgegebenen strukturierten JSON.",
+        "reported_paths und citations benutzen Repo-Kürzel und zum Repository relative Pfade.",
+        "Zitate müssen konkrete, tatsächlich gelesene Zeilen des eingefrorenen Commits tragen.",
+        "Wenn eine Behauptung nicht belegbar ist, verwende abstain oder unavailable.",
+    ]
+    if req["condition"] == "repoground_mandatory":
+        lines.append("Diese Versuchsbedingung verlangt vor der Antwort mindestens einen tatsächlich erfolgreichen RepoGround-MCP-Aufruf.")
+    elif req["condition"] == "repoground_selective":
+        lines.append("RepoGround-MCP ist verfügbar, aber freiwillig; null RepoGround-Aufrufe sind ausdrücklich erlaubt.")
+    else:
+        lines.append("RepoGround ist in dieser Kontrollbedingung nicht verfügbar; benutze Git und normale Dateisuche.")
+    return "\n".join(lines) + "\n\nAUFGABE (in allen drei Armen bytegleich):\n" + req["question"]
+
+
+def _codex_argv(req: dict[str, Any], cfg: dict[str, Any],
+                workspace: Path, sources: dict[str, Path]) -> list[str]:
+    schema_path = workspace / "answer.schema.json"
+    _create_once(schema_path, _json_bytes(_output_schema()) + b"\n")
+    argv = [
+        cfg["codex_bin"], "exec", "--sandbox", "read-only",
+        "--skip-git-repo-check", "--ephemeral", "--ignore-user-config",
+        "--disable", "apps", "--disable", "plugins",
+        "--json", "--output-schema", str(schema_path),
+        "--model", req["runner"]["model"],
+        "-c", 'model_reasoning_effort="medium"',
+    ]
+    for name, bound in sorted((req.get("repoground") or {}).items()):
+        server = "study_" + name.replace("-", "_")
+        mcp_argv = [
+            cfg["mcp_script"], "--bundle-root", bound["manifest_path"],
+            "--repo-root", str(sources[name]),
+        ]
+        argv += [
+            "-c", "mcp_servers." + server + ".command=" + json.dumps(cfg["mcp_python"]),
+            "-c", "mcp_servers." + server + ".enabled=true",
+            "-c", "mcp_servers." + server + ".required=true",
+            "-c", "mcp_servers." + server + ".args=" + json.dumps(mcp_argv, separators=(",", ":")),
+        ]
+    argv.append(_prompt(req))
+    return argv
+
+
+def _capture(argv: list[str], cwd: Path, stderr_path: Path) -> tuple[bytes, list[tuple[dict[str, Any], float]], int, bool, datetime, datetime, int]:
+    env = os.environ.copy()
+    for key in ("OPENAI_API_KEY", "CODEX_API_KEY", "ANTHROPIC_API_KEY", "XAI_API_KEY"):
+        env.pop(key, None)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env["GIT_OPTIONAL_LOCKS"] = "0"
+    chunks: list[bytes] = []
+    events: list[tuple[dict[str, Any], float]] = []
+    buffer = b""
+    size = 0
+    timed_out = False
+    started_at = datetime.now(timezone.utc)
+    start = time.monotonic()
+    with stderr_path.open("xb") as error_log:
+        process = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+                                   stdout=subprocess.PIPE, stderr=error_log,
+                                   start_new_session=True)
+        assert process.stdout is not None
+        selector = selectors.DefaultSelector()
+        selector.register(process.stdout, selectors.EVENT_READ)
+        try:
+            while True:
+                remaining = MODEL_TIMEOUT - (time.monotonic() - start)
+                if remaining <= 0:
+                    timed_out = True
+                    break
+                selected = selector.select(min(1.0, remaining))
+                if not selected:
+                    if process.poll() is not None:
+                        # A final closed pipe still needs to be drained.
+                        selected = selector.select(0.1)
+                        if not selected:
+                            break
+                    continue
+                fragment = os.read(process.stdout.fileno(), 65536)
+                if not fragment:
+                    break
+                size += len(fragment)
+                if size > MAX_TRACE_BYTES:
+                    raise ValueError("Codex trace over maximum byte budget")
+                chunks.append(fragment)
+                buffer += fragment
+                while b"\n" in buffer:
+                    line, buffer = buffer.split(b"\n", 1)
+                    if line.strip():
+                        event = json.loads(line)
+                        if not isinstance(event, dict):
+                            raise ValueError("Codex event not an object")
+                        events.append((event, time.monotonic()))
+            if buffer.strip():
+                event = json.loads(buffer)
+                if not isinstance(event, dict):
+                    raise ValueError("Codex final event not an object")
+                events.append((event, time.monotonic()))
+        except (OSError, ValueError, json.JSONDecodeError):
+            os.killpg(process.pid, signal.SIGKILL)
+            process.wait(timeout=10)
+            raise
+        finally:
+            selector.close()
+            process.stdout.close()
+        if timed_out:
+            os.killpg(process.pid, signal.SIGKILL)
+        code = process.wait(timeout=15)
+    ended_at = datetime.now(timezone.utc)
+    duration_ms = round((time.monotonic() - start) * 1000)
+    return b"".join(chunks), events, code, timed_out, started_at, ended_at, duration_ms
+
+
+def _mcp_payload(item: dict[str, Any]) -> dict[str, Any] | None:
+    result = item.get("result")
+    if not isinstance(result, dict):
+        return None
+    structured = result.get("structured_content")
+    if isinstance(structured, dict):
+        return structured
+    for part in result.get("content", []):
+        if isinstance(part, dict) and isinstance(part.get("text"), str):
+            try:
+                value = json.loads(part["text"])
+            except ValueError:
+                continue
+            if isinstance(value, dict):
+                return value
+    return None
+
+
+def _builtin_empty_mcp(item: dict[str, Any]) -> bool:
+    if item.get("server") != "codex":
+        return False
+    expected = {
+        "list_mcp_resources": {"resources": []},
+        "list_mcp_resource_templates": {"resourceTemplates": []},
+    }
+    tool = item.get("tool")
+    payload = _mcp_payload(item)
+    return tool in expected and payload == expected[tool]
+
+
+def _tool_receipts(events: list[tuple[dict[str, Any], float]],
+                   expected: dict[str, dict[str, Any]]) -> tuple[list[dict[str, Any]], str]:
+    starts: dict[str, float] = {}
+    calls = []
+    last_answer = ""
+    for event, timestamp in events:
+        typ = event.get("type")
+        item = event.get("item")
+        if not isinstance(item, dict):
+            continue
+        item_id = item.get("id")
+        if typ == "item.started" and isinstance(item_id, str):
+            starts[item_id] = timestamp
+        if typ != "item.completed":
+            continue
+        if item.get("type") == "agent_message":
+            last_answer = str(item.get("text") or "")
+            continue
+        if item.get("type") not in ("command_execution", "mcp_tool_call"):
+            continue
+        if item.get("type") == "mcp_tool_call" and _builtin_empty_mcp(item):
+            continue
+        if not isinstance(item_id, str) or item_id not in starts:
+            raise ValueError("unmeasured tool start/end pair")
+        duration = round((timestamp - starts[item_id]) * 1000)
+        if item["type"] == "command_execution":
+            command = str(item.get("command") or "")
+            name = "codex_git_command" if re.search(r"\bgit\b", command) else "codex_file_command"
+            input_bytes = len(command.encode("utf-8"))
+            output_bytes = len(str(item.get("aggregated_output") or "").encode("utf-8"))
+            successful = item.get("status") == "completed" and item.get("exit_code") == 0
+            call = {"sequence": len(calls) + 1, "name": name,
+                    "status": "success" if successful else "failed",
+                    "duration_ms": duration, "input_bytes": input_bytes,
+                    "output_bytes": output_bytes}
+        else:
+            server = item.get("server")
+            name = "repoground_" + str(item.get("tool"))
+            repo = str(server).removeprefix("study_").replace("_", "-")
+            if server != "study_" + repo.replace("-", "_") or repo not in expected:
+                raise ValueError("unregistered or forbidden MCP server observed")
+            if name not in TOOL_NAMES["repoground"]:
+                raise ValueError("unregistered RepoGround MCP tool observed")
+            payload = _mcp_payload(item)
+            successful = (
+                str(server).startswith("study_")
+                and name in TOOL_NAMES["repoground"]
+                and repo in expected
+                and item.get("status") == "completed"
+                and not item.get("error")
+                and isinstance(payload, dict)
+                and payload.get("status") == "available"
+            )
+            arguments = item.get("arguments")
+            result = item.get("result")
+            call = {
+                "sequence": len(calls) + 1, "name": name,
+                "status": "success" if successful else "failed",
+                "duration_ms": duration,
+                "input_bytes": len(_json_bytes(arguments)),
+                "output_bytes": len(_json_bytes(result)),
+            }
+            if successful:
+                # Both the startup-bound single manifest and the actual successful
+                # MCP response were verified. This is pinned, not current HEAD.
+                call["repoground_evidence"] = expected[repo]
+        calls.append(call)
+        if len(calls) > MAX_TOOL_CALLS:
+            raise ValueError("too many observed tool calls")
+    return calls, last_answer
+
+
+def _answer(text: str, repositories: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    """Keep a failed model-format trial billable, not falsely successful.
+
+    The unchanged actual model answer remains in the original Codex JSONL
+    trace. A contract-invalid answer is never sanitized into quality credit.
+    """
+    fallback = {
+        "outcome": "unavailable", "reported_paths": [], "citations": [],
+        "asserted_sufficient_evidence": False,
+    }
+    try:
+        answer = json.loads(text)
+    except ValueError:
+        return fallback, False
+    if not isinstance(answer, dict) or set(answer) != {
+        "outcome", "reported_paths", "citations", "asserted_sufficient_evidence",
+    }:
+        return fallback, False
+    if (answer["outcome"] not in ("answer", "abstain", "unavailable")
+            or type(answer["asserted_sufficient_evidence"]) is not bool
+            or not isinstance(answer["reported_paths"], list)
+            or not isinstance(answer["citations"], list)):
+        return fallback, False
+
+    def valid_path(repo: Any, path: Any) -> bool:
+        return (
+            isinstance(repo, str) and repo in repositories
+            and isinstance(path, str) and 0 < len(path) <= 400
+            and path == PurePosixPath(path).as_posix()
+            and not path.startswith(("/", "-", "\\"))
+            and "\\" not in path
+            and all(part not in (".", "..", "") for part in path.split("/"))
+            and not any(ord(char) < 32 for char in path)
+        )
+
+    seen_paths: set[tuple[str, str]] = set()
+    for raw in answer["reported_paths"]:
+        if not isinstance(raw, dict) or set(raw) != {"repo", "path"}:
+            return fallback, False
+        repo, path = raw["repo"], raw["path"]
+        if not valid_path(repo, path) or (repo, path) in seen_paths:
+            return fallback, False
+        seen_paths.add((repo, path))
+    seen_citations: set[tuple[str, str, str, int, int]] = set()
+    for raw in answer["citations"]:
+        if not isinstance(raw, dict) or set(raw) != {
+            "repo", "path", "commit", "start_line", "end_line",
+        }:
+            return fallback, False
+        repo, path, commit = raw["repo"], raw["path"], raw["commit"]
+        start, end = raw["start_line"], raw["end_line"]
+        if (
+            not valid_path(repo, path)
+            or not isinstance(commit, str)
+            or commit != repositories[repo].get("commit")
+            or type(start) is not int or type(end) is not int
+            or start < 1 or end < start
+            or (repo, path, commit, start, end) in seen_citations
+        ):
+            return fallback, False
+        seen_citations.add((repo, path, commit, start, end))
+    return answer, True
+
+
+def _usage(events: list[tuple[dict[str, Any], float]]) -> dict[str, Any] | None:
+    uses = [event.get("usage") for event, _at in events if event.get("type") == "turn.completed"]
+    if not uses or not isinstance(uses[-1], dict):
+        return None
+    use = uses[-1]
+    values = (use.get("input_tokens"), use.get("output_tokens"))
+    if any(type(v) is not int or v < 0 for v in values):
+        return None
+    cached = use.get("cached_input_tokens")
+    if cached is not None and (type(cached) is not int or not 0 <= cached <= values[0]):
+        return None
+    return {
+        "source": "provider_reported", "input_tokens": values[0],
+        "output_tokens": values[1], "cached_input_tokens": cached,
+    }
+
+
+def run(req: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
+    fingerprint = _fingerprint(cfg)
+    _validate_request(req, fingerprint)
+    workspace, sources = _prepare_sources(req, cfg)
+    manifest_evidence = _manifest_evidence(req, sources)
+    argv = _codex_argv(req, cfg, workspace, sources)
+    trace_root = Path(cfg["trace_root"])
+    _private_dir(trace_root)
+    trace_path = trace_root / (req["request_id"] + ".jsonl")
+    stderr_path = trace_root / (req["request_id"] + ".stderr.txt")
+    if trace_path.exists() or stderr_path.exists():
+        raise ValueError("refusing prior trial trace or stderr")
+    raw, events, exitcode, timeout, started, ended, duration = _capture(argv, workspace, stderr_path)
+    if not raw or not events:
+        raise RuntimeError("no actual Codex JSONL events")
+    _create_once(trace_path, raw)
+    usage = _usage(events)
+    if usage is None:
+        # A missing provider receipt is not a claim of zero token consumption.
+        raise RuntimeError("Codex never supplied valid provider usage")
+    calls, final_answer = _tool_receipts(events, manifest_evidence)
+    answer, parsed = _answer(final_answer, req["repositories"])
+    statuses = [e.get("type") for e, _at in events]
+    rg_success = any(c["name"] in TOOL_NAMES["repoground"] and c["status"] == "success"
+                     for c in calls)
+    success = (
+        exitcode == 0 and not timeout and "turn.completed" in statuses
+        and parsed and (req["condition"] != "repoground_mandatory" or rg_success)
+    )
+    error = None if success else {"class": (
+        "timeout" if timeout else "missing_mandatory_repoground_call"
+        if req["condition"] == "repoground_mandatory" and not rg_success
+        else "invalid_agent_answer" if not parsed else "provider_failed"
+    )}
+    return {
+        "kind": "repoground.agent_study_receipt", "version": "1.0",
+        "request_id": req["request_id"], "request_sha256": _digest(_json_bytes(req)),
+        "condition": req["condition"], "session_id": req["session_id"],
+        "workspace_id": req["workspace_id"], "runner": req["runner"],
+        "execution_context": req["execution_context"],
+        "status": "success" if success else "timeout" if timeout else "failed",
+        "started_at": started.isoformat(), "ended_at": ended.isoformat(),
+        "duration_ms": duration, "usage": usage, "tool_calls": calls,
+        "answer": answer,
+        "trace": {"path": trace_path.name, "bytes": len(raw), "sha256": _digest(raw)},
+        "billed_cost": None, "resources": None, "error": error,
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Real Codex JSON-stdio RepoGround study adapter")
+    parser.add_argument("--config", required=True)
+    parser.add_argument("--fingerprint", action="store_true")
+    args = parser.parse_args(argv)
+    try:
+        cfg = _config(Path(args.config))
+        if args.fingerprint:
+            print(json.dumps(_fingerprint(cfg), ensure_ascii=False, sort_keys=True))
+            return 0
+        req = json.load(sys.stdin)
+        if not isinstance(req, dict):
+            raise ValueError("expected one JSON study request")
+        print(json.dumps(run(req, cfg), ensure_ascii=False, sort_keys=True))
+        return 0
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+        # No phantom receipt is emitted on failure. The parent study CLI
+        # durably records the attempt and retains any actual raw trace.
+        print(type(exc).__name__ + ": " + str(exc)[:350], file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

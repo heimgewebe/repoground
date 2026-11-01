@@ -15,6 +15,7 @@ Dateien:
 - Schemas: merger/repoground/contracts/agent-study-{taskset,receipt,evaluation}.v1.schema.json
 - Tests: merger/repoground/tests/test_agent_study.py
 - Historisches Register: docs/diagnostics/repoground-agent-study-history.md
+- Reale Codex-Providerläufe: [JSONL-Agentenadapter und Reproduktionsanleitung](repoground-agent-study-codex-runner.md)
 
 ## Drei tatsächlich unterscheidbare Bedingungen
 
