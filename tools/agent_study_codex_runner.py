@@ -123,7 +123,7 @@ def _fingerprint(cfg: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _validate_request(req: dict[str, Any], fingerprint: dict[str, Any]) -> None:
+def _validate_request_identity(req: dict[str, Any]) -> None:
     if req.get("kind") != "repoground.agent_study_request" or req.get("version") != "1.0":
         raise ValueError("study request kind/version mismatch")
     if not isinstance(req.get("request_id"), str) or not ID.fullmatch(req["request_id"]):
@@ -132,6 +132,13 @@ def _validate_request(req: dict[str, Any], fingerprint: dict[str, Any]) -> None:
         raise ValueError("invalid workspace id")
     if req.get("condition") not in ("git_only", "repoground_mandatory", "repoground_selective"):
         raise ValueError("unknown study arm")
+    if not isinstance(req.get("repositories"), dict) or not req["repositories"]:
+        raise ValueError("frozen repository set missing")
+    if not isinstance(req.get("question"), str) or not req["question"]:
+        raise ValueError("study question missing")
+
+
+def _validate_request_profile(req: dict[str, Any], fingerprint: dict[str, Any]) -> None:
     run = req.get("runner")
     ctx = req.get("execution_context")
     if not isinstance(run, dict) or not isinstance(ctx, dict):
@@ -146,10 +153,9 @@ def _validate_request(req: dict[str, Any], fingerprint: dict[str, Any]) -> None:
         raise ValueError("agent/tool contract drift")
     if ctx.get("cache_policy") != "controlled" or not isinstance(ctx.get("host_class"), str):
         raise ValueError("cache/host profile mismatch")
-    if not isinstance(req.get("repositories"), dict) or not req["repositories"]:
-        raise ValueError("frozen repository set missing")
-    if not isinstance(req.get("question"), str) or not req["question"]:
-        raise ValueError("study question missing")
+
+
+def _validate_request_tools(req: dict[str, Any]) -> None:
     requested_tools = TOOL_NAMES["git"] + TOOL_NAMES["file"]
     if req["condition"] != "git_only":
         requested_tools += TOOL_NAMES["repoground"]
@@ -168,6 +174,11 @@ def _validate_request(req: dict[str, Any], fingerprint: dict[str, Any]) -> None:
     }:
         raise ValueError("required isolation flags absent")
 
+
+def _validate_request(req: dict[str, Any], fingerprint: dict[str, Any]) -> None:
+    _validate_request_identity(req)
+    _validate_request_profile(req, fingerprint)
+    _validate_request_tools(req)
 
 def _prepare_sources(req: dict[str, Any], cfg: dict[str, Any]) -> tuple[Path, dict[str, Path]]:
     root = Path(cfg["workspaces_root"])
@@ -312,74 +323,83 @@ def _codex_argv(req: dict[str, Any], cfg: dict[str, Any],
     return argv
 
 
+def _record_codex_event(events: list[tuple[dict[str, Any], float]], line: bytes) -> None:
+    if not line.strip():
+        return
+    event = json.loads(line)
+    if not isinstance(event, dict):
+        raise ValueError("Codex event not an object")
+    events.append((event, time.monotonic()))
+
+
+def _collect_codex_stream(
+    process: subprocess.Popen[bytes], start: float,
+) -> tuple[bytes, list[tuple[dict[str, Any], float]], bool]:
+    """Capture real bytes plus local event arrival timestamps without guesses."""
+    assert process.stdout is not None
+    chunks: list[bytes] = []
+    events: list[tuple[dict[str, Any], float]] = []
+    buffer = b""
+    size = 0
+    timed_out = False
+    selector = selectors.DefaultSelector()
+    selector.register(process.stdout, selectors.EVENT_READ)
+    try:
+        while True:
+            remaining = MODEL_TIMEOUT - (time.monotonic() - start)
+            if remaining <= 0:
+                timed_out = True
+                break
+            selected = selector.select(min(1.0, remaining))
+            if not selected:
+                if process.poll() is not None:
+                    selected = selector.select(0.1)
+                    if not selected:
+                        break
+                else:
+                    continue
+            fragment = os.read(process.stdout.fileno(), 65536)
+            if not fragment:
+                break
+            size += len(fragment)
+            if size > MAX_TRACE_BYTES:
+                raise ValueError("Codex trace over maximum byte budget")
+            chunks.append(fragment)
+            buffer += fragment
+            while b"\n" in buffer:
+                line, buffer = buffer.split(b"\n", 1)
+                _record_codex_event(events, line)
+        _record_codex_event(events, buffer)
+    finally:
+        selector.close()
+        process.stdout.close()
+    return b"".join(chunks), events, timed_out
+
+
 def _capture(argv: list[str], cwd: Path, stderr_path: Path) -> tuple[bytes, list[tuple[dict[str, Any], float]], int, bool, datetime, datetime, int]:
     env = os.environ.copy()
     for key in ("OPENAI_API_KEY", "CODEX_API_KEY", "ANTHROPIC_API_KEY", "XAI_API_KEY"):
         env.pop(key, None)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["GIT_OPTIONAL_LOCKS"] = "0"
-    chunks: list[bytes] = []
-    events: list[tuple[dict[str, Any], float]] = []
-    buffer = b""
-    size = 0
-    timed_out = False
     started_at = datetime.now(timezone.utc)
     start = time.monotonic()
     with stderr_path.open("xb") as error_log:
         process = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
                                    stdout=subprocess.PIPE, stderr=error_log,
                                    start_new_session=True)
-        assert process.stdout is not None
-        selector = selectors.DefaultSelector()
-        selector.register(process.stdout, selectors.EVENT_READ)
         try:
-            while True:
-                remaining = MODEL_TIMEOUT - (time.monotonic() - start)
-                if remaining <= 0:
-                    timed_out = True
-                    break
-                selected = selector.select(min(1.0, remaining))
-                if not selected:
-                    if process.poll() is not None:
-                        # A final closed pipe still needs to be drained.
-                        selected = selector.select(0.1)
-                        if not selected:
-                            break
-                    continue
-                fragment = os.read(process.stdout.fileno(), 65536)
-                if not fragment:
-                    break
-                size += len(fragment)
-                if size > MAX_TRACE_BYTES:
-                    raise ValueError("Codex trace over maximum byte budget")
-                chunks.append(fragment)
-                buffer += fragment
-                while b"\n" in buffer:
-                    line, buffer = buffer.split(b"\n", 1)
-                    if line.strip():
-                        event = json.loads(line)
-                        if not isinstance(event, dict):
-                            raise ValueError("Codex event not an object")
-                        events.append((event, time.monotonic()))
-            if buffer.strip():
-                event = json.loads(buffer)
-                if not isinstance(event, dict):
-                    raise ValueError("Codex final event not an object")
-                events.append((event, time.monotonic()))
+            raw, events, timed_out = _collect_codex_stream(process, start)
         except (OSError, ValueError, json.JSONDecodeError):
             os.killpg(process.pid, signal.SIGKILL)
             process.wait(timeout=10)
             raise
-        finally:
-            selector.close()
-            process.stdout.close()
         if timed_out:
             os.killpg(process.pid, signal.SIGKILL)
         code = process.wait(timeout=15)
     ended_at = datetime.now(timezone.utc)
     duration_ms = round((time.monotonic() - start) * 1000)
-    return b"".join(chunks), events, code, timed_out, started_at, ended_at, duration_ms
-
+    return raw, events, code, timed_out, started_at, ended_at, duration_ms
 
 def _mcp_payload(item: dict[str, Any]) -> dict[str, Any] | None:
     result = item.get("result")
@@ -411,10 +431,54 @@ def _builtin_empty_mcp(item: dict[str, Any]) -> bool:
     return tool in expected and payload == expected[tool]
 
 
+def _command_tool_receipt(
+    item: dict[str, Any], sequence: int, duration_ms: int,
+) -> dict[str, Any]:
+    command = str(item.get("command") or "")
+    name = "codex_git_command" if re.search(r"\bgit\b", command) else "codex_file_command"
+    successful = item.get("status") == "completed" and item.get("exit_code") == 0
+    return {
+        "sequence": sequence, "name": name,
+        "status": "success" if successful else "failed",
+        "duration_ms": duration_ms, "input_bytes": len(command.encode("utf-8")),
+        "output_bytes": len(str(item.get("aggregated_output") or "").encode("utf-8")),
+    }
+
+
+def _mcp_tool_receipt(
+    item: dict[str, Any], sequence: int, duration_ms: int,
+    expected: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    server = item.get("server")
+    name = "repoground_" + str(item.get("tool"))
+    repo = str(server).removeprefix("study_").replace("_", "-")
+    if server != "study_" + repo.replace("-", "_") or repo not in expected:
+        raise ValueError("unregistered or forbidden MCP server observed")
+    if name not in TOOL_NAMES["repoground"]:
+        raise ValueError("unregistered RepoGround MCP tool observed")
+    payload = _mcp_payload(item)
+    successful = (
+        item.get("status") == "completed" and not item.get("error")
+        and isinstance(payload, dict) and payload.get("status") == "available"
+    )
+    call = {
+        "sequence": sequence, "name": name,
+        "status": "success" if successful else "failed",
+        "duration_ms": duration_ms,
+        "input_bytes": len(_json_bytes(item.get("arguments"))),
+        "output_bytes": len(_json_bytes(item.get("result"))),
+    }
+    if successful:
+        # The exact health-checked manifest was bound before the actual MCP
+        # response; do not confuse pinned_exact with mutable HEAD freshness.
+        call["repoground_evidence"] = expected[repo]
+    return call
+
+
 def _tool_receipts(events: list[tuple[dict[str, Any], float]],
                    expected: dict[str, dict[str, Any]]) -> tuple[list[dict[str, Any]], str]:
     starts: dict[str, float] = {}
-    calls = []
+    calls: list[dict[str, Any]] = []
     last_answer = ""
     for event, timestamp in events:
         typ = event.get("type")
@@ -437,58 +501,46 @@ def _tool_receipts(events: list[tuple[dict[str, Any], float]],
             raise ValueError("unmeasured tool start/end pair")
         duration = round((timestamp - starts[item_id]) * 1000)
         if item["type"] == "command_execution":
-            command = str(item.get("command") or "")
-            name = "codex_git_command" if re.search(r"\bgit\b", command) else "codex_file_command"
-            input_bytes = len(command.encode("utf-8"))
-            output_bytes = len(str(item.get("aggregated_output") or "").encode("utf-8"))
-            successful = item.get("status") == "completed" and item.get("exit_code") == 0
-            call = {"sequence": len(calls) + 1, "name": name,
-                    "status": "success" if successful else "failed",
-                    "duration_ms": duration, "input_bytes": input_bytes,
-                    "output_bytes": output_bytes}
+            call = _command_tool_receipt(item, len(calls) + 1, duration)
         else:
-            server = item.get("server")
-            name = "repoground_" + str(item.get("tool"))
-            repo = str(server).removeprefix("study_").replace("_", "-")
-            if server != "study_" + repo.replace("-", "_") or repo not in expected:
-                raise ValueError("unregistered or forbidden MCP server observed")
-            if name not in TOOL_NAMES["repoground"]:
-                raise ValueError("unregistered RepoGround MCP tool observed")
-            payload = _mcp_payload(item)
-            successful = (
-                str(server).startswith("study_")
-                and name in TOOL_NAMES["repoground"]
-                and repo in expected
-                and item.get("status") == "completed"
-                and not item.get("error")
-                and isinstance(payload, dict)
-                and payload.get("status") == "available"
-            )
-            arguments = item.get("arguments")
-            result = item.get("result")
-            call = {
-                "sequence": len(calls) + 1, "name": name,
-                "status": "success" if successful else "failed",
-                "duration_ms": duration,
-                "input_bytes": len(_json_bytes(arguments)),
-                "output_bytes": len(_json_bytes(result)),
-            }
-            if successful:
-                # Both the startup-bound single manifest and the actual successful
-                # MCP response were verified. This is pinned, not current HEAD.
-                call["repoground_evidence"] = expected[repo]
+            call = _mcp_tool_receipt(item, len(calls) + 1, duration, expected)
         calls.append(call)
         if len(calls) > MAX_TOOL_CALLS:
             raise ValueError("too many observed tool calls")
     return calls, last_answer
 
+def _valid_answer_path(raw: Any, repositories: dict[str, Any]) -> bool:
+    if not isinstance(raw, dict) or set(raw) != {"repo", "path"}:
+        return False
+    repo, path = raw["repo"], raw["path"]
+    return (
+        isinstance(repo, str) and repo in repositories
+        and isinstance(path, str) and 0 < len(path) <= 400
+        and path == PurePosixPath(path).as_posix()
+        and not path.startswith(("/", "-", "\\"))
+        and "\\" not in path
+        and all(part not in (".", "..", "") for part in path.split("/"))
+        and not any(ord(char) < 32 for char in path)
+    )
+
+
+def _valid_answer_citation(raw: Any, repositories: dict[str, Any]) -> bool:
+    if not isinstance(raw, dict) or set(raw) != {
+        "repo", "path", "commit", "start_line", "end_line",
+    }:
+        return False
+    if not _valid_answer_path({"repo": raw["repo"], "path": raw["path"]}, repositories):
+        return False
+    repo, commit = raw["repo"], raw["commit"]
+    start, end = raw["start_line"], raw["end_line"]
+    return (
+        isinstance(commit, str) and commit == repositories[repo].get("commit")
+        and type(start) is int and type(end) is int and start >= 1 and end >= start
+    )
+
 
 def _answer(text: str, repositories: dict[str, Any]) -> tuple[dict[str, Any], bool]:
-    """Keep a failed model-format trial billable, not falsely successful.
-
-    The unchanged actual model answer remains in the original Codex JSONL
-    trace. A contract-invalid answer is never sanitized into quality credit.
-    """
+    """Preserve every invalid model answer in raw trace, never mark it successful."""
     fallback = {
         "outcome": "unavailable", "reported_paths": [], "citations": [],
         "asserted_sufficient_evidence": False,
@@ -506,46 +558,23 @@ def _answer(text: str, repositories: dict[str, Any]) -> tuple[dict[str, Any], bo
             or not isinstance(answer["reported_paths"], list)
             or not isinstance(answer["citations"], list)):
         return fallback, False
-
-    def valid_path(repo: Any, path: Any) -> bool:
-        return (
-            isinstance(repo, str) and repo in repositories
-            and isinstance(path, str) and 0 < len(path) <= 400
-            and path == PurePosixPath(path).as_posix()
-            and not path.startswith(("/", "-", "\\"))
-            and "\\" not in path
-            and all(part not in (".", "..", "") for part in path.split("/"))
-            and not any(ord(char) < 32 for char in path)
-        )
-
     seen_paths: set[tuple[str, str]] = set()
     for raw in answer["reported_paths"]:
-        if not isinstance(raw, dict) or set(raw) != {"repo", "path"}:
+        if not _valid_answer_path(raw, repositories):
             return fallback, False
-        repo, path = raw["repo"], raw["path"]
-        if not valid_path(repo, path) or (repo, path) in seen_paths:
+        key = raw["repo"], raw["path"]
+        if key in seen_paths:
             return fallback, False
-        seen_paths.add((repo, path))
+        seen_paths.add(key)
     seen_citations: set[tuple[str, str, str, int, int]] = set()
     for raw in answer["citations"]:
-        if not isinstance(raw, dict) or set(raw) != {
-            "repo", "path", "commit", "start_line", "end_line",
-        }:
+        if not _valid_answer_citation(raw, repositories):
             return fallback, False
-        repo, path, commit = raw["repo"], raw["path"], raw["commit"]
-        start, end = raw["start_line"], raw["end_line"]
-        if (
-            not valid_path(repo, path)
-            or not isinstance(commit, str)
-            or commit != repositories[repo].get("commit")
-            or type(start) is not int or type(end) is not int
-            or start < 1 or end < start
-            or (repo, path, commit, start, end) in seen_citations
-        ):
+        key = (raw["repo"], raw["path"], raw["commit"], raw["start_line"], raw["end_line"])
+        if key in seen_citations:
             return fallback, False
-        seen_citations.add((repo, path, commit, start, end))
+        seen_citations.add(key)
     return answer, True
-
 
 def _usage(events: list[tuple[dict[str, Any], float]]) -> dict[str, Any] | None:
     uses = [event.get("usage") for event, _at in events if event.get("type") == "turn.completed"]
