@@ -236,6 +236,23 @@ def test_v2_explanation_required_bounded_and_v1_remains_valid(planned, tmp_path)
     trace_path.write_bytes(trace)
     receipt["trace"].update(bytes=len(trace), sha256=hashlib.sha256(trace).hexdigest())
     assert study.validate_receipt(req, receipt, trace_root=tmp_path) == []
+    multiline = deepcopy(receipt)
+    multiline["answer"]["explanation"] = (
+        "Erste nachweisbare Quellenaussage.\n"
+        "\tZweite nachweisbare Quellenaussage mit Tabulator."
+    )
+    multiline_raw = (json.dumps({
+        "type": "item.completed",
+        "item": {"type": "agent_message", "text": json.dumps(
+            multiline["answer"], ensure_ascii=False,
+        )},
+    }, ensure_ascii=False) + "\n").encode("utf-8")
+    trace_path.write_bytes(multiline_raw)
+    multiline["trace"].update(
+        bytes=len(multiline_raw), sha256=hashlib.sha256(multiline_raw).hexdigest(),
+    )
+    assert study.validate_receipt(req, multiline, trace_root=tmp_path) == []
+    trace_path.write_bytes(trace)
     forged = deepcopy(receipt)
     forged["answer"]["explanation"] = "Eine zusätzliche angeblich geprüfte Erklärung ohne Modellbeleg."
     assert "differs" in " ".join(study.validate_receipt(req, forged, trace_root=tmp_path))
@@ -529,6 +546,16 @@ def test_live_receipt_schema_draft7_matches_synthetic_shape(planned, tmp_path):
     receipt = sample_receipt(req, case, tmp_path)
     assert study.validate_receipt(req, receipt, trace_root=tmp_path) == []
     jsonschema.validate(receipt, schema)
+    assert "explanation" not in schema["properties"]["answer"]["required"]
+    v2 = deepcopy(receipt)
+    v2["answer"]["explanation"] = (
+        "Diese tatsächlich gemessene Antwort hat einen Erklärungstext."
+    )
+    jsonschema.validate(v2, schema)
+    v2["status"] = "failed"
+    v2["error"] = {"class": "invalid_agent_answer"}
+    v2["answer"]["explanation"] = ""
+    jsonschema.validate(v2, schema)
 
 
 def test_report_schema_draft7_matches_generated_fixture(planned, tmp_path):

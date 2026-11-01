@@ -378,11 +378,9 @@ def review_export(args: argparse.Namespace) -> int:
     return 0
 
 
-def review_import(args: argparse.Namespace) -> int:
-    """Re-bind supplied independent judgments to their real v2 receipts."""
-    plan, taskset, receipts = _checked_review_inputs(args)
-    mapping = study.load_json(args.mapping)
-    packet = study.load_json(args.packet)
+def _require_review_identity(
+    mapping: dict[str, Any], packet: dict[str, Any], plan: dict[str, Any],
+) -> None:
     if (
         mapping.get("kind") != "repoground.blind_review_mapping"
         or mapping.get("version") != 1
@@ -396,6 +394,14 @@ def review_import(args: argparse.Namespace) -> int:
         or packet.get("run_id") != plan["run_id"]
     ):
         raise study.AgentBenchmarkError("review packet or private mapping digest/identity mismatch")
+
+
+def review_import(args: argparse.Namespace) -> int:
+    """Re-bind supplied independent judgments to their real v2 receipts."""
+    plan, taskset, receipts = _checked_review_inputs(args)
+    mapping = study.load_json(args.mapping)
+    packet = study.load_json(args.packet)
+    _require_review_identity(mapping, packet, plan)
     cards = packet.get("cases")
     entries = mapping.get("entries")
     if not isinstance(cards, list) or not isinstance(entries, list):

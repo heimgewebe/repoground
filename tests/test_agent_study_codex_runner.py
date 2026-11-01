@@ -274,6 +274,17 @@ class CodexStudyRunnerTest(unittest.TestCase):
         self.assertFalse(parsed)
         self.assertFalse(sanitized["asserted_sufficient_evidence"])
 
+    def test_prompt_lists_only_source_bound_repo_ids(self):
+        request = {
+            "condition": "git_only", "question": "Identify code",
+            "repositories": {"repoground": {"commit": "a" * 40},
+                             "grabowski": {"commit": "b" * 40}},
+        }
+        prompt = runner._prompt(request)
+        self.assertIn("Zulässige Repo-Kürzel", prompt)
+        self.assertIn("grabowski, repoground.", prompt)
+        self.assertNotIn("RepoGround-Python", prompt)
+
     def test_each_arm_shares_exact_same_question_bytes(self):
         question = "Where is the concrete source definition of Foo?"
         bodies = [runner._prompt({"condition": arm, "question": question})

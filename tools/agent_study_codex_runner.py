@@ -446,6 +446,11 @@ def _prompt(req: dict[str, Any]) -> str:
         "Erkläre auch bei abstain/unavailable, welche Evidenz fehlt; erfinde keine Fakten.",
         "Wenn eine Behauptung nicht belegbar ist, verwende abstain oder unavailable.",
     ]
+    if req.get("repositories"):
+        lines.append(
+            "Zulässige Repo-Kürzel für reported_paths und citations: "
+            + ", ".join(sorted(req["repositories"])) + "."
+        )
     if req["condition"] == "repoground_mandatory":
         lines.append("Diese Versuchsbedingung verlangt vor der Antwort mindestens einen tatsächlich erfolgreichen RepoGround-MCP-Aufruf.")
     elif req["condition"] == "repoground_selective":

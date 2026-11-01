@@ -399,7 +399,7 @@ def _validate_receipt_answer(request: Mapping[str, Any], receipt: Mapping[str, A
         _need(
             isinstance(explanation, str) and 24 <= len(explanation) <= 8000
             and bool(explanation.strip())
-            and not any(ord(c) < 32 and c not in "\\n\\t" for c in explanation),
+            and not any(ord(c) < 32 and c not in "\n\t" for c in explanation),
             "answer.explanation must be bounded nonempty actual agent text",
         )
     paths = answer.get("reported_paths")
