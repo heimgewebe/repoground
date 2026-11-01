@@ -23,6 +23,7 @@ from merger.repoground.architecture.call_graph_contract import (
 )
 from merger.repoground.architecture.symbol_index import (
     EXCLUDED_DIRS,
+    _is_python_source_file,
     _module_name,
     _range_ref,
     _symbol_id,
@@ -1573,7 +1574,13 @@ class _Resolver:
     """Apply only unique static bindings; uncertainty stays visible as S0."""
 
     def __init__(self, modules: dict[str, list[_ModuleState]]) -> None:
-        self.modules = modules
+        # Entrypoint scripts are visible to the local call graph, but Python
+        # cannot import extensionless files by ordinary module-name lookup.
+        self.modules = {
+            name: importable
+            for name, states in modules.items()
+            if (importable := [state for state in states if state.path.endswith(".py")])
+        }
 
     def _target_in_module(
         self,
@@ -2294,9 +2301,9 @@ def _collect_python_inputs(
             directory for directory in dirs if directory not in EXCLUDED_DIRS
         )
         for file_name in sorted(files):
-            if not file_name.endswith(".py"):
-                continue
             path = Path(root) / file_name
+            if not _is_python_source_file(path):
+                continue
             rel_path = path.relative_to(repo_root).as_posix()
             ordered_paths.append(rel_path)
             try:
