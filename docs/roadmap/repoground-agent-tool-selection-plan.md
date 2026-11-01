@@ -1,5 +1,7 @@
 # RepoGround – Agentenwerkzeugwahl nach tatsächlichem Nutzwert
 
+**Aktueller Entscheidungsstand (01.11.2026):** Der ursprüngliche R1–R4-Abschnitt ist eine datierte Planung vom 30.10.; inzwischen sind echte R3- und R5-Läufe ausgewertet. Der maßgebliche, begrenzte Fortsetzungsauftrag steht unter [R5 – zwei Nutzwertversuche und Stopentscheidung](#r5--zwei-nutzwertversuche-und-stopentscheidung-01112026). Er ergänzt die historische Planung, ohne bereits durchgeführte Schritte rückwirkend umzubenennen.
+
 **Stand:** 30. Oktober 2026 · **Priorität:** P1, gezielter Anschluss an die produktive Graph-Integration · **Status:** R1-Quellintegration in Grabowski gemergt; R1-Clientabnahme und R2–R4 noch offen.
 
 **Ziel:** Coding-Agenten sollen RepoGround **dann** verwenden, wenn seine revisionsgebundenen Beziehungen gegenüber direkter Git-/Dateisuche zusätzliche, überprüfbare Information liefern. Bei einfachen Fragen bleibt der direkte Weg Standard. Wir optimieren die **gesamte Aufgabe**, nicht die Anzahl der Graphabfragen.
@@ -143,3 +145,71 @@ Antwort-/Quellenreviews erstellen und die daraus gewonnenen
 vergleichbaren Laufberichte versionieren. Bis dahin gibt es keine neue
 Aussage über Agentennutzen, Kostenersparnis oder eine automatische
 Standardumstellung.
+
+## R5 – zwei Nutzwertversuche und Stopentscheidung (01.11.2026)
+
+**Entscheidung:** RepoGround bleibt als revisionsgebundene, deterministische Quellen-/Nachweisschicht erhalten. Die Behauptung „macht Coding-Agenten allgemein schneller oder richtiger“ ist **nicht** belegt. Vor weiterem Ausbau **höchstens zwei kleine, fachlich verschiedene Interventionen** mit echten Agenten und danach **höchstens eine** gezielte Bestätigungsstudie. Keine neue Architektur, kein Standardzwang, kein dritter Optimierungszyklus ohne neuen realen Nutzungsfall und einen neuen gesonderten Auftrag.
+
+### 0. Belegter Ausgangspunkt und zu prüfende Hypothesen
+
+Originalquellen: [R5-Quellreview und Reproduktion](../proofs/repoground-agent-study-codex-v2-r5-20261101.md), [native R5-Evaluation](../diagnostics/agent-study-reports/codex-v2-r5-20261101.json), [R3-Originaldaten und Protokolltrennung](../diagnostics/repoground-agent-study-history.md).
+
+| Reale R5-Pilotkohorte, 6 Aufgaben × 2 Wiederholungen | A Git-only | B RepoGround-Pflicht | C optional |
+| --- | ---: | ---: | ---: |
+| Streng qualitätskorrekte Antworten | 9/12 | 8/12 | 9/12 |
+| Mittlere Gesamtzeit | 24,633 s | 34,353 s | 27,252 s |
+| Gemeldete Input-Tokens, gesamt | 1.582.935 | 2.522.860 | 1.947.112 |
+| Erfolgreiche Git-Werkzeugaufrufe | 47 | 47 | 51 |
+| RepoGround-MCP-Aufrufe | 0 | 39 | **0** |
+
+B benötigte gegenüber A gemittelt **9,720 s mehr** pro Aufgabe (task-geclustertes 95-%-Intervall: **+6,148 bis +12,809 s**), rund **59 % mehr Input-Tokens** und ebenfalls 47 erfolgreiche Git-Aufrufe. In B entfielen **12** RepoGround-Aufrufe auf `bundle_discover` und **13** auf `query_existing_index`. Die Zahl zeigt zusätzlichen Aufwand, **nicht** schon, dass jede einzelne Abfrage unnütz war; dafür sind die originalen Traces je Fall zu prüfen. C hat RepoGround **nie verwendet**. R5 hatte 36 tatsächliche Providerreceipts und 36 blinde Quellbewertungen, aber nur einen GPT-6-Reviewer im selben Operator-Thread, kein unabhängiges menschliches Panel. Beurteilung: `not_established`.
+
+**H1 – Substitution statt Zusatzsuche:** Bei unbekannten eingehenden Beziehungen und konkreten Test-/Impact-Fragen kann die Kombination vorhandener RepoGround-Reads die Zahl der für die Antwort tatsächlich benötigten Git-/Datei-Suchschritte reduzieren, ohne inhaltliche oder zeitliche Nachteile.
+
+**H2 – Änderungsevidenz statt allgemeiner Suche:** Bei **echten** Commitpaaren `base..target` kann das bereits vorhandene `change_evidence_pack` einen kompakten, revisionsgebundenen Beleg für Änderungen, betroffene Tests und Vertragsfolgen liefern, den Git allein nur mit mehr Agentenarbeit zusammensetzt.
+
+**Wichtige technische Abgrenzung:** `change_evidence_pack` ist in der derzeitigen realen R5-Codex-Whitelist von zwölf RepoGround-Tools **nicht** enthalten. Es verlangt `base_revision`, `target_revision`, einen MCP-Server mit `--repo-root` und ein dazu passendes Git-Checkout; für strukturelle Evidenz braucht es eine saubere, zum Zielcommit passende Quelle. Es ist **kein** sinnvoller Ersatz für eine normale Suche nach einer bekannten Datei oder für einen Symbolfund ohne Commitpaar. Ebenso beweist ein statischer Graph keine Laufzeit- oder Testwirkung.
+
+### 1. Runde A – existierende Symbol-/Beziehungswerkzeuge effektiv verwenden
+
+**Voraussetzung, ohne neue Providerläufe:** Die bereits privaten R5-Traces nach Aufgabentyp auswerten: die 12 Discovery- und 13 Indexaufrufe, tatsächliche Reihenfolge und Bytes, weiterführende Git-Suchen, gültige/falsche Quellen, Toolstatus und Laufzeiten. Konkrete Dopplung oder fehlende Werkzeugwahl **erst nach Sichtung** als Ursache bezeichnen. Bei nachweislich notwendiger Git-Gegenprüfung zählt diese nicht als vermeidbare Arbeit.
+
+**Kleinste Änderung:** Genau **eine** nachgewiesene Ursache beseitigen: etwa bei bereits eindeutig revisionsgebundenen Quellen einen überflüssigen Discovery-Schritt vermeiden, das richtige vorhandene `find_symbol`/`get_structure_neighborhood`/`get_callers`-Werkzeug sichtbar machen oder die Ergebnisgröße begrenzen. Die Auswahl erfolgt beim bestehenden Consumer/Runner, nicht durch einen zweiten Agentenrouter. Für bekannte Ziele und Negativkontrollen weiterhin Git-first. Kein globales „RepoGround mindestens einmal“ außer im ausdrücklich diagnostischen B-Arm; C bleibt freiwillig. Reversibel, mit gezielten Positiv-/Negativtests und echten MCP-Readbacks, insbesondere für `stale`, `unavailable`, S0/S1 und unerfundene Quellen.
+
+**Messung A1:** Mit derselben gefrorenen 6-Fälle-Pilotbasis, **6 × 3 × 2 = 36 echten Sitzungen** (Git A, Pflicht B, selektiv C). B und C bekommen dieselbe tatsächlich installierte Toolauswahl; die fachliche Frage bleibt A/B/C-bytegleich, der experimentelle Werkzeugvertrag ist explizit unterschiedlich. Neue Runner-/Prompt-/Tool-/Generator-Fingerprints, neue Run-ID und neuer `protocol_key`; **R5 darf kein stillschweigend mitgemischter Kontrollarm sein.** Das Original-R5-Taskset und die privaten Receipts bleiben unverändert. Wenn bereits ein solcher Lauf nachweislich vorliegt, ihn zuerst verifizieren, nicht wiederholen.
+
+**Pilot-Signal für einen Fortsetzungskandidaten:** C nutzt RepoGround in **mindestens zwei unterschiedlichen, vorregistriert geeigneten Aufgaben**, und bei diesen Aufgaben sinken die benötigten Git-/Datei-Suchaufrufe um **mindestens 20 %** gegenüber A **bei gleicher oder besserer quellengeprüfter Qualität**. Die gesamte End-to-End-Dauer darf im Mittel nicht mehr als **10 %** über A liegen; Input-Tokens dürfen nicht verdeckt steigen. Ein einzelner gelungener Toolaufruf, eine direkte Graph-Mikrobenchmark-Verbesserung oder bloß reduzierte MCP-Aufrufzahl genügt nicht. Fehlt dieses Signal, die Relationsabkürzung **nicht** als Default oder „fertige Agentenoptimierung“ ausgeben.
+
+### 2. Runde B – `change_evidence_pack` ausschließlich bei echten Änderungen
+
+**Neue, vorher fixierte Aufgabenklasse:** Aus **tatsächlich vorhandenen Git-Commitpaaren** die sechs Pilotfragen für `base..target` und sechs weitere, zunächst zurückgehaltene Bestätigungsfälle bilden: mindestens zwei Repositories; echte mehrteilige Änderungsauswirkungen, betroffene Tests, Vertragsänderungen sowie einfache und bewusst negative/abdeckungsarme Fälle. Vor **jedem** Agentenlauf Fragen, Orakel, zulässige Quellen, beide SHA40, Git-Diff-SHA256, Modell, Toolinventar, Reihenfolge und Messschema archivieren. Kein nachträgliches Umetikettieren von Fällen aufgrund der Antworten.
+
+**Vorheriger technischer Smoke:** Mit sauberem, korrekt revisionsgebundenem Checkout und `--repo-root` genau einen echten `change_evidence_pack`-MCP-Roundtrip samt begrenztem Antwortbudget (Startwert höchstens **1.200 Kontexttokens**) und identischer Git-Gegenprobe. Für fehlende Bundles, Dirty-/historische Checkoutstände und nicht abgedeckte Änderungen den dokumentierten S0-/Git-Fallback erhalten. Nur soweit nötig die vorhandene R5-Agenten-Whitelist/Promptoberfläche **minimal** für B/C erweitern; der bisherige Runner-Code ist kein Beweis tatsächlicher Werkzeugfreigabe beim Client. A erhält dasselbe Commitpaar und denselben Fragetext, aber keinen RepoGround-Zugang.
+
+**Messung B1:** **6 × 3 × 2 = 36 echte Sitzungen** nach dem bestehenden JSONL-/Receipt-/Blindreview-Protokoll. Erzwungenes B dient nur zur Overhead-Diagnose; die Nutzwertfrage ist selektives C gegen A. B1 ist eine **andere Taskset-/Toolvertrag-Kohorte** als A1 und R5 und darf nicht gepoolt werden. Stop bei unzureichender Quellbindung, erkennbaren sicherheits-/integritätsrelevanten Regressionen oder fehlender tatsächlicher Nutzung.
+
+**Pilot-Signal:** Mindestens zwei verschiedene echte Impact-/Testfälle profitieren nach unabhängiger Source-Begutachtung durch weniger notwendige Git-Sucharbeit (Richtwert **≥ 20 %**) bei mindestens gleicher korrekter Folgen-/Testabdeckung, ohne neue ungestützte Sicherheit. Die mittlere Aufgabenzeit soll nicht über A liegen oder – falls die Genauigkeit wirklich steigt – höchstens **10 %** teurer sein. Antwortpaketbytes und echte Provider-Tokens zusätzlich protokollieren; Geldkosten ohne Abrechnung bleiben unbekannt.
+
+### 3. Eine Bestätigung statt eines endlosen Optimierungsprojekts
+
+**Hartes Ausführungslimit:** Höchstens **36 + 36 + 72 = 144** neue Provider-Sitzungen für beide Runden zusammen. Die letzte Gruppe von **12 × 3 × 2 = 72** ist **nur dann** zulässig, wenn mindestens ein Pilot das vorregistrierte Signal erfüllt. Bei zwei Kandidaten zuerst die fachlich stärkere Substitution wählen; die andere nicht stillschweigend ebenfalls voll testen. Pro Versuch immer neue create-only-Receipts und eindeutige Run-ID, niemals ungültige oder bereits gestartete Versuche automatisch wiederholen. Vor dem Lauf tatsächlich verfügbare Provider-/Budgetgrenzen prüfen; keine fixe Kostenersparnis behaupten.
+
+**Einheitliches Protokoll:** Gleiche echten Agentenmodelle, Sampling, Hostklasse, Cachepolitik, Toolgrenzen, Quellen und Quoten **innerhalb** jedes Vergleichs; balancierte Armreihenfolge, isolierte Sessions/Workspaces, vollständige JSONL-Traces und genau dieselbe Aufgabe für A/B/C. Originalberichte samt Source-/Manifest-/Runner-/Trace-SHA256 versionieren, Rohtraces und private Reviewer-Mappings nicht. Der existierende Evaluator berechnet task-geclusterte Intervalle; zwei Wiederholungen **zählen nicht als zwölf unabhängige Aufgaben**. Pilotfälle von nicht vorab gezeigten Bestätigungsfällen getrennt ausweisen.
+
+**Qualitätsprüfung:** Vor Entblindung jede tatsächliche Erklärung, Quellstelle und wichtige Gegenbehauptung am fixierten Commit kontrollieren. Ein vom Agenten getrenntes Modell reicht für eine erste Bewertung, ist aber nicht dasselbe wie ein externes Gutachten; bei entscheidenden oder strittigen Fällen einen unabhängigen Second-Source-Reviewer einsetzen. `quality_correct`, falsche Zuversicht, fehlende Gold-/relevante Pfade, ungestützte Zusatzbehauptungen und Fallback-Verhalten getrennt berichten.
+
+**Kriterien für eine **eng begrenzte** Förderung:** Im Bestätigungslauf C gegen A **nicht schlechtere** quellengeprüfte Korrektheit und **keine** erhöhte falsche Sicherheit. Dazu entweder (a) obere 95-%-Grenze der task-gepaarten C−A-Gesamtzeitdifferenz unter null bei identischem Qualitätsniveau **oder** (b) belegter zusätzlicher fachlich korrekter Folgen-/Testnutzen auf mindestens zwei bislang zurückgehaltenen Fällen bei insgesamt **höchstens 10 %** Zeitmehrkosten. Auch bei (b) als **aufgabenklassenspezifischer Kandidat**, nicht als allgemeiner Geschwindigkeitsbeweis oder automatischer Default. Die vorhandene native `decision`-Formel wird nicht heimlich geändert, damit der gewählte Kandidat besser aussieht.
+
+### 4. Verbindliche Stop-/Fortsetzungsentscheidung
+
+| Nachweise nach den zwei Piloten und ggf. einer Bestätigung | Entscheidung |
+| --- | --- |
+| Echte Substitution **und** robuste Qualität-/Zeitwirkung in einer begrenzten Klasse | **Nur für diese Klasse optional anbieten**; Git-Fallback, keine Pflicht und ein einziger echter Consumer-Ende-zu-Ende-Test vor Rollout |
+| C nutzt RepoGround weiterhin nicht, B bleibt bloß zusätzlicher Aufwand oder Effekte sind negativ | **Allgemeines Agentenbeschleunigungs-Versprechen einstellen**; Git-first beibehalten, RepoGround für deterministische Navigation, Quellenprüfung und historische Revisionsbelege pflegen |
+| Echte Rohdaten oder unabhängige Qualitätsprüfung unvollständig | **Unentschieden, kein Rollout**; vorhandene Daten korrigiert bewerten, aber keinen automatischen dritten Optimierungsversuch starten |
+
+**Nicht in diesem Auftrag:** neue Graphdatenbank, Cache-/Routerplattform, Index-Neubau, großflächiger Refactor, weitere Suchfeatures ohne konkrete Fehlerursache, automatischer Defaultwechsel, neue Sicherheits-/Reviewbürokratie oder unabhängige Feature-PRs pauschal blockieren.
+
+**Umsetzungshoheit:** Grabowski alleiniger Writer/Operator je einmaligem gebundenem Worktree/PR; Captain für Merges. Großer Adler bei konkretem Unabhängigkeitsbedarf lesend. R5 und R3 bleiben historische Primärbelege, keine künstliche Regression und kein Grund, Änderungen ohne neuen tatsächlichen Agentenmesswert als „Wirkung bestätigt“ zu verkaufen.
+
+**Abschlussartefakte:** Je wirklich ausgeführter Runde ein datierter SHA-gebundener Proof im bestehenden `docs/proofs/`, ein neuer nativer Auswertungsreport im vorhandenen Berichtspfad und ein kurzer Eintrag im [Langzeit-Messregister](../diagnostics/repoground-agent-study-history.md). **Keinen** gesonderten Steuerungsdienst, Backlog oder zweiten Studien-Recorder anlegen.
