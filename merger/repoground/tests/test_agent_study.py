@@ -602,7 +602,7 @@ def test_started_attempt_without_receipt_stays_non_retryable(planned, tmp_path):
 
 def test_valid_timeout_consumption_is_counted_without_quality_credit(planned, tmp_path):
     """Successful answers only for quality; failed provider work still costs."""
-    receipts, _grades = sample_data(planned, tmp_path)
+    receipts, grades = sample_data(planned, tmp_path)
     baseline = [r for r in receipts if r["condition"] == "git_only"]
     assert len(baseline) == 12
     for item in baseline:
@@ -616,9 +616,13 @@ def test_valid_timeout_consumption_is_counted_without_quality_credit(planned, tm
     failed["billed_cost"]["amount"] = 12.0
     request = next(r for r in planned["requests"] if r["request_id"] == failed["request_id"])
     assert study.validate_receipt(request, failed, trace_root=tmp_path) == []
+    by_id = {item["request_id"]: item for item in receipts}
+    for grade in grades:
+        grade["receipt_sha256"] = study.sha256_json(by_id[grade["request_id"]])
+    assert next(g for g in grades if g["request_id"] == failed["request_id"])["verdict"] == "correct"
 
     evaluation = study.evaluate(
-        planned, gold(), receipts, [], trace_root=tmp_path,
+        planned, gold(), receipts, grades, trace_root=tmp_path,
         measurement_scope="synthetic_contract_fixture",
     )
     arm = evaluation["conditions"]["git_only"]
@@ -631,6 +635,11 @@ def test_valid_timeout_consumption_is_counted_without_quality_credit(planned, tm
     assert arm["tool_calls_total"] == 12
     assert arm["tool_time_ms_total"] == 2400
     assert evaluation["valid_success_trials"] == 35
+    failed_trial = next(t for t in evaluation["trials"] if t["request_id"] == failed["request_id"])
+    assert failed_trial["score"]["human_grade"] == "correct"
+    assert failed_trial["score"]["quality_success"] is False
+    by_class = evaluation["by_class"][request["case_class"]]["condition_summaries"]["git_only"]
+    assert by_class["human_correct"] == by_class["valid_success"]
     assert evaluation["decision"]["status"] == "not_established"
 
 

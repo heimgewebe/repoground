@@ -479,7 +479,8 @@ def _score(case: Mapping[str, Any], receipt: Mapping[str, Any], grade: Mapping[s
         result["human_grade"] = grade["verdict"]
         result["human_verified_citations"] = grade["citations_checked"]
         result["quality_success"] = bool(
-            grade["verdict"] == "correct"
+            receipt["status"] == "success"
+            and grade["verdict"] == "correct"
             and grade["citations_checked"] is True
             and not missing and not false_paths and outcome_ok and not negative_false_confidence
         )
@@ -801,7 +802,9 @@ def _aggregate_study_pairs(rows: Sequence[Mapping[str, Any]], cases: Mapping[str
                 arm: {
                     "valid_success": sum(x["condition"] == arm and x["valid"]
                                          and x["status"] == "success" for x in klass),
-                    "human_correct": sum(x["condition"] == arm and x["score"] is not None
+                    "human_correct": sum(x["condition"] == arm and x["valid"]
+                                         and x["status"] == "success"
+                                         and x["score"] is not None
                                          and x["score"]["quality_success"] is True for x in klass),
                     "median_duration_ms": _median([
                         x["metrics"]["duration_ms"] for x in klass
