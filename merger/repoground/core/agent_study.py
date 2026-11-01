@@ -660,8 +660,10 @@ def _summarize_study_arms(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     for arm in ARMS:
         subset = [x for x in rows if x["condition"] == arm]
         valid = [x for x in subset if x["valid"] and x["status"] == "success"]
+        accounted = [x for x in subset if x["valid"] and x["metrics"] is not None]
         by_arm[arm] = {
             "planned": len(subset), "valid_success": len(valid),
+            "resource_accounted_trials": len(accounted),
             "failed_or_invalid": len(subset) - len(valid),
             "grades_complete": len([x for x in valid if x["score"]["human_grade"] is not None]),
             "quality_correct": len([x for x in valid if x["score"]["quality_success"] is True]),
@@ -672,24 +674,24 @@ def _summarize_study_arms(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
                 "median": _median([x["metrics"]["duration_ms"] for x in valid]),
                 "p95": _percentile([x["metrics"]["duration_ms"] for x in valid], 0.95),
             },
-            "input_tokens_total": sum(x["metrics"]["input_tokens"] for x in valid),
-            "output_tokens_total": sum(x["metrics"]["output_tokens"] for x in valid),
-            "tool_calls_total": sum(x["metrics"]["tool_calls"] for x in valid),
-            "tool_failures_total": sum(x["metrics"]["tool_failures"] for x in valid),
-            "repoground_calls_total": sum(x["metrics"]["repoground_calls"] for x in valid),
-            "repoground_failures_total": sum(x["metrics"]["repoground_failures"] for x in valid),
-            "tool_bytes_total": sum(x["metrics"]["tool_input_bytes"] + x["metrics"]["tool_output_bytes"] for x in valid),
-            "tool_time_ms_total": sum(x["metrics"]["tool_duration_ms"] for x in valid),
+            "input_tokens_total": sum(x["metrics"]["input_tokens"] for x in accounted),
+            "output_tokens_total": sum(x["metrics"]["output_tokens"] for x in accounted),
+            "tool_calls_total": sum(x["metrics"]["tool_calls"] for x in accounted),
+            "tool_failures_total": sum(x["metrics"]["tool_failures"] for x in accounted),
+            "repoground_calls_total": sum(x["metrics"]["repoground_calls"] for x in accounted),
+            "repoground_failures_total": sum(x["metrics"]["repoground_failures"] for x in accounted),
+            "tool_bytes_total": sum(x["metrics"]["tool_input_bytes"] + x["metrics"]["tool_output_bytes"] for x in accounted),
+            "tool_time_ms_total": sum(x["metrics"]["tool_duration_ms"] for x in accounted),
             "cached_input_tokens_total": (
-                sum(x["metrics"]["cached_input_tokens"] for x in valid)
-                if valid and all(x["metrics"]["cached_input_tokens"] is not None for x in valid)
+                sum(x["metrics"]["cached_input_tokens"] for x in accounted)
+                if accounted and all(x["metrics"]["cached_input_tokens"] is not None for x in accounted)
                 else None
             ),
             "tool_breakdown": [],
             "cost_billed_total": None,  # Only report same-currency billed costs when ALL are known.
         }
         tool_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
-        for item in valid:
+        for item in accounted:
             for call in item["metrics"]["tool_breakdown"]:
                 tool_groups[call["name"]].append(call)
         by_arm[arm]["tool_breakdown"] = [
@@ -699,8 +701,8 @@ def _summarize_study_arms(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
              "bytes_sum": sum(x["bytes"] for x in group)}
             for name, group in sorted(tool_groups.items())
         ]
-        costs = [x["metrics"]["billed_cost"] for x in valid]
-        if valid and all(isinstance(c, dict) and c["currency"] == costs[0]["currency"] for c in costs):
+        costs = [x["metrics"]["billed_cost"] for x in accounted]
+        if accounted and all(isinstance(c, dict) and c["currency"] == costs[0]["currency"] for c in costs):
             by_arm[arm]["cost_billed_total"] = {
                 "currency": costs[0]["currency"],
                 "amount": round(sum(c["amount"] for c in costs), 6),

@@ -56,6 +56,8 @@ Eine Änderung eines Prompts, einer Quell-SHA, des Goldsets oder der Bewertungsl
 
 **Token und Toolkosten:** Tatsächlich vom Provider gemeldete Input-, Output- und Cache-Tokens; Anzahl, Status, Latenz und ein-/ausgegebene Bytes aller echten Toolcalls, einschließlich Fehlversuchen. Keine nachträglich geschätzten Tokens. Optional CPU-Zeit und Peak-RSS.
 
+**Fehlgeschlagene Aufgaben verbrauchen ebenfalls Ressourcen:** Gültige Quittungen mit Status failed oder timeout und wirklich provider-gemeldeten Tokens/Tools/Abrechnungen zählen zu allen Arm-Gesamtkosten. Das Feld resource_accounted_trials nennt die tatsächliche Zahl solcher Quittungen. Nur gültige *erfolgreiche* Aufgaben gehen in Antwortqualität, Erfolgsdauer und vollständig bewertete Task-Paarvergleiche ein. Bei ganz fehlenden Quittungen bleiben die nicht beobachtbaren Verbrauchswerte unbekannt, keinesfalls 0.
+
 **Geld:** Nur vom Provider tatsächlich abgerechnete Beträge; Rate-Card-Schätzungen sind keine Istkosten. Unbekannt bleibt null und wird niemals zu 0 Euro umgedeutet. Abrechnungswährungen nicht zusammenrechnen.
 
 **Gültigkeit:** Git-/Prompt-/Modell-/Runner-/Manifest-SHA, Sitzungs-/Workspace-Isolation, Zeitstempel, Trace-Dateigröße und SHA-256 sowie echtes Review. Fehlende, manipulierte und fehlgeschlagene Läufe bleiben sichtbar. Ein unvollständiger dreifacher Block wird **nicht** als Erfolg oder Effizienzgewinn gewertet.

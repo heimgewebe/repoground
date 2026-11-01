@@ -144,6 +144,7 @@
           "required": [
             "planned",
             "valid_success",
+            "resource_accounted_trials",
             "failed_or_invalid",
             "grades_complete",
             "quality_correct",
@@ -256,6 +257,10 @@
                   }
                 }
               ]
+            },
+            "resource_accounted_trials": {
+              "type": "integer",
+              "minimum": 0
             }
           }
         },
@@ -264,6 +269,7 @@
           "required": [
             "planned",
             "valid_success",
+            "resource_accounted_trials",
             "failed_or_invalid",
             "grades_complete",
             "quality_correct",
@@ -376,6 +382,10 @@
                   }
                 }
               ]
+            },
+            "resource_accounted_trials": {
+              "type": "integer",
+              "minimum": 0
             }
           }
         },
@@ -384,6 +394,7 @@
           "required": [
             "planned",
             "valid_success",
+            "resource_accounted_trials",
             "failed_or_invalid",
             "grades_complete",
             "quality_correct",
@@ -496,6 +507,10 @@
                   }
                 }
               ]
+            },
+            "resource_accounted_trials": {
+              "type": "integer",
+              "minimum": 0
             }
           }
         }

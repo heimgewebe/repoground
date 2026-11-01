@@ -598,3 +598,37 @@ def test_started_attempt_without_receipt_stays_non_retryable(planned, tmp_path):
     with pytest.raises(study.AgentBenchmarkError, match="prior attempt exists"):
         cli._reserve_attempt(request, target)
     assert not target.exists()
+
+
+def test_valid_timeout_consumption_is_counted_without_quality_credit(planned, tmp_path):
+    """Successful answers only for quality; failed provider work still costs."""
+    receipts, _grades = sample_data(planned, tmp_path)
+    baseline = [r for r in receipts if r["condition"] == "git_only"]
+    assert len(baseline) == 12
+    for item in baseline:
+        item["billed_cost"] = {
+            "source": "provider_billed", "currency": "USD", "amount": 1.0,
+        }
+    failed = baseline[0]
+    failed["status"] = "timeout"
+    failed["error"] = {"class": "RunnerTimeout", "message": "Provider timed out after usage"}
+    failed["usage"]["input_tokens"] = 10250
+    failed["billed_cost"]["amount"] = 12.0
+    request = next(r for r in planned["requests"] if r["request_id"] == failed["request_id"])
+    assert study.validate_receipt(request, failed, trace_root=tmp_path) == []
+
+    evaluation = study.evaluate(
+        planned, gold(), receipts, [], trace_root=tmp_path,
+        measurement_scope="synthetic_contract_fixture",
+    )
+    arm = evaluation["conditions"]["git_only"]
+    assert arm["planned"] == 12
+    assert arm["valid_success"] == 11
+    assert arm["failed_or_invalid"] == 1
+    assert arm["resource_accounted_trials"] == 12
+    assert arm["input_tokens_total"] == 13000
+    assert arm["cost_billed_total"] == {"currency": "USD", "amount": 23.0}
+    assert arm["tool_calls_total"] == 12
+    assert arm["tool_time_ms_total"] == 2400
+    assert evaluation["valid_success_trials"] == 35
+    assert evaluation["decision"]["status"] == "not_established"
