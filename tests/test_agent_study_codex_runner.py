@@ -103,6 +103,76 @@ class CodexStudyRunnerTest(unittest.TestCase):
         self.assertEqual(fallback["reported_paths"], [])
         self.assertFalse(fallback["asserted_sufficient_evidence"])
 
+    def test_mcp_success_depends_on_specific_tool_contract(self):
+        available = {"status": "available"}
+        self.assertTrue(runner._mcp_evidence_available("bundle_discover", available))
+        self.assertTrue(runner._mcp_evidence_available("find_symbol", available))
+        self.assertTrue(runner._mcp_evidence_available("ask_context", {
+            "status": "ok", "context_pack": {
+                "availability": {"status": "available"},
+            },
+        }))
+        self.assertFalse(runner._mcp_evidence_available("ask_context", {
+            "status": "ok", "context_pack": {
+                "availability": {"status": "unavailable"},
+            },
+        }))
+        self.assertFalse(runner._mcp_evidence_available("ask_context", {"status": "ok"}))
+        self.assertTrue(runner._mcp_evidence_available("grounding_verify", {"status": "pass"}))
+        self.assertFalse(runner._mcp_evidence_available("grounding_verify", {"status": "fail"}))
+        self.assertTrue(runner._mcp_evidence_available("live_freshness", {"status": "fresh"}))
+        self.assertFalse(runner._mcp_evidence_available("live_freshness", {"status": "stale"}))
+        self.assertFalse(runner._mcp_evidence_available("live_freshness", {"status": "unknown"}))
+        self.assertFalse(runner._mcp_evidence_available("find_symbol", {"status": "invalid"}))
+
+    def test_actual_mcp_response_status_and_iserror_affect_receipt(self):
+        evidence = {
+            "repo": "repoground", "source_commit": "a" * 40,
+            "generator_commit": "b" * 40, "manifest_sha256": "c" * 64,
+            "observed_status": "available", "freshness": "pinned_exact",
+        }
+        item = {
+            "id": "m1", "type": "mcp_tool_call", "server": "study_repoground",
+            "tool": "ask_context", "arguments": {"query": "where"},
+            "result": {"structured_content": {
+                "status": "ok", "context_pack": {
+                    "availability": {"status": "available"},
+                },
+            }},
+            "error": None, "status": "completed",
+        }
+        call = runner._mcp_tool_receipt(item, 1, 11, {"repoground": evidence})
+        self.assertEqual(call["status"], "success")
+        self.assertEqual(call["repoground_evidence"], evidence)
+        item["result"]["isError"] = True
+        call = runner._mcp_tool_receipt(item, 1, 11, {"repoground": evidence})
+        self.assertEqual(call["status"], "failed")
+        self.assertNotIn("repoground_evidence", call)
+
+    def test_mcp_exposure_disables_additional_change_evidence_tool(self):
+        request = {
+            "condition": "repoground_mandatory", "question": "Exact source question",
+            "runner": {"model": "gpt-5.6-sol"},
+            "repoground": {"repoground": {
+                "manifest_path": "/fake/bundle/manifest.json",
+            }},
+        }
+        config = {
+            "codex_bin": "/fake/codex", "mcp_script": "/fake/mcp.py",
+            "mcp_python": "/fake/python",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            argv = runner._codex_argv(
+                request, config, workspace, {"repoground": workspace},
+            )
+        self.assertTrue(any(
+            part.startswith("mcp_servers.study_repoground.disabled_tools=")
+            and json.loads(part.partition("=")[2]) == ["change_evidence_pack"]
+            for part in argv
+        ))
+        self.assertNotIn("repoground_change_evidence_pack", runner.TOOL_NAMES["repoground"])
+
     def test_foreign_mcp_server_cannot_hide_as_repo_tool(self):
         call = {"id": "m2", "type": "mcp_tool_call",
                 "server": "evil", "tool": "query_existing_index",

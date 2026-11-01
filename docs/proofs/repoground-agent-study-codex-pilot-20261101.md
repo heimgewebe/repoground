@@ -99,6 +99,7 @@ die Bewertungsfälle wurden nicht zu gültigen Erfolgen umetikettiert.
   keine fachlich belastbaren, task-geclusterten 95-%-Intervalle.
   Fehlende menschliche/sonstige unabhängige Qualitätsgrades
   werden nicht nachträglich erfunden.
+- **Bekannte R3-Messgrenze (nach Review):** Drei echte `live_freshness`-MCP-Antworten meldeten `status=fresh`, wurden vom ursprünglichen universellen `status=available`-Prädikat aber fälschlich als fehlgeschlagene Toolaufrufe klassifiziert. Die Original-JSONL-Traces bestätigen **3/3 `fresh`**. Es handelt sich um eine Toolstatus-Fehlklassifikation, nicht um drei RepoGround-Ausfälle. Die 41 MCP-Aufrufe, Modellantworten, Gesamtzeiten und Provider-Tokens bleiben echte Rohwerte; die R3-Originalreceipts bleiben unangetastet. Der korrigierte Runner besitzt eine andere SHA und benötigt künftig einen eigenen Protokollschlüssel.
 - Die beobachteten einzelnen Codex-Toolzeiten beruhen auf lokal
   empfangenen Start-/End-Ereignissen. Bei gemeinsam ausgelieferten
   Events ist ein `0 ms`-Wert möglich, ohne dass das Tool wirklich

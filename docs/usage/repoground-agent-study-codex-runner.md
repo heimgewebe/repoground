@@ -26,6 +26,7 @@ auf stdout zurück. Der vorhandene
   (`--ephemeral`) und einen neuen privaten Workspace. Git-Quellen werden
   von den explizit gebundenen Repositories nach dem eingefrorenen Commit
   geklont, ohne den aktuellen HEAD als Ersatz zu verwenden.
+- **Exakter MCP-Werkzeugumfang:** Mit `--repo-root` bietet der Server zusätzlich `change_evidence_pack` an. Der Codex-Client blendet dieses nicht zum eingefrorenen Messvertrag gehörende Werkzeug ausdrücklich über `mcp_servers.<server>.disabled_tools` aus. Der installierte Codex-CLI-Client 0.164.0 hat den gesetzten Ausschluss im lokalen Konfigurations-Readback bestätigt.
 - **Unveränderliche Belege:** Die verwendeten Bundle-Manifeste, Generator-,
   Quell- und Health-Identitäten werden vor dem Providerstart geprüft.
   Ein erfolgreich beobachteter MCP-Aufruf bekommt den passenden

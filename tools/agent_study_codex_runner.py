@@ -318,6 +318,9 @@ def _codex_argv(req: dict[str, Any], cfg: dict[str, Any],
             "-c", "mcp_servers." + server + ".enabled=true",
             "-c", "mcp_servers." + server + ".required=true",
             "-c", "mcp_servers." + server + ".args=" + json.dumps(mcp_argv, separators=(",", ":")),
+            # The RepoGround MCP server exposes change_evidence_pack whenever
+            # --repo-root is supplied. It is deliberately outside this study.
+            "-c", "mcp_servers." + server + ".disabled_tools=" + json.dumps(["change_evidence_pack"]),
         ]
     argv.append(_prompt(req))
     return argv
@@ -445,6 +448,25 @@ def _command_tool_receipt(
     }
 
 
+def _mcp_evidence_available(tool: str, payload: Any) -> bool:
+    """Treat a successfully observed read according to its actual MCP contract."""
+    if not isinstance(payload, dict):
+        return False
+    status = payload.get("status")
+    if tool == "ask_context":
+        pack = payload.get("context_pack")
+        availability = pack.get("availability") if isinstance(pack, dict) else None
+        return (
+            status == "ok" and isinstance(availability, dict)
+            and availability.get("status") == "available"
+        )
+    if tool == "grounding_verify":
+        return status == "pass"
+    if tool == "live_freshness":
+        return status == "fresh"
+    return status == "available"
+
+
 def _mcp_tool_receipt(
     item: dict[str, Any], sequence: int, duration_ms: int,
     expected: dict[str, dict[str, Any]],
@@ -457,9 +479,11 @@ def _mcp_tool_receipt(
     if name not in TOOL_NAMES["repoground"]:
         raise ValueError("unregistered RepoGround MCP tool observed")
     payload = _mcp_payload(item)
+    result = item.get("result")
     successful = (
         item.get("status") == "completed" and not item.get("error")
-        and isinstance(payload, dict) and payload.get("status") == "available"
+        and not (isinstance(result, dict) and result.get("isError") is True)
+        and _mcp_evidence_available(str(item.get("tool")), payload)
     )
     call = {
         "sequence": sequence, "name": name,
