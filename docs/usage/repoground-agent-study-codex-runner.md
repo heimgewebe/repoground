@@ -31,7 +31,11 @@ auf stdout zurück. Der vorhandene
   Quell- und Health-Identitäten werden vor dem Providerstart geprüft.
   Danach bekommt jeder Agentenlauf eine **private Kopie der exakten
   Manifestbytes** im frischen Workspace; referenzierte, unveränderliche
-  Bundle-Artefakte werden ohne erneutes Kopieren per Hardlink eingebunden.
+  Bundle-Artefakte werden auch bei verschachtelten Relativpfaden im
+  ursprünglichen Verzeichnisaufbau eingebunden. Auf demselben Dateisystem
+  geschieht das per Hardlink, bei `EXDEV` durch eine bytegetreue private
+  Kopie mit Dateimodus `0600`. Weder Quellpfade außerhalb des Bundlebaums
+  noch Symlinks werden dafür akzeptiert.
   Eine lokale Kopie des Post-Emit-Health-Dokuments wird zusätzlich an den
   originalen Manifest-SHA256 gebunden, weil der ursprüngliche absolute
   Publikationspfad kein Pfad zur privaten Kopie ist. Das MCP startet

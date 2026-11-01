@@ -288,12 +288,29 @@ class CodexStudyRunnerTest(unittest.TestCase):
                     "tool": tool, "arguments": {}, "status": "completed",
                     "result": {"structured_content": collection},
                 }
+                # B/C can inspect registered metadata, but discovery alone
+                # is not a successful RepoGround retrieval.
                 calls, answer = runner._tool_receipts([
                     (event("item.started", item), 1.0),
                     (event("item.completed", item), 1.2),
-                ], {})
+                ], {"repoground": {}})
                 self.assertEqual(calls, [])
                 self.assertEqual(answer, "")
+                # Git-only must reject nonempty discovery: a hidden source
+                # would invalidate its A/B/C isolation even without a read.
+                with self.assertRaisesRegex(ValueError, "MCP discovery in git_only"):
+                    runner._tool_receipts([
+                        (event("item.started", item), 1.0),
+                        (event("item.completed", item), 1.2),
+                    ], {})
+        empty = {**item, "tool": "list_mcp_resources", "result": {
+            "structured_content": {"resources": []},
+        }}
+        calls, _ = runner._tool_receipts([
+            (event("item.started", empty), 1.0),
+            (event("item.completed", empty), 1.1),
+        ], {})
+        self.assertEqual(calls, [])
         unknown = {**item, "tool": "read_mcp_resource"}
         with self.assertRaisesRegex(ValueError, "unregistered"):
             runner._tool_receipts([
@@ -339,6 +356,104 @@ class CodexStudyRunnerTest(unittest.TestCase):
             target.write_bytes(b"mutated private manifest")
             with self.assertRaisesRegex(ValueError, "private manifest changed"):
                 runner._assert_pinned_manifests(request, pinned)
+
+    def test_private_pin_preserves_declared_nested_roles(self):
+        import hashlib
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            publisher = root / "published"
+            (publisher / "artifacts" / "docs").mkdir(parents=True)
+            (publisher / "artifacts" / "docs" / "demo.md").write_text("nested source proof")
+            source = publisher / "nested.bundle.manifest.json"
+            raw = json.dumps({
+                "links": {"post_emit_health_path": "health.json"},
+                "artifacts": [{"path": "artifacts/docs/demo.md"}],
+            }).encode()
+            source.write_bytes(raw)
+            (publisher / "health.json").write_text(json.dumps({
+                "status": "pass", "bundle_manifest_path": str(source),
+            }))
+            work = root / "workspace"
+            work.mkdir()
+            copied = runner._pin_snapshot_manifests({"repoground": {
+                "repoground": {
+                    "manifest_path": str(source),
+                    "manifest_sha256": hashlib.sha256(raw).hexdigest(),
+                },
+            }}, work)["repoground"]
+            self.assertEqual(
+                (copied.parent / "artifacts" / "docs" / "demo.md").read_text(),
+                "nested source proof",
+            )
+
+    def test_private_pin_falls_back_to_copy_on_cross_filesystem(self):
+        import errno
+        import hashlib
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            pub = root / "published"
+            pub.mkdir()
+            source = pub / "test.bundle.manifest.json"
+            raw = json.dumps({"links": {"post_emit_health_path": "health.json"}}).encode()
+            source.write_bytes(raw)
+            (pub / "health.json").write_text(json.dumps({
+                "status": "pass", "bundle_manifest_path": str(source),
+            }))
+            role = pub / "role.txt"
+            role.write_bytes(b"preserve original bundle role bytes\x00\xfe")
+            ws = root / "workspace"
+            ws.mkdir()
+            with patch.object(runner.os, "link", side_effect=OSError(
+                errno.EXDEV, "cross-device link",
+            )) as linked:
+                copied = runner._pin_snapshot_manifests({"repoground": {
+                    "repoground": {
+                        "manifest_path": str(source),
+                        "manifest_sha256": hashlib.sha256(raw).hexdigest(),
+                    },
+                }}, ws)["repoground"]
+            self.assertGreaterEqual(linked.call_count, 1)
+            self.assertEqual((copied.parent / "role.txt").read_bytes(), role.read_bytes())
+            self.assertNotEqual(
+                (copied.parent / "role.txt").stat().st_ino, role.stat().st_ino,
+            )
+            self.assertEqual(stat.S_IMODE((copied.parent / "role.txt").stat().st_mode), 0o600)
+
+    def test_nested_artifact_traversal_and_symlink_not_pinned(self):
+        import hashlib
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            pub = root / "published"
+            pub.mkdir()
+            (pub / "health.json").write_text(json.dumps({"status": "pass"}))
+            source = pub / "a.bundle.manifest.json"
+            ws = root / "workspace"
+            ws.mkdir()
+            for suffix, invalid in enumerate(("x/../secret", "x//bad", "/abs/no", "dir\\bad")):
+                raw = json.dumps({"links": {"post_emit_health_path": "health.json"},
+                                  "artifacts": [{"path": invalid}]}).encode()
+                source.write_bytes(raw)
+                request = {"repoground": {"repoground": {
+                    "manifest_path": str(source),
+                    "manifest_sha256": hashlib.sha256(raw).hexdigest(),
+                }}}
+                work = ws / str(suffix)
+                work.mkdir()
+                with self.assertRaisesRegex(ValueError, "unsafe manifest"):
+                    runner._pin_snapshot_manifests(request, work)
+            (pub / "artifacts").symlink_to(root, target_is_directory=True)
+            raw = json.dumps({"links": {"post_emit_health_path": "health.json"},
+                              "artifacts": [{"path": "artifacts/demo.md"}]}).encode()
+            source.write_bytes(raw)
+            request = {"repoground": {"repoground": {
+                "manifest_path": str(source),
+                "manifest_sha256": hashlib.sha256(raw).hexdigest(),
+            }}}
+            work = ws / "symlink"
+            work.mkdir()
+            with self.assertRaisesRegex(ValueError, "unsafe"):
+                runner._pin_snapshot_manifests(request, work)
 
     def test_mcp_digest_changes_when_imported_module_changes(self):
         with tempfile.TemporaryDirectory() as directory:

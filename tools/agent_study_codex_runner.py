@@ -8,6 +8,7 @@ No model result, cost, citation, tool time, or quality grade is manufactured.
 from __future__ import annotations
 
 import argparse
+import errno
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -16,6 +17,7 @@ from pathlib import Path, PurePosixPath
 import re
 import selectors
 import signal
+import shutil
 import subprocess
 import sys
 import time
@@ -296,9 +298,9 @@ def _pin_bundle_sibling(
         return  # Generation metadata is not a manifest role.
     if source.is_symlink() or not source.is_file():
         raise ValueError("source bundle contains unsafe entry")
-    if source.name == original.name:
+    if source == original:
         return
-    if source.name == post_name:
+    if source.parent == original.parent and source.name == post_name:
         # Preserve the health attestation's original publication path, but
         # also hash-bind its private copy to exactly the pinned manifest bytes.
         post = _read_json(source)
@@ -307,8 +309,51 @@ def _pin_bundle_sibling(
         post["bundle_manifest_sha256"] = expected_sha
         _create_once(directory / post_name, _json_bytes(post) + b"\n")
         return
-    # Immutable artifacts can be linked without rewriting published bytes.
-    os.link(source, directory / source.name, follow_symlinks=False)
+    # Use a byte-preserving private copy for bundle volumes on another fs.
+    destination = directory / source.name
+    try:
+        os.link(source, destination, follow_symlinks=False)
+    except OSError as exc:
+        if exc.errno != errno.EXDEV:
+            raise
+        with source.open("rb") as reader, _open_private_create(destination) as writer:
+            shutil.copyfileobj(reader, writer, length=1024 * 1024)
+            writer.flush()
+            os.fsync(writer.fileno())
+
+
+def _pin_nested_artifacts(
+    original: Path, directory: Path, manifest_doc: dict[str, Any],
+    post_name: str, expected_sha: str,
+) -> None:
+    """Mirror manifest-declared nested roles; reject traversal and symlinks."""
+    artifacts = manifest_doc.get("artifacts", [])
+    if not isinstance(artifacts, list):
+        raise ValueError("manifest artifacts not an array")
+    for artifact in artifacts:
+        if not isinstance(artifact, dict) or not isinstance(artifact.get("path"), str):
+            raise ValueError("manifest artifact path invalid")
+        relative = artifact["path"]
+        if (
+            relative.startswith("/") or "\\" in relative
+            or any(part in ("", ".", "..") for part in relative.split("/"))
+        ):
+            raise ValueError("unsafe manifest artifact relative path")
+        parts = relative.split("/")
+        if len(parts) == 1:
+            continue  # Top-level files have already been mirrored.
+        src_dir = original.parent
+        for segment in parts[:-1]:
+            src_dir = src_dir / segment
+            if src_dir.is_symlink() or not src_dir.is_dir():
+                raise ValueError("nested manifest artifact parent unsafe")
+        target_dir = directory.joinpath(*parts[:-1])
+        target_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if target_dir.is_symlink():
+            raise ValueError("nested manifest artifact destination unsafe")
+        _pin_bundle_sibling(
+            src_dir / parts[-1], original, target_dir, post_name, expected_sha,
+        )
 
 
 def _pin_bundle_manifest(bound: dict[str, Any], directory: Path) -> Path:
@@ -318,12 +363,14 @@ def _pin_bundle_manifest(bound: dict[str, Any], directory: Path) -> Path:
     raw = original.read_bytes()
     if _digest(raw) != bound["manifest_sha256"]:
         raise ValueError("source manifest changed before private pin")
-    post_name = json.loads(raw).get("links", {}).get("post_emit_health_path")
+    manifest_doc = json.loads(raw)
+    post_name = manifest_doc.get("links", {}).get("post_emit_health_path")
     if not isinstance(post_name, str) or Path(post_name).name != post_name:
         raise ValueError("source bundle post-emit health name invalid")
     directory.mkdir(mode=0o700, exist_ok=False)
     for source in original.parent.iterdir():
         _pin_bundle_sibling(source, original, directory, post_name, bound["manifest_sha256"])
+    _pin_nested_artifacts(original, directory, manifest_doc, post_name, bound["manifest_sha256"])
     manifest = directory / original.name
     _create_once(manifest, raw)
     manifest.chmod(0o400)
@@ -617,15 +664,21 @@ def _mcp_tool_receipt(
     return call
 
 
-def _measured_tool_item(item: dict[str, Any]) -> bool:
+def _measured_tool_item(
+    item: dict[str, Any], *, baseline: bool = False,
+) -> bool:
     if item.get("type") not in ("command_execution", "mcp_tool_call"):
         return False
     if item.get("type") == "mcp_tool_call" and item.get("server") == "codex":
-        # Codex's own MCP resource/template listing returns metadata, not
-        # a source read. It may legitimately be NONEMPTY for this server.
-        # Preserve it in the raw JSONL trace, never credit it as a
-        # RepoGround retrieval or count it as an unauthorized tool call.
+        # Built-in discovery is metadata, not a RepoGround retrieval. In the
+        # Git-only control arm it must be empty and successful; a nonempty
+        # listing would reveal an undeclared source and contaminate the trial.
         if item.get("tool") in ("list_mcp_resources", "list_mcp_resource_templates"):
+            if baseline and (
+                item.get("status") != "completed" or item.get("error")
+                or not _builtin_empty_mcp(item)
+            ):
+                raise ValueError("nonempty or failed MCP discovery in git_only")
             return False
     return True
 
@@ -648,7 +701,7 @@ def _tool_receipts(events: list[tuple[dict[str, Any], float]],
         if item.get("type") == "agent_message":
             last_answer = str(item.get("text") or "")
             continue
-        if not _measured_tool_item(item):
+        if not _measured_tool_item(item, baseline=not expected):
             continue
         if not isinstance(item_id, str) or item_id not in starts:
             raise ValueError("unmeasured tool start/end pair")
