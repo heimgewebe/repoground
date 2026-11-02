@@ -4,11 +4,13 @@ import io
 import json
 import unittest
 import urllib.error
+import urllib.request
 from unittest.mock import patch
 
 from scripts.ops.measure_nixer_runtime_chain import (
     _canonical,
     _derivation_sources,
+    _mcp_request,
     _git_blob,
     _http_observation,
     _mainpid_listener,
@@ -124,11 +126,43 @@ class NixerRuntimeChainTests(unittest.TestCase):
         request_error = urllib.error.HTTPError(
             "http://127.0.0.1:18187/mcp", 406, "Not Acceptable", None, io.BytesIO(),
         )
-        with patch("scripts.ops.measure_nixer_runtime_chain.urllib.request.urlopen", side_effect=request_error):
+        with patch("scripts.ops.measure_nixer_runtime_chain._direct_urlopen", side_effect=request_error):
             proof = _http_observation()
         self.assertTrue(proof["http_responded"])
         self.assertEqual(proof["http_status"], 406)
         self.assertNotIn("mcp_handshake", proof)
+
+    def test_http_and_mcp_loopback_ignore_environment_proxies(self):
+        # A host-supplied proxy must not forge a local Nixer MCP response.
+        with patch.dict("os.environ", {
+            "http_proxy": "http://127.0.0.1:9",
+            "HTTP_PROXY": "http://127.0.0.1:9",
+            "no_proxy": "",
+            "NO_PROXY": "",
+        }):
+            with patch(
+                "scripts.ops.measure_nixer_runtime_chain.urllib.request.build_opener",
+            ) as make_opener:
+                response = make_opener.return_value.open.return_value.__enter__.return_value
+                response.status = 200
+                response.headers.get.return_value = "application/json"
+                response.read.return_value = (
+                    b'{"jsonrpc":"2.0","id":7,"result":{"proof":"direct"}}'
+                )
+                self.assertTrue(_http_observation()["http_responded"])
+                self.assertEqual(
+                    _mcp_request("initialize", {}, 7), {"proof": "direct"},
+                )
+            self.assertEqual(make_opener.call_count, 2)
+            for call in make_opener.call_args_list:
+                self.assertEqual(len(call.args), 1)
+                self.assertIsInstance(call.args[0], urllib.request.ProxyHandler)
+                self.assertEqual(call.args[0].proxies, {})
+            self.assertEqual(
+                [call.kwargs["timeout"]
+                 for call in make_opener.return_value.open.call_args_list],
+                [3, 5],
+            )
 
     def test_mcp_status_success_requires_identity_backend_and_jsonrpc(self):
         expected = {"serverInfo": {"name": "Nixer"}, "protocolVersion": "2025-06-18"}

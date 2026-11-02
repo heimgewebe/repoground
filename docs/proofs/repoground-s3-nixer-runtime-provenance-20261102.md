@@ -79,3 +79,31 @@ Der Endstatus ist weiterhin `partial`: Zusätzlich bleibt der aktuelle Git-Pin
 vom ausgeführten Server-Quellbyte verschieden und der vollständige
 Flake-Eingabesatz→Derivation-Beleg aus. 13 fokussierte Tests und der
 Graph-Wartbarkeitsratchet liefen nach dem Fix erfolgreich.
+
+
+## Direkter Loopback-Probenachweis nach Proxy-P2
+
+Ein weiteres aktuelles Codex-P2 zeigte, dass das alte
+`urllib.request.urlopen` HTTP- und MCP-Probes über Umgebungsproxies
+umleiten konnte: eine scheinbar lokale Antwort konnte vom Proxy stammen.
+Die neue gemeinsame `_direct_urlopen`-Funktion verwendet explizit
+`urllib.request.ProxyHandler({})` für **beide** Abfragen. Ein gezielter
+Negativtest belegt die leere Proxy-Zuordnung unter gesetztem
+`HTTP_PROXY`/`http_proxy` und leerem `NO_PROXY`/`no_proxy`.
+
+Frische tatsächliche Gegenprobe auf heim-pc:
+**2026-11-02T16:02:34.144319+00:00**;
+lokales, nicht versioniertes Original:
+`~/.local/state/grabowski/repoground-s3-nixer-runtime-provenance-proxyfix-nix-20261102.json`.
+Gebundener Evidence-SHA-256:
+`b23111a841bf797f93a623c4da9dcba9bb8af34043a8099c52eba06b604e6959`.
+Ergebnis: `status=partial`, ein erreichbarer MCP-Endpunkt mit eigener
+`nixer_status`-Verifikation, ein separat belegter MainPID-Listener,
+aber `observed_process_to_mcp_nixer_status=unattributed_mcp_response`.
+Weiterhin unbewiesen bleiben die genaue Request-Handler-PID und die
+vollständige Flake-Eingabe→Derivation-Herkunft; aktueller deklarierter
+Git-Serverquellbyte und aktiver Build weichen voneinander ab.
+
+14 fokussierte Unit-Tests und Ruff mit `ruff-ci.toml` bestanden auf der
+geänderten Version. Alle Live-Snapshots bleiben ausschließlich außerhalb
+von Git. Weder NixOS noch Nixer wurden für diese Messung umgebaut oder neu gestartet.

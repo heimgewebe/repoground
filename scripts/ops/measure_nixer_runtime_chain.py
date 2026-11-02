@@ -93,10 +93,17 @@ def _derivation_sources(drv: dict[str, Any]) -> dict[str, str]:
     return result
 
 
+def _direct_urlopen(request: urllib.request.Request, *, timeout: int):
+    """Keep localhost observation independent of ambient HTTP proxy settings."""
+    return urllib.request.build_opener(urllib.request.ProxyHandler({})).open(
+        request, timeout=timeout,
+    )
+
+
 def _http_observation() -> dict[str, Any]:
     request = urllib.request.Request(_ENDPOINT, headers={"Accept": "application/json"})
     try:
-        with urllib.request.urlopen(request, timeout=3) as response:
+        with _direct_urlopen(request, timeout=3) as response:
             return {"http_status": response.status, "http_responded": True}
     except urllib.error.HTTPError as exc:
         # A 4xx from a live MCP server is HTTP reachability, *not* an MCP handshake.
@@ -118,7 +125,7 @@ def _mcp_request(method: str, params: dict[str, Any], request_id: int) -> dict[s
         },
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=5) as response:
+    with _direct_urlopen(request, timeout=5) as response:
         content_type = response.headers.get("Content-Type", "")
         payload = response.read(65_537)
         if len(payload) > 65_536:
