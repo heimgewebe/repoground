@@ -20,11 +20,13 @@ CLI im Grabowski-Worktree:
 
 ```bash
 python3 -m merger.repoground.cli federation flake-relations \
-  --repo-root /home/alex/repos/.repoground-sources/heimgewebe__heim-pc__main--a01e4d677f0375b4c5eb0a383b4eb1a5787a8003 \
+  --repo-root /home/alex/repos/heim-pc \
   --repo-id heimgewebe/heim-pc \
   --commit a01e4d677f0375b4c5eb0a383b4eb1a5787a8003 \
   --target heimgewebe/nixer=/home/alex/repos/nixer@6c1fae3936e441c43d19a7924f2f26f3539fb1d3
 ```
+
+Nach Rotation des temporären Publisher-Quellcheckouts ist das gebundene Heim-PC-Git-Objekt weiterhin aus /home/alex/repos/heim-pc verfügbar; der CLI-Lauf mit dieser kanonischen Objektquelle lieferte fünf S1-Kanten, keine Lücke und unveränderten Digest 805efdef4e269186e7b1be3e9d75673c2d774fd6ff46da9c01157be754664c26 in 0,639 Sekunden.
 
 Erster echter direkter CLI-Lauf: Status `ok`, keine Lücken, 4 S1-Deklarationskanten, Digest `a8746ef4ddb8724d12b0459545012f56bb317a0955b8f6e4b696e0bd5b295eb3`, etwa **0,50 Sekunden**. Nach Erweiterung um `nixos_local_module_inclusion` ist der aktuelle **zweite echte CLI-Lauf** (0,528 Sekunden) ebenfalls `ok`, ohne Lücken, nun **5** gerichtete S1-Beziehungen. Der aktuelle Fünf-Kanten-Evidence-Digest lautet `805efdef4e269186e7b1be3e9d75673c2d774fd6ff46da9c01157be754664c26`. Der oben genannte Digest bezieht sich nur auf den anfänglichen Vier-Kantenstand. Jede Kante trägt die gebundene Quell- und Zielrevision sowie Git-Blob-OID/Digest; `flake.nix:11`, `nixos/system/flake.nix:41`, `modules/nixer.nix:46,69` sind auf Zeilen gebunden. Keine Relation behauptet Aktivierung oder erfolgreichen Dienststart.
 
@@ -32,7 +34,9 @@ Zweiter, unabhängiger Fall mit bereits vorhandenem `fleet_revision_relations`: 
 
 ## Negativ- und Abdeckungsgrenzen
 
-`python3 -m unittest -q tests.test_cross_repo_flake_relations`: 13 gezielte Tests bestanden, inklusive exakter Gitobjekt-Positivkette, reproduzierbarem Output, falschem Owner, falschem Zielcommit, Lock-Konflikt, fehlendem Zielrepo, fehlendem Modulpfad, kommentar-only Modul-Export, URL außerhalb der Flake-Root-Inputs, doppelter Root-Input, Root-Attrpfad, Git-HEAD im Ziel verschieden vom gepinnten Objekt und tatsächlichem CLI-Aufruf.
+`python3 -m unittest -q tests.test_cross_repo_flake_relations`: 20 gezielte Tests bestanden, inklusive exakter Gitobjekt-Positivkette, reproduzierbarem Output, falschem Owner, falschem Zielcommit, Lock-Konflikt, fehlendem Zielrepo, fehlendem Modulpfad, kommentar-only Modul-Export, URL außerhalb der Flake-Root-Inputs, doppelter Root-Input, Root-Attrpfad, Git-HEAD im Ziel verschieden vom gepinnten Objekt und tatsächlichem CLI-Aufruf.
+
+Zusätzlich: Fünf echte Codex-P2-Reviewbefunde wurden mit sechs neuen Gegenproben reproduziert und adressiert: Referenz nach schließender hostModules-Klammer, Alias other-nixer, Pfadpräfix .nix.disabled, verschachtelter nur scheinbarer Modul-Export, widersprüchlicher innerer Flake-Pin und fehlende äußere outputs-Passthrough-Bindung. Ein zusätzliches Shadow-Export-Beispiel mit verschachteltem let und ein nicht unterstützter Modulpfad-Suffix werden als Lücke ausgewiesen. Kein solcher Fall darf eine S1-Modul-/Dienstkante erzeugen.
 
 Nicht bewiesen: vollständige Nix-AST-Evaluation, dynamische Importpfade, vollständige Cross-Repo-Abdeckung, Build-/CI-Identität, aktivierte Generation, tatsächlich laufender Dienst, Deploy-Kompatibilität. S0 Host-Readback des *User-Managers* meldet für `nixer.service` und `nixer-image.service` `LoadState=not-found`, `ActiveState=inactive`. Das beweist weder die Nichtexistenz eines systemweiten Headless-Dienstes noch die aktuelle NixOS-Generation.
 
@@ -44,6 +48,19 @@ Nicht bewiesen: vollständige Nix-AST-Evaluation, dynamische Importpfade, vollst
 - Revidierte Flake-Relationen vor und nach: jeweils vier bestätigte Deklarationskanten im ersten Producerstand, Digest davor `05cf1fdf323a7123cc9b1fa9f0d324abb6769d97106cafce41b2ee6873855fda`, danach `4599545d5dc7dd3e1f2ac20ac361b25c47e50ffd2681ef66b565c637cfcbf615`. Diese Vergleichsbeobachtung stammt vom ersten Vier-Kantenstand. Die heutige Fünf-Kanten-Version ist erneut abzugleichen.
 
 Es wurde weder ein ausführbarer Deploy-Impact noch ein Testlauf zu den historischen Commits behauptet. Solange keine reproduzierbare integrierte S2-Antwort vorliegt, ist das nur ein Vorbeleg.
+
+## S3: Separate Live-Beweise ohne produktive Änderungen
+
+Read-only-Primärquellen am 02.11.2026 ca. 07:54–07:55 UTC. Die Beobachtungen stammen jeweils vom zuständigen System und nicht aus einem Git-Commit oder CI-Lauf.
+
+- **Deklariert:** Heim-PC-Quellstand a01e4d... referenziert den oben belegten Nixer-Pin 6c1fae... inklusive bedingter NixOS-Dienstdeklaration. Die Konfigurationsabhängigkeit bedeutet nicht, dass derselbe Dienst aktiviert sein muss.
+- **Store/gebaut:** Nixer-Artefakt /nix/store/292bw8x8n77zw4bdlr247rqk11lln9iw-nixer-0.2.0, Derivation /nix/store/dk36ajandjc88knhjzwwaza72lsmzr31-nixer-0.2.0.drv, NAR-Hash sha256-zMXXlzJ+fg33Zaz2QzY3szmxmgId0XW2ks7OVXD4H2c=; durch nix path-info und nix derivation show tatsächlich im Host-Store bestätigt.
+- **Dateigleichheit Quelle ↔ gebautes Artefakt:** Die Derivation referenziert im Installationsskript drei Quell-Storedateien aus inputs.srcs, die byteweise exakt mit Git-Objekten aus Nixer@6c1fae3936e441c43d19a7924f2f26f3539fb1d3 identisch sind: server.py SHA256 0576da02fd08deb7f1cdea3d92a75e573eab294128cd384c914ad400bb0a1a88 (32246 Bytes), evidence.py SHA256 965887bfa74d58da74feeb75bef1af3ac972b72ba12c3b3d41c4a16bc6ea42fa (39838 Bytes), image_pin.py SHA256 42b46b6fd7c3304a09984cb4669d75e5904df11416834a774e66c216b8830809 (14967 Bytes). Das belegt keine vollständige Commit-Attestation aller Bestandteile.
+- **Aktivierte NixOS-Generation:** readlink -f /run/current-system und /nix/var/nix/profiles/system ergeben beide /nix/store/2xy6inggq55kq8zzkhvppivm8yz0xlqn-nixos-system-heim-pc-26.05.20261025.1f607aa. Der Store-Name ist keine belegte Heim-PC-Quell-SHA.
+- **Tatsächlich laufender Dienst:** Großer Adler beobachtete nixer-headless.service in systemd-Systemscope, loaded/active/running, MainPID 4413, UID 1000, cgroup /system.slice/nixer-headless.service und cgroup-eigenen TCP-Listener 127.0.0.1:18187. systemctl show belegt ExecStart des genannten Nixer-Storeartefakts. Der Unitpfad /etc/systemd/system/nixer-headless.service zeigt auf /nix/store/3sdsd4fbdr2fq58bq8pwr18hlbqdizkw-unit-nixer-headless.service/nixer-headless.service. Das Nixer-MCP meldete Backend-Bereitschaft.
+- **Negativgrenze:** nixer.service ist in User- und Systemscope not-found; daraus folgt **nicht**, dass Nixer nicht läuft. Der nixer-headless-Systemdienst ist unabhängig davon tatsächlich vorhanden. Es fehlt weiterhin die revisionsgenaue Git-Commit-Quittung der aktivierten NixOS-Generation und ein RepoGround-Consumerbeleg auf neu veröffentlichtem Generator/Bundle.
+
+Die beobachtete S3-Kette lautet damit: deklarierter Flake-Pin → drei identische gebaute Quellbytes → Store-Derivation/Artefakt → ExecStart des laufenden Headless-Dienstes; die Host-Git-SHA der aktivierten NixOS-Generation bleibt unbekannt. CI-Erfolg, Store-Existenz und Prozessgesundheit sind separate Beweise.
 
 ## Betriebs-, Integrations- und Kostenwahrheit
 

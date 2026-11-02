@@ -138,6 +138,123 @@ def _resolved_target(
     return target_sha, target_tree, target_flake
 
 
+
+def _brace_depths(syntax: str) -> list[int]:
+    """Track lexical brace nesting after Nix trivia/string masking."""
+    result: list[int] = []
+    depth = 0
+    for char in syntax:
+        result.append(depth)
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+    return result
+
+
+def _let_body_opener(syntax: str, start: int) -> int:
+    """Find the returned attrset of an outputs let, not a nested let value."""
+    nested = 0
+    for token in re.finditer(r"\blet\b|\bin\b", syntax[start:]):
+        nested += 1 if token.group() == "let" else -1
+        if nested == 0:
+            after = start + token.end()
+            matched = re.match(r"\s*\{", syntax[after:])
+            return after + matched.end() - 1 if matched else -1
+        if nested < 0:
+            break
+    return -1
+
+
+def _verified_output_export(target_flake: bytes) -> bool:
+    """Only an attr directly in the returned root outputs set can be S1."""
+    syntax = _nix_without_trivia(target_flake.decode("utf-8", errors="replace"))
+    depths = _brace_depths(syntax)
+    signatures = list(re.finditer(
+        r"(?m)^\s*outputs\s*=\s*\{[^{}]*\}\s*:", syntax,
+    ))
+    if len(signatures) != 1 or depths[signatures[0].start()] != 1:
+        return False
+    tail = signatures[0].end()
+    immediate_set = re.match(r"\s*\{", syntax[tail:])
+    if immediate_set:
+        opener = tail + immediate_set.end() - 1
+    elif re.match(r"\s*let\b", syntax[tail:]):
+        opener = _let_body_opener(syntax, tail)
+    else:
+        return False
+    if opener < 0:
+        return False
+    if depths[opener] != 1 or syntax[opener] != "{":
+        return False
+    output_depth = depths[opener] + 1
+    for item in re.finditer(r"(?m)^[ \t]*nixosModules\.default\s*=", syntax):
+        if item.start() > opener and depths[item.start()] == output_depth:
+            return True
+    return False
+
+
+def _verified_inner_flake(
+    outer: bytes, inner: bytes, alias: str,
+    dependency: str, declared_sha: str, module_flake_path: str,
+) -> bool:
+    """An inner same-named input is not an alias of the outer Flake by name."""
+    if module_flake_path != "nixos/system/flake.nix":
+        return False
+    outer_syntax = _nix_without_trivia(outer.decode("utf-8"))
+    depths = _brace_depths(outer_syntax)
+    links = list(re.finditer(
+        r"(?m)^\s*outputs\s*=\s*inputs@\{([^{}]*)\}\s*:\s*"
+        r"\(import\s+\./nixos/system/flake\.nix\)\.outputs\s+inputs\s*;",
+        outer_syntax,
+    ))
+    if len(links) != 1 or depths[links[0].start()] != 1:
+        return False
+    if alias not in re.findall(r"[A-Za-z_][A-Za-z0-9_-]*", links[0].group(1)):
+        return False
+    inner_text = inner.decode("utf-8")
+    inner_urls, gaps = _literal_urls(inner_text)
+    if gaps or alias not in inner_urls:
+        return False
+    actual_repo, actual_sha, _ = inner_urls[alias]
+    if (actual_repo, actual_sha) != (dependency, declared_sha):
+        return False
+    inner_syntax = _nix_without_trivia(inner_text)
+    inner_depths = _brace_depths(inner_syntax)
+    declarations = list(re.finditer(
+        r"(?m)^\s*outputs\s*=\s*\{([^{}]*)\}\s*:", inner_syntax,
+    ))
+    return (
+        len(declarations) == 1
+        and inner_depths[declarations[0].start()] == 1
+        and alias in re.findall(
+            r"[A-Za-z_][A-Za-z0-9_-]*", declarations[0].group(1)
+        )
+    )
+
+
+def _host_module_list_tokens(line: str, alias: str) -> list[str] | None:
+    """Only literal items before the closing bracket of hostModules are evidence."""
+    matched = re.fullmatch(r"\s*hostModules\s*=\s*\[([^\[\]]*)\]\s*;\s*", line)
+    if matched is None:
+        return None
+    tokens = matched.group(1).split()
+    expected = alias + ".nixosModules.default"
+    if expected not in tokens:
+        return []
+    if any(
+        item != expected and (
+            not re.fullmatch(r"\.{1,2}/[A-Za-z0-9_./-]+", item)
+            or (item.startswith("./modules/") and not _MODULE.fullmatch(item))
+        )
+        for item in tokens
+    ):
+        return None
+    return [
+        item for item in tokens
+        if re.fullmatch(r"\./modules/[A-Za-z0-9_.-]+\.nix", item)
+    ]
+
 def _declared_services(
     source_repo: str, commit: str, tree: dict[str, str],
     candidate: str, host_module: bytes,
@@ -164,27 +281,30 @@ def _declared_services(
 
 def _declared_host_modules(
     root: Path, tree: dict[str, str], source_repo: str, commit: str,
-    module_flake_path: str, inner: bytes | None, alias: str,
-    target_flake: bytes, target_evidence: dict[str, Any],
+    module_flake_path: str, outer: bytes, inner: bytes | None, alias: str,
+    dependency: str, declared_sha: str, target_flake: bytes, target_evidence: dict[str, Any],
     root_evidence: dict[str, Any], lock_evidence: dict[str, Any],
     rows: list[dict[str, Any]], gaps: list[str],
 ) -> None:
     if inner is None:
         gaps.append("host_module_flake_unavailable:" + alias)
         return
-    # Do not promote a mention in a comment or a string to an exported module.
-    export_syntax = _nix_without_trivia(
-        target_flake.decode("utf-8", errors="replace")
-    )
-    if not re.search(r"(?<![\w.])nixosModules\.default\s*=", export_syntax):
+    if not _verified_output_export(target_flake):
         gaps.append("target_module_export_unverified:" + target_evidence["repo_id"])
         return
+    if not _verified_inner_flake(
+        outer, inner, alias, dependency, declared_sha, module_flake_path
+    ):
+        gaps.append("inner_flake_input_unverified:" + alias)
+        return
     for number, line in enumerate(_nix_without_trivia(inner.decode("utf-8")).splitlines(), 1):
-        if not re.match(r"^\s*hostModules\s*=\s*\[", line):
+        if not re.match(r"^\s*hostModules\s*=", line):
             continue
-        if not re.search(r"\b" + re.escape(alias) + r"\.nixosModules\.default\b", line):
+        members = _host_module_list_tokens(line, alias)
+        if members is None:
+            gaps.append("host_modules_list_unverified:" + alias)
             continue
-        for relative in sorted(set(_MODULE.findall(line))):
+        for relative in sorted(set(members)):
             candidate = posixpath.normpath(
                 posixpath.join(posixpath.dirname(module_flake_path), relative)
             )
@@ -268,8 +388,9 @@ def flake_revision_relations(
                 "flake_pinned_input", root_evidence, target_evidence, [lock_evidence],
             ))
             _declared_host_modules(
-                root, tree, source_repo, commit, module_flake_path, inner, alias,
-                target_flake, target_evidence, root_evidence, lock_evidence,
+                root, tree, source_repo, commit, module_flake_path,
+                outer, inner, alias, dependency, declared_sha, target_flake,
+                target_evidence, root_evidence, lock_evidence,
                 rows, gaps,
             )
     rows.sort(key=lambda row: (

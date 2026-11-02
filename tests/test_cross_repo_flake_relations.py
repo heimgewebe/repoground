@@ -34,7 +34,9 @@ def make_repo(root, files):
 def fixture(root, *, owner="heimgewebe", lock_rev=None, missing_module=False):
     target = root / "target"
     t_sha = make_repo(target, {
-        "flake.nix": '{ nixosModules.default = import ./nix/module.nix; }\n',
+        "flake.nix": '{\n  outputs = { self }: {\n'
+                     '    nixosModules.default = import ./nix/module.nix;\n'
+                     '  };\n}\n',
         "nix/module.nix": "{ ... }: { }\n",
     })
     pin = t_sha
@@ -48,10 +50,17 @@ def fixture(root, *, owner="heimgewebe", lock_rev=None, missing_module=False):
     }
     files = {
         "flake.nix": ('{\n  inputs = {\n    nixer.url = "github:'
-                      + owner + '/nixer/' + pin + '";\n  };\n}\n'),
+                      + owner + '/nixer/' + pin + '";\n  };\n'
+                      '  outputs = inputs@{ self, nixer }:'
+                      ' (import ./nixos/system/flake.nix).outputs inputs;\n}\n'),
         "flake.lock": json.dumps(lock),
-        "nixos/system/flake.nix":
-            "{\n  hostModules = [ nixer.nixosModules.default ./modules/nixer.nix ];\n}\n",
+        "nixos/system/flake.nix": (
+            '{\n  inputs = {\n    nixer.url = "github:' + owner + '/nixer/'
+            + pin + '";\n  };\n'
+            '  outputs = { self, nixer }:\n    let\n'
+            '      hostModules = [ nixer.nixosModules.default ./modules/nixer.nix ];\n'
+            '    in { inherit hostModules; };\n}\n'
+        ),
     }
     if not missing_module:
         files["nixos/system/modules/nixer.nix"] = (
@@ -63,6 +72,20 @@ def fixture(root, *, owner="heimgewebe", lock_rev=None, missing_module=False):
     source = root / "source"
     s_sha = make_repo(source, files)
     return source, s_sha, target, t_sha, pin
+
+
+def rewrite_committed(root, path, original, replacement):
+    target = root / path
+    source = target.read_text(encoding="utf-8")
+    assert original in source, (path, original)
+    target.write_text(source.replace(original, replacement, 1), encoding="utf-8")
+    git(root, "add", path)
+    subprocess.run(
+        ["git", "-C", str(root), "-c", "user.name=Test",
+         "-c", "user.email=test@example.invalid",
+         "commit", "-qm", "revised Git fixture"], check=True,
+    )
+    return git(root, "rev-parse", "HEAD")
 
 
 class FlakeRelationsTest(TestCase):
@@ -223,8 +246,12 @@ class FlakeRelationsTest(TestCase):
                     },
                     "root": "root",
                 }),
-                "nixos/system/flake.nix":
-                    "hostModules = [ nixer.nixosModules.default ./modules/nixer.nix ];\n",
+                "nixos/system/flake.nix": (
+                    '{\n  inputs = {\n    nixer.url = "github:heimgewebe/nixer/'
+                    + pin + '";\n  };\n  outputs = { self, nixer }:\n'
+                    '    let hostModules = [ nixer.nixosModules.default '
+                    './modules/nixer.nix ]; in { inherit hostModules; };\n}\n'
+                ),
                 "nixos/system/modules/nixer.nix": "services.nixer = { };\n",
             })
             result = flake_revision_relations(
@@ -265,6 +292,8 @@ class FlakeRelationsTest(TestCase):
             (src / "flake.nix").write_text(
                 '{\n'
                 f'  inputs.nixer.url = "github:heimgewebe/nixer/{pin}";\n'
+                '  outputs = inputs@{ self, nixer }: '
+                '(import ./nixos/system/flake.nix).outputs inputs;\n'
                 '}\n', encoding="utf-8"
             )
             git(src, "add", "flake.nix")
@@ -303,3 +332,130 @@ class FlakeRelationsTest(TestCase):
             )
             self.assertEqual(result["relations"], [])
             self.assertIn("duplicate_flake_input:nixer", result["gaps"])
+
+    def test_host_modules_after_closing_bracket_cannot_bind(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src, sha, target, t_sha, _pin = fixture(Path(tmp))
+            sha = rewrite_committed(
+                src, "nixos/system/flake.nix",
+                "hostModules = [ nixer.nixosModules.default ./modules/nixer.nix ];",
+                "hostModules = [ ]; unused = [ nixer.nixosModules.default ./modules/nixer.nix ];",
+            )
+            result = flake_revision_relations(
+                src, sha, source_repo="heimgewebe/heim-pc",
+                targets={"heimgewebe/nixer": (target, t_sha)},
+            )
+            self.assertEqual([r["relation_type"] for r in result["relations"]],
+                             ["flake_pinned_input"])
+            self.assertIn("host_modules_list_unverified:nixer", result["gaps"])
+
+    def test_same_suffix_other_nixer_alias_cannot_bind(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src, sha, target, t_sha, _pin = fixture(Path(tmp))
+            sha = rewrite_committed(
+                src, "nixos/system/flake.nix",
+                "hostModules = [ nixer.nixosModules.default ./modules/nixer.nix ];",
+                "hostModules = [ other-nixer.nixosModules.default ./modules/nixer.nix ];",
+            )
+            result = flake_revision_relations(
+                src, sha, source_repo="heimgewebe/heim-pc",
+                targets={"heimgewebe/nixer": (target, t_sha)},
+            )
+            self.assertEqual([r["relation_type"] for r in result["relations"]],
+                             ["flake_pinned_input"])
+
+    def test_module_suffix_is_not_prefix_of_an_actual_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src, sha, target, t_sha, _pin = fixture(Path(tmp))
+            extra = src / "nixos/system/modules/nixer.nix.disabled"
+            extra.write_text("services.nixer = { enable = true; };\n", encoding="utf-8")
+            git(src, "add", "nixos/system/modules/nixer.nix.disabled")
+            sha = rewrite_committed(
+                src, "nixos/system/flake.nix",
+                "hostModules = [ nixer.nixosModules.default ./modules/nixer.nix ];",
+                "hostModules = [ nixer.nixosModules.default ./modules/nixer.nix.disabled ];",
+            )
+            result = flake_revision_relations(
+                src, sha, source_repo="heimgewebe/heim-pc",
+                targets={"heimgewebe/nixer": (target, t_sha)},
+            )
+            self.assertEqual([r["relation_type"] for r in result["relations"]],
+                             ["flake_pinned_input"])
+
+    def test_nested_export_is_not_an_actual_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src, sha, target, t_sha, _pin = fixture(Path(tmp))
+            revised = rewrite_committed(
+                target, "flake.nix",
+                "nixosModules.default = import ./nix/module.nix;",
+                "unused = { nixosModules.default = import ./nix/module.nix; };",
+            )
+            # Pin remains the old object; root URL/lock must follow the exact
+            # newly created target Git revision for this negative fixture.
+            sha = rewrite_committed(src, "flake.nix", t_sha, revised)
+            sha = rewrite_committed(src, "flake.lock", t_sha, revised)
+            sha = rewrite_committed(src, "nixos/system/flake.nix", t_sha, revised)
+            result = flake_revision_relations(
+                src, sha, source_repo="heimgewebe/heim-pc",
+                targets={"heimgewebe/nixer": (target, revised)},
+            )
+            self.assertEqual([r["relation_type"] for r in result["relations"]],
+                             ["flake_pinned_input"])
+            self.assertIn("target_module_export_unverified:heimgewebe/nixer",
+                          result["gaps"])
+
+    def test_inner_flake_conflicting_pin_cannot_claim_outer_binding(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src, sha, target, t_sha, _pin = fixture(Path(tmp))
+            sha = rewrite_committed(
+                src, "nixos/system/flake.nix",
+                f'nixer.url = "github:heimgewebe/nixer/{t_sha}";',
+                f'nixer.url = "github:other/nixer/{"f" * 40}";',
+            )
+            result = flake_revision_relations(
+                src, sha, source_repo="heimgewebe/heim-pc",
+                targets={"heimgewebe/nixer": (target, t_sha)},
+            )
+            self.assertEqual([r["relation_type"] for r in result["relations"]],
+                             ["flake_pinned_input"])
+            self.assertIn("inner_flake_input_unverified:nixer", result["gaps"])
+
+    def test_nested_let_variable_is_not_a_returned_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src, sha, target, t_sha, _pin = fixture(Path(tmp))
+            new = rewrite_committed(
+                target, "flake.nix",
+                "outputs = { self }: {\n"
+                "    nixosModules.default = import ./nix/module.nix;\n"
+                "  };",
+                "outputs = { self }: let\n"
+                "    hidden = { nixosModules.default = import ./nix/module.nix; };\n"
+                "  in { packages.default = null; };",
+            )
+            sha = rewrite_committed(src, "flake.nix", t_sha, new)
+            sha = rewrite_committed(src, "flake.lock", t_sha, new)
+            sha = rewrite_committed(src, "nixos/system/flake.nix", t_sha, new)
+            result = flake_revision_relations(
+                src, sha, source_repo="heimgewebe/heim-pc",
+                targets={"heimgewebe/nixer": (target, new)},
+            )
+            self.assertEqual([r["relation_type"] for r in result["relations"]],
+                             ["flake_pinned_input"])
+            self.assertIn("target_module_export_unverified:heimgewebe/nixer",
+                          result["gaps"])
+
+    def test_outer_flake_missing_outputs_passthrough_does_not_claim_binding(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src, sha, target, t_sha, _pin = fixture(Path(tmp))
+            sha = rewrite_committed(
+                src, "flake.nix",
+                "(import ./nixos/system/flake.nix).outputs inputs;",
+                "{ packages.default = null; };",
+            )
+            result = flake_revision_relations(
+                src, sha, source_repo="heimgewebe/heim-pc",
+                targets={"heimgewebe/nixer": (target, t_sha)},
+            )
+            self.assertEqual([r["relation_type"] for r in result["relations"]],
+                             ["flake_pinned_input"])
+            self.assertIn("inner_flake_input_unverified:nixer", result["gaps"])
