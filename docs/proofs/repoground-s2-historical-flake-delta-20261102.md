@@ -32,6 +32,31 @@ python -m merger.repoground.cli.main federation flake-relation-delta \
 
 Die automatisierte Antwort ist somit: Der äußere Nixer-Pin wurde geändert, der innere blieb zunächst widersprüchlich; eine vollständig belegte Modulbindung kann für diese Revision **nicht** bestätigt werden. Aus diesem Git-Befund folgt keine produktive Laufzeitversion.
 
+
+## Unabhängiger realer S2-Fall: Metarepo-Kopiervertrag → RepoGround
+
+Der bereits bestehende Produzent \`federation relation-delta\` wurde unabhängig von Nixer und ohne neue Architektur an tatsächlich verschiedenen RepoGround-Revisionen aufgerufen:
+
+- Metarepo-Quelle, beide Seiten: \`heimgewebe/metarepo@c1ac04fec54de590eda209b916f81c4ce8eb363a\`
+- RepoGround-Ziel vor Änderung: \`70a481fec04370cee06bd62ba1c3fe135183f14e\`
+- RepoGround-Ziel nach Änderung: \`520199e2727fab11aae080ad81837d283e60e3f8\`
+- Deklarierter Vertrag: \`sync/metarepo-sync.yml\` → \`.github/workflows/wgx-guard.yml\`
+
+Der echte CLI-Lauf lieferte \`status=ok\`, \`gaps=[]\` und genau **eine** \`relation_deltas[].transition=modified\`-Beziehung vom Typ \`declared_copy_target\`. Die Git-gebundenen SHA-256-Quellbytes am Ziel wechselten von \`9cb7c5b0579d2b022fc68c926cd6e04695a09eb5441a6e716376b3640c192695\` auf \`8cdaec478de624bd59a7bec17cedb56c369376c18d69f86ab5c25444af28232b\`. **Dies ist eine Änderung des Zielinhalts innerhalb eines deklarierten Kopiervertrags, kein Beweis einer erfolgten Synchronisierung oder Runtime-Auswirkung.**
+
+Wiederholung:
+
+\`\`\`bash
+python3 -m merger.repoground.cli.main federation relation-delta \
+  --metarepo-root /home/alex/repos/metarepo \
+  --base-metarepo-commit c1ac04fec54de590eda209b916f81c4ce8eb363a \
+  --head-metarepo-commit c1ac04fec54de590eda209b916f81c4ce8eb363a \
+  --target-before repoground=/home/alex/repos/repoground@70a481fec04370cee06bd62ba1c3fe135183f14e \
+  --target-after repoground=/home/alex/repos/repoground@520199e2727fab11aae080ad81837d283e60e3f8
+\`\`\`
+
+Dieser reale Vergleich nutzt die schon vorhandene allgemeine \`relation-delta\`-Funktion; der neue \`flake-relation-delta\`-Aufruf deckt den Nixer-Fall ab. Die Fälle prüfen unterschiedliche Relationstypen und dürfen nicht als gleichartige Flake-Kanten statistisch vermengt werden.
+
 ## Gegenproben, Prüfungen und Grenzen
 
 `merger.repoground.tests.test_flake_relation_delta`: 6/6 erfolgreich (stabile identische Revision, widersprüchliche innere Flake-Revision, vollständig konsistenter Pinwechsel, echte Entfernung eines systemd-Dienstattributs bei vollständiger Evidenz, fehlendes Ziel-Gitobjekt, CLI-SHA-Validierung). Der andere, unabhängige Repo-Vertrag ist bereits über die vorhandene Metarepo-`relation-delta`-Fixture abgedeckt, muss aber in einem vollständigen Agenten-Goldset gesondert gemessen werden.
