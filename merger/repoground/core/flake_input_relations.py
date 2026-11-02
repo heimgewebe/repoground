@@ -95,10 +95,32 @@ def _locked_inputs(lock: bytes) -> tuple[dict[str, Any], dict[str, Any]]:
         raise ValueError("invalid flake.lock at requested Git revision") from exc
 
 
+def _unsupported_input_layout(
+    alias: str, source_text: str, node: dict[str, Any], locked: dict[str, Any],
+) -> bool:
+    """Do not bind root flake.nix for subdirectory or non-flake inputs."""
+    syntax = _nix_without_trivia(source_text)
+    # Our bounded lexical producer supports the root flake of an ordinary input
+    # only. A declared dir or flake modifier changes input evaluation semantics.
+    attr = r"(?:inputs\.)?" + re.escape(alias) + r"\.(?:dir|flake)\s*="
+    if re.search(r"(?m)^\s*" + attr, syntax):
+        return True
+    nested = re.escape(alias) + r"\s*=\s*\{[^}]{0,2048}\b(?:dir|flake)\s*="
+    if re.search(nested, syntax):
+        return True
+    for entry in (node, locked, node.get("original")):
+        if isinstance(entry, dict) and (
+            "dir" in entry or entry.get("flake") is False
+        ):
+            return True
+    return False
+
+
 def _resolved_target(
     alias: str, dependency: str, declared_sha: str,
     nodes: dict[str, Any], root_inputs: dict[str, Any],
     targets: dict[str, tuple[str | Path, str]], gaps: list[str],
+    source_text: str,
 ) -> tuple[str, dict[str, str], bytes] | None:
     node_key = root_inputs.get(alias)
     node = nodes.get(node_key) if isinstance(node_key, str) else None
@@ -112,6 +134,9 @@ def _resolved_target(
         or locked.get("rev") != declared_sha
     ):
         gaps.append("flake_lock_mismatch:" + alias)
+        return None
+    if _unsupported_input_layout(alias, source_text, node, locked):
+        gaps.append("unsupported_flake_input_layout:" + alias)
         return None
     spec = targets.get(dependency)
     if spec is None:
@@ -500,6 +525,7 @@ def flake_revision_relations(
         for alias, (dependency, declared_sha, url_line) in sorted(urls.items()):
             resolved = _resolved_target(
                 alias, dependency, declared_sha, nodes, root_inputs, targets, gaps,
+                outer.decode("utf-8"),
             )
             if resolved is None:
                 continue

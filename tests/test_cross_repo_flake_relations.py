@@ -583,3 +583,61 @@ class FlakeRelationsTest(TestCase):
                 self.assertEqual(result["status"], "ok")
                 self.assertEqual(len(result["relations"]), 5)
                 self.assertEqual(result["gaps"], [])
+
+    def test_subdirectory_input_never_reuses_repository_root_flake(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src, _sha, target, t_sha, pin = fixture(Path(tmp))
+            name = "flake.nix"
+            old = f'nixer.url = "github:heimgewebe/nixer/{pin}";'
+            sha = rewrite_committed(
+                src, name, old, old + '\n    nixer.dir = "other";',
+            )
+            lock = json.loads((src / "flake.lock").read_text())
+            lock["nodes"]["nixer"]["locked"]["dir"] = "other"
+            sha = rewrite_committed(
+                src, "flake.lock",
+                (src / "flake.lock").read_text(), json.dumps(lock),
+            )
+            result = flake_revision_relations(
+                src, sha, source_repo="heimgewebe/heim-pc",
+                targets={"heimgewebe/nixer": (target, t_sha)},
+            )
+            self.assertEqual(result["relations"], [])
+            self.assertIn("unsupported_flake_input_layout:nixer", result["gaps"])
+
+    def test_nonflake_input_never_exports_nixos_module(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src, _sha, target, t_sha, pin = fixture(Path(tmp))
+            old = f'nixer.url = "github:heimgewebe/nixer/{pin}";'
+            sha = rewrite_committed(
+                src, "flake.nix", old, old + "\n    nixer.flake = false;",
+            )
+            lock = json.loads((src / "flake.lock").read_text())
+            lock["nodes"]["nixer"]["flake"] = False
+            lock["nodes"]["nixer"]["locked"]["flake"] = False
+            sha = rewrite_committed(
+                src, "flake.lock",
+                (src / "flake.lock").read_text(), json.dumps(lock),
+            )
+            result = flake_revision_relations(
+                src, sha, source_repo="heimgewebe/heim-pc",
+                targets={"heimgewebe/nixer": (target, t_sha)},
+            )
+            self.assertEqual(result["relations"], [])
+            self.assertIn("unsupported_flake_input_layout:nixer", result["gaps"])
+
+    def test_lock_only_nonroot_flake_attribute_is_not_promoted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src, sha, target, t_sha, _pin = fixture(Path(tmp))
+            lock = json.loads((src / "flake.lock").read_text())
+            lock["nodes"]["nixer"]["locked"]["dir"] = "subdir"
+            sha = rewrite_committed(
+                src, "flake.lock",
+                (src / "flake.lock").read_text(), json.dumps(lock),
+            )
+            result = flake_revision_relations(
+                src, sha, source_repo="heimgewebe/heim-pc",
+                targets={"heimgewebe/nixer": (target, t_sha)},
+            )
+            self.assertEqual(result["relations"], [])
+            self.assertIn("unsupported_flake_input_layout:nixer", result["gaps"])
