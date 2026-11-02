@@ -1,0 +1,124 @@
+{
+  "does_not_establish": [
+    "unique_git_commit_from_equal_content",
+    "current_git_pin_was_built",
+    "exact_nix_flake_input_to_derivation_identity",
+    "mcp_agent_tool_success",
+    "runtime_source_equal_to_declared_pin",
+    "absence_of_other_processes"
+  ],
+  "edges": [
+    {
+      "evidence_ref": "1c9aac891aa03ee5df0cf9d72ff4541ebf065ac31a09dbad4c6674b6d4c87f10",
+      "relation": "heim_pc_git_flake_to_declared_nixer_git_pin",
+      "status": "verified"
+    },
+    {
+      "evidence_ref": "/nix/store/2xy6inggq55kq8zzkhvppivm8yz0xlqn-nixos-system-heim-pc-26.05.20261025.1f607aa",
+      "relation": "active_generation_to_system_profile",
+      "status": "verified"
+    },
+    {
+      "evidence_ref": "68f98f1080e4bc05b512a6a0a87e88ec5160257a1d77b3332d830dcfadb67c92",
+      "relation": "activated_generation_to_nixer_unit_and_output",
+      "status": "verified"
+    },
+    {
+      "evidence_ref": "/nix/store/dk36ajandjc88knhjzwwaza72lsmzr31-nixer-0.2.0.drv",
+      "relation": "nix_derivation_to_store_output",
+      "status": "verified"
+    },
+    {
+      "evidence_ref": "979e2345cf1ad20e21207860b9376ee4752124345b4f2b28501a082273b4af2d",
+      "relation": "older_git_sources_content_to_build_derivation",
+      "status": "verified_content_equivalence"
+    },
+    {
+      "evidence_ref": "979e2345cf1ad20e21207860b9376ee4752124345b4f2b28501a082273b4af2d",
+      "relation": "declared_git_sources_content_to_build_derivation",
+      "status": "source_content_mismatch"
+    },
+    {
+      "evidence_ref": "e3a08a15fe74b96e5da63fc76dee9ac039bbfe4da781166aa6dc7a7bad059b4f",
+      "relation": "effective_systemd_unit_to_observed_process",
+      "status": "verified"
+    },
+    {
+      "detail": "HTTP 406",
+      "evidence_ref": "http://127.0.0.1:18187/mcp",
+      "relation": "observed_process_to_http_endpoint",
+      "status": "http_reachable_only"
+    }
+  ],
+  "endpoint": {
+    "http_responded": true,
+    "http_status": 406,
+    "protocol_handshake_verified": false,
+    "url": "http://127.0.0.1:18187/mcp"
+  },
+  "evidence_sha256": "990fb28ccc8956e069a9cbbc9c9d80bbf4375443eefddf3a768df1e92a16bf7d",
+  "gaps": [
+    "declared_git_source_content_does_not_match_running_build",
+    "full_nix_flake_source_to_derivation_identity_not_proven",
+    "mcp_initialize_or_tool_call_not_proven"
+  ],
+  "kind": "repoground.nixer-runtime-provenance",
+  "nix": {
+    "active_generation": "/nix/store/2xy6inggq55kq8zzkhvppivm8yz0xlqn-nixos-system-heim-pc-26.05.20261025.1f607aa",
+    "derivation_json_sha256": "8ee2c23c96d293be8deec56b058eee639fd611801b043538bb9220df71ca2c9c",
+    "effective_unit_store_path": "/nix/store/3sdsd4fbdr2fq58bq8pwr18hlbqdizkw-unit-nixer-headless.service/nixer-headless.service",
+    "nixer_derivation": "/nix/store/dk36ajandjc88knhjzwwaza72lsmzr31-nixer-0.2.0.drv",
+    "nixer_source_store_paths": {
+      "evidence.py": "/nix/store/q707qc6q4jd6irib40ai8rvsxdsk6rvd-evidence.py",
+      "image_pin.py": "/nix/store/qxvwwklb4s4i3zlxv0j1dwi2f17255sa-image_pin.py",
+      "server.py": "/nix/store/ha4f7yxja6snlmlkr6dis8nkm6pr441z-server.py"
+    },
+    "nixer_store_output": "/nix/store/292bw8x8n77zw4bdlr247rqk11lln9iw-nixer-0.2.0",
+    "system_profile": "/nix/store/2xy6inggq55kq8zzkhvppivm8yz0xlqn-nixos-system-heim-pc-26.05.20261025.1f607aa",
+    "why_depends_sha256": "68f98f1080e4bc05b512a6a0a87e88ec5160257a1d77b3332d830dcfadb67c92"
+  },
+  "observed_at_utc": "2026-11-02T12:17:04.843663+00:00",
+  "source": {
+    "content_comparison_older_nixer_commit": "6c1fae3936e441c43d19a7924f2f26f3539fb1d3",
+    "declared_nixer_commit": "c252b62b0fcd0bd5442681bb68d809a4b5984c61",
+    "heim_pc_commit": "049efc0fcddee75d5d6ddee631be6e5b42784761",
+    "s1_evidence_sha256": "1c9aac891aa03ee5df0cf9d72ff4541ebf065ac31a09dbad4c6674b6d4c87f10"
+  },
+  "source_file_matches": {
+    "evidence.py": {
+      "git_sha256_declared": "965887bfa74d58da74feeb75bef1af3ac972b72ba12c3b3d41c4a16bc6ea42fa",
+      "git_sha256_older": "965887bfa74d58da74feeb75bef1af3ac972b72ba12c3b3d41c4a16bc6ea42fa",
+      "match_declared": true,
+      "match_older": true,
+      "status": "observed",
+      "store_sha256": "965887bfa74d58da74feeb75bef1af3ac972b72ba12c3b3d41c4a16bc6ea42fa"
+    },
+    "image_pin.py": {
+      "git_sha256_declared": "42b46b6fd7c3304a09984cb4669d75e5904df11416834a774e66c216b8830809",
+      "git_sha256_older": "42b46b6fd7c3304a09984cb4669d75e5904df11416834a774e66c216b8830809",
+      "match_declared": true,
+      "match_older": true,
+      "status": "observed",
+      "store_sha256": "42b46b6fd7c3304a09984cb4669d75e5904df11416834a774e66c216b8830809"
+    },
+    "server.py": {
+      "git_sha256_declared": "741520a0cb7a469dbcc98c0aba4acf5ba504acd3c5ea51aa6cccb800df9b9703",
+      "git_sha256_older": "0576da02fd08deb7f1cdea3d92a75e573eab294128cd384c914ad400bb0a1a88",
+      "match_declared": false,
+      "match_older": true,
+      "status": "observed",
+      "store_sha256": "0576da02fd08deb7f1cdea3d92a75e573eab294128cd384c914ad400bb0a1a88"
+    }
+  },
+  "status": "partial",
+  "systemd": {
+    "active_state": "active",
+    "cgroup": "/system.slice/nixer-headless.service",
+    "exec_start": "{ path=/nix/store/292bw8x8n77zw4bdlr247rqk11lln9iw-nixer-0.2.0/bin/nixer ; argv[]=/nix/store/292bw8x8n77zw4bdlr247rqk11lln9iw-nixer-0.2.0/bin/nixer --transport streamable-http --host 127.0.0.1 --port 18187 ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }",
+    "main_pid": 4413,
+    "process_cmdline_sha256": "67915b47a817f43bf3fcbfac1bd1fdb0a369f1f4e635617891dbbf98a415f8d2",
+    "process_exe": "/nix/store/d64q19q1xjdwfhqx6czvrjgrhq0n3lcc-python3-3.14.7/bin/python3.14",
+    "unit": "nixer-headless.service"
+  },
+  "version": "1"
+}
