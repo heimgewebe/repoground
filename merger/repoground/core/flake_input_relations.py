@@ -191,30 +191,54 @@ def _let_body_opener(syntax: str, start: int) -> int:
     return -1
 
 
-def _verified_output_export(target_flake: bytes) -> bool:
-    """Only an attr directly in the returned root outputs set can be S1."""
-    syntax = _nix_without_trivia(target_flake.decode("utf-8", errors="replace"))
+def _returned_output_span(syntax: str) -> tuple[int, int] | None:
+    """Bound a literal outputs attrset, excluding later sibling attrsets."""
     depths = _brace_depths(syntax)
-    signatures = list(re.finditer(
+    matches = list(re.finditer(
         r"(?m)^\s*outputs\s*=\s*\{[^{}]*\}\s*:", syntax,
     ))
-    if len(signatures) != 1 or depths[signatures[0].start()] != 1:
-        return False
-    tail = signatures[0].end()
-    immediate_set = re.match(r"\s*\{", syntax[tail:])
-    if immediate_set:
-        opener = tail + immediate_set.end() - 1
+    if len(matches) != 1 or depths[matches[0].start()] != 1:
+        return None
+    tail = matches[0].end()
+    immediate = re.match(r"\s*\{", syntax[tail:])
+    if immediate is not None:
+        opener = tail + immediate.end() - 1
     elif re.match(r"\s*let\b", syntax[tail:]):
         opener = _let_body_opener(syntax, tail)
     else:
+        return None
+    if opener < 0 or depths[opener] != 1 or syntax[opener] != "{":
+        return None
+    closer = next(
+        (i for i in range(opener + 1, len(syntax))
+         if syntax[i] == "}" and depths[i] == 2),
+        None,
+    )
+    return (opener, closer) if closer is not None else None
+
+
+def _inner_host_modules_reaches_output(inner: bytes) -> bool:
+    syntax = _nix_without_trivia(inner.decode("utf-8"))
+    span = _returned_output_span(syntax)
+    if span is None:
         return False
-    if opener < 0:
+    body = syntax[span[0] + 1:span[1]]
+    # These are the bounded, explicitly supported uses of the let-bound list.
+    return bool(re.search(
+        r"(?<![\w-])(?:modules\s*=\s*hostModules\b|inherit\s+hostModules\s*;)",
+        body,
+    ))
+
+
+def _verified_output_export(target_flake: bytes) -> bool:
+    """Only direct properties of the returned outputs attrset establish S1."""
+    syntax = _nix_without_trivia(target_flake.decode("utf-8", errors="replace"))
+    span = _returned_output_span(syntax)
+    if span is None:
         return False
-    if depths[opener] != 1 or syntax[opener] != "{":
-        return False
-    output_depth = depths[opener] + 1
+    depths = _brace_depths(syntax)
     for item in re.finditer(r"(?m)^[ \t]*nixosModules\.default\s*=", syntax):
-        if item.start() > opener and depths[item.start()] == output_depth:
+        if span[0] < item.start() < span[1] and depths[item.start()] == 2:
             return True
     return False
 
@@ -438,6 +462,21 @@ def _append_local_module_relation(
     )
 
 
+def _module_binding_problem(
+    target_flake: bytes, outer: bytes, inner: bytes,
+    alias: str, dependency: str, declared_sha: str, module_flake_path: str,
+) -> str | None:
+    if not _verified_output_export(target_flake):
+        return "target_module_export_unverified:" + dependency
+    if not _verified_inner_flake(
+        outer, inner, alias, dependency, declared_sha, module_flake_path
+    ):
+        return "inner_flake_input_unverified:" + alias
+    if not _inner_host_modules_reaches_output(inner):
+        return "host_modules_output_unverified:" + alias
+    return None
+
+
 def _declared_host_modules(
     root: Path, tree: dict[str, str], source_repo: str, commit: str,
     module_flake_path: str, outer: bytes, inner: bytes | None, alias: str,
@@ -448,13 +487,12 @@ def _declared_host_modules(
     if inner is None:
         gaps.append("host_module_flake_unavailable:" + alias)
         return
-    if not _verified_output_export(target_flake):
-        gaps.append("target_module_export_unverified:" + target_evidence["repo_id"])
-        return
-    if not _verified_inner_flake(
-        outer, inner, alias, dependency, declared_sha, module_flake_path
-    ):
-        gaps.append("inner_flake_input_unverified:" + alias)
+    problem = _module_binding_problem(
+        target_flake, outer, inner, alias, dependency, declared_sha,
+        module_flake_path,
+    )
+    if problem is not None:
+        gaps.append(problem)
         return
     for number, line, depth in _lexical_line_depths(
         _nix_without_trivia(inner.decode("utf-8"))

@@ -641,3 +641,48 @@ class FlakeRelationsTest(TestCase):
             )
             self.assertEqual(result["relations"], [])
             self.assertIn("unsupported_flake_input_layout:nixer", result["gaps"])
+
+    def test_sibling_after_returned_outputs_is_not_module_export(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src, sha, target, t_sha, _pin = fixture(Path(tmp))
+            new = rewrite_committed(
+                target, "flake.nix",
+                "    nixosModules.default = import ./nix/module.nix;",
+                "    packages.default = null;\n"
+                "  };\n"
+                "  unrelated = {\n"
+                "    nixosModules.default = import ./nix/module.nix;",
+            )
+            sha = rewrite_committed(src, "flake.nix", t_sha, new)
+            sha = rewrite_committed(src, "flake.lock", t_sha, new)
+            sha = rewrite_committed(src, "nixos/system/flake.nix", t_sha, new)
+            result = flake_revision_relations(
+                src, sha, source_repo="heimgewebe/heim-pc",
+                targets={"heimgewebe/nixer": (target, new)},
+            )
+            self.assertEqual(
+                [row["relation_type"] for row in result["relations"]],
+                ["flake_pinned_input"],
+            )
+            self.assertIn(
+                "target_module_export_unverified:heimgewebe/nixer",
+                result["gaps"],
+            )
+
+    def test_unused_host_modules_binding_not_in_returned_outputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src, sha, target, t_sha, _pin = fixture(Path(tmp))
+            sha = rewrite_committed(
+                src, "nixos/system/flake.nix",
+                "in { inherit hostModules; };",
+                "in { packages = {}; };",
+            )
+            result = flake_revision_relations(
+                src, sha, source_repo="heimgewebe/heim-pc",
+                targets={"heimgewebe/nixer": (target, t_sha)},
+            )
+            self.assertEqual(
+                [row["relation_type"] for row in result["relations"]],
+                ["flake_pinned_input"],
+            )
+            self.assertIn("host_modules_output_unverified:nixer", result["gaps"])
