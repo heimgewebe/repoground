@@ -82,7 +82,7 @@ class FlakeRelationDeltaTests(TestCase):
             self.assertTrue(any(x["relation_identity"]["relation_type"] ==
                                 "flake_pinned_input" for x in result["changes"]))
 
-    def test_real_service_declaration_removal_with_complete_evidence(self):
+    def test_removed_service_declaration_does_not_prove_relation_deletion(self):
         with tempfile.TemporaryDirectory() as d:
             source, base, target, pin, _ = fixture(Path(d))
             head = rewrite_committed(
@@ -91,14 +91,33 @@ class FlakeRelationDeltaTests(TestCase):
                 "  # systemd.user.services.nixer was deliberately removed",
             )
             result = query(source, base, head, target, pin, pin)
-            self.assertEqual(result["status"], "ok")
-            removed = [x for x in result["changes"] if x["transition"] == "removed"]
-            self.assertEqual(len(removed), 1)
+            self.assertEqual(result["status"], "partial")
+            uncertain = [x for x in result["changes"] if x["transition"] == "unverified"]
+            self.assertEqual(len(uncertain), 1)
             self.assertEqual(
-                removed[0]["relation_identity"]["target"]["symbol"],
+                uncertain[0]["relation_identity"]["target"]["symbol"],
                 "systemd.user.services.nixer",
             )
-            self.assertFalse(any(x["transition"] == "unverified" for x in result["changes"]))
+            self.assertIn("head:relation_absence_not_proven", result["gaps"])
+            self.assertFalse(any(x["transition"] == "removed" for x in result["changes"]))
+
+    def test_multiline_nix_url_is_not_false_relation_removal(self):
+        with tempfile.TemporaryDirectory() as d:
+            source, base, target, pin, _ = fixture(Path(d))
+            original = f'nixer.url = "github:heimgewebe/nixer/{pin}";'
+            multiline = f'nixer.url =\n    "github:heimgewebe/nixer/{pin}";'
+            head = rewrite_committed(source, "flake.nix", original, multiline)
+            result = query(source, base, head, target, pin, pin)
+            self.assertEqual(result["status"], "partial")
+            self.assertEqual(result["head_gaps"], [])
+            self.assertIn("head:relation_absence_not_proven", result["gaps"])
+            self.assertEqual(len(result["changes"]), 5)
+            self.assertTrue(all(
+                row["transition"] == "unverified" for row in result["changes"]
+            ))
+            self.assertFalse(any(
+                row["transition"] == "removed" for row in result["changes"]
+            ))
 
     def test_missing_target_git_object_never_becomes_removal(self):
         with tempfile.TemporaryDirectory() as d:

@@ -94,8 +94,9 @@ def flake_relation_delta(
 ) -> dict[str, Any]:
     """Compare exact S1 relationships and Git file deltas, preserving unknowns.
 
-    An edge absent from an incomplete head projection is *unverified*, not removed.
-    An edge newly present after an incomplete base is *newly_verified*, not added.
+    An edge absent from S1's non-exhaustive head projection is *unverified*,
+    not removed, even when S1 reports zero gaps. Newly seen relations are
+    *newly_verified*, not proven to have been newly added.
     No source-to-runtime transition, causal impact, or implicit Nix activation is inferred.
     """
     before = flake_revision_relations(
@@ -112,15 +113,21 @@ def flake_relation_delta(
     new, new_duplicates = _indexed(after["relations"])
     duplicates = sorted(set(old_duplicates + new_duplicates))
     changes: list[dict[str, Any]] = []
+    uncovered_absences: list[str] = []
     for key in sorted(set(old) | set(new)):
         previous, current = old.get(key), new.get(key)
         if previous is None:
-            transition = "newly_verified" if before["gaps"] or old_duplicates else "added"
+            # S1's lexical extraction is not complete coverage, even when
+            # gaps=[]; a previously unseen relation may have existed already.
+            transition = "newly_verified"
+            if not before["gaps"] and not old_duplicates:
+                uncovered_absences.append("base:relation_absence_not_proven")
         elif current is None:
-            transition = (
-                "unverified" if after["gaps"] or new_duplicates
-                or git_delta["status"] != "ok" else "removed"
-            )
+            # Missing evidence is not deletion. A valid multiline Nix URL is
+            # currently outside S1's bounded lexical grammar and reports no gap.
+            transition = "unverified"
+            if not after["gaps"] and not new_duplicates:
+                uncovered_absences.append("head:relation_absence_not_proven")
         elif _material(previous, source_repo) != _material(current, source_repo):
             transition = "changed"
         else:
@@ -139,6 +146,7 @@ def flake_relation_delta(
         + ["head:" + item for item in after["gaps"]]
         + ["git_delta:" + item for item in git_delta["gaps"]]
         + (["ambiguous_relation_identity"] if duplicates else [])
+        + uncovered_absences
     )
     result: dict[str, Any] = {
         "kind": KIND,

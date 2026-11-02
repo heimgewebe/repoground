@@ -7,7 +7,7 @@
 
 `federation flake-relation-delta` ruft für zwei volle, exakt gebundene Heim-PC-Git-SHAs den bestehenden S1-Produzenten `flake_revision_relations` auf, ergänzt den existierenden `git_revision_delta` mit Pfaden und Git-Blob-OIDs und vergleicht semantische Beziehungen. Deterministische JSON-Ausgabe führt `source_repo`, Basis-/Zielcommit, explizite Target-Pins, beide S1-Evidenzdigests, direkten Git-Dateidelta, Zeilen-/Blob-Belege, Kantenübergänge, Gaps und einen SHA-256-Digest.
 
-Beziehungen sind `added`, `changed` oder `removed` nur, wenn die Evidenz vollständige Aussagen erlaubt. Verschwundene bestätigte Kanten bei einem unvollständigen Zielstand heißen `unverified`. Neue Kanten bei unvollständigem Basisstand heißen `newly_verified`. Unsichere oder widersprüchliche Kanten sind **keine** belegten Löschungen. Direkte Quellveränderungen und nur vermutete transitive Auswirkungen bleiben strikt getrennt (`transitive_impacts=[]`). S2 ist keine Aussage über Build, aktivierte Generation oder laufenden Dienst.
+Da S1 ausdrücklich **keine vollständige Eingabe-/Relationsabdeckung** zusichert, ist auch `gaps=[]` kein Beweis für die Nicht-Existenz einer Beziehung. Nicht mehr beobachtete Kanten heißen deshalb stets `unverified`, erstmals beobachtete `newly_verified`; ihr fehlender positiver Abdeckungsnachweis erzeugt `relation_absence_not_proven`. Nur auf beiden Revisionen erkannte, belegte Relationen können `changed` sein. Es gibt hier **keinen** automatisch behaupteten `removed`- oder `added`-Relationsübergang. Eine unabhängig beobachtete Änderung der Git-Quelldateien bleibt weiterhin ein echter `git_revision_delta`-Befund. Direkte Quellveränderungen und nur vermutete transitive Auswirkungen bleiben strikt getrennt (`transitive_impacts=[]`). S2 ist keine Aussage über Build, aktivierte Generation oder laufenden Dienst.
 
 ## Echtes historisches Goldset
 
@@ -59,7 +59,7 @@ Dieser reale Vergleich nutzt die schon vorhandene allgemeine \`relation-delta\`-
 
 ## Gegenproben, Prüfungen und Grenzen
 
-`merger.repoground.tests.test_flake_relation_delta`: 6/6 erfolgreich (stabile identische Revision, widersprüchliche innere Flake-Revision, vollständig konsistenter Pinwechsel, echte Entfernung eines systemd-Dienstattributs bei vollständiger Evidenz, fehlendes Ziel-Gitobjekt, CLI-SHA-Validierung). Der andere, unabhängige Repo-Vertrag ist bereits über die vorhandene Metarepo-`relation-delta`-Fixture abgedeckt, muss aber in einem vollständigen Agenten-Goldset gesondert gemessen werden.
+`merger.repoground.tests.test_flake_relation_delta`: gezielte Tests für stabile Revision, widersprüchliche innere Flake, konsistenten Pinwechsel, syntaktisch entferntes Dienst-Attribut ohne bewiesene relationale Löschung, **gültige mehrzeilige Nix-URL ohne fälschliches `removed`**, fehlendes Ziel-Gitobjekt und CLI-SHA-Validierung. Der andere, unabhängige Repo-Vertrag ist bereits über die vorhandene Metarepo-`relation-delta`-Fixture abgedeckt, muss aber in einem vollständigen Agenten-Goldset gesondert gemessen werden.
 
 Ruff mit `ruff-ci.toml`: PASS. Der Graph-Komplexitäts-Ratchet meldete nach einem gezielten CLI-Refactoring **PASS** mit explizit im PATH bereitgestelltem Ruff. Die kombinierte S1-/S4-/S2-Unittest-Suite bestand mit **51/51** Tests. Vollständige GitHub-CI-/PR-/Bundle-Abnahme ist weiterhin gesondert erforderlich.
 
