@@ -2,6 +2,8 @@
 
 **Beschluss:** 27.10.2026 · **Status:** verbindliche Entwicklungspriorität, nicht Implementierungs- oder Reifequittung · **Repository:** heimgewebe/repoground
 
+**Ausführungspräzisierung vom 02.11.2026:** Der priorisierte reale System-Evidenz-Vertikalschnitt steht in Abschnitt 7. Die negativen Suchbeschleuniger-Versuche bleiben gültig; die daraus nicht getestete, systemweite Architektur wird an echten Quell-/Betriebsverbindungen erprobt, ohne neue Parallelroadmap.
+
 ## 0. Neue verbindliche Priorität
 
 **RepoGround wird zunächst umfassend zum deterministischen, zeit- und revisionsbewussten Veränderungs- und Wissenssystem für das Heimgewebe-Ökosystem ausgebaut. Die umfassende Bewertung seines Nutzens erfolgt nach diesem Ausbau.** Ein vorgezogener Nachweis allgemeiner Produktivitätsgewinne, ein vollständiger 20-Aufgaben-A/B-Benchmark oder eine bestimmte Mindestzahl freiwilliger Toolaufrufe sind **keine Start-, Architektur- oder Implementierungs-Gates** für die folgenden Epics.
@@ -147,6 +149,8 @@ Keine Benchmarks, Demos oder Snapshot-Zahlen als Ersatz für funktionierende Fea
 - `heimgewebe/metarepo` bei lokalem HEAD `c1ac04fec54de590eda209b916f81c4ce8eb363a`: `fleet/repos.yml` nennt Heim-PC und weitere Fleet-Repositories. Mitgliedschaft ist **keine** Nixer-Abhängigkeit. Metadaten können die Beziehung nicht ersatzweise begründen.
 - Frische GitHub-`main`-Stände, CI, Nix-Store-Pfade, aktive NixOS-Generation, aktuelle Dienstprozesse und wirklich ausgelieferte Konfigurationen müssen jeweils an GitHub, Nix-/Deployment-Quittungen und dem Host geprüft werden. **Keinen** dieser unbekannten Betriebsstände aus dem lokalen Quellstand ableiten.
 
+**Zweiter unabhängiger Quellfall:** Eine tatsächlich belegte Metarepo-Fleet-/Sync-Deklaration zu einem **nachweislich vorhandenen** Zielrepo und einer Zielrevision oder ein anderer realer Producer-Consumer-Vertrag über zwei Repositories. Die Zielquelle und ein eventueller Kopierinhalt werden mit Commit und Digest verglichen; nur dieselbe Fleet-Liste oder ähnliche Dateinamen reichen nicht. Erst damit prüfen wir, ob der Verbund mehr als eine einzelne Flake-Speziallösung abbildet.
+
 **Gegenprobe:** Ein Agent ohne RepoGround darf `git`, `rg`, `nix`, Lockdateien, GitHub/CI und vorhandene read-only-Hostwerkzeuge voll verwenden. Ebenfalls vergleichen: ein kleines vorhandenes Skript, das dieselben Primärquellen direkt zusammenfasst. RepoGround gewinnt nicht dadurch, dass der Gegner künstlich eingeschränkt wird.
 
 ### 7.2 Vier Lieferungen, seriell und mit echter Abnahme
@@ -185,6 +189,9 @@ Teure Struktur- und Änderungsanalyse **beim bestehenden autorisierten Publisher
 ### 7.4 Nutzwertprüfung erst am funktionierenden Systemweg
 
 Die Abnahme misst nicht MCP-Aufrufanzahl, sondern:
+
+**Fixiertes Minigoldset vor dem Eingriff:** 4–8 echte Quell-/Folgenfragen aus mindestens **zwei** unterschiedlichen Repo-Paaren; darunter der Nixer-Pin, der zweite unabhängige Vertragsfall, eine tatsächliche Versionsabweichung, eine eindeutig falsche Kante und eine veraltete/teilweise unbeobachtbare Quelle. Dieselben autorisierten Git-/CI-/Hostbelege stehen beiden Vergleichswegen zur Verfügung. Getrennt messen: korrekte/missing/falsche Relationen, belastbare Quellranges, unangemessene Gewissheit, End-to-End-Kosten sowie Publisher-Rechenaufwand. Ein einzelner positiver Fall beweist keine allgemeine Agentenüberlegenheit.
+
 - **Faktenqualität:** Jede als sicher ausgewiesene Repository-/Vertrags-/Artefakt-/Runtimekante ist an Originalquelle und Revision gebunden; im fixierten Positiv-/Negativgoldset **null** unbewiesene als sichere Beziehungen. Fehlende Beziehungen und parserbedingte Auslassungen werden als Coverage-Lücken ausgewiesen.
 - **Mehrwert:** relevante zusätzliche richtige Cross-Repo-/Historien-/Build-/Runtimefunde gegenüber einer **gleichberechtigten** Git/Nix/CI/Host-Alternative; sinnvolle Erkennung unterschiedlicher deklarierter, gebauter und aktiver Versionen.
 - **Wiederverwendbarkeit und Kosten:** Agentenzeit, Tokens, Toolcalls **plus** Publisher-Rechenzeit, Speicher und Aktualisierungsverzug. Ein warmes, bereits veröffentlichtes Pack soll als **Ziel** p95 in ungefähr 2 Sekunden lesbar sein (kein gegenwärtig bewiesener Wert); der Reader kompiliert den Graph nicht neu.
