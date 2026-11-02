@@ -15,6 +15,9 @@ def git(root, *args):
 def make_repo(root, files):
     root.mkdir()
     subprocess.run(["git", "init", "-q", str(root)], check=True)
+    # Prevent detached auto-maintenance racing temporary Git fixture cleanup.
+    subprocess.run(["git", "-C", str(root), "config", "maintenance.auto", "false"], check=True)
+    subprocess.run(["git", "-C", str(root), "config", "gc.auto", "0"], check=True)
     for path, data in files.items():
         target = root / path
         target.parent.mkdir(parents=True, exist_ok=True)
