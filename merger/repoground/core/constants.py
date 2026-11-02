@@ -34,6 +34,7 @@ class ArtifactRole(str, Enum):
     PYTHON_CALL_GRAPH_JSON = "python_call_graph_json"
     LANGUAGE_STRUCTURE_JSON = "language_structure_json"
     RELATIONSHIP_PROJECTION_JSON = "relationship_projection_json"
+    FLAKE_RELATION_EVIDENCE_JSON = "flake_relation_evidence_json"
 
 
 CLAIM_EVIDENCE_MAP_ABSENCE_REASON_LINK_KEY = "claim_evidence_map_absence_reason"

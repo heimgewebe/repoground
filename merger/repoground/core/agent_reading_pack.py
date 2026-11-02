@@ -439,6 +439,7 @@ _ROLE_GUIDE = {
     "python_symbol_index_json": "Python AST symbol navigation index; static parse only, not runtime truth",
     "python_call_graph_json": "Python AST call-site navigation index; only safe static resolutions, not runtime truth",
     "relationship_projection_json": "Cross-language directed S1 relations and S0 hints; read with get_structure_neighborhood, retain coverage gaps and canonical source ranges",
+    "flake_relation_evidence_json": "Offline immutable cross-repository Flake S1 declarations, S0 gaps and exact source/target Git pins; not runtime dependency truth",
 }
 
 

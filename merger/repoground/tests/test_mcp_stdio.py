@@ -153,6 +153,7 @@ def test_mcp_stdio_lists_read_tools_and_hides_snapshot_create_by_default(tmp_pat
         "get_callers",
         "get_callees",
         "get_structure_neighborhood",
+        "get_flake_relation_evidence",
     }
 
 

@@ -123,6 +123,7 @@ def test_mcp_stdio_launcher_completes_handshake_outside_checkout(
         "get_callers",
         "get_callees",
         "get_structure_neighborhood",
+        "get_flake_relation_evidence",
     }
 
 

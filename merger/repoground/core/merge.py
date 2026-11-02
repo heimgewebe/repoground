@@ -272,6 +272,7 @@ ARTIFACT_CONTRACT_REGISTRY = {
     ArtifactRole.PYTHON_CALL_GRAPH_JSON: {"id": "python-call-graph", "version": "v1"},
     ArtifactRole.LANGUAGE_STRUCTURE_JSON: {"id": "language-structure", "version": "v1"},
     ArtifactRole.RELATIONSHIP_PROJECTION_JSON: {"id": "relationship_projection", "version": "v1"},
+    ArtifactRole.FLAKE_RELATION_EVIDENCE_JSON: {"id": "repoground.flake_relation_evidence_pack", "version": "1.0"},
 }
 
 ARTIFACT_AUTHORITY_REGISTRY = {
@@ -361,6 +362,13 @@ ARTIFACT_AUTHORITY_REGISTRY = {
         "authority": "navigation_index",
         "canonicality": "derived",
         "risk_class": "navigation",
+        "regenerable": True,
+        "staleness_sensitive": True,
+    },
+    ArtifactRole.FLAKE_RELATION_EVIDENCE_JSON: {
+        "authority": "navigation_index",
+        "canonicality": "derived",
+        "risk_class": "evidence_index",
         "regenerable": True,
         "staleness_sensitive": True,
     },

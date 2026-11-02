@@ -117,6 +117,7 @@ ARTIFACT_ORDER = (
     "python_symbol_index_json",
     "python_call_graph_json",
     "language_structure_json",
+    "flake_relation_evidence_json",
 )
 
 BASE_RULES = {
@@ -137,6 +138,7 @@ BASE_RULES = {
     "python_symbol_index_json": REQ_OPTIONAL,
     "python_call_graph_json": REQ_OPTIONAL,
     "language_structure_json": REQ_OPTIONAL,
+    "flake_relation_evidence_json": REQ_OPTIONAL,
 }
 
 PROFILE_ARTIFACT_RULES = {
@@ -206,6 +208,7 @@ PROFILE_ARTIFACT_RULES = {
         "python_symbol_index_json": REQ_EXCLUDED,
         "python_call_graph_json": REQ_EXCLUDED,
         "language_structure_json": REQ_EXCLUDED,
+        "flake_relation_evidence_json": REQ_EXCLUDED,
     },
     "ci-artifact": {
         **BASE_RULES,

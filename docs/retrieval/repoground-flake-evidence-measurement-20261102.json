@@ -1,0 +1,53 @@
+{
+  "does_not_establish": [
+    "agent_answer_quality",
+    "runtime_dependency",
+    "complete_impact",
+    "cross-machine performance"
+  ],
+  "gaps": [],
+  "kind": "repoground.flake_evidence_latency_study",
+  "measured_at_utc": "2026-11-02T10:27:51.668533+00:00",
+  "method": {
+    "excludes": [
+      "one-time artifact production",
+      "fleet publishing",
+      "MCP transport",
+      "network access",
+      "live runtime checks"
+    ],
+    "git_only": "compute full producer from requested Git objects each query",
+    "order": "alternating paired, same process and pinned Git objects",
+    "precomputed_offline": "hash-check content-addressed JSON, no Git or network",
+    "samples_per_path": 35,
+    "warmups_per_path": 4
+  },
+  "pack_sha256": "40c7f199f57086d6fb9a2038b74400a03295d2d73d4639c8f7c4b257f69a8b1a",
+  "python_version": "3.12.14",
+  "relations": 5,
+  "results": {
+    "git_only": {
+      "maximum_ms": 216.576,
+      "minimum_ms": 132.444,
+      "p50_ms": 140.207,
+      "p95_ms": 177.316
+    },
+    "precomputed_offline": {
+      "maximum_ms": 0.446,
+      "minimum_ms": 0.176,
+      "p50_ms": 0.241,
+      "p95_ms": 0.432
+    }
+  },
+  "source_commit": "ff991e7a2d0a98ab4bab849515e5344e224131cb",
+  "source_repo": "heimgewebe/heim-pc",
+  "speedup_p95": 410.454,
+  "status": "ok",
+  "target_pins": [
+    {
+      "commit": "c252b62b0fcd0bd5442681bb68d809a4b5984c61",
+      "repo_id": "heimgewebe/nixer"
+    }
+  ],
+  "version": "1.0"
+}

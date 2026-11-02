@@ -87,6 +87,34 @@ def register_federation_commands(subparsers) -> None:
     flake_parser.add_argument("--target", action="append", required=True,
                               metavar="OWNER/REPO=LOCAL_REPO_ROOT@FULL_SHA")
 
+    pack_create = federation_subparsers.add_parser(
+        "flake-pack-create",
+        help="Materialize exact revision-bound Flake evidence once as an immutable JSON artifact",
+    )
+    pack_create.add_argument("--repo-root", required=True)
+    pack_create.add_argument("--repo-id", required=True, metavar="OWNER/REPO")
+    pack_create.add_argument("--commit", required=True)
+    pack_create.add_argument("--target", action="append", required=True,
+                             metavar="OWNER/REPO=LOCAL_REPO_ROOT@FULL_SHA")
+    pack_create.add_argument("--out", required=True, help="Absent output JSON file")
+
+    pack_read = federation_subparsers.add_parser(
+        "flake-pack-read",
+        help="Verify a precomputed Flake evidence artifact without opening Git",
+    )
+    pack_read.add_argument("--pack", required=True)
+    pack_read.add_argument("--repo-id", required=True, metavar="OWNER/REPO")
+    pack_read.add_argument("--commit", required=True)
+
+    pack_manifest = federation_subparsers.add_parser(
+        "flake-pack-manifest",
+        help="Read manifest-digest-bound Flake evidence from an immutable RepoGround bundle",
+    )
+    pack_manifest.add_argument("--manifest", required=True)
+    pack_manifest.add_argument("--repo-id", required=True, metavar="OWNER/REPO")
+    pack_manifest.add_argument("--commit", required=True)
+    pack_manifest.add_argument("--expected-manifest-sha256")
+
     relation_delta_parser = federation_subparsers.add_parser(
         "relation-delta", help="Compare two pinned Fleet and target repository snapshots"
     )
@@ -137,8 +165,29 @@ def _parse_pinned_targets(values: list[str]) -> dict[str, tuple[Path, str]]:
 
 _TEMPORAL_COMMANDS = frozenset({
     "revision", "delta", "path-history", "relations", "flake-relations",
-    "relation-delta", "history-events",
+    "flake-pack-read", "flake-pack-manifest", "relation-delta", "history-events",
 })
+
+
+def _read_flake_pack_command(args: argparse.Namespace) -> dict:
+    from merger.repoground.core.flake_evidence_pack import (
+        read_flake_evidence_pack, read_flake_evidence_from_manifest,
+    )
+    if args.federation_command == "flake-pack-read":
+        return read_flake_evidence_pack(
+            args.pack, expected_repo=args.repo_id, expected_commit=args.commit,
+        )
+    return read_flake_evidence_from_manifest(
+        args.manifest, expected_repo=args.repo_id, expected_commit=args.commit,
+        expected_manifest_sha256=args.expected_manifest_sha256,
+    )
+
+
+def _query_filters(args: argparse.Namespace) -> dict[str, str]:
+    filters = {"archive_scope": getattr(args, "archive_scope", "current")}
+    if args.repo:
+        filters["repo"] = args.repo
+    return filters
 
 
 def _temporal_federation_output(args: argparse.Namespace) -> dict:
@@ -167,6 +216,8 @@ def _temporal_federation_output(args: argparse.Namespace) -> dict:
             Path(args.repo_root), args.commit, source_repo=args.repo_id,
             targets=_parse_pinned_targets(args.target),
         )
+    if args.federation_command in {"flake-pack-read", "flake-pack-manifest"}:
+        return _read_flake_pack_command(args)
     if args.federation_command == "relation-delta":
         from merger.repoground.retrieval.federation_query import query_federation_relation_delta
 
@@ -194,6 +245,32 @@ def _handle_temporal_command(args: argparse.Namespace) -> int:
         return 1
 
 
+def _handle_flake_pack_create(args: argparse.Namespace) -> int:
+    from merger.repoground.core.flake_evidence_pack import (
+        prepare_flake_evidence_pack, write_flake_evidence_pack,
+    )
+    try:
+        pack = prepare_flake_evidence_pack(
+            args.repo_root, args.commit, source_repo=args.repo_id,
+            targets=_parse_pinned_targets(args.target),
+        )
+        write_flake_evidence_pack(args.out, pack)
+        print(json.dumps({
+            "status": "created", "path": str(Path(args.out)),
+            "source_repo": pack["source_repo"],
+            "source_commit": pack["source_commit"],
+            "pack_sha256": pack["pack_sha256"],
+            "evidence_sha256": pack["evidence"]["evidence_sha256"],
+            "relation_count": len(pack["evidence"]["relations"]),
+            "gaps": pack["evidence"]["gaps"],
+        }, sort_keys=True))
+        return 0
+    except (ValueError, OSError, RuntimeError, TypeError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+
+
 def handle_federation_command(args: argparse.Namespace) -> int:
     """Dispatches federation commands to their respective handlers."""
     from merger.repoground.core.federation import init_federation
@@ -204,6 +281,9 @@ def handle_federation_command(args: argparse.Namespace) -> int:
 
     if args.federation_command in _TEMPORAL_COMMANDS:
         return _handle_temporal_command(args)
+
+    if args.federation_command == "flake-pack-create":
+        return _handle_flake_pack_create(args)
 
     if args.federation_command == "init":
         out_path = Path(args.out)
@@ -250,9 +330,7 @@ def handle_federation_command(args: argparse.Namespace) -> int:
         from merger.repoground.retrieval.federation_query import execute_federated_query_from_bundles
         index_path = Path(args.index) if args.index else None
         inline_bundles = getattr(args, "bundle", []) or []
-        filters = {"archive_scope": getattr(args, "archive_scope", "current")}
-        if args.repo:
-            filters["repo"] = args.repo
+        filters = _query_filters(args)
 
         try:
             if bool(index_path) == bool(inline_bundles):

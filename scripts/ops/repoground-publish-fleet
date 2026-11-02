@@ -6000,6 +6000,49 @@ def prune_all_special(
     ]
 
 
+def _flakeref_target_for_published_heim_pc(
+    source_wt: Path, registry_repository: str,
+) -> str | None:
+    """One opt-in real Fleet proof, not an inferred transitive dependency graph."""
+    if registry_repository != "heimgewebe__heim-pc":
+        return None
+    source = run(
+        ["git", "-C", str(source_wt), "show", "HEAD:flake.lock"],
+        check=False,
+    )
+    if source.returncode != 0 or len(source.stdout) > 512 * 1024:
+        return None
+    try:
+        lock = json.loads(source.stdout)
+        nodes = lock["nodes"]
+        root = nodes[lock["root"]]["inputs"]["nixer"]
+        pinned = nodes[root]["locked"]
+        commit = pinned["rev"]
+    except (ValueError, TypeError, KeyError, IndexError):
+        return None
+    if not (
+        isinstance(pinned, dict) and pinned.get("type") == "github"
+        and pinned.get("owner") == "heimgewebe"
+        and pinned.get("repo") == "nixer"
+        and isinstance(commit, str)
+        and re.fullmatch(r"[0-9a-f]{40}", commit)
+    ):
+        return None
+    target_root = REPOS_ROOT / "nixer"
+    if not target_root.is_dir() or target_root.is_symlink():
+        return None
+    remote = run(
+        ["git", "-C", str(target_root), "remote", "get-url", "origin"],
+        check=False,
+    )
+    if remote.returncode != 0 or parse_github_remote(remote.stdout.strip()) != (
+        "heimgewebe", "nixer",
+    ):
+        return None
+    # Pin from source *Git object*, not mutable Nixer HEAD or remote main.
+    return f"heimgewebe/nixer={target_root}@{commit}"
+
+
 def build_refresh_command(
     *,
     source_wt: Path,
@@ -6040,6 +6083,14 @@ def build_refresh_command(
         command.append("--redact-secrets")
     if config.language_structure:
         command.append("--language-structure")
+    flake_target = _flakeref_target_for_published_heim_pc(
+        source_wt, registry_repository,
+    )
+    if flake_target is not None:
+        command.extend([
+            "--flake-source-repo", "heimgewebe/heim-pc",
+            "--flake-target", flake_target,
+        ])
     return command
 
 
