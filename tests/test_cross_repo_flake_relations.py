@@ -155,7 +155,7 @@ class FlakeRelationsTest(TestCase):
             self.assertEqual(result["relations"], [])
             self.assertIn("target_commit_mismatch:heimgewebe/nixer", result["gaps"])
 
-    def test_missing_module_yields_only_flake_edge(self):
+    def test_missing_local_module_keeps_cross_repo_binding(self):
         with tempfile.TemporaryDirectory() as directory:
             src, sha, target, t_sha, pin = fixture(Path(directory), missing_module=True)
             result = flake_revision_relations(
@@ -164,7 +164,7 @@ class FlakeRelationsTest(TestCase):
             )
             self.assertEqual(
                 [x["relation_type"] for x in result["relations"]],
-                ["flake_pinned_input"],
+                ["flake_pinned_input", "nixos_module_binding"],
             )
             self.assertIn(
                 "host_module_path_missing:nixos/system/modules/nixer.nix",
@@ -459,3 +459,72 @@ class FlakeRelationsTest(TestCase):
             self.assertEqual([r["relation_type"] for r in result["relations"]],
                              ["flake_pinned_input"])
             self.assertIn("inner_flake_input_unverified:nixer", result["gaps"])
+
+    def test_alias_only_host_modules_keeps_cross_repository_binding(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src, sha, target, t_sha, _pin = fixture(Path(tmp))
+            sha = rewrite_committed(
+                src, "nixos/system/flake.nix",
+                "hostModules = [ nixer.nixosModules.default ./modules/nixer.nix ];",
+                "hostModules = [ nixer.nixosModules.default ];",
+            )
+            result = flake_revision_relations(
+                src, sha, source_repo="heimgewebe/heim-pc",
+                targets={"heimgewebe/nixer": (target, t_sha)},
+            )
+            self.assertEqual(
+                [row["relation_type"] for row in result["relations"]],
+                ["flake_pinned_input", "nixos_module_binding"],
+            )
+            self.assertEqual(result["gaps"], [])
+
+    def test_unused_let_service_assignments_are_not_host_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src, sha, target, t_sha, _pin = fixture(Path(tmp))
+            source_path = "nixos/system/modules/nixer.nix"
+            original = (src / source_path).read_text(encoding="utf-8")
+            forged = (
+                "{ lib, ... }: let\n"
+                "  unused = {\n"
+                "    services.nixer = { enable = true; };\n"
+                "    systemd.user.services.nixer = { wantedBy = [ ]; };\n"
+                "  };\n"
+                "in { }\n"
+            )
+            sha = rewrite_committed(src, source_path, original, forged)
+            result = flake_revision_relations(
+                src, sha, source_repo="heimgewebe/heim-pc",
+                targets={"heimgewebe/nixer": (target, t_sha)},
+            )
+            self.assertEqual(
+                [row["relation_type"] for row in result["relations"]],
+                ["flake_pinned_input", "nixos_local_module_inclusion",
+                 "nixos_module_binding"],
+            )
+            self.assertIn(
+                "service_scope_unverified:nixos/system/modules/nixer.nix",
+                result["gaps"],
+            )
+
+    def test_conditional_root_config_is_s1_declaration_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src, sha, target, t_sha, _pin = fixture(Path(tmp))
+            path = "nixos/system/modules/nixer.nix"
+            original = (src / path).read_text(encoding="utf-8")
+            configured = (
+                "{ lib, heimPcProfile ? { }, ... }:\n"
+                "let enabled = true; in {\n"
+                "  config = lib.mkIf enabled {\n"
+                "    services.nixer = { enable = true; };\n"
+                "    systemd.user.services.nixer = { wantedBy = [ ]; };\n"
+                "  };\n"
+                "}\n"
+            )
+            sha = rewrite_committed(src, path, original, configured)
+            result = flake_revision_relations(
+                src, sha, source_repo="heimgewebe/heim-pc",
+                targets={"heimgewebe/nixer": (target, t_sha)},
+            )
+            self.assertEqual(len(result["relations"]), 5)
+            self.assertEqual(result["gaps"], [])
+            self.assertTrue(all(not row["asserts_runtime_dependency"] for row in result["relations"]))

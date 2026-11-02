@@ -233,15 +233,17 @@ def _verified_inner_flake(
     )
 
 
-def _host_module_list_tokens(line: str, alias: str) -> list[str] | None:
-    """Only literal items before the closing bracket of hostModules are evidence."""
+def _host_module_list_tokens(
+    line: str, alias: str,
+) -> tuple[bool, list[str]] | None:
+    """Return verified alias membership independently of local module paths."""
     matched = re.fullmatch(r"\s*hostModules\s*=\s*\[([^\[\]]*)\]\s*;\s*", line)
     if matched is None:
         return None
     tokens = matched.group(1).split()
     expected = alias + ".nixosModules.default"
     if expected not in tokens:
-        return []
+        return False, []
     if any(
         item != expected and (
             not re.fullmatch(r"\.{1,2}/[A-Za-z0-9_./-]+", item)
@@ -250,34 +252,121 @@ def _host_module_list_tokens(line: str, alias: str) -> list[str] | None:
         for item in tokens
     ):
         return None
-    return [
+    return True, [
         item for item in tokens
         if re.fullmatch(r"\./modules/[A-Za-z0-9_.-]+\.nix", item)
     ]
+
+
+def _module_result_open(
+    syntax: str, depths: list[int], tail: int,
+) -> int | None:
+    direct = re.match(r"\s*\{", syntax[tail:])
+    if direct is not None:
+        return tail + direct.end() - 1
+    opening_let = re.match(r"\s*let(?![\w-])", syntax[tail:])
+    if opening_let is None:
+        return None
+    cursor = tail + opening_let.end()
+    nested = 1
+    for word in re.finditer(
+        r"(?<![\w-])(?:let|in)(?![\w-])", syntax[cursor:]
+    ):
+        position = cursor + word.start()
+        if depths[position] != 0:
+            continue
+        nested += 1 if word.group() == "let" else -1
+        if nested == 0:
+            after = cursor + word.end()
+            opening = re.match(r"\s*\{", syntax[after:])
+            return after + opening.end() - 1 if opening is not None else None
+    return None
+
+
+def _module_return_scope(
+    syntax: str, depths: list[int],
+) -> tuple[int, int] | None:
+    """Only inspect the attrset returned by a root Nix module lambda."""
+    start = re.match(r"\s*\{", syntax)
+    if start is None:
+        return None
+    lambda_close = next(
+        (i for i, ch in enumerate(syntax) if ch == "}" and depths[i] == 1),
+        None,
+    )
+    if lambda_close is None:
+        return None
+    colon = re.match(r"\s*:", syntax[lambda_close + 1:])
+    if colon is None:
+        return None
+    tail = lambda_close + 1 + colon.end()
+    opener = _module_result_open(syntax, depths, tail)
+    if opener is None:
+        return None
+    if depths[opener] != 0:
+        return None
+    closing = next(
+        (i for i in range(opener + 1, len(syntax))
+         if syntax[i] == "}" and depths[i] == 1),
+        None,
+    )
+    return (opener, closing) if closing is not None else None
+
+
+def _module_service_scopes(
+    syntax: str, depths: list[int],
+) -> list[tuple[int, int, int]]:
+    root = _module_return_scope(syntax, depths)
+    if root is None:
+        return []
+    scopes = [(root[0], root[1], 1)]
+    config = re.compile(
+        r"(?m)^[ \t]*config\s*=\s*"
+        r"(?:lib\.mkIf\s+[A-Za-z_][A-Za-z0-9_-]*\s*)?\{"
+    )
+    for match in config.finditer(syntax):
+        opener = match.end() - 1
+        if not root[0] < opener < root[1] or depths[match.start()] != 1:
+            continue
+        closing = next(
+            (i for i in range(opener + 1, root[1])
+             if syntax[i] == "}" and depths[i] == 2),
+            None,
+        )
+        if closing is not None:
+            scopes.append((opener, closing, 2))
+    return scopes
+
 
 def _declared_services(
     source_repo: str, commit: str, tree: dict[str, str],
     candidate: str, host_module: bytes,
     module_export: dict[str, Any], target_evidence: dict[str, Any],
-    rows: list[dict[str, Any]],
+    rows: list[dict[str, Any]], gaps: list[str],
 ) -> None:
-    syntax = _nix_without_trivia(host_module.decode("utf-8")).splitlines()
-    for service, token in (
-        ("services.nixer", "services.nixer ="),
-        ("systemd.user.services.nixer", "systemd.user.services.nixer ="),
+    syntax = _nix_without_trivia(host_module.decode("utf-8"))
+    depths = _brace_depths(syntax)
+    scopes = _module_service_scopes(syntax, depths)
+    for found in re.finditer(
+        r"(?m)^[ \t]*(services\.nixer|systemd\.user\.services\.nixer)\s*=",
+        syntax,
     ):
-        for number, line in enumerate(syntax, 1):
-            if line.lstrip().startswith(token):
-                rows.append(_record(
-                    "nixos_service_declaration",
-                    _artifact_evidence(
-                        source_repo, commit, candidate, tree, host_module, number,
-                    ),
-                    {"repo_id": source_repo, "commit": commit,
-                     "symbol": service, "status": "declared_only"},
-                    [module_export, target_evidence],
-                ))
-
+        if not any(
+            opening < found.start() < closing and depths[found.start()] == level
+            for opening, closing, level in scopes
+        ):
+            gaps.append("service_scope_unverified:" + candidate)
+            continue
+        line = syntax.count("\n", 0, found.start()) + 1
+        rows.append(_record(
+            "nixos_service_declaration",
+            _artifact_evidence(
+                source_repo, commit, candidate, tree, host_module, line,
+            ),
+            {"repo_id": source_repo, "commit": commit,
+             "symbol": found.group(1), "status": "declared_only"},
+            [module_export, target_evidence],
+        ))
 
 def _declared_host_modules(
     root: Path, tree: dict[str, str], source_repo: str, commit: str,
@@ -300,10 +389,20 @@ def _declared_host_modules(
     for number, line in enumerate(_nix_without_trivia(inner.decode("utf-8")).splitlines(), 1):
         if not re.match(r"^\s*hostModules\s*=", line):
             continue
-        members = _host_module_list_tokens(line, alias)
-        if members is None:
+        checked = _host_module_list_tokens(line, alias)
+        if checked is None:
             gaps.append("host_modules_list_unverified:" + alias)
             continue
+        alias_present, members = checked
+        if not alias_present:
+            continue
+        module_export = _artifact_evidence(
+            source_repo, commit, module_flake_path, tree, inner, number,
+        )
+        rows.append(_record(
+            "nixos_module_binding", module_export, target_evidence,
+            [root_evidence, lock_evidence],
+        ))
         for relative in sorted(set(members)):
             candidate = posixpath.normpath(
                 posixpath.join(posixpath.dirname(module_flake_path), relative)
@@ -312,23 +411,16 @@ def _declared_host_modules(
             if host_module is None:
                 gaps.append("host_module_path_missing:" + candidate)
                 continue
-            module_export = _artifact_evidence(
-                source_repo, commit, module_flake_path, tree, inner, number
-            )
             host_module_evidence = _artifact_evidence(
                 source_repo, commit, candidate, tree, host_module
             )
-            rows.append(_record(
-                "nixos_module_binding", module_export, target_evidence,
-                [root_evidence, lock_evidence, host_module_evidence],
-            ))
             rows.append(_record(
                 "nixos_local_module_inclusion", module_export,
                 host_module_evidence, [target_evidence, lock_evidence],
             ))
             _declared_services(
                 source_repo, commit, tree, candidate, host_module,
-                module_export, target_evidence, rows,
+                module_export, target_evidence, rows, gaps,
             )
 
 
