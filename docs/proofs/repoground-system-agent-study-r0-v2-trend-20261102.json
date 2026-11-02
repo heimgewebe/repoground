@@ -1,0 +1,59 @@
+{
+  "comparison_groups": 2,
+  "groups": [
+    {
+      "cross_run_causal_claim": false,
+      "protocol_key": "7fb215e9aee64026bf806038d3b86e0b32ab88bc20fb3bdffa702c041f7d16cc",
+      "runs": [
+        {
+          "ci_95": [
+            -6232.4167,
+            12472.6667
+          ],
+          "complete_tasks": 6,
+          "created_at": "2026-11-02T15:16:46.882781+00:00",
+          "decision": "not_established",
+          "delta_ms": 3408.1667,
+          "generator_commits": {
+            "heim-pc": "7d299a7d1248a22263e176a7f7c5182a2ad57ba2",
+            "metarepo": "7d299a7d1248a22263e176a7f7c5182a2ad57ba2",
+            "nixer": "7d299a7d1248a22263e176a7f7c5182a2ad57ba2",
+            "repoground": "7d299a7d1248a22263e176a7f7c5182a2ad57ba2"
+          },
+          "quality_review_complete": false,
+          "run_id": "study-20261102-system-evidence-s4-v2-luna",
+          "scope": "real_runner_reported"
+        }
+      ]
+    },
+    {
+      "cross_run_causal_claim": false,
+      "protocol_key": "83d6e22deef0c68b53122cbec5510e93302f44eedf42f2ffe305484a4213313a",
+      "runs": [
+        {
+          "ci_95": [
+            -5424.0,
+            2693.2
+          ],
+          "complete_tasks": 5,
+          "created_at": "2026-11-02T14:52:44.444669+00:00",
+          "decision": "not_established",
+          "delta_ms": -1234.0,
+          "generator_commits": {
+            "heim-pc": "7d299a7d1248a22263e176a7f7c5182a2ad57ba2",
+            "metarepo": "7d299a7d1248a22263e176a7f7c5182a2ad57ba2",
+            "nixer": "7d299a7d1248a22263e176a7f7c5182a2ad57ba2",
+            "repoground": "7d299a7d1248a22263e176a7f7c5182a2ad57ba2"
+          },
+          "quality_review_complete": false,
+          "run_id": "study-20261102-system-evidence-s4-luna",
+          "scope": "real_runner_reported"
+        }
+      ]
+    }
+  ],
+  "kind": "repoground.agent_study_history",
+  "note": "Only the same protocol_key is structurally comparable. Even then time-period drift and sampling remain.",
+  "total_runs": 2,
+  "version": "1.0"
+}

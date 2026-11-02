@@ -43,3 +43,106 @@ Für die neue Systemwissenskohorte zählen nur reale zusätzliche Erkenntnisse u
 Alle 36 echten gpt-5.6-luna-Durchläufe sind mit SHA-gebundenen Providerreceipts abgeschlossen. In der nativen Auswertung: Git-only 9/12 gültig und 22.091 ms Median, RepoGround-Pflicht 10/12 und 29.309 ms, RepoGround-optional 10/12 und 25.714 ms. Eingabetokens: 1.750.957 / 2.971.982 / 2.535.420. Der Entscheid bleibt `not_established`: keine unabhängig geprüften Antworten und kein vollständiger Paarblock. Der Blindexport umfasst 29 reviewfähige und sieben ungültige Antworttexte.
 
 Historische Quellzitate wurden im R0-Runner wegen einer zu engen Commit-Whitelist verworfen, obwohl die historischen Gitobjekte existieren. Die alte v1-Kohorte und ihre Rohbelege bleiben unverändert. Ein neues v2-Taskset bindet vier zulässige historische Revisionen und lässt diese durch Git-Ancestry und präzise Einzelfallprüfung verifizieren. Ein neuer Vergleich braucht einen neuen Protokollschlüssel, keine rückwirkende Schönrechnung.
+
+## Nachbewertung der Original-Kohorten R0 und V2 (separate, unveränderte Evidenz)
+
+**Messentscheidung: `not_established`**. Die ursprünglichen Modellläufe,
+Providertraces, Receipts, Blindzuordnungen und Bewertungen bleiben in ihren
+jeweiligen privaten Studienwurzeln; sie wurden nicht überschrieben. Nach dem
+frühen R0-Bericht wurden die 29 reviewfähigen R0-Antworten unabhängig
+armblind gegen eingefrorene Git-Quellen bewertet: 24 `correct`, vier
+`partial`, eine `uncertain`. Dies ist eine unabhängige **Modellbewertung**,
+keine menschliche Abnahme. Das Original-Protokoll behält seine sieben ungültigen
+Versuche (darunter den historischen Zitatvalidatorfehler). R0 und V2 dürfen
+wegen verschiedener Protokoll- und Taskset-Hashes nicht zusammengepoolt werden.
+
+Für V2 wurde **keine neue Runner-Architektur** verwendet. Das neue Goldset
+`docs/retrieval/repoground_system_evidence_agent_study_cases.v2.json`
+(SHA-256 `e3785cc5d894271fe01a74293db6b183825038d22fbe80e07423ce986df3f730`)
+bindet historische Zitat-Commits pro Aufgabe. Der neue Protokollschlüssel lautet
+`7fb215e9aee64026bf806038d3b86e0b32ab88bc20fb3bdffa702c041f7d16cc`.
+Alle 36 echten V2-Modellversuche wurden im ursprünglichen privaten Studienroot
+abgeschlossen. 34 waren protokollgültig; die 34 eindeutigen Blindantworten
+erhielten in fünf getrennten read-only Git-Quellenprüfungen 32 `correct`
+und zwei `partial`. Die ursprünglichen Bewertungsdateien blieben erhalten;
+der native `review-import` band die Bewertungen unverändert an die
+Originalreceipts. Auch diese unabhängigen Urteile sind **Modell-**, keine
+Menschenbewertungen.
+
+Die nativen, strengeren `quality_correct`-Zahlen bewerten nicht bloß das
+externe Urteil, sondern auch die Aufgabenerfüllung nach Goldpfaden. Deshalb
+weichen sie von den 32 fachlich korrekten V2-Modellurteilen ab:
+
+| V2 (12 Versuche je Arm) | Git-only | RepoGround-Pflicht | RepoGround-optional |
+|---|---:|---:|---:|
+| Protokollgültig | 11 | 11 | 12 |
+| `quality_correct` | 3/11 | 4/11 | 2/12 |
+| Median aller gemessenen Laufzeiten | 22.821 ms | 32.968 ms | 29.645,5 ms |
+| Input-Tokens gesamt | 1.991.938 | 3.006.352 | 1.857.572 |
+| Werkzeugaufrufe gesamt | 69 | 107 | 66 |
+| RepoGround-Aufrufe / Fehlschläge | 0 / 0 | 48 / 6 | 0 / 0 |
+
+Für R0 lauten die entsprechenden strengeren Erfolge 3/9, 3/10, 2/10;
+Medianlaufzeiten 22.091 / 29.309 / 25.714 ms und Input-Tokens
+1.750.957 / 2.971.982 / 2.535.420 (gleiche Armreihenfolge).
+Die bewerteten R0-Ergebnisse enthalten acht vollständige
+Task×Wiederholung-Blöcke, V2 enthält zehn; wegen ungültiger Antworten und
+der vorregistrierten Mindestdeckung bleibt die Qualitätsprüfung im
+automatischen Entscheidungsobjekt unvollständig. Eine stärkere
+statistische Schlussfolgerung ist damit nicht zulässig.
+
+**Funktionaler Befund:** Der V2-Pflichtarm verbrauchte ungefähr 1,5-mal so
+viele Input-Tokens wie Git-only und hatte einen um 10,147 Sekunden
+höheren Laufzeitmedian. Sein gepaarter taskgeclusterter Mehrzeit-Mittelwert
+beträgt 8,317 Sekunden, das Bootstrap-95%-Intervall schließt null ein
+(−5,853 bis +20,040 Sekunden). Der optionale V2-Arm nutzte RepoGround
+tatsächlich **kein einziges Mal**. Die V2-Klasse `impact_tests` hatte
+zwar vollständig gültige Receipts und einen kürzeren gepaarten Pflicht-Arm,
+aber unter der strengen `quality_correct`-Rubrik **keinen
+Qualitätserfolg in irgendeinem Arm**; daraus folgt noch kein Nachweis
+historischer Nutzungsüberlegenheit. Ebenso war `reverse_relations` in V2
+bei der Pflichtverwendung länger, ohne strengeren Qualitätserfolg.
+Das native Urteil bleibt deshalb `not_established` und
+`default_promoted=false`. Ein isoliert schneller S4-Paketleser ist nicht
+gleich einem schnelleren oder besseren End-to-End-Agenten.
+
+Private, SHA-gebundene Nachrechenreferenzen (nur Hashes, keine Rohdaten):
+
+| Abgeleitetes Artefakt | SHA-256 |
+|---|---|
+| R0 `evaluation-luna-graded.json` | `839d1f74b7e17f5636fa9cc44ac414996cee484926725be9aa40a9ca752cd5f3` |
+| R0 `owner-only/grades-luna.json` | `080c05b58e4e5cefc4153c81e4097f609a932a9eb84f253df23fb4c809149dc7` |
+| V2 `evaluation-luna-graded.json` | `717d40ee87f7c1a2ce0c4b944f591c23f1e6b34f9a6cc9107129a2e3c1df145b` |
+| V2 `owner-only/grades-luna.json` | `2e2974f6015c0a30da51c8a63d0430292c538983ef8bdb5dbc3f24bc04264df3` |
+
+**Wiederholungsvertrag:** `agent_study validate-taskset`, `plan`,
+`run-batch`, `validate-receipt`, `review-export`, `review-import`,
+`evaluate --grades` und `trend` bleiben die maßgeblichen Werkzeuge.
+Bei neuen Kohorten Taskset-/Modell-/Runner-/Tool-/Quell-SHAs, Reihenfolge,
+Providertraces, Cache-/Hostbedingungen und Bewertungsart separat binden.
+Abweichende Protokollschlüssel nur **nebeneinander** vergleichen,
+nie zusammenrechnen. Bei weiterem Ausbau zuerst die Qualität historischer
+`impact_tests` und präzise Anwendung der vorab berechneten Flake-Evidenz
+gezielt verbessern; kein verpflichtender globaler RepoGround-Zugriff ohne
+nachgewiesenen zusätzlichen Endnutzen.
+
+
+## Native Langzeit-Trendprojektion (getrennte Protokollgruppen)
+
+Die vorhandene agent_study trend-CLI wurde mit exakt zwei unabhängig
+validierten, qualitätsgebundenen Originalauswertungen ausgeführt. Der
+bereinigte, maschinenlesbare Output ist in
+[repoground-system-agent-study-r0-v2-trend-20261102.json](repoground-system-agent-study-r0-v2-trend-20261102.json)
+versioniert. Er enthält nur Protokollschlüssel, Auswertungsidentitäten,
+Generatorrevisionen und statistische Aggregate; weder private
+Armzuordnungen noch Providertraces, Geheimnisse oder lokale Runtimepfade.
+
+Der Native-Output (SHA-256
+ee22d700ec287de3647fe3825d23e132eab54840fe924e3677d23b79ba7fe14d)
+weist total_runs=2, comparison_groups=2 und in **beiden**
+Gruppen cross_run_causal_claim=false aus. Die voneinander abweichenden
+Protokollschlüssel verhindern damit bereits in der vorhandenen Trendfunktion
+eine unzulässige gemeinsame R0/V2-Wirkungsschätzung. Für spätere Wiederholungen
+sind neue kohortengebundene Evaluationsberichte in eine eigene private
+Trend-Eingabemappe aufzunehmen und nur geprüfte, sensible-freie Aggregate
+zu veröffentlichen.
