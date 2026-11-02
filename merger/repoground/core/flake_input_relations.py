@@ -220,6 +220,10 @@ def _verified_inner_flake(
     if (actual_repo, actual_sha) != (dependency, declared_sha):
         return False
     inner_syntax = _nix_without_trivia(inner_text)
+    # A local let-bound name shadows the passed Flake input parameter.
+    # Scope-ambiguous cases remain S0 rather than a fabricated S1 link.
+    if re.search(r"(?m)^[ \t]*" + re.escape(alias) + r"\s*=", inner_syntax):
+        return False
     inner_depths = _brace_depths(inner_syntax)
     declarations = list(re.finditer(
         r"(?m)^\s*outputs\s*=\s*\{([^{}]*)\}\s*:", inner_syntax,
@@ -368,6 +372,43 @@ def _declared_services(
             [module_export, target_evidence],
         ))
 
+def _lexical_line_depths(syntax: str):
+    """Yield masked Nix source lines with the depth of their first token."""
+    depths = _brace_depths(syntax)
+    offset = 0
+    for number, line in enumerate(syntax.splitlines(keepends=True), 1):
+        token = offset + len(line) - len(line.lstrip())
+        yield number, line.rstrip("\n"), depths[token]
+        offset += len(line)
+
+
+def _append_local_module_relation(
+    root: Path, tree: dict[str, str], source_repo: str, commit: str,
+    module_flake_path: str, relative: str,
+    module_export: dict[str, Any], target_evidence: dict[str, Any],
+    lock_evidence: dict[str, Any],
+    rows: list[dict[str, Any]], gaps: list[str],
+) -> None:
+    candidate = posixpath.normpath(
+        posixpath.join(posixpath.dirname(module_flake_path), relative)
+    )
+    host_module = _git_object_bytes(root, tree, candidate)
+    if host_module is None:
+        gaps.append("host_module_path_missing:" + candidate)
+        return
+    host_module_evidence = _artifact_evidence(
+        source_repo, commit, candidate, tree, host_module,
+    )
+    rows.append(_record(
+        "nixos_local_module_inclusion", module_export,
+        host_module_evidence, [target_evidence, lock_evidence],
+    ))
+    _declared_services(
+        source_repo, commit, tree, candidate, host_module,
+        module_export, target_evidence, rows, gaps,
+    )
+
+
 def _declared_host_modules(
     root: Path, tree: dict[str, str], source_repo: str, commit: str,
     module_flake_path: str, outer: bytes, inner: bytes | None, alias: str,
@@ -386,8 +427,13 @@ def _declared_host_modules(
     ):
         gaps.append("inner_flake_input_unverified:" + alias)
         return
-    for number, line in enumerate(_nix_without_trivia(inner.decode("utf-8")).splitlines(), 1):
+    for number, line, depth in _lexical_line_depths(
+        _nix_without_trivia(inner.decode("utf-8"))
+    ):
         if not re.match(r"^\s*hostModules\s*=", line):
+            continue
+        if depth != 1:
+            gaps.append("host_modules_scope_unverified:" + alias)
             continue
         checked = _host_module_list_tokens(line, alias)
         if checked is None:
@@ -404,23 +450,10 @@ def _declared_host_modules(
             [root_evidence, lock_evidence],
         ))
         for relative in sorted(set(members)):
-            candidate = posixpath.normpath(
-                posixpath.join(posixpath.dirname(module_flake_path), relative)
-            )
-            host_module = _git_object_bytes(root, tree, candidate)
-            if host_module is None:
-                gaps.append("host_module_path_missing:" + candidate)
-                continue
-            host_module_evidence = _artifact_evidence(
-                source_repo, commit, candidate, tree, host_module
-            )
-            rows.append(_record(
-                "nixos_local_module_inclusion", module_export,
-                host_module_evidence, [target_evidence, lock_evidence],
-            ))
-            _declared_services(
-                source_repo, commit, tree, candidate, host_module,
-                module_export, target_evidence, rows, gaps,
+            _append_local_module_relation(
+                root, tree, source_repo, commit, module_flake_path,
+                relative, module_export, target_evidence,
+                lock_evidence, rows, gaps,
             )
 
 

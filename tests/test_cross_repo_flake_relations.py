@@ -528,3 +528,43 @@ class FlakeRelationsTest(TestCase):
             self.assertEqual(len(result["relations"]), 5)
             self.assertEqual(result["gaps"], [])
             self.assertTrue(all(not row["asserts_runtime_dependency"] for row in result["relations"]))
+
+    def test_unused_nested_hostmodules_does_not_bind_root_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src, sha, target, t_sha, _pin = fixture(Path(tmp))
+            sha = rewrite_committed(
+                src, "nixos/system/flake.nix",
+                "      hostModules = [ nixer.nixosModules.default ./modules/nixer.nix ];",
+                "      unused = {\n"
+                "        hostModules = [ nixer.nixosModules.default ./modules/nixer.nix ];\n"
+                "      };\n"
+                "      hostModules = [ ];",
+            )
+            result = flake_revision_relations(
+                src, sha, source_repo="heimgewebe/heim-pc",
+                targets={"heimgewebe/nixer": (target, t_sha)},
+            )
+            self.assertEqual(
+                [x["relation_type"] for x in result["relations"]],
+                ["flake_pinned_input"],
+            )
+            self.assertIn("host_modules_scope_unverified:nixer", result["gaps"])
+
+    def test_let_shadows_verified_input_alias(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src, sha, target, t_sha, _pin = fixture(Path(tmp))
+            sha = rewrite_committed(
+                src, "nixos/system/flake.nix",
+                "      hostModules = [ nixer.nixosModules.default ./modules/nixer.nix ];",
+                "      nixer = { nixosModules.default = {}; };\n"
+                "      hostModules = [ nixer.nixosModules.default ./modules/nixer.nix ];",
+            )
+            result = flake_revision_relations(
+                src, sha, source_repo="heimgewebe/heim-pc",
+                targets={"heimgewebe/nixer": (target, t_sha)},
+            )
+            self.assertEqual(
+                [x["relation_type"] for x in result["relations"]],
+                ["flake_pinned_input"],
+            )
+            self.assertIn("inner_flake_input_unverified:nixer", result["gaps"])
