@@ -77,6 +77,16 @@ def register_federation_commands(subparsers) -> None:
     relations_parser.add_argument("--metarepo-commit", required=True)
     relations_parser.add_argument("--target", action="append", required=True,
                                   metavar="REPO_ID=LOCAL_REPO_ROOT@FULL_SHA")
+    flake_parser = federation_subparsers.add_parser(
+        "flake-relations",
+        help="Read exact Git-locked cross-repository Flake inputs and declared modules",
+    )
+    flake_parser.add_argument("--repo-root", required=True)
+    flake_parser.add_argument("--repo-id", required=True, metavar="OWNER/REPO")
+    flake_parser.add_argument("--commit", required=True)
+    flake_parser.add_argument("--target", action="append", required=True,
+                              metavar="OWNER/REPO=LOCAL_REPO_ROOT@FULL_SHA")
+
     relation_delta_parser = federation_subparsers.add_parser(
         "relation-delta", help="Compare two pinned Fleet and target repository snapshots"
     )
@@ -126,7 +136,8 @@ def _parse_pinned_targets(values: list[str]) -> dict[str, tuple[Path, str]]:
 
 
 _TEMPORAL_COMMANDS = frozenset({
-    "revision", "delta", "path-history", "relations", "relation-delta", "history-events",
+    "revision", "delta", "path-history", "relations", "flake-relations",
+    "relation-delta", "history-events",
 })
 
 
@@ -149,6 +160,13 @@ def _temporal_federation_output(args: argparse.Namespace) -> dict:
 
         return query_federation_relations(Path(args.metarepo_root), args.metarepo_commit,
                                           _parse_pinned_targets(args.target))
+    if args.federation_command == "flake-relations":
+        from merger.repoground.core.flake_input_relations import flake_revision_relations
+
+        return flake_revision_relations(
+            Path(args.repo_root), args.commit, source_repo=args.repo_id,
+            targets=_parse_pinned_targets(args.target),
+        )
     if args.federation_command == "relation-delta":
         from merger.repoground.retrieval.federation_query import query_federation_relation_delta
 
