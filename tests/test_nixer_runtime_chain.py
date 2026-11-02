@@ -12,6 +12,7 @@ from scripts.ops.measure_nixer_runtime_chain import (
     _git_blob,
     _http_observation,
     _mainpid_listener,
+    _mcp_process_attribution,
     _mcp_observation,
     _store_output_from_execstart,
     compare_source_contents,
@@ -93,6 +94,21 @@ class NixerRuntimeChainTests(unittest.TestCase):
             )
             self.assertFalse(_mainpid_listener(4712, proc)["verified"])
 
+
+    def test_shared_listener_socket_never_proves_mcp_handler_pid(self):
+        # MainPID can own the listener while its child handles the HTTP call.
+        observed_gaps: list[str] = []
+        self.assertEqual(
+            _mcp_process_attribution(True, True, observed_gaps),
+            "unattributed_mcp_response",
+        )
+        self.assertEqual(observed_gaps, ["mcp_request_handler_pid_not_proven"])
+        self.assertEqual(
+            _mcp_process_attribution(False, True), "http_reachable_only",
+        )
+        self.assertEqual(
+            _mcp_process_attribution(False, False), "unverified",
+        )
 
     def test_valid_output_only_from_effective_nixer_execstart(self):
         self.assertEqual(

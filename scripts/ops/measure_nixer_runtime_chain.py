@@ -262,6 +262,17 @@ def _record_listener_ownership(
     return bound
 
 
+def _mcp_process_attribution(
+    mcp_verified: bool, http_responded: bool, gaps: list[str] | None = None,
+) -> str:
+    """Socket ownership never implies identity of a TCP request handler."""
+    if mcp_verified:
+        if gaps is not None:
+            gaps.append("mcp_request_handler_pid_not_proven")
+        return "unattributed_mcp_response"
+    return "http_reachable_only" if http_responded else "unverified"
+
+
 def _source_comparison(
     drv_record: dict[str, Any],
     nixer_repo: Path,
@@ -388,16 +399,15 @@ def build_report(
         "verified" if mcp["tool_call_verified"] else "unverified",
         mcp.get("tool_payload_sha256") or _ENDPOINT,
     )
+    # Holding the listener socket does not identify the process accepting the
+    # request. Keep MCP success distinct from precise process attribution.
     _append_edge(
         edges, "observed_process_to_mcp_nixer_status",
-        "verified" if listener_bound and mcp["tool_call_verified"] else
-        "unattributed_mcp_response" if mcp["tool_call_verified"] else
-        "http_reachable_only" if unit_running and http["http_responded"]
-        else "unverified",
+        _mcp_process_attribution(
+            mcp["tool_call_verified"], unit_running and http["http_responded"], gaps,
+        ),
         mcp.get("tool_payload_sha256") or _ENDPOINT,
-        "MCP status bound to MainPID" if listener_bound and mcp["tool_call_verified"]
-        else "MCP status endpoint only" if mcp["tool_call_verified"]
-        else f"HTTP {http['http_status']}",
+        "MCP response handler PID not established",
     )
     if not http["http_responded"]:
         gaps.append("endpoint_http_unreachable")
@@ -440,6 +450,7 @@ def build_report(
             "unique_git_commit_from_equal_content", "current_git_pin_was_built",
             "exact_nix_flake_input_to_derivation_identity",
             "runtime_source_equal_to_declared_pin", "absence_of_other_processes",
+            "mcp_request_handler_pid",
         ],
     }
     result["evidence_sha256"] = _sha256(_canonical(result))
