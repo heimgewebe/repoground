@@ -83,6 +83,64 @@ class CodexStudyRunnerTest(unittest.TestCase):
         self.assertEqual(calls[0]["status"], "failed")
         self.assertNotIn("repoground_evidence", calls[0])
 
+    def test_flake_relation_tool_requires_exact_manifest_commit_and_digest(self):
+        self.assertIn("get_flake_relation_evidence", runner.MCP_TOOLS)
+        expected = {"heim-pc": {
+            "repo": "heim-pc", "source_commit": "a" * 40,
+            "generator_commit": "b" * 40, "manifest_sha256": "c" * 64,
+            "observed_status": "available", "freshness": "pinned_exact",
+        }}
+        payload = {
+            "pack_sha256": "d" * 64,
+            "source_commit": "a" * 40,
+            "manifest_sha256": "c" * 64,
+            "evidence": {
+                "status": "ok", "relations": [{"relation_type": "flake_pinned_input"}],
+                "gaps": [],
+            },
+        }
+        event = {
+            "id": "m-s4", "type": "mcp_tool_call",
+            "server": "study_heim_pc", "tool": "get_flake_relation_evidence",
+            "arguments": {
+                "expected_repo": "heimgewebe/heim-pc", "expected_commit": "a" * 40,
+            },
+            "result": {"structured_content": payload},
+            "error": None, "status": "completed",
+        }
+        success = runner._mcp_tool_receipt(event, 1, 12, expected)
+        self.assertEqual(success["status"], "success")
+        self.assertEqual(success["repoground_evidence"], expected["heim-pc"])
+        for mutated in (
+            {"source_commit": "e" * 40},
+            {"manifest_sha256": "f" * 64},
+            {"pack_sha256": "not-a-sha"},
+            {"evidence": {"status": "unknown", "relations": [], "gaps": ["missing"]}},
+        ):
+            bad = {**payload, **mutated}
+            response = {**event, "result": {"structured_content": bad}}
+            proof = runner._mcp_tool_receipt(response, 1, 12, expected)
+            self.assertEqual(proof["status"], "failed")
+            self.assertNotIn("repoground_evidence", proof)
+
+    def test_flake_relation_tool_allows_gaps_without_inventing_missing_relations(self):
+        payload = {
+            "pack_sha256": "d" * 64,
+            "source_commit": "a" * 40,
+            "manifest_sha256": "c" * 64,
+            "evidence": {
+                "status": "partial", "relations": [],
+                "gaps": ["inner_flake_input_unverified:nixer"],
+            },
+        }
+        self.assertTrue(
+            runner._mcp_evidence_available("get_flake_relation_evidence", payload)
+        )
+        self.assertFalse(runner._mcp_evidence_available(
+            "get_flake_relation_evidence",
+            {**payload, "evidence": {"status": "ok", "gaps": []}}
+        ))
+
     def test_builtin_empty_codex_discovery_is_not_treatment(self):
         item = {"id": "m1", "type": "mcp_tool_call", "server": "codex",
                 "tool": "list_mcp_resources", "arguments": {},

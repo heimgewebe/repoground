@@ -27,7 +27,7 @@ MCP_TOOLS = (
     "bundle_discover", "snapshot_status", "ask_context", "query_existing_index",
     "range_get", "grounding_verify", "live_freshness", "find_symbol",
     "find_references", "get_callers", "get_callees",
-    "get_structure_neighborhood",
+    "get_structure_neighborhood", "get_flake_relation_evidence",
 )
 TOOL_NAMES = {
     "git": ["codex_git_command"],
@@ -637,7 +637,30 @@ def _mcp_evidence_available(tool: str, payload: Any) -> bool:
         return status == "pass"
     if tool == "live_freshness":
         return status == "fresh"
+    if tool == "get_flake_relation_evidence":
+        evidence = payload.get("evidence")
+        return (
+            isinstance(evidence, dict)
+            and evidence.get("status") in ("ok", "partial")
+            and isinstance(evidence.get("relations"), list)
+            and isinstance(evidence.get("gaps"), list)
+            and isinstance(payload.get("pack_sha256"), str)
+            and HEX64.fullmatch(payload["pack_sha256"]) is not None
+            and isinstance(payload.get("source_commit"), str)
+            and HEX40.fullmatch(payload["source_commit"]) is not None
+        )
     return status == "available"
+
+
+def _flake_pack_matches_bound_manifest(payload: Any, expected: dict[str, Any]) -> bool:
+    """Reject tool results not bound to the immutable manifest and source commit."""
+    return (
+        isinstance(payload, dict)
+        and payload.get("manifest_sha256") == expected.get("manifest_sha256")
+        and payload.get("source_commit") == expected.get("source_commit")
+        and isinstance(payload.get("pack_sha256"), str)
+        and HEX64.fullmatch(payload["pack_sha256"]) is not None
+    )
 
 
 def _mcp_tool_receipt(
@@ -657,6 +680,10 @@ def _mcp_tool_receipt(
         item.get("status") == "completed" and not item.get("error")
         and not (isinstance(result, dict) and result.get("isError") is True)
         and _mcp_evidence_available(str(item.get("tool")), payload)
+        and (
+            item.get("tool") != "get_flake_relation_evidence"
+            or _flake_pack_matches_bound_manifest(payload, expected[repo])
+        )
     )
     call = {
         "sequence": sequence, "name": name,
