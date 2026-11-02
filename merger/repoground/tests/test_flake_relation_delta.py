@@ -12,7 +12,6 @@ from merger.repoground.cli.main import main
 from merger.repoground.core.flake_relation_delta import flake_relation_delta
 from tests.test_cross_repo_flake_relations import fixture, rewrite_committed
 
-
 REPO = "heimgewebe/heim-pc"
 TARGET = "heimgewebe/nixer"
 
@@ -133,6 +132,19 @@ class FlakeRelationDeltaTests(TestCase):
             self.assertEqual(
                 sum(x["transition"] == "unverified" for x in output["changes"]), 5,
             )
+
+    def test_long_valid_source_repo_identity_keeps_history_available(self):
+        with tempfile.TemporaryDirectory() as d:
+            source, base, target, pin, _ = fixture(Path(d))
+            long_repo = "a" * 39 + "/" + "b" * 89
+            result = flake_relation_delta(
+                source, base, base, source_repo=long_repo,
+                targets_before={TARGET: (target, pin)},
+                targets_after={TARGET: (target, pin)},
+            )
+            self.assertEqual(result["source_repo"], long_repo)
+            self.assertEqual(result["status"], "ok")
+            self.assertEqual(result["changes"], [])
 
     def test_cli_exact_commits_and_invalid_sha(self):
         with tempfile.TemporaryDirectory() as d:

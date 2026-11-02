@@ -105,8 +105,13 @@ def flake_relation_delta(
     after = flake_revision_relations(
         source_root, head_commit, source_repo=source_repo, targets=targets_after,
     )
+    # history_lens accepts a bounded display identifier, while S1 accepts
+    # longer valid owner/repository names. Preserve full source_repo in output.
+    history_repo_id = source_repo.replace("/", "__")
+    if len(history_repo_id) > 128:
+        history_repo_id = "repo_" + hashlib.sha256(source_repo.encode()).hexdigest()
     git_delta = git_revision_delta(
-        Path(source_root), source_repo.replace("/", "__"),
+        Path(source_root), history_repo_id,
         before["source_commit"], after["source_commit"],
     )
     old, old_duplicates = _indexed(before["relations"])
