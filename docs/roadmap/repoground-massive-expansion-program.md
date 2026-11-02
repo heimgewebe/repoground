@@ -132,3 +132,62 @@ Jedes Epic liefert reale Codeänderungen, gezielte Tests, Diff und Ausgangs-/Zie
 Keine Benchmarks, Demos oder Snapshot-Zahlen als Ersatz für funktionierende Features. Ein funktionierendes Teilergebnis darf in einem eigenen PR integriert werden, auch wenn das Gesamtprogramm noch nicht fertig ist. Änderungen an fremden Repositories/Hostdiensten nur durch getrennte, autorisierte Grabowski-Arbeiten mit eigenen Gates.
 
 **Wahrheitsstatus:** Dieses Dokument ist die strategische Prioritätsentscheidung und der Backlog, nicht die kanonische Task-/CI-/Produktionsstatusquelle. Autoritativ bleiben `docs/tasks/index.json`, die zuständigen Grabowski-/Bureau-Belege, GitHub, Tests und Live-Readbacks.
+
+## 7. Ausführungsreihenfolge: System-Evidenz statt Git-Suchbeschleunigung (02.11.2026)
+
+**Verbindliches Ziel:** Diese vier Schritte konkretisieren die bereits beschlossenen Epics RG-XG, RG-XH, RG-XF und RG-XC. Sie sind **keine neue Architektur und kein dritter Versuch** des nach R5, A1 und B1 nicht nachgewiesenen allgemeinen Git-Suchbeschleunigers. Dessen Stopentscheidung bleibt bestehen. Der neue, noch unbelegte Produktanspruch lautet: revisionsgebundene Beziehungen **zwischen** Repository, Version, Vertrag, Test, Buildartefakt, Deployment und tatsächlich beobachtetem Dienst. Ein Agent kann diese Informationen auch über Primärsysteme zusammensetzen; RepoGround soll sie dauerhaft konsistent, nachprüfbar und für verschiedene Agenten gemeinsam abrufbar machen.
+
+### 7.1 Ein konkreter Nutzerweg mit realen Quellen
+
+**Frage:** *Welche Nixer-Revision ist in Heim-PCs NixOS-Konfiguration deklariert, wie wird das Nixer-Modul eingebunden, welche Änderungen am Nixer-Code könnten den Host betreffen, und welche Version ist nachweislich gebaut beziehungsweise tatsächlich aktiviert?*
+
+**Historischer Ausgangsbeleg (lokal am 02.11.2026 gelesen; vor Ausführung frisch verifizieren):**
+- `heimgewebe/heim-pc` bei lokalem HEAD `dfb80bd81b2e2160594d75854a5c8e1da03f949d`: `flake.nix`, `nixos/system/flake.nix` und `flake.lock` referenzieren den Nixer-Git-Commit `6c1fae3936e441c43d19a7924f2f26f3539fb1d3`. Das innere NixOS-Flake bindet `nixer.nixosModules.default` und `./modules/nixer.nix`. Das ist **Deklarations-, nicht Laufzeitbeleg**.
+- `heimgewebe/nixer`: Das gepinnte Objekt war lokal als Commit vorhanden; der lokale HEAD `c0e254fd2c771519217ded859102cc00989102ed` ist ein **anderer** Stand. Ein Vergleich Pin ↔ lokaler HEAD ist ohne geprüfte Revisionen/Ancestry und Remoteprüfung **keine** zulässige „seitdem“-Geschichte.
+- `heimgewebe/metarepo` bei lokalem HEAD `c1ac04fec54de590eda209b916f81c4ce8eb363a`: `fleet/repos.yml` nennt Heim-PC und weitere Fleet-Repositories. Mitgliedschaft ist **keine** Nixer-Abhängigkeit. Metadaten können die Beziehung nicht ersatzweise begründen.
+- Frische GitHub-`main`-Stände, CI, Nix-Store-Pfade, aktive NixOS-Generation, aktuelle Dienstprozesse und wirklich ausgelieferte Konfigurationen müssen jeweils an GitHub, Nix-/Deployment-Quittungen und dem Host geprüft werden. **Keinen** dieser unbekannten Betriebsstände aus dem lokalen Quellstand ableiten.
+
+**Gegenprobe:** Ein Agent ohne RepoGround darf `git`, `rg`, `nix`, Lockdateien, GitHub/CI und vorhandene read-only-Hostwerkzeuge voll verwenden. Ebenfalls vergleichen: ein kleines vorhandenes Skript, das dieselben Primärquellen direkt zusammenfasst. RepoGround gewinnt nicht dadurch, dass der Gegner künstlich eingeschränkt wird.
+
+### 7.2 Vier Lieferungen, seriell und mit echter Abnahme
+
+**S1 – Eindeutige repositoryübergreifende Deklarationen (RG-XF-01, RG-XG-02).**
+
+Die vorhandenen `system_relation_producer`-/`system_relation_overlay`-, `federation`- und Graphkomponenten sollen die nachweisbare Beziehung `heim-pc@SHA → Flake-Input/Lock → nixer@PIN → NixOS-Modul` als gerichtete, quellgebundene Struktur ausgeben. Pro Kante: Repository und Commit beider Seiten, Beziehungstyp, exakter Quelldatei- und Zeilenbereich, Artefakt-/Manifestdigest, `S0/S1` und `resolved/ambiguous/unavailable`. **Keine** Beziehung anhand gleicher Namen, Fleet-Koexistenz oder GitHub-Domain erraten.
+
+*Abnahme:* Ein positives echtes Commitpaar liefert nach zweimaliger Ausführung identische Belege und Git-Quellranges. Negativfall: gleicher Modulname, aber anderes Owner-/Commitziel wird nicht zusammengeführt. Fehlen eines Flake-Inputs und veraltetes Bundle ergeben sichtbare Lücken. Wenn vorhandene Module dies bereits schaffen, **nur** den fehlenden Verknüpfungs- oder Readerpfad schließen, keinen zusätzlichen Parser schreiben.
+
+**S2 – Zeit und Folgen einer echten Änderung (RG-XH-01, RG-XG-03).**
+
+Die vorhandenen `git_revision_delta`, `revision_graph_impact` und Systemrelationen an einem **ancestry-geprüften** Nixer- oder Heim-PC-Commitpaar verwenden. Ergebnis: direkt geänderte Quellen, belegte eingehende Beziehungen, registrierte oder nur vermutete Tests, unaufgelöste Kanten. Revision, Ereigniszeit, Beobachtung und Publikation separat halten. Bei fehlendem Zwischenstand keine Änderungsgeschichte erfinden.
+
+*Abnahme:* Ein realer mehrteiliger Code-/Contract-Fall mit Basis-SHA, Ziel-SHA und Diff-SHA256; ein negativer oder mehrdeutiger Testfall; ein veralteter Stand. Keine Behauptung über vollständige Testabdeckung, Laufzeitwirkung oder tatsächlichen Defekt ohne dazugehörigen Primärbeleg.
+
+**S3 – Tatsächlich gebaut und tatsächlich aktiv (RG-XF-02).**
+
+Nur vorhandene **authentische read-only** Nix-Build-/Store-, GitHub-CI-, Grabowski-Deployment- und Heim-PC-Service-Receipts an die S1-/S2-Kette anschließen. Deklarierte Revision, gebautes Artefakt, aktivierte NixOS-Generation und tatsächlich laufender Dienst sind **vier getrennte Aussagen**. Der Build einer NixOS-Generation beweist weder Aktivierung noch einen gesunden Prozess; Hostreadback muss dieselbe Identität tragen. Bei fehlender Berechtigung oder unzureichendem Receipt ausdrücklich `unavailable`.
+
+*Abnahme:* Mit einem echten aktuellen Runtimebeleg ist eine zusätzliche Kante mit Zeit/Identität zulässig; ohne denselben Beleg verschwindet nur diese Kante, S1/S2 bleiben unverändert. Widersprechende Quellen werden `conflict` statt „alles aktuell“. Kein Eingriff in NixOS, Backups oder fremde Dienste als Nebenwirkung der Analyse.
+
+**S4 – Ein vorab erzeugtes, kleines Evidence Pack (RG-XC-01/02/03).**
+
+Teure Struktur- und Änderungsanalyse **beim bestehenden autorisierten Publisher/Event-Handoff**, nicht bei jedem Agenten-Read, ausführen; bestehende Manifestrollen/Generation/Cachefunktionen vor Neuentwicklung nutzen. Ein begrenzter Response über die **eine vorhandene CLI/MCP-Frontdoor**: revisionsgebundene Relationen, Quelle/Range, Test-, Build- und Runtimebelege sowie Coverage, unbekannte Stellen und `does_not_establish`. Git-first bleibt für normale Suche unverändert. Weder neue Datenbank noch Router, Daemon, Rootbroker oder automatisch aktive RepoGround-Pflicht.
+
+*Abnahme:* Von der neuen veröffentlichten Generator-/Bundle-Version beantwortet ein echter Grabowski-Consumer die S1–S3-Frage und prüft mindestens einen Beleg am Original-Git; ein zweiter tatsächlicher Codex-/Claude-Consumer folgt beim bewährten Pfad. Zwei identische Reads starten **keinen** 20–50-Sekunden-Graph-Neubau und verändern keine Quellen. Ein echtes autorisiertes Event führt zu genau einem deduplizierten, datierten Pack. Bei `stale` oder fehlendem Bundle bleibt Git-Fallback benutzbar.
+
+### 7.3 Durchführung ohne Architekturverdopplung
+
+1. **Erste Lücke zuerst:** Frischen GitHub-/Runtime-/Leasestand prüfen und genau den S1-Pfad auf aktuellen Quellständen mit vorhandenen Werkzeugen durchlaufen. Schon implementierte Funktionen nicht neu bauen. Nur das tatsächlich fehlende Bindeglied im eigenen Grabowski-Worktree als kleinsten testbaren PR schließen.
+2. Danach S2 an einem realen positiven und einem negativen Git-Änderungsfall nachweisen. S3 nur mit tatsächlich vorhandenen Host-/CI-/Buildreceipts, sonst `unavailable` liefern. Die gemeinsame Agenten-Frontdoor erst auf vollständig gebundene Daten aus S1/S2 setzen.
+3. Pro Schritt echter Quell-/SHA-/Range-/Diff-Nachweis, fokussierte Positiv- und Negativtests, CI und kontrollierter GitHub-Merge durch Captain. Nach Merge **den aktualisierten Generator** und seine neu veröffentlichten Bundles am realen Client prüfen, nicht nur einen grünen Repo-Branch.
+4. **Grabowski alleiniger Writer**; separate disjunkte Lanes nur bei realen Abhängigkeiten. Bestehende A1/B1-Dokumentations-Lane nicht übernehmen oder überschreiben. Großer Adler bei konkreter Unabhängigkeitsfrage read-only. Die vorhandenen drei Ausbau-Epics und ihre Dokumente bleiben die alleinige Roadmap.
+
+### 7.4 Nutzwertprüfung erst am funktionierenden Systemweg
+
+Die Abnahme misst nicht MCP-Aufrufanzahl, sondern:
+- **Faktenqualität:** Jede als sicher ausgewiesene Repository-/Vertrags-/Artefakt-/Runtimekante ist an Originalquelle und Revision gebunden; im fixierten Positiv-/Negativgoldset **null** unbewiesene als sichere Beziehungen. Fehlende Beziehungen und parserbedingte Auslassungen werden als Coverage-Lücken ausgewiesen.
+- **Mehrwert:** relevante zusätzliche richtige Cross-Repo-/Historien-/Build-/Runtimefunde gegenüber einer **gleichberechtigten** Git/Nix/CI/Host-Alternative; sinnvolle Erkennung unterschiedlicher deklarierter, gebauter und aktiver Versionen.
+- **Wiederverwendbarkeit und Kosten:** Agentenzeit, Tokens, Toolcalls **plus** Publisher-Rechenzeit, Speicher und Aktualisierungsverzug. Ein warmes, bereits veröffentlichtes Pack soll als **Ziel** p95 in ungefähr 2 Sekunden lesbar sein (kein gegenwärtig bewiesener Wert); der Reader kompiliert den Graph nicht neu.
+- **Echte Kundenwirkung:** Mindestens ein durchgängiger zuerst-zuletzt nachgewiesener Grabowski-Auftrag und nachfolgend ein zweiter echter Consumer. Ein PR-Merge, ein MCP-Handshake oder ein isolierter Graph-Mikrotest genügt nicht.
+
+**Entscheidung:** Bei zusätzlichem korrekt belegtem Systemwissen bzw. deutlich geringerem Gesamtaufwand nur **diese** Aufgabenklasse als System-Evidenz-Produkt weiterentwickeln. Wenn Git/Nix/CI/Host-Reads oder ein einfaches Skript dieselben Ergebnisse mit weniger Wartung liefern, die einfachere Lösung bevorzugen. **Keine** weitere allgemeine Suchoptimierungsstudie, keine Pflichtnutzung, keine fiktive Runtime- oder Testabdeckungsbehauptung und kein unbefristeter Feature-Ausbau ohne realen Verbraucher.
