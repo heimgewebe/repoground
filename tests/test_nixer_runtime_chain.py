@@ -11,6 +11,7 @@ from scripts.ops.measure_nixer_runtime_chain import (
     _derivation_sources,
     _git_blob,
     _http_observation,
+    _mainpid_listener,
     _mcp_observation,
     _store_output_from_execstart,
     compare_source_contents,
@@ -65,6 +66,33 @@ class NixerRuntimeChainTests(unittest.TestCase):
         result = _derivation_sources(drv)
         self.assertEqual(set(result), {"server.py", "evidence.py", "image_pin.py"})
         self.assertTrue(all(x.startswith("/nix/store/") for x in result.values()))
+
+    def test_mainpid_listener_requires_exact_proc_socket_inode(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as dirname:
+            proc = Path(dirname)
+            folder = proc / "4711"
+            (folder / "net").mkdir(parents=True)
+            (folder / "fd").mkdir()
+            line = "  0: 0100007F:470B 00000000:0000 0A 00000000:00000000 00:00000000 00000000 1000 0 123 1 0000000000000000"
+            (folder / "net/tcp").write_text("  sl local_address rem_address st tx_queue tr tm uid timeout inode\n" + line + "\n")
+            (folder / "fd/3").symlink_to("socket:[123]")
+            self.assertTrue(_mainpid_listener(4711, proc)["verified"])
+            (folder / "fd/3").unlink()
+            (folder / "fd/3").symlink_to("socket:[456]")
+            wrong = _mainpid_listener(4711, proc)
+            self.assertFalse(wrong["verified"])
+            self.assertEqual(wrong["reason"], "main_pid_does_not_own_listener")
+            (folder / "fd/3").unlink()
+            (folder / "fd/3").symlink_to("socket:[123]")
+            (folder / "net/tcp").write_text("header\n" + line + "\n" + line.replace("123", "456") + "\n")
+            self.assertEqual(
+                _mainpid_listener(4711, proc)["reason"], "listener_missing_or_ambiguous",
+            )
+            self.assertFalse(_mainpid_listener(4712, proc)["verified"])
+
 
     def test_valid_output_only_from_effective_nixer_execstart(self):
         self.assertEqual(

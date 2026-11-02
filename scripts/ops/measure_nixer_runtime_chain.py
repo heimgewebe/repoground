@@ -176,6 +176,48 @@ def _mcp_observation() -> dict[str, Any]:
                 "gap": type(exc).__name__}
 
 
+def _tcp_listener_inodes(proc_tcp_text: str) -> set[str]:
+    """Exact IPv4 listeners for 127.0.0.1:18187, including the wildcard bind."""
+    result: set[str] = set()
+    for line in proc_tcp_text.splitlines()[1:]:
+        cols = line.split()
+        if len(cols) < 10 or cols[3] != "0A":
+            continue
+        address_port = cols[1].split(":", 1)
+        if (
+            len(address_port) == 2
+            and address_port[0] in {"0100007F", "00000000"}
+            and address_port[1].upper() == "470B"
+        ):
+            result.add(cols[9])
+    return result
+
+
+def _mainpid_listener(pid: int, proc_root: Path = Path("/proc")) -> dict[str, Any]:
+    """Bind the IPv4 MCP listening socket to the observed systemd MainPID.
+
+    A successful MCP response from an unrelated listener is not process proof.
+    A shared/ambiguous port or inaccessible procfs remains unverified.
+    """
+    if pid <= 0:
+        return {"verified": False, "reason": "main_pid_missing"}
+    try:
+        listeners = _tcp_listener_inodes((proc_root / str(pid) / "net/tcp").read_text())
+        if len(listeners) != 1:
+            return {"verified": False, "reason": "listener_missing_or_ambiguous"}
+        inode = next(iter(listeners))
+        for fd in (proc_root / str(pid) / "fd").iterdir():
+            try:
+                target = fd.readlink().as_posix()
+            except OSError:
+                continue
+            if target == f"socket:[{inode}]":
+                return {"verified": True, "socket_inode_sha256": _sha256(inode.encode())}
+        return {"verified": False, "reason": "main_pid_does_not_own_listener"}
+    except (OSError, ValueError) as exc:
+        return {"verified": False, "reason": type(exc).__name__}
+
+
 def _unit_state(unit: str) -> dict[str, str]:
     out = _cmd("systemctl", "show", unit, "-p", "LoadState", "-p", "ActiveState",
                "-p", "MainPID", "-p", "ExecStart", "-p", "ControlGroup")
@@ -203,6 +245,21 @@ def _append_edge(edges: list[dict[str, Any]], relation: str, status: str,
     if detail is not None:
         row["detail"] = detail
     edges.append(row)
+
+
+def _record_listener_ownership(
+    edges: list[dict[str, Any]], gaps: list[str],
+    before: dict[str, Any], after: dict[str, Any],
+) -> bool:
+    bound = before.get("verified") is True and before == after
+    _append_edge(
+        edges, "observed_process_to_endpoint_listener",
+        "verified" if bound else "unverified",
+        before.get("socket_inode_sha256"),
+    )
+    if not bound:
+        gaps.append("nixer_mcp_listener_ownership_unverified")
+    return bound
 
 
 def _source_comparison(
@@ -312,18 +369,35 @@ def build_report(
                  _sha256(proc_cmdline + proc_cgroup.encode()))
     if not unit_running:
         gaps.append("effective_unit_to_process_unverified")
+    listener_before = _mainpid_listener(pid) if unit_running else {
+        "verified": False, "reason": "unit_process_unverified",
+    }
     http = _http_observation()
     mcp = _mcp_observation() if unit_running and http["http_responded"] else {
         "protocol_handshake_verified": False, "tool_call_verified": False,
-        "gap": "no_attributed_http_endpoint",
+        "gap": "endpoint_not_observed",
     }
+    listener_after = _mainpid_listener(pid) if unit_running else {
+        "verified": False, "reason": "unit_process_unverified",
+    }
+    listener_bound = _record_listener_ownership(
+        edges, gaps, listener_before, listener_after,
+    )
+    _append_edge(
+        edges, "mcp_endpoint_to_nixer_status",
+        "verified" if mcp["tool_call_verified"] else "unverified",
+        mcp.get("tool_payload_sha256") or _ENDPOINT,
+    )
     _append_edge(
         edges, "observed_process_to_mcp_nixer_status",
-        "verified" if mcp["tool_call_verified"] else
+        "verified" if listener_bound and mcp["tool_call_verified"] else
+        "unattributed_mcp_response" if mcp["tool_call_verified"] else
         "http_reachable_only" if unit_running and http["http_responded"]
         else "unverified",
         mcp.get("tool_payload_sha256") or _ENDPOINT,
-        "MCP nixer_status" if mcp["tool_call_verified"] else f"HTTP {http['http_status']}",
+        "MCP status bound to MainPID" if listener_bound and mcp["tool_call_verified"]
+        else "MCP status endpoint only" if mcp["tool_call_verified"]
+        else f"HTTP {http['http_status']}",
     )
     if not http["http_responded"]:
         gaps.append("endpoint_http_unreachable")
@@ -353,7 +427,13 @@ def build_report(
             "process_cmdline_sha256": _sha256(proc_cmdline),
         },
         "source_file_matches": comparison,
-        "endpoint": {"url": _ENDPOINT, **http, **mcp},
+        "endpoint": {
+            "url": _ENDPOINT, **http, **mcp,
+            "listener_ownership": {
+                "verified": listener_bound,
+                "before": listener_before, "after": listener_after,
+            },
+        },
         "edges": edges, "gaps": sorted(set(gaps)),
         "status": "partial" if gaps else "ok",
         "does_not_establish": [
