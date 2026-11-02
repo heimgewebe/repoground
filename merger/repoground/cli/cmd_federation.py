@@ -87,6 +87,19 @@ def register_federation_commands(subparsers) -> None:
     flake_parser.add_argument("--target", action="append", required=True,
                               metavar="OWNER/REPO=LOCAL_REPO_ROOT@FULL_SHA")
 
+    flake_delta = federation_subparsers.add_parser(
+        "flake-relation-delta",
+        help="Compare two exact Git revisions of cross-repository Flake evidence",
+    )
+    flake_delta.add_argument("--repo-root", required=True)
+    flake_delta.add_argument("--repo-id", required=True, metavar="OWNER/REPO")
+    flake_delta.add_argument("--base", required=True)
+    flake_delta.add_argument("--head", required=True)
+    flake_delta.add_argument("--target-before", action="append", required=True,
+                             metavar="OWNER/REPO=LOCAL_REPO_ROOT@FULL_SHA")
+    flake_delta.add_argument("--target-after", action="append", required=True,
+                             metavar="OWNER/REPO=LOCAL_REPO_ROOT@FULL_SHA")
+
     pack_create = federation_subparsers.add_parser(
         "flake-pack-create",
         help="Materialize exact revision-bound Flake evidence once as an immutable JSON artifact",
@@ -165,8 +178,25 @@ def _parse_pinned_targets(values: list[str]) -> dict[str, tuple[Path, str]]:
 
 _TEMPORAL_COMMANDS = frozenset({
     "revision", "delta", "path-history", "relations", "flake-relations",
-    "flake-pack-read", "flake-pack-manifest", "relation-delta", "history-events",
+    "flake-pack-read", "flake-pack-manifest", "relation-delta", "flake-relation-delta", "history-events",
 })
+
+
+def _read_flake_relation_command(args: argparse.Namespace) -> dict:
+    if args.federation_command == "flake-relation-delta":
+        from merger.repoground.core.flake_relation_delta import flake_relation_delta
+
+        return flake_relation_delta(
+            Path(args.repo_root), args.base, args.head, source_repo=args.repo_id,
+            targets_before=_parse_pinned_targets(args.target_before),
+            targets_after=_parse_pinned_targets(args.target_after),
+        )
+    from merger.repoground.core.flake_input_relations import flake_revision_relations
+
+    return flake_revision_relations(
+        Path(args.repo_root), args.commit, source_repo=args.repo_id,
+        targets=_parse_pinned_targets(args.target),
+    )
 
 
 def _read_flake_pack_command(args: argparse.Namespace) -> dict:
@@ -209,13 +239,8 @@ def _temporal_federation_output(args: argparse.Namespace) -> dict:
 
         return query_federation_relations(Path(args.metarepo_root), args.metarepo_commit,
                                           _parse_pinned_targets(args.target))
-    if args.federation_command == "flake-relations":
-        from merger.repoground.core.flake_input_relations import flake_revision_relations
-
-        return flake_revision_relations(
-            Path(args.repo_root), args.commit, source_repo=args.repo_id,
-            targets=_parse_pinned_targets(args.target),
-        )
+    if args.federation_command in {"flake-relations", "flake-relation-delta"}:
+        return _read_flake_relation_command(args)
     if args.federation_command in {"flake-pack-read", "flake-pack-manifest"}:
         return _read_flake_pack_command(args)
     if args.federation_command == "relation-delta":
