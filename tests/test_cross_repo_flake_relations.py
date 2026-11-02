@@ -568,3 +568,18 @@ class FlakeRelationsTest(TestCase):
                 ["flake_pinned_input"],
             )
             self.assertIn("inner_flake_input_unverified:nixer", result["gaps"])
+
+    def test_trailing_blank_line_or_comment_cannot_crash_depth_scan(self):
+        for trailing in ("\n", "# a final comment\n"):
+            with self.subTest(trailing=trailing), tempfile.TemporaryDirectory() as tmp:
+                src, sha, target, t_sha, _pin = fixture(Path(tmp))
+                name = "nixos/system/flake.nix"
+                original = (src / name).read_text(encoding="utf-8")
+                sha = rewrite_committed(src, name, original, original + trailing)
+                result = flake_revision_relations(
+                    src, sha, source_repo="heimgewebe/heim-pc",
+                    targets={"heimgewebe/nixer": (target, t_sha)},
+                )
+                self.assertEqual(result["status"], "ok")
+                self.assertEqual(len(result["relations"]), 5)
+                self.assertEqual(result["gaps"], [])

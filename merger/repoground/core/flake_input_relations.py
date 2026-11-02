@@ -377,8 +377,12 @@ def _lexical_line_depths(syntax: str):
     depths = _brace_depths(syntax)
     offset = 0
     for number, line in enumerate(syntax.splitlines(keepends=True), 1):
-        token = offset + len(line) - len(line.lstrip())
-        yield number, line.rstrip("\n"), depths[token]
+        if line.strip():
+            token = offset + len(line) - len(line.lstrip())
+            at_depth = depths[token]
+        else:
+            at_depth = 0  # No identifier is present to attribute to a scope.
+        yield number, line.rstrip("\n"), at_depth
         offset += len(line)
 
 
