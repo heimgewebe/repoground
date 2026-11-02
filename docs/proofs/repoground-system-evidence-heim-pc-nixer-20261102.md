@@ -14,7 +14,7 @@ Vor dem ersten Writer-Schritt in der unveränderlichen Grabowski-Auftragsquittun
 
 ## S1: Reproduzierbare deterministische Relation
 
-Der neue `flake_revision_relations`-Producer verwendet ausschließlich die Git-Objekte der angegebenen Quell- und Zielrevision, ohne Git-Fetch, Nix-Evaluation, Bundle-Refresh oder Arbeitsbaum-Lesezugriff auf die Datenquellen. Er prüft URL, owner/repo, SHA, `flake.lock`, Ziel-Commitobjekt, Modul-Export und vorhandenen lokalen Modulpfad. Unverifizierte Elemente bleiben Lücken (S0), nicht sichere Kanten (S1).
+Der neue `flake_revision_relations`-Producer verwendet ausschließlich die Git-Objekte der angegebenen Quell- und Zielrevision, ohne Git-Fetch, Nix-Evaluation, Bundle-Refresh oder Arbeitsbaum-Lesezugriff auf die Datenquellen. Er prüft URL, owner/repo, SHA, `flake.lock`, Ziel-Commitobjekt, Modul-Export und vorhandenen lokalen Modulpfad. Unverifizierte Elemente bleiben Lücken (S0), nicht sichere Kanten (S1). Die lexikalische Erkennung ist bewusst auf Root-Inputs beschränkt; URLs in fremden Nix-Attributbereichen werden nicht als Flake-Inputs aufgewertet. Die Repositoryidentitäten stammen aus den ausdrücklich angegebenen Quell-/Zielzuordnungen, nicht aus einer automatischen GitHub-Identitätsprüfung.
 
 CLI im Grabowski-Worktree:
 
@@ -32,7 +32,7 @@ Zweiter, unabhängiger Fall mit bereits vorhandenem `fleet_revision_relations`: 
 
 ## Negativ- und Abdeckungsgrenzen
 
-`python3 -m unittest -q tests.test_cross_repo_flake_relations`: zehn gezielte Tests bestanden, inklusive exakter Gitobjekt-Positivkette, reproduzierbarem Output, falschem Owner, falschem Zielcommit, Lock-Konflikt, fehlendem Zielrepo, fehlendem Modulpfad, kommentar-only Modul-Export, Git-HEAD im Ziel verschieden vom gepinnten Objekt und tatsächlichem CLI-Aufruf.
+`python3 -m unittest -q tests.test_cross_repo_flake_relations`: 13 gezielte Tests bestanden, inklusive exakter Gitobjekt-Positivkette, reproduzierbarem Output, falschem Owner, falschem Zielcommit, Lock-Konflikt, fehlendem Zielrepo, fehlendem Modulpfad, kommentar-only Modul-Export, URL außerhalb der Flake-Root-Inputs, doppelter Root-Input, Root-Attrpfad, Git-HEAD im Ziel verschieden vom gepinnten Objekt und tatsächlichem CLI-Aufruf.
 
 Nicht bewiesen: vollständige Nix-AST-Evaluation, dynamische Importpfade, vollständige Cross-Repo-Abdeckung, Build-/CI-Identität, aktivierte Generation, tatsächlich laufender Dienst, Deploy-Kompatibilität. S0 Host-Readback des *User-Managers* meldet für `nixer.service` und `nixer-image.service` `LoadState=not-found`, `ActiveState=inactive`. Das beweist weder die Nichtexistenz eines systemweiten Headless-Dienstes noch die aktuelle NixOS-Generation.
 

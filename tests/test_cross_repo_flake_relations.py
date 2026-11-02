@@ -236,3 +236,70 @@ class FlakeRelationsTest(TestCase):
                 ["flake_pinned_input"],
             )
             self.assertIn("target_module_export_unverified:heimgewebe/nixer", result["gaps"])
+
+    def test_outside_root_inputs_does_not_resolve(self):
+        with tempfile.TemporaryDirectory() as directory:
+            src, _sha, target, t_sha, pin = fixture(Path(directory))
+            (src / "flake.nix").write_text(
+                '{\n  other = {\n'
+                f'    nixer.url = "github:heimgewebe/nixer/{pin}";\n'
+                '  };\n}\n', encoding="utf-8"
+            )
+            git(src, "add", "flake.nix")
+            subprocess.run(
+                ["git", "-C", str(src), "-c", "user.name=Test",
+                 "-c", "user.email=test@example.invalid",
+                 "commit", "-qm", "unrelated attr"], check=True,
+            )
+            result = flake_revision_relations(
+                src, git(src, "rev-parse", "HEAD"),
+                source_repo="heimgewebe/heim-pc",
+                targets={"heimgewebe/nixer": (target, t_sha)},
+            )
+            self.assertEqual(result["relations"], [])
+            self.assertIn("flake_url_outside_root_inputs:nixer", result["gaps"])
+
+    def test_direct_top_level_inputs_attrpath_resolves(self):
+        with tempfile.TemporaryDirectory() as directory:
+            src, _sha, target, t_sha, pin = fixture(Path(directory))
+            (src / "flake.nix").write_text(
+                '{\n'
+                f'  inputs.nixer.url = "github:heimgewebe/nixer/{pin}";\n'
+                '}\n', encoding="utf-8"
+            )
+            git(src, "add", "flake.nix")
+            subprocess.run(
+                ["git", "-C", str(src), "-c", "user.name=Test",
+                 "-c", "user.email=test@example.invalid",
+                 "commit", "-qm", "direct input attrpath"], check=True,
+            )
+            result = flake_revision_relations(
+                src, git(src, "rev-parse", "HEAD"),
+                source_repo="heimgewebe/heim-pc",
+                targets={"heimgewebe/nixer": (target, t_sha)},
+            )
+            self.assertEqual(result["gaps"], [])
+            self.assertEqual(len(result["relations"]), 5)
+
+    def test_duplicate_root_inputs_cannot_be_promoted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            src, _sha, target, t_sha, pin = fixture(Path(directory))
+            (src / "flake.nix").write_text(
+                '{\n  inputs = {\n'
+                f'    nixer.url = "github:heimgewebe/nixer/{pin}";\n'
+                f'    nixer.url = "github:heimgewebe/nixer/{pin}";\n'
+                '  };\n}\n', encoding="utf-8"
+            )
+            git(src, "add", "flake.nix")
+            subprocess.run(
+                ["git", "-C", str(src), "-c", "user.name=Test",
+                 "-c", "user.email=test@example.invalid",
+                 "commit", "-qm", "duplicate attr"], check=True,
+            )
+            result = flake_revision_relations(
+                src, git(src, "rev-parse", "HEAD"),
+                source_repo="heimgewebe/heim-pc",
+                targets={"heimgewebe/nixer": (target, t_sha)},
+            )
+            self.assertEqual(result["relations"], [])
+            self.assertIn("duplicate_flake_input:nixer", result["gaps"])
