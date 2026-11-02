@@ -323,5 +323,107 @@ class FlakeEvidencePackTest(unittest.TestCase):
                     samples=2,
                 )
 
+    def test_public_share_excludes_flake_pack_without_generation_failure(self):
+        import argparse
+        from merger.repoground.cli.cmd_ground import build_snapshot_create_result
+        from merger.repoground.core.bundle_generation import resolve_bundle_manifest_path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source, _sha, target, target_sha = self._prepare(root)
+            subprocess.run(
+                ["git", "-C", str(source), "remote", "add", "origin",
+                 "https://github.com/heimgewebe/heim-pc.git"],
+                capture_output=True, check=True,
+            )
+            out = root / "public"
+            ns = argparse.Namespace(
+                repo=str(source), out=str(out), profile="public-share",
+                mode="gesamt", max_bytes="0", split_size="25MB",
+                path_filter=None, ext=None, output_mode=None,
+                redact_secrets=None, include_hidden=True,
+                language_structure=False, latest_complete_registry=None,
+                flake_source_repo=SOURCE_REPO,
+                flake_targets=[f"{TARGET_REPO}={target}@{target_sha}"],
+            )
+            result = build_snapshot_create_result(ns)
+            self.assertEqual(result["finalization"]["status"], "pass")
+            manifest = resolve_bundle_manifest_path(result["bundle_manifest"])
+            metadata = json.loads(manifest.read_text(encoding="utf-8"))
+            self.assertFalse(any(
+                item["role"] == "flake_relation_evidence_json"
+                for item in metadata["artifacts"]
+            ))
+            self.assertFalse(list(out.glob("*.flake_relation_evidence.*.json")))
+
+    def test_two_same_minute_publisher_generations_remain_isolated(self):
+        import argparse
+        from merger.repoground.cli.cmd_ground import build_snapshot_create_result
+        from merger.repoground.core.bundle_generation import resolve_bundle_manifest_path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source, sha, target, target_sha = self._prepare(root)
+            subprocess.run(
+                ["git", "-C", str(source), "remote", "add", "origin",
+                 "https://github.com/heimgewebe/heim-pc.git"],
+                capture_output=True, check=True,
+            )
+            out = root / "pub" / "generation_a"
+            ns = argparse.Namespace(
+                repo=str(source), out=str(out), profile="fleet-context",
+                mode="gesamt", max_bytes="0", split_size="25MB",
+                path_filter=None, ext=None, output_mode=None,
+                redact_secrets=None, include_hidden=True, language_structure=False,
+                latest_complete_registry=None, flake_source_repo=SOURCE_REPO,
+                flake_targets=[f"{TARGET_REPO}={target}@{target_sha}"],
+            )
+            first = build_snapshot_create_result(ns)
+            self.assertEqual(first["finalization"]["status"], "pass")
+            immutable = resolve_bundle_manifest_path(first["bundle_manifest"])
+            before = immutable.read_bytes()
+            # The existing publisher selects a distinct output directory for
+            # each generation; do not reuse the underlying graph source files.
+            ns.out = str(root / "pub" / "generation_b")
+            second = build_snapshot_create_result(ns)
+            self.assertEqual(second["finalization"]["status"], "pass")
+            self.assertEqual(immutable.read_bytes(), before)
+            manifest = resolve_bundle_manifest_path(second["bundle_manifest"])
+            rows = [
+                a for a in json.loads(manifest.read_text())["artifacts"]
+                if a["role"] == "flake_relation_evidence_json"
+            ]
+            self.assertEqual(len(rows), 1)
+            self.assertIn(".flake_relation_evidence.", rows[0]["path"])
+            self.assertEqual(
+                read_flake_evidence_pack(
+                    manifest.parent / rows[0]["path"],
+                    expected_repo=SOURCE_REPO, expected_commit=sha,
+                )["evidence"]["status"], "ok",
+            )
+
+    def test_existing_staging_pack_is_reused_only_if_hash_identical(self):
+        from merger.repoground.cli.cmd_ground import _write_or_reuse_flake_pack
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source, sha, target, target_sha = self._prepare(root)
+            pack = prepare_flake_evidence_pack(
+                source, sha, source_repo=SOURCE_REPO,
+                targets={TARGET_REPO: (target, target_sha)},
+            )
+            output = root / "pack.json"
+            _write_or_reuse_flake_pack(output, pack)
+            first = output.read_bytes()
+            _write_or_reuse_flake_pack(output, pack)
+            self.assertEqual(output.read_bytes(), first)
+            altered = prepare_flake_evidence_pack(
+                source, sha, source_repo=SOURCE_REPO,
+                targets={TARGET_REPO: (target, "f" * 40)},
+            )
+            with self.assertRaisesRegex(ValueError, "different Flake evidence"):
+                _write_or_reuse_flake_pack(output, altered)
+            self.assertEqual(output.read_bytes(), first)
+
 if __name__ == "__main__":
     unittest.main()

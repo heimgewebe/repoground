@@ -87,6 +87,7 @@ The MCP tools available by default are generated from the runtime registry:
 - `get_callers`: Group uniquely resolved callers for one exact target symbol.
 - `get_callees`: Group uniquely resolved outgoing calls for one exact caller symbol.
 - `get_structure_neighborhood`: Read incoming/outgoing proven S1 relations and unresolved S0 hints for an exact file:PATH or symbol ID from a published bundle. Includes cross-language declarations and coverage; never scans or refreshes sources.
+- `get_flake_relation_evidence`: Read precomputed S1 Nix Flake input/module declarations and explicit S0 gaps from one immutable manifest-bound bundle. Source and target Git revisions are verified against the publication, without Git, network access or runtime dependency claims.
 <!-- repoground-mcp-tools:end -->
 
 Every read tool that targets one snapshot accepts either an exact `bundle_manifest`

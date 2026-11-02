@@ -1521,7 +1521,8 @@ def _append_unique_paths(
 
 
 def _append_optional_flake_artifact(paths: list[Path], path: Path | None) -> None:
-    if path is not None and path not in paths:
+    # Profile exclusions remove the artifact before generation finalization.
+    if path is not None and path.is_file() and path not in paths:
         paths.append(path)
 
 
@@ -1534,6 +1535,23 @@ def _require_flake_source_identity(repo: Path, expected_repo: str) -> None:
     )
     if not _remote_matches_repo(observed.stdout.strip(), expected_repo):
         raise ValueError("Flake source remote does not match claimed owner/repository")
+
+
+def _write_or_reuse_flake_pack(path: Path, pack: dict[str, Any]) -> None:
+    from merger.repoground.core.flake_evidence_pack import (
+        read_flake_evidence_pack, write_flake_evidence_pack,
+    )
+    try:
+        write_flake_evidence_pack(path, pack)
+    except FileExistsError:
+        # Only reusable if the *complete* existing immutable content agrees.
+        # Never replace a stale, damaged, symlinked or different staging pack.
+        previous = read_flake_evidence_pack(
+            path, expected_repo=pack["source_repo"],
+            expected_commit=pack["source_commit"],
+        )
+        if previous["pack_sha256"] != pack["pack_sha256"]:
+            raise ValueError("different Flake evidence already occupies staging path")
 
 
 def _emit_flake_relation_artifact(
@@ -1549,9 +1567,7 @@ def _emit_flake_relation_artifact(
     _require_flake_source_identity(source_root, source_repo)
     from merger.repoground.cli.cmd_federation import _parse_pinned_targets
     from merger.repoground.core.constants import ArtifactRole
-    from merger.repoground.core.flake_evidence_pack import (
-        prepare_flake_evidence_pack, write_flake_evidence_pack,
-    )
+    from merger.repoground.core.flake_evidence_pack import prepare_flake_evidence_pack
     from merger.repoground.core.merge import _bundle_artifact_entry
 
     revision = subprocess.run(
@@ -1570,9 +1586,9 @@ def _emit_flake_relation_artifact(
     )
     path = bundle_manifest.with_name(
         bundle_manifest.name.removesuffix(".bundle.manifest.json")
-        + ".flake_relation_evidence.json"
+        + ".flake_relation_evidence." + pack["pack_sha256"][:20] + ".json"
     )
-    write_flake_evidence_pack(path, pack)
+    _write_or_reuse_flake_pack(path, pack)
     entry = _bundle_artifact_entry(
         path, ArtifactRole.FLAKE_RELATION_EVIDENCE_JSON,
         "application/json", bundle_manifest.parent,
