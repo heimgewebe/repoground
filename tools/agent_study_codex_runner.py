@@ -174,6 +174,16 @@ def _validate_request_identity(req: dict[str, Any]) -> None:
         raise ValueError("frozen repository set missing")
     if not isinstance(req.get("question"), str) or not req["question"]:
         raise ValueError("study question missing")
+    historical = req.get("citation_commits", {})
+    if not isinstance(historical, dict):
+        raise ValueError("historical citation scope must be a mapping")
+    for repo, commits in historical.items():
+        if (repo not in req["repositories"] or not isinstance(commits, list)
+                or not 0 < len(commits) <= 8
+                or any(not isinstance(rev, str) or not HEX40.fullmatch(rev)
+                       or rev == req["repositories"][repo].get("commit")
+                       for rev in commits) or len(commits) != len(set(commits))):
+            raise ValueError("historical citation commits are not bounded")
 
 
 def _validate_request_profile(req: dict[str, Any], fingerprint: dict[str, Any]) -> None:
@@ -450,6 +460,11 @@ def _prompt(req: dict[str, Any]) -> str:
         lines.append(
             "Zulässige Repo-Kürzel für reported_paths und citations: "
             + ", ".join(sorted(req["repositories"])) + "."
+        )
+    for repo, commits in sorted(req.get("citation_commits", {}).items()):
+        lines.append(
+            "Zusätzlich zulässige historische Zitatrevisionen für "
+            + repo + ": " + ", ".join(commits)
         )
     if req["condition"] == "repoground_mandatory":
         lines.append("Diese Versuchsbedingung verlangt vor der Antwort mindestens einen tatsächlich erfolgreichen RepoGround-MCP-Aufruf.")
@@ -765,7 +780,10 @@ def _valid_answer_path(raw: Any, repositories: dict[str, Any]) -> bool:
     )
 
 
-def _valid_answer_citation(raw: Any, repositories: dict[str, Any]) -> bool:
+def _valid_answer_citation(
+    raw: Any, repositories: dict[str, Any],
+    citation_commits: dict[str, list[str]] | None = None,
+) -> bool:
     if not isinstance(raw, dict) or set(raw) != {
         "repo", "path", "commit", "start_line", "end_line",
     }:
@@ -774,13 +792,18 @@ def _valid_answer_citation(raw: Any, repositories: dict[str, Any]) -> bool:
         return False
     repo, commit = raw["repo"], raw["commit"]
     start, end = raw["start_line"], raw["end_line"]
+    allowed = {repositories[repo].get("commit")}
+    allowed.update((citation_commits or {}).get(repo, []))
     return (
-        isinstance(commit, str) and commit == repositories[repo].get("commit")
+        isinstance(commit, str) and commit in allowed
         and type(start) is int and type(end) is int and start >= 1 and end >= start
     )
 
 
-def _answer(text: str, repositories: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+def _answer(
+    text: str, repositories: dict[str, Any],
+    citation_commits: dict[str, list[str]] | None = None,
+) -> tuple[dict[str, Any], bool]:
     """Preserve every invalid model answer in raw trace, never mark it successful."""
     fallback = {
         "outcome": "unavailable", "reported_paths": [], "citations": [],
@@ -814,7 +837,7 @@ def _answer(text: str, repositories: dict[str, Any]) -> tuple[dict[str, Any], bo
         seen_paths.add(key)
     seen_citations: set[tuple[str, str, str, int, int]] = set()
     for raw in answer["citations"]:
-        if not _valid_answer_citation(raw, repositories):
+        if not _valid_answer_citation(raw, repositories, citation_commits):
             return fallback, False
         key = (raw["repo"], raw["path"], raw["commit"], raw["start_line"], raw["end_line"])
         if key in seen_citations:
@@ -863,7 +886,7 @@ def run(req: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
         # A missing provider receipt is not a claim of zero token consumption.
         raise RuntimeError("Codex never supplied valid provider usage")
     calls, final_answer = _tool_receipts(events, manifest_evidence)
-    answer, parsed = _answer(final_answer, req["repositories"])
+    answer, parsed = _answer(final_answer, req["repositories"], req.get("citation_commits"))
     statuses = [e.get("type") for e, _at in events]
     rg_success = any(c["name"] in TOOL_NAMES["repoground"] and c["status"] == "success"
                      for c in calls)

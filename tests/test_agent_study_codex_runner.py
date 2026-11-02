@@ -83,6 +83,23 @@ class CodexStudyRunnerTest(unittest.TestCase):
         self.assertEqual(calls[0]["status"], "failed")
         self.assertNotIn("repoground_evidence", calls[0])
 
+    def test_historical_citation_requires_explicit_source_bound_revision(self):
+        pinned = {"heim-pc": {"commit": "a" * 40}}
+        item = {
+            "repo": "heim-pc", "path": "flake.lock", "commit": "b" * 40,
+            "start_line": 1, "end_line": 20,
+        }
+        self.assertFalse(runner._valid_answer_citation(item, pinned))
+        self.assertTrue(runner._valid_answer_citation(
+            item, pinned, {"heim-pc": ["b" * 40]}
+        ))
+        self.assertFalse(runner._valid_answer_citation(
+            item, pinned, {"heim-pc": ["c" * 40]}
+        ))
+        self.assertFalse(runner._valid_answer_citation(
+            item, pinned, {"nixer": ["b" * 40]}
+        ))
+
     def test_flake_relation_tool_requires_exact_manifest_commit_and_digest(self):
         self.assertIn("get_flake_relation_evidence", runner.MCP_TOOLS)
         expected = {"heim-pc": {
