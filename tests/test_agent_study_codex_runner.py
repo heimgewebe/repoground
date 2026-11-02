@@ -27,6 +27,53 @@ class CodexStudyRunnerTest(unittest.TestCase):
         self.assertNotIn("repoground_snapshot_create", runner.TOOL_NAMES["repoground"])
         self.assertEqual(len(runner.MCP_TOOLS), len(set(runner.MCP_TOOLS)))
         self.assertEqual(set(runner.TOOL_NAMES), {"git", "file", "repoground"})
+        self.assertIn("change_evidence_pack", runner.MCP_TOOLS)
+
+    def test_b1_change_evidence_is_optional_without_changing_task_question(self):
+        base = {
+            "repositories": {"repoground": {"commit": "a" * 40}},
+            "question": "Erkläre base bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb zu target aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.",
+        }
+        git_only = runner._prompt({**base, "condition": "git_only"})
+        mandatory = runner._prompt({**base, "condition": "repoground_mandatory"})
+        selective = runner._prompt({**base, "condition": "repoground_selective"})
+        self.assertNotIn("change_evidence_pack", git_only)
+        self.assertIn("null RepoGround-Aufrufe sind ausdrücklich erlaubt", selective)
+        self.assertIn("mindestens einen tatsächlich erfolgreichen", mandatory)
+        for treatment in (mandatory, selective):
+            self.assertIn("change_evidence_pack", treatment)
+            self.assertIn("context_budget_tokens<=1200", treatment)
+            self.assertIn("status=warn", treatment)
+            self.assertIn("Git-Fallback", treatment)
+        marker = "AUFGABE (in allen drei Armen bytegleich):\n"
+        self.assertEqual(git_only.split(marker)[1], mandatory.split(marker)[1])
+        self.assertEqual(git_only.split(marker)[1], selective.split(marker)[1])
+
+    def test_b1_change_evidence_partial_is_genuine_only_with_exact_provenance(self):
+        valid = {
+            "kind": "repoground.agent_change_evidence", "status": "warn",
+            "revision": {"base": "a" * 40, "target": "b" * 40,
+                         "diff_sha256": "c" * 64, "worktree": "clean",
+                         "source": "local_git_read_only"},
+            "bundle": {"status": "available", "manifest_sha256": "d" * 64},
+            "live_freshness": {"status": "fresh"},
+            "mutation_boundary": {"writes": []},
+            "gaps": [{"code": "test_coverage_unverified"}],
+        }
+        self.assertTrue(runner._mcp_evidence_available("change_evidence_pack", valid))
+        self.assertTrue(runner._mcp_evidence_available(
+            "change_evidence_pack", {**valid, "status": "pass"}))
+        for invalid in (
+            {**valid, "status": "blocked"},
+            {**valid, "bundle": {"status": "unavailable"}},
+            {**valid, "live_freshness": {"status": "stale"}},
+            {**valid, "mutation_boundary": {"writes": ["unexpected"]}},
+            {**valid, "revision": {**valid["revision"], "diff_sha256": None}},
+            {**valid, "revision": {**valid["revision"], "base": "not-a-sha"}},
+            {**valid, "revision": {**valid["revision"], "worktree": "dirty"}},
+        ):
+            self.assertFalse(runner._mcp_evidence_available("change_evidence_pack", invalid))
+        self.assertFalse(runner._mcp_evidence_available("change_evidence_pack", {"status": "warn"}))
 
     def test_provider_usage_only_from_terminal_provider_event(self):
         usage = {"input_tokens": 120, "output_tokens": 17, "cached_input_tokens": 80}
@@ -130,7 +177,7 @@ class CodexStudyRunnerTest(unittest.TestCase):
             fallback, valid = runner._answer(json.dumps(broken), repositories)
             self.assertFalse(valid)
             self.assertEqual(fallback["explanation"], "")
-        self.assertEqual(runner.AGENT_VERSION, "codex-study-prompt-v2")
+        self.assertEqual(runner.AGENT_VERSION, "codex-study-prompt-v4-change-evidence-b1")
 
     def test_mcp_success_depends_on_specific_tool_contract(self):
         available = {"status": "available"}
@@ -200,7 +247,7 @@ class CodexStudyRunnerTest(unittest.TestCase):
             and json.loads(part.partition("=")[2]) == list(runner.MCP_TOOLS)
             for part in argv
         ))
-        self.assertNotIn("repoground_change_evidence_pack", runner.TOOL_NAMES["repoground"])
+        self.assertIn("repoground_change_evidence_pack", runner.TOOL_NAMES["repoground"])
         with tempfile.TemporaryDirectory() as directory:
             workspace = Path(directory)
             private_manifest = workspace / "pinned.bundle.manifest.json"

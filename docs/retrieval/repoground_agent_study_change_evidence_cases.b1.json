@@ -1,0 +1,457 @@
+{
+  "kind": "repoground.agent_study_taskset",
+  "version": "1.0",
+  "id": "repoground-b1-change-evidence-20261101-v1",
+  "measurement_scope": "frozen_three_arm_agent_study",
+  "default_promoted": false,
+  "arms": [
+    "git_only",
+    "repoground_mandatory",
+    "repoground_selective"
+  ],
+  "repositories": {
+    "repoground": {
+      "slug": "heimgewebe/repoground",
+      "commit": "0fe8e5fd972c69b0d816b6bf124e10e6f5a43112"
+    },
+    "grabowski": {
+      "slug": "heimgewebe/grabowski",
+      "commit": "3fbe93d2f4c7a99c3c1aaf2c35952bac3541d98f"
+    },
+    "commonthing": {
+      "slug": "heimgewebe/commonthing",
+      "commit": "8dbc8c53ea7f26e218d419ac401eef44b29f9333"
+    }
+  },
+  "cases": [
+    {
+      "id": "b1-rg-shebang-implementation",
+      "class": "known_target",
+      "pilot": true,
+      "repositories": [
+        "repoground"
+      ],
+      "question": "Vergleiche die eingefrorene Git-Änderung 81d3d0e7a536e430cdff634e1f3c639c93dac6ae..0fe8e5fd972c69b0d816b6bf124e10e6f5a43112 in repoground. Welche Implementierungsdateien wurden für ausführbare Python-Skripte ohne .py angepasst? Nenne nachprüfbare Quellzeilen und Grenzen.",
+      "oracle": {
+        "outcome": "answer",
+        "required_paths": [
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/architecture/symbol_index.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/architecture/call_graph.py"
+          }
+        ],
+        "allowed_paths": [
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/architecture/symbol_index.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/architecture/call_graph.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/tests/test_python_symbol_index.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/tests/test_python_call_graph.py"
+          }
+        ],
+        "rationale": "Tatsächlich geändert wurden sowohl Python-Symbol- als auch Call-Graph-Erkennung."
+      }
+    },
+    {
+      "id": "b1-gr-review-budget-code",
+      "class": "known_target",
+      "pilot": true,
+      "repositories": [
+        "grabowski"
+      ],
+      "question": "Vergleiche die eingefrorene Git-Änderung 063cb83f156cda2ed413fbbab0bdf4ff47794322..3fbe93d2f4c7a99c3c1aaf2c35952bac3541d98f in grabowski. Welches Quellmodul setzt die neue maximale Review-Diffgröße und den geänderten Pfadumfang um? Nenne nachprüfbare Quellzeilen und Grenzen.",
+      "oracle": {
+        "outcome": "answer",
+        "required_paths": [
+          {
+            "repo": "grabowski",
+            "path": "src/grabowski_self_review_execution.py"
+          }
+        ],
+        "allowed_paths": [
+          {
+            "repo": "grabowski",
+            "path": "src/grabowski_self_review_execution.py"
+          },
+          {
+            "repo": "grabowski",
+            "path": "tests/test_self_review_diff_budget_commonworld.py"
+          }
+        ],
+        "rationale": "Die Änderung des signierten Review-Diff-Limits liegt im Selfreview-Verifier."
+      }
+    },
+    {
+      "id": "b1-rg-symbol-routing",
+      "class": "known_target",
+      "pilot": false,
+      "repositories": [
+        "repoground"
+      ],
+      "question": "Vergleiche die eingefrorene Git-Änderung 97ea9cc0257501bea8bbd0c94b26c9be3f6a69a5..0fe8e5fd972c69b0d816b6bf124e10e6f5a43112 in repoground. Wo erfolgte bei der Symbol-Lookup-Routingkorrektur eine Änderung im MCP-Code? Nenne nachprüfbare Quellzeilen und Grenzen.",
+      "oracle": {
+        "outcome": "answer",
+        "required_paths": [
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/core/mcp_tools.py"
+          }
+        ],
+        "allowed_paths": [
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/core/mcp_tools.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/tests/test_mcp_query_routing.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/architecture/symbol_index.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/architecture/call_graph.py"
+          }
+        ],
+        "rationale": "Die auf dem Zweicommits-Diff vorhandene MCP-Symbolsuche ist im Core implementiert."
+      }
+    },
+    {
+      "id": "b1-rg-shebang-consumers",
+      "class": "reverse_relations",
+      "pilot": true,
+      "repositories": [
+        "repoground"
+      ],
+      "question": "Vergleiche die eingefrorene Git-Änderung 81d3d0e7a536e430cdff634e1f3c639c93dac6ae..0fe8e5fd972c69b0d816b6bf124e10e6f5a43112 in repoground. Welche interne Erkennung und ihr Call-Graph-Verbraucher sind von der Erweiterung der Quellenerkennung betroffen? Nenne nachprüfbare Quellzeilen und Grenzen.",
+      "oracle": {
+        "outcome": "answer",
+        "required_paths": [
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/architecture/symbol_index.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/architecture/call_graph.py"
+          }
+        ],
+        "allowed_paths": [
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/architecture/symbol_index.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/architecture/call_graph.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/tests/test_python_symbol_index.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/tests/test_python_call_graph.py"
+          }
+        ],
+        "rationale": "Symbol-Quellerkennung und deren Aufrufgraph-Verwendung werden beide geändert."
+      }
+    },
+    {
+      "id": "b1-gr-signed-review-callers",
+      "class": "reverse_relations",
+      "pilot": false,
+      "repositories": [
+        "grabowski"
+      ],
+      "question": "Vergleiche die eingefrorene Git-Änderung ce1f77250c2b822c5d5c95a32b32a0e3163cd99..3fbe93d2f4c7a99c3c1aaf2c35952bac3541d98f in grabowski. Wo treffen das MCP-Eingangstor und die signierte Quellenreview-Implementierung in den Änderungen aufeinander? Nenne nachprüfbare Quellzeilen und Grenzen.",
+      "oracle": {
+        "outcome": "answer",
+        "required_paths": [
+          {
+            "repo": "grabowski",
+            "path": "src/grabowski_mcp.py"
+          },
+          {
+            "repo": "grabowski",
+            "path": "src/grabowski_self_review_execution.py"
+          }
+        ],
+        "allowed_paths": [
+          {
+            "repo": "grabowski",
+            "path": "src/grabowski_mcp.py"
+          },
+          {
+            "repo": "grabowski",
+            "path": "src/grabowski_self_review_execution.py"
+          },
+          {
+            "repo": "grabowski",
+            "path": "tests/test_self_review_diff_budget_commonworld.py"
+          },
+          {
+            "repo": "grabowski",
+            "path": "tests/test_self_review_first_party.py"
+          }
+        ],
+        "rationale": "Die zusammenhängende Zwei-Commit-Differenz enthält MCP-Routing und signierte Selfreview-Quelle."
+      }
+    },
+    {
+      "id": "b1-rg-mcp-reference-route",
+      "class": "reverse_relations",
+      "pilot": false,
+      "repositories": [
+        "repoground"
+      ],
+      "question": "Vergleiche die eingefrorene Git-Änderung 97ea9cc0257501bea8bbd0c94b26c9be3f6a69a5..0fe8e5fd972c69b0d816b6bf124e10e6f5a43112 in repoground. Welche Core-Routingstelle ist von Symbolfundstellen und deren Testverifikation betroffen? Nenne nachprüfbare Quellzeilen und Grenzen.",
+      "oracle": {
+        "outcome": "answer",
+        "required_paths": [
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/core/mcp_tools.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/tests/test_mcp_query_routing.py"
+          }
+        ],
+        "allowed_paths": [
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/core/mcp_tools.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/tests/test_mcp_query_routing.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/architecture/symbol_index.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/architecture/call_graph.py"
+          }
+        ],
+        "rationale": "Die frühere MCP-Route und der Query-Routing-Test sind beide im gefrorenen Diff geändert."
+      }
+    },
+    {
+      "id": "b1-rg-shebang-tests",
+      "class": "impact_tests",
+      "pilot": true,
+      "repositories": [
+        "repoground"
+      ],
+      "question": "Vergleiche die eingefrorene Git-Änderung 81d3d0e7a536e430cdff634e1f3c639c93dac6ae..0fe8e5fd972c69b0d816b6bf124e10e6f5a43112 in repoground. Welche zwei bestehenden Testmodule sind für die geänderte Symbol- und Aufrufgraph-Erkennung unmittelbar relevant? Nenne nachprüfbare Quellzeilen und Grenzen.",
+      "oracle": {
+        "outcome": "answer",
+        "required_paths": [
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/tests/test_python_symbol_index.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/tests/test_python_call_graph.py"
+          }
+        ],
+        "allowed_paths": [
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/tests/test_python_symbol_index.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/tests/test_python_call_graph.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/architecture/symbol_index.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/architecture/call_graph.py"
+          }
+        ],
+        "rationale": "Für beide angepassten Python-Erkennungspfade existieren im Diff entsprechende Regressionstests."
+      }
+    },
+    {
+      "id": "b1-gr-signed-diff-tests",
+      "class": "impact_tests",
+      "pilot": true,
+      "repositories": [
+        "grabowski"
+      ],
+      "question": "Vergleiche die eingefrorene Git-Änderung 063cb83f156cda2ed413fbbab0bdf4ff47794322..3fbe93d2f4c7a99c3c1aaf2c35952bac3541d98f in grabowski. Welcher Regressionstest deckt die geänderte signierte Diff-Größenbegrenzung ab? Nenne nachprüfbare Quellzeilen und Grenzen.",
+      "oracle": {
+        "outcome": "answer",
+        "required_paths": [
+          {
+            "repo": "grabowski",
+            "path": "tests/test_self_review_diff_budget_commonworld.py"
+          }
+        ],
+        "allowed_paths": [
+          {
+            "repo": "grabowski",
+            "path": "tests/test_self_review_diff_budget_commonworld.py"
+          },
+          {
+            "repo": "grabowski",
+            "path": "src/grabowski_self_review_execution.py"
+          }
+        ],
+        "rationale": "Der Diff-Budget-Test wird im selben Commit wie die Limit-Erweiterung ergänzt."
+      }
+    },
+    {
+      "id": "b1-gr-review-compat-tests",
+      "class": "impact_tests",
+      "pilot": false,
+      "repositories": [
+        "grabowski"
+      ],
+      "question": "Vergleiche die eingefrorene Git-Änderung ce1f77250c2b822c5d5c95a32b32a0e3163cd99..3fbe93d2f4c7a99c3c1aaf2c35952bac3541d98f in grabowski. Welche beiden Testmodule müssen nach den zusammenhängenden Review-MCP- und Diff-Änderungen geprüft werden? Nenne nachprüfbare Quellzeilen und Grenzen.",
+      "oracle": {
+        "outcome": "answer",
+        "required_paths": [
+          {
+            "repo": "grabowski",
+            "path": "tests/test_self_review_diff_budget_commonworld.py"
+          },
+          {
+            "repo": "grabowski",
+            "path": "tests/test_self_review_first_party.py"
+          }
+        ],
+        "allowed_paths": [
+          {
+            "repo": "grabowski",
+            "path": "tests/test_self_review_diff_budget_commonworld.py"
+          },
+          {
+            "repo": "grabowski",
+            "path": "tests/test_self_review_first_party.py"
+          },
+          {
+            "repo": "grabowski",
+            "path": "src/grabowski_self_review_execution.py"
+          },
+          {
+            "repo": "grabowski",
+            "path": "src/grabowski_mcp.py"
+          }
+        ],
+        "rationale": "Signierter Firstparty-Review und großer Diff-Budget-Fall werden in den beiden Testmodulen überprüft."
+      }
+    },
+    {
+      "id": "b1-rg-no-runtime-guarantee",
+      "class": "boundary",
+      "pilot": true,
+      "repositories": [
+        "repoground"
+      ],
+      "question": "Vergleiche die eingefrorene Git-Änderung 81d3d0e7a536e430cdff634e1f3c639c93dac6ae..0fe8e5fd972c69b0d816b6bf124e10e6f5a43112 in repoground. Beweist die Code-Differenz, dass alle ausführbaren Dateien ohne .py produktiv als Python ausgeführt werden? Falls nicht, begründe das Nichtwissen ohne pauschalen Erfolgsanspruch. Nenne nachprüfbare Quellzeilen und Grenzen.",
+      "oracle": {
+        "outcome": "abstain",
+        "required_paths": [],
+        "allowed_paths": [
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/architecture/symbol_index.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/architecture/call_graph.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/tests/test_python_symbol_index.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/tests/test_python_call_graph.py"
+          }
+        ],
+        "rationale": "Statische Quellerkennung beweist weder produktive Dateiausführung noch sämtliche Laufzeitpfade."
+      }
+    },
+    {
+      "id": "b1-gr-review-no-global-proof",
+      "class": "boundary",
+      "pilot": false,
+      "repositories": [
+        "grabowski"
+      ],
+      "question": "Vergleiche die eingefrorene Git-Änderung 063cb83f156cda2ed413fbbab0bdf4ff47794322..3fbe93d2f4c7a99c3c1aaf2c35952bac3541d98f in grabowski. Beweist der geänderte Diff-Budget-Test, dass jede beliebige spätere Review-Eingabe erfolgreich und sicher durchläuft? Falls nein, benenne die Evidenzgrenze. Nenne nachprüfbare Quellzeilen und Grenzen.",
+      "oracle": {
+        "outcome": "abstain",
+        "required_paths": [],
+        "allowed_paths": [
+          {
+            "repo": "grabowski",
+            "path": "src/grabowski_self_review_execution.py"
+          },
+          {
+            "repo": "grabowski",
+            "path": "tests/test_self_review_diff_budget_commonworld.py"
+          }
+        ],
+        "rationale": "Ein gezielter Revisionstest beweist nicht die erfolgreiche Verarbeitung jeder künftigen Eingabe."
+      }
+    },
+    {
+      "id": "b1-rg-no-complete-dynamic-graph",
+      "class": "boundary",
+      "pilot": false,
+      "repositories": [
+        "repoground"
+      ],
+      "question": "Vergleiche die eingefrorene Git-Änderung 97ea9cc0257501bea8bbd0c94b26c9be3f6a69a5..0fe8e5fd972c69b0d816b6bf124e10e6f5a43112 in repoground. Beweist die zweicommitige Graph- und MCP-Änderung vollständige Laufzeit-Call-Graph-Abdeckung für dynamisch geladene Python-Skripte? Falls nicht, antworte mit belegter Begrenzung. Nenne nachprüfbare Quellzeilen und Grenzen.",
+      "oracle": {
+        "outcome": "abstain",
+        "required_paths": [],
+        "allowed_paths": [
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/architecture/symbol_index.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/architecture/call_graph.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/core/mcp_tools.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/tests/test_mcp_query_routing.py"
+          }
+        ],
+        "rationale": "Statisch erkannte Symbole und Aufrufgraphkanten sind keine vollständigen Laufzeitbelege."
+      }
+    }
+  ]
+}

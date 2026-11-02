@@ -27,14 +27,14 @@ MCP_TOOLS = (
     "bundle_discover", "snapshot_status", "ask_context", "query_existing_index",
     "range_get", "grounding_verify", "live_freshness", "find_symbol",
     "find_references", "get_callers", "get_callees",
-    "get_structure_neighborhood",
+    "get_structure_neighborhood", "change_evidence_pack",
 )
 TOOL_NAMES = {
     "git": ["codex_git_command"],
     "file": ["codex_file_command"],
     "repoground": ["repoground_" + tool for tool in MCP_TOOLS],
 }
-AGENT_VERSION = "codex-study-prompt-v2"
+AGENT_VERSION = "codex-study-prompt-v4-change-evidence-b1"
 PROVIDER = "openai-codex-cli"
 MAX_TRACE_BYTES = 32 * 1024 * 1024
 MAX_TOOL_CALLS = 160
@@ -457,6 +457,20 @@ def _prompt(req: dict[str, Any]) -> str:
         lines.append("RepoGround-MCP ist verfügbar, aber freiwillig; null RepoGround-Aufrufe sind ausdrücklich erlaubt.")
     else:
         lines.append("RepoGround ist in dieser Kontrollbedingung nicht verfügbar; benutze Git und normale Dateisuche.")
+    if req["condition"] != "git_only":
+        lines.extend((
+            "Bei einer Frage zu einer konkreten Git-Änderung base..target mit beiden vollständigen "
+            "Git-SHAs und zu Test-/Vertragsfolgen ist change_evidence_pack ein gezielter Kandidat "
+            "statt mehrerer breiter Git-Suchrunden. In einfachen Dateisuchen hat Git Vorrang.",
+            "Wenn hilfreich, frage change_evidence_pack genau einmal für die in der AUFGABE "
+            "genannten base_revision und target_revision ab: use_case=find-related-tests "
+            "für Testfolgen, sonst contract-impact oder explain-change, context_budget_tokens<=1200. "
+            "Der MCP-Server ist an ein gesundes eingefrorenes Bundle und ein Git-Checkout gebunden.",
+            "Ein status=warn kann echte revisionsgebundene Änderungsevidenz mit Abdeckungslücken "
+            "bedeuten; behaupte dann keine vollständige Testabdeckung. Überprüfe die entscheidenden "
+            "Git-Zitatzeilen nur gezielt; wiederhole keine breite Suche ohne neuen Anlass. "
+            "Bei stale, fehlendem Bundle oder ungeeignetem Diff verwende Git-Fallback.",
+        ))
     return "\n".join(lines) + "\n\nAUFGABE (in allen drei Armen bytegleich):\n" + req["question"]
 
 
@@ -637,6 +651,26 @@ def _mcp_evidence_available(tool: str, payload: Any) -> bool:
         return status == "pass"
     if tool == "live_freshness":
         return status == "fresh"
+    if tool == "change_evidence_pack":
+        # A bounded, source-bound partial result is a genuine read. It is NOT
+        # evidence of complete impact/test coverage or an agent quality grade.
+        revision = payload.get("revision")
+        bundle = payload.get("bundle")
+        freshness = payload.get("live_freshness")
+        mutation = payload.get("mutation_boundary")
+        return (
+            payload.get("kind") == "repoground.agent_change_evidence"
+            and status in ("pass", "warn")
+            and isinstance(revision, dict)
+            and all(isinstance(revision.get(key), str)
+                    and HEX40.fullmatch(revision[key]) for key in ("base", "target"))
+            and isinstance(revision.get("diff_sha256"), str)
+            and HEX64.fullmatch(revision["diff_sha256"]) is not None
+            and revision.get("worktree") == "clean"
+            and isinstance(bundle, dict) and bundle.get("status") == "available"
+            and isinstance(freshness, dict) and freshness.get("status") == "fresh"
+            and isinstance(mutation, dict) and mutation.get("writes") == []
+        )
     return status == "available"
 
 
