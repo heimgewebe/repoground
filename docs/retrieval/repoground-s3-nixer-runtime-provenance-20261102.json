@@ -3,7 +3,6 @@
     "unique_git_commit_from_equal_content",
     "current_git_pin_was_built",
     "exact_nix_flake_input_to_derivation_identity",
-    "mcp_agent_tool_success",
     "runtime_source_equal_to_declared_pin",
     "absence_of_other_processes"
   ],
@@ -44,23 +43,27 @@
       "status": "verified"
     },
     {
-      "detail": "HTTP 406",
-      "evidence_ref": "http://127.0.0.1:18187/mcp",
-      "relation": "observed_process_to_http_endpoint",
-      "status": "http_reachable_only"
+      "detail": "MCP nixer_status",
+      "evidence_ref": "b757595ee04203b57a1b0dee0707ce6b8da964e7ac73794c7cb1af93ad282990",
+      "relation": "observed_process_to_mcp_nixer_status",
+      "status": "verified"
     }
   ],
   "endpoint": {
     "http_responded": true,
     "http_status": 406,
-    "protocol_handshake_verified": false,
+    "protocol_handshake_verified": true,
+    "protocol_version": "2025-06-18",
+    "server_name": "Nixer",
+    "tool_call_verified": true,
+    "tool_name": "nixer_status",
+    "tool_payload_sha256": "b757595ee04203b57a1b0dee0707ce6b8da964e7ac73794c7cb1af93ad282990",
     "url": "http://127.0.0.1:18187/mcp"
   },
-  "evidence_sha256": "990fb28ccc8956e069a9cbbc9c9d80bbf4375443eefddf3a768df1e92a16bf7d",
+  "evidence_sha256": "af9d5318a755099356d5bb1b84597c307092ef1f340cecdadbd84d283687f426",
   "gaps": [
     "declared_git_source_content_does_not_match_running_build",
-    "full_nix_flake_source_to_derivation_identity_not_proven",
-    "mcp_initialize_or_tool_call_not_proven"
+    "full_nix_flake_source_to_derivation_identity_not_proven"
   ],
   "kind": "repoground.nixer-runtime-provenance",
   "nix": {
@@ -77,7 +80,7 @@
     "system_profile": "/nix/store/2xy6inggq55kq8zzkhvppivm8yz0xlqn-nixos-system-heim-pc-26.05.20261025.1f607aa",
     "why_depends_sha256": "68f98f1080e4bc05b512a6a0a87e88ec5160257a1d77b3332d830dcfadb67c92"
   },
-  "observed_at_utc": "2026-11-02T12:17:04.843663+00:00",
+  "observed_at_utc": "2026-11-02T12:21:16.593786+00:00",
   "source": {
     "content_comparison_older_nixer_commit": "6c1fae3936e441c43d19a7924f2f26f3539fb1d3",
     "declared_nixer_commit": "c252b62b0fcd0bd5442681bb68d809a4b5984c61",

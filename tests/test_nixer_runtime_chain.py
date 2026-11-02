@@ -11,6 +11,7 @@ from scripts.ops.measure_nixer_runtime_chain import (
     _derivation_sources,
     _git_blob,
     _http_observation,
+    _mcp_observation,
     _store_output_from_execstart,
     compare_source_contents,
 )
@@ -84,6 +85,41 @@ class NixerRuntimeChainTests(unittest.TestCase):
         self.assertTrue(proof["http_responded"])
         self.assertEqual(proof["http_status"], 406)
         self.assertNotIn("mcp_handshake", proof)
+
+    def test_mcp_status_success_requires_identity_backend_and_jsonrpc(self):
+        expected = {"serverInfo": {"name": "Nixer"}, "protocolVersion": "2025-06-18"}
+        good = {"isError": False, "structuredContent": {
+            "identity": "nixer-nix-specialist-v0",
+            "service": "Nixer", "backend": {"ready": True},
+        }}
+        with patch("scripts.ops.measure_nixer_runtime_chain._mcp_request",
+                   side_effect=[expected, good]) as request:
+            result = _mcp_observation()
+        self.assertTrue(result["protocol_handshake_verified"])
+        self.assertTrue(result["tool_call_verified"])
+        self.assertEqual(result["tool_name"], "nixer_status")
+        self.assertEqual(request.call_count, 2)
+
+    def test_mcp_status_backend_failure_is_not_success(self):
+        expected = {"serverInfo": {"name": "Nixer"}, "protocolVersion": "2025-06-18"}
+        failed = {"isError": False, "structuredContent": {
+            "identity": "nixer-nix-specialist-v0",
+            "service": "Nixer", "backend": {"ready": False},
+        }}
+        with patch("scripts.ops.measure_nixer_runtime_chain._mcp_request",
+                   side_effect=[expected, failed]):
+            result = _mcp_observation()
+        self.assertTrue(result["protocol_handshake_verified"])
+        self.assertFalse(result["tool_call_verified"])
+        self.assertIsNone(result["tool_payload_sha256"])
+
+    def test_mcp_transport_failure_keeps_unknown(self):
+        with patch("scripts.ops.measure_nixer_runtime_chain._mcp_request",
+                   side_effect=OSError("connection refused")):
+            result = _mcp_observation()
+        self.assertFalse(result["protocol_handshake_verified"])
+        self.assertFalse(result["tool_call_verified"])
+        self.assertEqual(result["gap"], "OSError")
 
     def test_git_sha_requires_full_literal(self):
         with self.assertRaises(ValueError):
