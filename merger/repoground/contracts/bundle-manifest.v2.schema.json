@@ -150,7 +150,8 @@
               "python_symbol_index_json",
               "python_call_graph_json",
               "language_structure_json",
-              "relationship_projection_json"
+              "relationship_projection_json",
+              "flake_relation_evidence_json"
             ],
             "description": "Machine-readable enum role for this artifact."
           },
@@ -322,7 +323,8 @@
                     "python_symbol_index_json",
                     "python_call_graph_json",
                     "language_structure_json",
-                    "relationship_projection_json"
+                    "relationship_projection_json",
+                    "flake_relation_evidence_json"
                   ]
                 }
               },
@@ -1170,6 +1172,38 @@
                 "staleness_sensitive": {
                   "const": true
                 }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "role": {
+                  "const": "flake_relation_evidence_json"
+                }
+              },
+              "required": ["role"]
+            },
+            "then": {
+              "required": [
+                "content_type", "contract", "authority", "canonicality",
+                "risk_class", "regenerable", "staleness_sensitive"
+              ],
+              "properties": {
+                "content_type": {"const": "application/json"},
+                "contract": {
+                  "type": "object",
+                  "required": ["id", "version"],
+                  "properties": {
+                    "id": {"const": "repoground.flake_relation_evidence_pack"},
+                    "version": {"const": "1.0"}
+                  }
+                },
+                "authority": {"const": "navigation_index"},
+                "canonicality": {"const": "derived"},
+                "risk_class": {"const": "evidence_index"},
+                "regenerable": {"const": true},
+                "staleness_sensitive": {"const": true}
               }
             }
           },

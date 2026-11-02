@@ -807,6 +807,11 @@ def register_ground_command_groups(ground_parser: argparse.ArgumentParser) -> No
         "refresh",
         help="Create a RepoGround snapshot and publish external manifest references",
     )
+    external_refresh_parser.add_argument("--flake-source-repo", metavar="OWNER/REPO",
+                                         help="Verified source identity for an explicit immutable Flake evidence pack")
+    external_refresh_parser.add_argument("--flake-target", action="append", dest="flake_targets",
+                                         metavar="OWNER/REPO=LOCAL_REPO_ROOT@FULL_SHA",
+                                         help="Exact target Git revision to bind into the bundle (repeatable)")
     external_refresh_parser.add_argument("--repo", required=True, help="Repository path to snapshot")
     external_refresh_parser.add_argument("--out", required=True, help="Output directory for RepoGround bundle artifacts")
     external_refresh_parser.add_argument("--publication-root", required=True, help="Root directory for published external manifests")
@@ -1054,6 +1059,8 @@ def run_external_manifest_refresh(args: argparse.Namespace) -> int:
         ext=args.ext, output_mode=args.output_mode, redact_secrets=args.redact_secrets,
         include_hidden=args.include_hidden,
         language_structure=bool(getattr(args, "language_structure", False)),
+        flake_source_repo=getattr(args, "flake_source_repo", None),
+        flake_targets=getattr(args, "flake_targets", None),
         latest_complete_registry=None,
     )
     snapshot_stdout = io.StringIO()
@@ -1513,6 +1520,91 @@ def _append_unique_paths(
         known.add(path)
 
 
+def _append_optional_flake_artifact(paths: list[Path], path: Path | None) -> None:
+    # Profile exclusions remove the artifact before generation finalization.
+    if path is not None and path.is_file() and path not in paths:
+        paths.append(path)
+
+
+def _require_flake_source_identity(repo: Path, expected_repo: str) -> None:
+    import subprocess
+    from merger.repoground.core.flake_evidence_pack import _remote_matches_repo
+    observed = subprocess.run(
+        ["git", "-C", str(repo), "remote", "get-url", "origin"],
+        capture_output=True, text=True, check=True, timeout=10,
+    )
+    if not _remote_matches_repo(observed.stdout.strip(), expected_repo):
+        raise ValueError("Flake source remote does not match claimed owner/repository")
+
+
+def _write_or_reuse_flake_pack(path: Path, pack: dict[str, Any]) -> None:
+    from merger.repoground.core.flake_evidence_pack import (
+        read_flake_evidence_pack, write_flake_evidence_pack,
+    )
+    try:
+        write_flake_evidence_pack(path, pack)
+    except FileExistsError:
+        # Only reusable if the *complete* existing immutable content agrees.
+        # Never replace a stale, damaged, symlinked or different staging pack.
+        previous = read_flake_evidence_pack(
+            path, expected_repo=pack["source_repo"],
+            expected_commit=pack["source_commit"],
+        )
+        if previous["pack_sha256"] != pack["pack_sha256"]:
+            raise ValueError("different Flake evidence already occupies staging path")
+
+
+def _emit_flake_relation_artifact(
+    bundle_manifest: Path | None, source_root: Path, *, source_repo: str | None,
+    target_specs: list[str] | None,
+) -> Path | None:
+    """Attach one deterministic pack before profile checks/generation sealing."""
+    if not target_specs:
+        return None
+    if bundle_manifest is None or not source_repo:
+        raise ValueError("Flake evidence requires a bundle and source owner/repo")
+    import subprocess
+    _require_flake_source_identity(source_root, source_repo)
+    from merger.repoground.cli.cmd_federation import _parse_pinned_targets
+    from merger.repoground.core.constants import ArtifactRole
+    from merger.repoground.core.flake_evidence_pack import prepare_flake_evidence_pack
+    from merger.repoground.core.merge import _bundle_artifact_entry
+
+    revision = subprocess.run(
+        ["git", "-C", str(source_root), "rev-parse", "--verify", "HEAD"],
+        capture_output=True, text=True, check=True, timeout=12,
+    ).stdout.strip()
+    dirty = subprocess.run(
+        ["git", "-C", str(source_root), "status", "--porcelain=v1"],
+        capture_output=True, text=True, check=True, timeout=12,
+    )
+    if dirty.stdout:
+        raise ValueError("Flake evidence requires a clean source Git tree")
+    pack = prepare_flake_evidence_pack(
+        source_root, revision, source_repo=source_repo,
+        targets=_parse_pinned_targets(target_specs),
+    )
+    path = bundle_manifest.with_name(
+        bundle_manifest.name.removesuffix(".bundle.manifest.json")
+        + ".flake_relation_evidence." + pack["pack_sha256"][:20] + ".json"
+    )
+    _write_or_reuse_flake_pack(path, pack)
+    entry = _bundle_artifact_entry(
+        path, ArtifactRole.FLAKE_RELATION_EVIDENCE_JSON,
+        "application/json", bundle_manifest.parent,
+    )
+    if entry is None:
+        raise ValueError("Flake evidence artifact did not materialize")
+    data = json.loads(bundle_manifest.read_text(encoding="utf-8"))
+    artifacts = data["artifacts"]
+    if any(item.get("role") == entry["role"] for item in artifacts):
+        raise ValueError("duplicate flake evidence artifact role")
+    artifacts.append(entry)
+    artifacts.sort(key=lambda item: (item["role"], item["path"]))
+    _json_write_atomic(bundle_manifest, data)
+    return path
+
+
 def build_snapshot_create_result(args: argparse.Namespace) -> dict[str, Any]:
     profile = args.profile
     repo = Path(args.repo).expanduser().resolve()
@@ -1585,6 +1677,11 @@ def build_snapshot_create_result(args: argparse.Namespace) -> dict[str, Any]:
         # publish exactly once below after that complete file set is known.
         publish_generation=False,
     )
+    flake_evidence_path = _emit_flake_relation_artifact(
+        artifacts.bundle_manifest, repo,
+        source_repo=getattr(args, "flake_source_repo", None),
+        target_specs=getattr(args, "flake_targets", None),
+    )
     dropped_profile_paths = enforce_profile_exclusions(artifacts.bundle_manifest, profile)
     bounded_bundle_plan = apply_bounded_bundle_budget(
         artifacts.bundle_manifest,
@@ -1621,6 +1718,7 @@ def build_snapshot_create_result(args: argparse.Namespace) -> dict[str, Any]:
         for path in artifacts.get_all_paths()
         if path not in dropped_profile_paths
     ]
+    _append_optional_flake_artifact(artifact_paths, flake_evidence_path)
     if snapshot_plan_path is not None and snapshot_plan_path not in artifact_paths:
         artifact_paths.append(snapshot_plan_path)
     for raw_path in finalization.get("control_paths", []):

@@ -273,6 +273,21 @@ def _tool_definitions(enable_snapshot_create: bool, enable_change_evidence: bool
         }, ["target_id"]),
         "annotations": _read_annotations(),
     })
+    tools.append({
+        "name": "get_flake_relation_evidence",
+        "title": "RepoGround cross-repository Flake evidence",
+        "description": (
+            "Read precomputed S1 Nix Flake input/module declarations and explicit S0 "
+            "gaps from one immutable manifest-bound bundle. Source and target "
+            "Git revisions are verified against the publication, without Git, "
+            "network access or runtime dependency claims."
+        ),
+        "inputSchema": schema({
+            "expected_repo": {"type": "string", "minLength": 3, "maxLength": 255},
+            "expected_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        }, ["expected_repo", "expected_commit"]),
+        "annotations": _read_annotations(),
+    })
     if enable_change_evidence:
         tools.append(
             {
@@ -834,6 +849,46 @@ class RepoGroundMcpStdioServer:
             mcp_tools.get_structure_neighborhood, call_args, manifest, binding,
         )
 
+    def _call_flake_relation_evidence(
+        self, arguments: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        call_args, manifest, binding = self._selected_call_args(arguments)
+        expected_repo = call_args.pop("expected_repo", None)
+        expected_commit = call_args.pop("expected_commit", None)
+        if (
+            not isinstance(expected_repo, str) or not expected_repo.strip()
+            or not isinstance(expected_commit, str) or len(expected_commit) != 40
+            or call_args != {"bundle_manifest": str(manifest)}
+        ):
+            raise McpProtocolError(-32602, "exact expected_repo and expected_commit are required")
+        from merger.repoground.core.flake_evidence_pack import (
+            read_flake_evidence_from_manifest,
+        )
+        try:
+            with use_manifest_binding(binding):
+                pack = read_flake_evidence_from_manifest(
+                    manifest, expected_repo=expected_repo,
+                    expected_commit=expected_commit,
+                    expected_manifest_sha256=binding.sha256,
+                )
+        except ManifestBindingError as exc:
+            raise self._manifest_binding_error(exc) from exc
+        except (OSError, ValueError) as exc:
+            return {
+                "kind": "repoground.flake_relation_evidence_pack",
+                "version": "1.0", "status": "blocked",
+                "reason": str(exc)[:250],
+                "evidence": None,
+            }
+        return {
+            **pack, "status": "available",
+            "manifest_sha256": binding.sha256,
+            "does_not_establish": [
+                "runtime_dependency", "active_generation", "running_service",
+                "complete_change_impact",
+            ],
+        }
+
     def _call_change_evidence_pack(
         self, arguments: Mapping[str, Any]
     ) -> dict[str, Any]:
@@ -904,6 +959,7 @@ class RepoGroundMcpStdioServer:
             "grounding_verify": self._call_grounding_verify,
             "find_symbol": self._call_find_symbol,
             "get_structure_neighborhood": self._call_structure_neighborhood,
+            "get_flake_relation_evidence": self._call_flake_relation_evidence,
             "snapshot_create": self._call_snapshot_create,
             "change_evidence_pack": self._call_change_evidence_pack,
         }
