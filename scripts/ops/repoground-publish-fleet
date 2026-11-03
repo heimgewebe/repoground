@@ -3788,7 +3788,8 @@ def _fleet_member_local_config_is_transport_override(key: str) -> bool:
     if normalized.startswith("remote.") and normalized.endswith(
         (".promisor", ".partialclonefilter")
     ):
-        return normalized not in _FLEET_MEMBER_PARTIAL_CLONE_KEYS
+        # Git remote subsection names are case-sensitive (Origin != origin).
+        return key.strip() not in _FLEET_MEMBER_PARTIAL_CLONE_KEYS
     if normalized == "extensions.worktreeconfig":
         return False
     if normalized.startswith("remote.origin."):
@@ -3821,9 +3822,9 @@ def _fleet_member_local_config_entry_is_transport_override(
         return value not in {"--no-tags", "--tags"}
     if normalized == "remote.origin.prunetags":
         return not _fleet_git_boolean_value_allowed(value)
-    if normalized == "remote.origin.promisor":
+    if key.strip() == "remote.origin.promisor":
         return value.casefold() != "true"
-    if normalized == "remote.origin.partialclonefilter":
+    if key.strip() == "remote.origin.partialclonefilter":
         return value != "blob:none"
     if _fleet_http_version_config_key_allowed(key):
         return not _fleet_http_version_value_allowed(value)
@@ -4044,7 +4045,7 @@ def assert_fleet_member_git_transport_safe(
         if _fleet_member_local_config_entry_is_transport_override(key, value)
     }
     partial = {
-        name: [value for key, value in local_entries if key.strip().lower() == name]
+        name: [value for key, value in local_entries if key.strip() == name]
         for name in _FLEET_MEMBER_PARTIAL_CLONE_KEYS
     }
     if any(partial.values()) and (

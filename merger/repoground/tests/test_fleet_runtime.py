@@ -386,6 +386,9 @@ def test_fleet_member_partial_clone_rejects_duplicate_or_transport_override(
         ("remote.backup.promisor", "true"),
         ("remote.backup.partialclonefilter", "blob:none"),
         ("remote.origin.backup.promisor", "true"),
+        ("remote.Origin.promisor", "true"),
+        ("remote.Origin.partialclonefilter", "blob:none"),
+        ("remote.ORIGIN.promisor", "true"),
         ("extensions.partialClone", "origin"),
         ("extensions.partialClone", "backup"),
     ],
@@ -401,6 +404,8 @@ def test_partial_clone_refuses_unvalidated_promisor_sources_before_worktree(
     git(repo, "config", "remote.origin.partialclonefilter", "blob:none")
     if key.startswith("extensions."):
         git(repo, "config", "core.repositoryformatversion", "1")
+    if key.startswith(("remote.Origin.", "remote.ORIGIN.")):
+        git(repo, "config", "remote.Origin.url", "ssh://attacker.invalid/repo")
     git(repo, "config", key, value)
 
     with pytest.raises(RuntimeError, match="unsafe local Git transport configuration"):
