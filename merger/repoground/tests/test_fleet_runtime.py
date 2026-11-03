@@ -380,6 +380,44 @@ def test_fleet_member_partial_clone_rejects_duplicate_or_transport_override(
         )
 
 
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("remote.backup.promisor", "true"),
+        ("remote.backup.partialclonefilter", "blob:none"),
+        ("remote.origin.backup.promisor", "true"),
+        ("extensions.partialClone", "origin"),
+        ("extensions.partialClone", "backup"),
+    ],
+)
+def test_partial_clone_refuses_unvalidated_promisor_sources_before_worktree(
+    tmp_path: Path, key: str, value: str,
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path, "member-untrusted-promisor")
+    remote = "git@github.com:heimgewebe/member.git"
+    git(repo, "remote", "add", "origin", remote)
+    git(repo, "config", "remote.origin.promisor", "true")
+    git(repo, "config", "remote.origin.partialclonefilter", "blob:none")
+    if key.startswith("extensions."):
+        git(repo, "config", "core.repositoryformatversion", "1")
+    git(repo, "config", key, value)
+
+    with pytest.raises(RuntimeError, match="unsafe local Git transport configuration"):
+        module.assert_fleet_member_git_transport_safe(
+            repo, env=module._authority_git_env(),
+        )
+    # The source-worktree path must refuse this before Git can lazily
+    # contact an unvalidated promisor remote with fleet credentials.
+    target = tmp_path / "managed-refused"
+    with pytest.raises(RuntimeError, match="unsafe local Git transport configuration"):
+        module.prepare_managed_worktree(
+            target, expected_repo=repo, target=sha,
+            authenticated_remote=remote,
+        )
+    assert not target.exists()
+
+
 def test_fleet_member_partial_clone_flags_in_worktree_scope_are_rejected(
     tmp_path: Path,
 ) -> None:
