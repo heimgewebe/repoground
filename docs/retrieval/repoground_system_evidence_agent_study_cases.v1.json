@@ -1,0 +1,486 @@
+{
+  "kind": "repoground.agent_study_taskset",
+  "version": "1.0",
+  "id": "repoground-system-evidence-20261102-v1",
+  "measurement_scope": "frozen_three_arm_agent_study",
+  "default_promoted": false,
+  "arms": [
+    "git_only",
+    "repoground_mandatory",
+    "repoground_selective"
+  ],
+  "repositories": {
+    "heim-pc": {
+      "slug": "heimgewebe/heim-pc",
+      "commit": "049efc0fcddee75d5d6ddee631be6e5b42784761"
+    },
+    "nixer": {
+      "slug": "heimgewebe/nixer",
+      "commit": "c252b62b0fcd0bd5442681bb68d809a4b5984c61"
+    },
+    "metarepo": {
+      "slug": "heimgewebe/metarepo",
+      "commit": "c1ac04fec54de590eda209b916f81c4ce8eb363a"
+    },
+    "repoground": {
+      "slug": "heimgewebe/repoground",
+      "commit": "7d299a7d1248a22263e176a7f7c5182a2ad57ba2"
+    }
+  },
+  "cases": [
+    {
+      "id": "pin-heim-pc-nixer",
+      "class": "known_target",
+      "pilot": true,
+      "repositories": [
+        "heim-pc",
+        "nixer"
+      ],
+      "question": "Welcher vollständige Nixer-Git-Commit wird im Heim-PC-Flake an der eingefrorenen Heim-PC-Revision deklariert? Unterscheide URL und Lock von einem beliebigen Nixer-main.",
+      "oracle": {
+        "outcome": "answer",
+        "required_paths": [
+          {
+            "repo": "heim-pc",
+            "path": "flake.nix"
+          },
+          {
+            "repo": "heim-pc",
+            "path": "flake.lock"
+          }
+        ],
+        "allowed_paths": [
+          {
+            "repo": "heim-pc",
+            "path": "flake.nix"
+          },
+          {
+            "repo": "heim-pc",
+            "path": "flake.lock"
+          }
+        ],
+        "rationale": "Der Heim-PC-Quell-Flake und dessen Lock enthalten denselben wortwörtlich gebundenen Nixer-Pin; Nixer-main ist kein Ersatz für diesen Nachweis."
+      }
+    },
+    {
+      "id": "module-path-heim-pc-nixer",
+      "class": "known_target",
+      "pilot": true,
+      "repositories": [
+        "heim-pc",
+        "nixer"
+      ],
+      "question": "Über welche äußere und innere Flake-Bindung wird das Nixer-Modul in Heim-PC eingebunden, und welche Ziel-Definition bietet den Modul-Export an?",
+      "oracle": {
+        "outcome": "answer",
+        "required_paths": [
+          {
+            "repo": "heim-pc",
+            "path": "flake.nix"
+          },
+          {
+            "repo": "heim-pc",
+            "path": "nixos/system/flake.nix"
+          },
+          {
+            "repo": "nixer",
+            "path": "flake.nix"
+          }
+        ],
+        "allowed_paths": [
+          {
+            "repo": "heim-pc",
+            "path": "flake.nix"
+          },
+          {
+            "repo": "heim-pc",
+            "path": "nixos/system/flake.nix"
+          },
+          {
+            "repo": "nixer",
+            "path": "flake.nix"
+          },
+          {
+            "repo": "heim-pc",
+            "path": "nixos/system/modules/nixer.nix"
+          }
+        ],
+        "rationale": "Die drei eingefrorenen Git-Dateien bilden einen nachprüfbaren Source- und Exportpfad; Quelle, Zielpin und Modulbindung sind getrennt zu prüfen."
+      }
+    },
+    {
+      "id": "service-declaration-nixer",
+      "class": "known_target",
+      "pilot": false,
+      "repositories": [
+        "heim-pc"
+      ],
+      "question": "Welche Nixer-Dienstdeklarationen enthält der Heim-PC-NixOS-Modulpfad tatsächlich, und was davon ist nur deklariert statt zur Laufzeit beobachtet?",
+      "oracle": {
+        "outcome": "answer",
+        "required_paths": [
+          {
+            "repo": "heim-pc",
+            "path": "nixos/system/modules/nixer.nix"
+          }
+        ],
+        "allowed_paths": [
+          {
+            "repo": "heim-pc",
+            "path": "nixos/system/modules/nixer.nix"
+          },
+          {
+            "repo": "heim-pc",
+            "path": "nixos/system/flake.nix"
+          }
+        ],
+        "rationale": "Die wirklichen Services sind im versionierten NixOS-Quellmodul zu lesen; daraus lässt sich ohne systemd-Beleg keine laufende Unit ableiten."
+      }
+    },
+    {
+      "id": "export-to-host-chain",
+      "class": "reverse_relations",
+      "pilot": true,
+      "repositories": [
+        "heim-pc",
+        "nixer"
+      ],
+      "question": "Verfolge die Nixer-Repository-Exportdefinition rückwärts bis zur Heim-PC-Host-Moduleinbindung. Nenne jede nachgewiesene Quellstation statt aus dem gleichen Namen auf eine Identität zu schließen.",
+      "oracle": {
+        "outcome": "answer",
+        "required_paths": [
+          {
+            "repo": "nixer",
+            "path": "flake.nix"
+          },
+          {
+            "repo": "heim-pc",
+            "path": "nixos/system/flake.nix"
+          },
+          {
+            "repo": "heim-pc",
+            "path": "flake.nix"
+          }
+        ],
+        "allowed_paths": [
+          {
+            "repo": "nixer",
+            "path": "flake.nix"
+          },
+          {
+            "repo": "heim-pc",
+            "path": "nixos/system/flake.nix"
+          },
+          {
+            "repo": "heim-pc",
+            "path": "flake.nix"
+          },
+          {
+            "repo": "heim-pc",
+            "path": "nixos/system/modules/nixer.nix"
+          }
+        ],
+        "rationale": "Das tatsächliche Exportziel und die Host-Einbindung müssen über unterschiedliche Git-Dateien abgeglichen werden, nicht über die Alias-Bezeichnung allein."
+      }
+    },
+    {
+      "id": "metarepo-copy-contract",
+      "class": "reverse_relations",
+      "pilot": false,
+      "repositories": [
+        "metarepo",
+        "repoground"
+      ],
+      "question": "Welcher deklarierte Metarepo-Kopiervertrag zeigt auf den RepoGround-WGX-Guard, und lässt sich aus diesem Vertrag allein beweisen, dass Quell- und Zielbytes synchron sind?",
+      "oracle": {
+        "outcome": "answer",
+        "required_paths": [
+          {
+            "repo": "metarepo",
+            "path": "sync/metarepo-sync.yml"
+          },
+          {
+            "repo": "repoground",
+            "path": ".github/workflows/wgx-guard.yml"
+          }
+        ],
+        "allowed_paths": [
+          {
+            "repo": "metarepo",
+            "path": "sync/metarepo-sync.yml"
+          },
+          {
+            "repo": "repoground",
+            "path": ".github/workflows/wgx-guard.yml"
+          },
+          {
+            "repo": "metarepo",
+            "path": ".github/workflows/wgx-guard.yml"
+          }
+        ],
+        "rationale": "Der Kopiervertrag ist in sync/metarepo-sync.yml deklariert; ein Zielpfad garantiert nicht dieselben Bytes, weshalb Quell- und Zielblob zu vergleichen sind."
+      }
+    },
+    {
+      "id": "flake-relation-proof-code",
+      "class": "reverse_relations",
+      "pilot": false,
+      "repositories": [
+        "repoground"
+      ],
+      "question": "Wo wird in RepoGround die revisionsgenaue Flake-zu-NixOS-Modul-Beziehung tatsächlich erzeugt, und welcher Test grenzt falsche Links bei widersprüchlichen Pins ein?",
+      "oracle": {
+        "outcome": "answer",
+        "required_paths": [
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/core/flake_input_relations.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "tests/test_cross_repo_flake_relations.py"
+          }
+        ],
+        "allowed_paths": [
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/core/flake_input_relations.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "tests/test_cross_repo_flake_relations.py"
+          }
+        ],
+        "rationale": "Die S1-Producerfunktion und der Nixer-Pin-Negativtest sind beide am fixierten RepoGround-Commit konkret versioniert."
+      }
+    },
+    {
+      "id": "historic-split-pin",
+      "class": "impact_tests",
+      "pilot": true,
+      "repositories": [
+        "heim-pc",
+        "nixer"
+      ],
+      "question": "Untersuche die tatsächliche historische Heim-PC-Änderung 7ff110f9dc2c561ca9bb525edb4d4b41a3796bfe → 12a8c6af34e5aedfa98f795c1261c782f97731d8: Welche Flake-Dateien änderten den Nixer-Pin, und warum ist der inneren Modulbindung im Zwischenstand nicht vollständig zu trauen?",
+      "oracle": {
+        "outcome": "answer",
+        "required_paths": [
+          {
+            "repo": "heim-pc",
+            "path": "flake.nix"
+          },
+          {
+            "repo": "heim-pc",
+            "path": "flake.lock"
+          },
+          {
+            "repo": "heim-pc",
+            "path": "nixos/system/flake.nix"
+          }
+        ],
+        "allowed_paths": [
+          {
+            "repo": "heim-pc",
+            "path": "flake.nix"
+          },
+          {
+            "repo": "heim-pc",
+            "path": "flake.lock"
+          },
+          {
+            "repo": "heim-pc",
+            "path": "nixos/system/flake.nix"
+          },
+          {
+            "repo": "nixer",
+            "path": "flake.nix"
+          }
+        ],
+        "rationale": "Am historischen Gitobjekt wechselten nur äußerer Flake und Lock; der innere System-Flake blieb zunächst auf dem älteren Pin und beweist keine vollständige Modulbinding."
+      }
+    },
+    {
+      "id": "regression-test-selection",
+      "class": "impact_tests",
+      "pilot": false,
+      "repositories": [
+        "repoground"
+      ],
+      "question": "Welche bestehende RepoGround-Erkennung und welche gezielten Regressionstests sollten bei einer Änderung der Nixer-Root-Input-/Modulbindungslogik zuerst geprüft werden?",
+      "oracle": {
+        "outcome": "answer",
+        "required_paths": [
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/core/flake_input_relations.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "tests/test_cross_repo_flake_relations.py"
+          }
+        ],
+        "allowed_paths": [
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/core/flake_input_relations.py"
+          },
+          {
+            "repo": "repoground",
+            "path": "tests/test_cross_repo_flake_relations.py"
+          }
+        ],
+        "rationale": "Die tatsächlich betroffene Erkennungslogik und ihre Falschbeziehungs-Negativtests liegen an genau diesen beiden eingefrorenen Quellpfaden."
+      }
+    },
+    {
+      "id": "runtime-source-check-plan",
+      "class": "impact_tests",
+      "pilot": false,
+      "repositories": [
+        "heim-pc",
+        "nixer"
+      ],
+      "question": "Welche konkret versionierten Git-Quelldateien sind der richtige Prüfbereich, falls ein laufender Nixer-Build nicht zum derzeit deklarierten Heim-PC-Pin passt? Behaupte ohne Prozess- und Derivationbelege keine Aktivierung.",
+      "oracle": {
+        "outcome": "answer",
+        "required_paths": [
+          {
+            "repo": "heim-pc",
+            "path": "flake.lock"
+          },
+          {
+            "repo": "heim-pc",
+            "path": "nixos/system/modules/nixer.nix"
+          },
+          {
+            "repo": "nixer",
+            "path": "server.py"
+          }
+        ],
+        "allowed_paths": [
+          {
+            "repo": "heim-pc",
+            "path": "flake.lock"
+          },
+          {
+            "repo": "heim-pc",
+            "path": "nixos/system/modules/nixer.nix"
+          },
+          {
+            "repo": "nixer",
+            "path": "server.py"
+          },
+          {
+            "repo": "nixer",
+            "path": "evidence.py"
+          },
+          {
+            "repo": "nixer",
+            "path": "image_pin.py"
+          }
+        ],
+        "rationale": "Der Flake-Lock ist die Deklaration; Nixer-Quelldateien sind nur Vergleichskandidaten, die tatsächliche Aktivierung benötigt eigenständige Nix-/Runtimebelege."
+      }
+    },
+    {
+      "id": "invented-frobnicate",
+      "class": "boundary",
+      "pilot": true,
+      "repositories": [
+        "nixer"
+      ],
+      "question": "Belege die öffentliche Funktion frobnicate_nixer_flux_v99() samt Git-Definition und Aufrufern im eingefrorenen Nixer-Repository. Wenn sie nicht existiert, gib ausdrücklich Nichtwissen an statt andere ähnlich benannte Funktionen zu erfinden.",
+      "oracle": {
+        "outcome": "abstain",
+        "required_paths": [],
+        "allowed_paths": [
+          {
+            "repo": "nixer",
+            "path": "server.py"
+          },
+          {
+            "repo": "nixer",
+            "path": "evidence.py"
+          }
+        ],
+        "rationale": "Die erfundene Funktion ist absichtlich nicht in der Nixer-Gitquelle enthalten; ein leeres Ergebnis ist korrekt, aber keine negative Aussage über fremde Revisionen."
+      }
+    },
+    {
+      "id": "runtime-activation-unknown",
+      "class": "boundary",
+      "pilot": true,
+      "repositories": [
+        "heim-pc",
+        "nixer"
+      ],
+      "question": "Beweise ausschließlich mit den eingefrorenen Git-Repositories, dass der aktuell auf dem Heim-PC laufende Nixer-Prozess genau aus dem heute deklarierten Git-Commit gebaut wurde. Falls dafür Runtime- und Buildbelege fehlen, verweigere diese Behauptung.",
+      "oracle": {
+        "outcome": "abstain",
+        "required_paths": [],
+        "allowed_paths": [
+          {
+            "repo": "heim-pc",
+            "path": "flake.lock"
+          },
+          {
+            "repo": "heim-pc",
+            "path": "nixos/system/modules/nixer.nix"
+          },
+          {
+            "repo": "nixer",
+            "path": "server.py"
+          }
+        ],
+        "rationale": "Ein Git-Flake-Pin belegt weder aktivierte NixOS-Generation noch ExecStart, PID oder Store-Derivation; aus diesen Quellkopien ist die aktive Git-Build-Identität nicht entscheidbar."
+      }
+    },
+    {
+      "id": "combined-fts-negative",
+      "class": "boundary",
+      "pilot": false,
+      "repositories": [
+        "heim-pc",
+        "repoground"
+      ],
+      "question": "Finde die konkret belegbaren Heim-PC-Nixer-Einbindungen und den RepoGround-Beziehungsproduzenten auch dann, wenn eine lange kombinierte Freitextsuchanfrage keine Treffer liefert. Ist ein FTS-Nulltreffer ein Beweis fehlender Abhängigkeit?",
+      "oracle": {
+        "outcome": "answer",
+        "required_paths": [
+          {
+            "repo": "heim-pc",
+            "path": "flake.nix"
+          },
+          {
+            "repo": "heim-pc",
+            "path": "nixos/system/flake.nix"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/core/flake_input_relations.py"
+          }
+        ],
+        "allowed_paths": [
+          {
+            "repo": "heim-pc",
+            "path": "flake.nix"
+          },
+          {
+            "repo": "heim-pc",
+            "path": "nixos/system/flake.nix"
+          },
+          {
+            "repo": "repoground",
+            "path": "merger/repoground/core/flake_input_relations.py"
+          },
+          {
+            "repo": "heim-pc",
+            "path": "flake.lock"
+          }
+        ],
+        "rationale": "Der bekannte negative FTS-Mehrwortfall darf deterministische Dateiquellen und die separate Flake-Beziehungsprojektion nicht überstimmen; Suchtreffer sind keine relationale Wahrheit."
+      }
+    }
+  ]
+}

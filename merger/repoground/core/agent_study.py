@@ -140,6 +140,17 @@ def taskset_valid(taskset: Mapping[str, Any]) -> dict[str, Any]:
             _need(not req, f"{cid}: negative case cannot require exact answer paths")
         else:
             _need(bool(req), f"{cid}: answer case must have required paths")
+        citation = case.get("citation_commits", {})
+        _need(isinstance(citation, dict), f"{cid}: citation_commits must be a mapping")
+        for repo, revisions in citation.items():
+            _need(repo in scope and isinstance(revisions, list) and 0 < len(revisions) <= 8,
+                  f"{cid}: unsupported historical citation scope")
+            _need(all(
+                isinstance(rev, str) and SHA40.fullmatch(rev)
+                and rev != repositories[repo]["commit"] for rev in revisions
+            ), f"{cid}: historical revisions must be 40-hex non-current commits")
+            _need(len(revisions) == len(set(revisions)),
+                  f"{cid}: duplicate historical citation revisions")
         _need(isinstance(expectation.get("rationale"), str) and len(expectation["rationale"]) >= 12, f"{cid}: independent oracle rationale required")
     _need(all(classes[cls] == 3 for cls in CLASSES), "v1 requires three tasks in each of four classes")
     _need(negative >= 2, "v1 requires at least two unknown/unavailable controls")
@@ -188,6 +199,15 @@ def verify_sources(taskset: Mapping[str, Any], roots: Mapping[str, Any]) -> dict
             result = subprocess.run(["git", "cat-file", "-e", f'{info["commit"]}:{path}'],
                                     cwd=root, capture_output=True, timeout=15, check=False)
             _need(result.returncode == 0, f"{name}:{info['commit']}:{path}: unverified gold path")
+        revisions = {rev for case in taskset["cases"]
+                     for rev in case.get("citation_commits", {}).get(name, [])}
+        for revision in sorted(revisions):
+            probe = subprocess.run(
+                ["git", "merge-base", "--is-ancestor", revision, info["commit"]],
+                cwd=root, capture_output=True, timeout=15, check=False,
+            )
+            _need(probe.returncode == 0,
+                  f"{name}:{revision}: historical citation is not an ancestor of frozen source")
         counts[name] = len(refs)
     return counts
 
@@ -312,6 +332,8 @@ def create_plan(taskset: Mapping[str, Any], profile: Mapping[str, Any],
                     "isolation": {"fresh_session": True, "fresh_workspace": True,
                                   "no_prior_arm_transcripts": True, "disable_unlisted_plugins": True},
                 }
+                if case.get("citation_commits"):
+                    request["citation_commits"] = case["citation_commits"]
                 runs.append(request)
     return {
         "kind": PLAN_KIND, "version": VERSION, "run_id": run_id,
@@ -411,7 +433,9 @@ def _validate_receipt_answer(request: Mapping[str, Any], receipt: Mapping[str, A
     for ref in citation:
         obj = _object(ref, "citation")
         rp = _ref({"repo": obj.get("repo"), "path": obj.get("path")}, request["repositories"], "citation")
-        _need(obj.get("commit") == request["repositories"][rp[0]]["commit"], "citation revision mismatch")
+        allowed_commits = {request["repositories"][rp[0]]["commit"]}
+        allowed_commits.update(request.get("citation_commits", {}).get(rp[0], []))
+        _need(obj.get("commit") in allowed_commits, "citation revision mismatch")
         _need(_nonnegative(obj.get("start_line"), "start_line") >= 1 and
               _nonnegative(obj.get("end_line"), "end_line") >= obj["start_line"], "citation lines invalid")
 
