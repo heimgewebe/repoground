@@ -2201,15 +2201,68 @@ def prepare_managed_worktree(
     *,
     expected_repo: Path,
     target: str,
+    authenticated_remote: str | None = None,
 ) -> None:
     with tempfile.TemporaryDirectory(
         prefix="repoground-managed-worktree-gitconfig-",
         dir="/tmp",
     ) as raw_config_root:
+        include_https_auth = False
+        ssh_command: str | None = None
+        if authenticated_remote is not None:
+            transport_env = _authority_git_env()
+            local_config = run(
+                [
+                    "git", "-C", str(expected_repo), "config", "--local",
+                    "--no-includes", "--null", "--list",
+                ],
+                check=False, env=transport_env,
+            )
+            if local_config.returncode != 0:
+                raise RuntimeError("managed source repository local Git config unavailable")
+            entries = _parse_git_config_list_entries(
+                local_config.stdout, label="managed source repository local",
+            )
+            partial_clone = any(
+                key.strip().lower() in _FLEET_MEMBER_PARTIAL_CLONE_KEYS
+                for key, _value in entries
+            )
+            if partial_clone:
+                # A partial clone can lazily fetch blobs during checkout.
+                # Verify the original GitHub origin and reuse the bounded SSH
+                # identity already admitted by remote_head_for_entry. Full
+                # clones have no promisor source and need no additional route.
+                assert_fleet_member_git_transport_safe(
+                    expected_repo, env=transport_env,
+                )
+                observed = run(
+                    [
+                        "git", "-C", str(expected_repo), "config", "--local",
+                        "--no-includes", "--get-all", "remote.origin.url",
+                    ],
+                    check=False, env=transport_env,
+                )
+                if (
+                    observed.returncode != 0
+                    or observed.stdout.splitlines() != [authenticated_remote]
+                    or parse_github_remote(authenticated_remote) is None
+                ):
+                    raise RuntimeError(
+                        "managed source repository origin changed before source worktree"
+                    )
+                if authenticated_remote.lower().startswith("https://"):
+                    include_https_auth = True
+                else:
+                    ssh_command = _fleet_repo_ssh_env(
+                        remote=authenticated_remote,
+                    )["GIT_SSH_COMMAND"]
         env = _managed_worktree_git_env(
             expected_repo,
             safe_global_config=Path(raw_config_root) / "global.gitconfig",
+            include_https_auth=include_https_auth,
         )
+        if ssh_command is not None:
+            env["GIT_SSH_COMMAND"] = ssh_command
         if path.exists() or path.is_symlink():
             cleanup_managed_disposable_artifacts(
                 path,
@@ -2623,6 +2676,11 @@ _AUTHORITY_GIT_ALLOWED_ORIGIN_CONFIG = frozenset(
 _FLEET_MEMBER_ALLOWED_ORIGIN_CONFIG = _AUTHORITY_GIT_ALLOWED_ORIGIN_CONFIG | frozenset(
     {"remote.origin.prune", "remote.origin.prunetags"}
 )
+# An ordinary Git partial clone is compatible with a pinned GitHub origin,
+# provided both fixed settings are present and remain repository-local.
+_FLEET_MEMBER_PARTIAL_CLONE_KEYS = frozenset(
+    {"remote.origin.promisor", "remote.origin.partialclonefilter"}
+)
 _AUTHORITY_PROXY_ENV_NAMES = frozenset({"all_proxy", "http_proxy", "https_proxy"})
 _AUTHORITY_TLS_ENV_NAMES = frozenset(
     {"curl_ca_bundle", "ssl_cert_dir", "ssl_cert_file"}
@@ -2852,25 +2910,32 @@ def _managed_worktree_git_env(
     repo_path: Path,
     *,
     safe_global_config: Path,
+    include_https_auth: bool = False,
 ) -> dict[str, str]:
-    env = _authority_git_env()
+    # Reuse the existing validated HTTPS credential/TLS constructor when
+    # a partial-commit source checkout may need a lazy GitHub blob fetch.
+    env = (
+        _fleet_repo_git_env(repo_path, safe_global_config=safe_global_config)
+        if include_https_auth else _authority_git_env()
+    )
     env["PATH"] = _fleet_member_credential_helper_path()
     entries = _global_system_checkout_filter_config(repo_path)
     if not entries:
         return env
     if not safe_global_config.is_absolute():
         raise RuntimeError("managed worktree scoped Git config path must be absolute")
-    try:
-        descriptor = os.open(
-            safe_global_config,
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC,
-            0o600,
-        )
-    except OSError as exc:
-        raise RuntimeError(
-            "managed worktree scoped Git configuration is unavailable"
-        ) from exc
-    os.close(descriptor)
+    if env.get("GIT_CONFIG_GLOBAL") != str(safe_global_config):
+        try:
+            descriptor = os.open(
+                safe_global_config,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC,
+                0o600,
+            )
+        except OSError as exc:
+            raise RuntimeError(
+                "managed worktree scoped Git configuration is unavailable"
+            ) from exc
+        os.close(descriptor)
 
     writer_env = _authority_git_env()
     for key, value in entries:
@@ -3747,6 +3812,10 @@ def _fleet_member_local_config_entry_is_transport_override(
         return value not in {"--no-tags", "--tags"}
     if normalized == "remote.origin.prunetags":
         return not _fleet_git_boolean_value_allowed(value)
+    if normalized == "remote.origin.promisor":
+        return value.casefold() != "true"
+    if normalized == "remote.origin.partialclonefilter":
+        return value != "blob:none"
     if _fleet_http_version_config_key_allowed(key):
         return not _fleet_http_version_value_allowed(value)
     if _fleet_github_extra_header_key_allowed(key):
@@ -3960,17 +4029,26 @@ def assert_fleet_member_git_transport_safe(
         for key, _value in local_entries
         if key.strip()
     }
-    unsafe_keys = sorted(
-        {
-            key.strip().lower()
-            for key, value in local_entries
-            if _fleet_member_local_config_entry_is_transport_override(key, value)
-        }
-    )
+    unsafe_keys = {
+        key.strip().lower()
+        for key, value in local_entries
+        if _fleet_member_local_config_entry_is_transport_override(key, value)
+    }
+    partial = {
+        name: [value for key, value in local_entries if key.strip().lower() == name]
+        for name in _FLEET_MEMBER_PARTIAL_CLONE_KEYS
+    }
+    if any(partial.values()) and (
+        len(partial["remote.origin.promisor"]) != 1
+        or partial["remote.origin.promisor"][0].casefold() != "true"
+        or partial["remote.origin.partialclonefilter"] != ["blob:none"]
+    ):
+        # Reject unpaired values, duplicate keys and noncanonical filters.
+        unsafe_keys.update(_FLEET_MEMBER_PARTIAL_CLONE_KEYS)
     if unsafe_keys:
         raise RuntimeError(
             "fleet repository has unsafe local Git transport configuration: "
-            + ", ".join(unsafe_keys)
+            + ", ".join(sorted(unsafe_keys))
         )
 
     if "extensions.worktreeconfig" in local_keys:
@@ -4020,9 +4098,12 @@ def assert_fleet_member_git_transport_safe(
                 {
                     key.strip().lower()
                     for key, value in worktree_entries
-                    if _fleet_member_local_config_entry_is_transport_override(
-                        key,
-                        value,
+                    if (
+                        key.strip().lower() in _FLEET_MEMBER_PARTIAL_CLONE_KEYS
+                        or _fleet_member_local_config_entry_is_transport_override(
+                            key,
+                            value,
+                        )
                     )
                 }
             )
@@ -4898,6 +4979,7 @@ def ensure_source_worktree(entry: RepoEntry, ref_segment: str, sha: str) -> Path
             source_wt,
             expected_repo=entry.path,
             target=sha,
+            authenticated_remote=getattr(entry, "remote", None),
         )
         return source_wt
     except ManagedWorktreeDirtyError as exc:
@@ -4922,6 +5004,7 @@ def ensure_source_worktree(entry: RepoEntry, ref_segment: str, sha: str) -> Path
         replacement,
         expected_repo=entry.path,
         target=sha,
+        authenticated_remote=getattr(entry, "remote", None),
     )
     try:
         receipt_path = record_source_recovery(
