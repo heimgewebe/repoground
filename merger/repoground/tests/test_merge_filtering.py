@@ -475,3 +475,34 @@ def test_noise_dirs_absent_from_generated_bundle_surfaces(tmp_path):
         assert any(hidden_path in p for p in chunk_file_paths), (
             f"Hidden context '{hidden_path}' must appear in chunk_index: {chunk_file_paths}"
         )
+
+
+def test_scoped_root_exclusion_preserves_working_sources_and_nested_names(tmp_path):
+    """Exclude only explicitly named release mirrors, not live scripts/tests."""
+    for name in (
+        "releases/old/scripts/validate_commons_admission.py",
+        "scripts/validate_commons_admission.py",
+        "tests/test_commons_admission.py",
+        "docs/releases/history.md",
+    ):
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("source\n", encoding="utf-8")
+    full = merge.scan_repo(tmp_path, calculate_md5=False)
+    selected = merge.scan_repo(
+        tmp_path, calculate_md5=False, exclude_root_dirs=["releases"]
+    )
+    paths = {p.rel_path.as_posix() for p in selected["files"]}
+    assert full["total_files"] == 4
+    assert selected["total_files"] == 3
+    assert "releases/old/scripts/validate_commons_admission.py" not in paths
+    assert {"scripts/validate_commons_admission.py",
+            "tests/test_commons_admission.py",
+            "docs/releases/history.md"} <= paths
+    assert selected["excluded_root_dirs"] == ["releases"]
+
+
+@pytest.mark.parametrize("unsafe", ["../repo", "docs/other", ".", "..", "", "*", "\\\\evil", "a\n"])
+def test_scoped_root_exclusion_rejects_unsafe_names(tmp_path, unsafe):
+    with pytest.raises(ValueError, match="safe top-level"):
+        merge.scan_repo(tmp_path, calculate_md5=False, exclude_root_dirs=[unsafe])

@@ -556,6 +556,9 @@ def register_ground_command_groups(ground_parser: argparse.ArgumentParser) -> No
     )
     create_parser.add_argument("--split-size", default="25MB")
     create_parser.add_argument("--path-filter")
+    create_parser.add_argument("--exclude-root-dir", action="append",
+                               dest="exclude_root_dirs",
+                               help="Exclude one exact top-level directory from the agent snapshot (repeatable)")
     create_parser.add_argument("--ext", action="append")
     create_parser.add_argument("--output-mode", choices=["archive", "retrieval", "dual"])
     create_parser.add_argument(
@@ -823,6 +826,9 @@ def register_ground_command_groups(ground_parser: argparse.ArgumentParser) -> No
     external_refresh_parser.add_argument("--max-bytes", default="0")
     external_refresh_parser.add_argument("--split-size", default="25MB")
     external_refresh_parser.add_argument("--path-filter")
+    external_refresh_parser.add_argument("--exclude-root-dir", action="append",
+                                         dest="exclude_root_dirs",
+                                         help="Exclude one exact top-level source directory (repeatable)")
     external_refresh_parser.add_argument("--ext", action="append")
     external_refresh_parser.add_argument("--output-mode", choices=["archive", "retrieval", "dual"])
     external_refresh_parser.add_argument(
@@ -1056,6 +1062,7 @@ def run_external_manifest_refresh(args: argparse.Namespace) -> int:
     snapshot_args = argparse.Namespace(
         repo=args.repo, out=str(out_path), profile=args.profile, mode=args.mode,
         max_bytes=args.max_bytes, split_size=args.split_size, path_filter=args.path_filter,
+        exclude_root_dirs=getattr(args, "exclude_root_dirs", None),
         ext=args.ext, output_mode=args.output_mode, redact_secrets=args.redact_secrets,
         include_hidden=args.include_hidden,
         language_structure=bool(getattr(args, "language_structure", False)),
@@ -1648,12 +1655,15 @@ def build_snapshot_create_result(args: argparse.Namespace) -> dict[str, Any]:
         include_paths=None,
         calculate_md5=True,
         include_hidden=args.include_hidden,
+        exclude_root_dirs=getattr(args, "exclude_root_dirs", None),
     )
     generator_info = {
         "name": "repobrief",
         "version": os.getenv("REPOGROUND_VERSION", "dev"),
         "platform": getattr(args, "platform", "cli"),
         "repobrief_output_plan": output_plan,
+        **({"source_scope_exclusions": {"root_dirs": summary["excluded_root_dirs"]}}
+           if summary.get("excluded_root_dirs") else {}),
     }
     artifacts = write_reports_v2(
         out,
@@ -1696,6 +1706,17 @@ def build_snapshot_create_result(args: argparse.Namespace) -> dict[str, Any]:
     )
     output_plan["bounded_bundle"] = bounded_bundle_plan
     mark_bundle_manifest_profile(artifacts.bundle_manifest, profile, output_plan)
+    # Make deliberate source-scope exclusions visible to agent consumers.
+    # The source Git revision stays exact; its historical archive subtree is
+    # intentionally absent from this retrieval bundle.
+    if summary.get("excluded_root_dirs"):
+        manifest_data = json.loads(artifacts.bundle_manifest.read_text(encoding="utf-8"))
+        manifest_data.setdefault("capabilities", {})["source_scope_exclusions"] = {
+            "root_dirs": summary["excluded_root_dirs"],
+            "scope": "retrieval_snapshot_only",
+            "does_not_establish": ["complete_source_tree_coverage"],
+        }
+        _json_write_atomic(artifacts.bundle_manifest, manifest_data)
     snapshot_plan_path = emit_snapshot_plan_report(
         artifacts.bundle_manifest, profile, output_plan
     )

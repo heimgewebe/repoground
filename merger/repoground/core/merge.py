@@ -2577,7 +2577,7 @@ def _record_excluded_noise_dir(
 
     excluded_noise["count"] = count
 
-def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_contains: Optional[str] = None, max_bytes: int = DEFAULT_MAX_BYTES, include_paths: Optional[List[str]] = None, calculate_md5: bool = True, include_hidden: bool = True) -> Dict[str, Any]:
+def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_contains: Optional[str] = None, max_bytes: int = DEFAULT_MAX_BYTES, include_paths: Optional[List[str]] = None, calculate_md5: bool = True, include_hidden: bool = True, exclude_root_dirs: Optional[List[str]] = None) -> Dict[str, Any]:
     """
     Scans a repository and returns a summary dict with file info.
 
@@ -2594,6 +2594,16 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
 
     ext_filter = set(e.lower() for e in extensions) if extensions else None
     path_filter = path_contains.strip() if path_contains else None
+    # Source-scope exclusions are exact top-level directories, never globs.
+    excluded_root_names = tuple(exclude_root_dirs or ())
+    if any(
+        not isinstance(name, str)
+        or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name, flags=re.ASCII) is None
+        or name in {".", ".."}
+        for name in excluded_root_names
+    ):
+        raise ValueError("exclude_root_dirs requires safe top-level directory names")
+    excluded_root_set = frozenset(excluded_root_names)
 
     # Optimize include_paths check
     include_set = None
@@ -2665,6 +2675,8 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
         # Filter directories
         keep_dirs = []
         for d in dirnames:
+            if dirpath == root_str and d in excluded_root_set:
+                continue
             if d in SKIP_DIRS:
                 if d in _BUILD_AND_CACHE_DIRS:
                     _record_excluded_noise_dir(repo_root, Path(dirpath) / d, excluded_noise)
@@ -2834,6 +2846,7 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
         "total_bytes": total_bytes,
         "ext_hist": ext_hist,
         "excluded_noise": excluded_noise,
+        **({"excluded_root_dirs": sorted(excluded_root_set)} if excluded_root_set else {}),
     }
 
 def parse_human_size(text: str) -> int:
@@ -6902,6 +6915,8 @@ def write_reports_v2(
         "redact_secrets": redact_secrets,
         "include_hidden": include_hidden,
     }
+    if generator_info.get("source_scope_exclusions"):
+        config_payload["source_scope_exclusions"] = generator_info["source_scope_exclusions"]
     config_str = json.dumps(config_payload, sort_keys=True, separators=(",", ":"))
     config_sha256 = hashlib.sha256(config_str.encode("utf-8")).hexdigest()
 
