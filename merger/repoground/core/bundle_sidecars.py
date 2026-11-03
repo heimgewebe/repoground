@@ -130,6 +130,7 @@ def write_language_structure_json(
     repo_summaries: List[Dict[str, Any]],
     final_dump_index: Optional[Path],
     run_id: str,
+    exclude_root_dirs: tuple[str, ...] = (),
 ) -> Optional[Path]:
     """Emit bounded Rust/Bash navigation evidence for one bound Git repository."""
 
@@ -159,6 +160,7 @@ def write_language_structure_json(
         bundle_manifest=base_manifest_path.name,
         canonical_dump_index_sha256=canonical_sha,
         run_id=run_id,
+        exclude_root_dirs=exclude_root_dirs,
     )
     summaries = document.get("languages")
     if isinstance(summaries, dict) and not any(

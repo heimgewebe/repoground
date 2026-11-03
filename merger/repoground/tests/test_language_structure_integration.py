@@ -134,6 +134,60 @@ def _bundle(
     return repo, commit, artifacts
 
 
+def test_scoped_snapshot_omits_historical_releases_from_structure_and_chunks(
+    tmp_path: Path,
+) -> None:
+    """All agent-facing source scans must honor the explicit top-level scope."""
+    repo = tmp_path / "repo"
+    sources = {
+        "scripts/live.sh": "#!/usr/bin/env bash\nlive() {\n  :\n}\n",
+        "src/live.rs": "pub fn live() {}\n",
+        "docs/releases/keep.sh": "#!/usr/bin/env bash\nkeep() {\n  :\n}\n",
+        "releases/old/scripts/old.sh": "#!/usr/bin/env bash\nold() {\n  :\n}\n",
+        "releases/old/src/old.rs": "pub fn old() {}\n",
+    }
+    for relative, body in sources.items():
+        target = repo / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body, encoding="utf-8")
+    _git(repo, "init", "-q")
+    _git(repo, "add", ".")
+    _git(
+        repo, "-c", "user.name=RepoGround Test",
+        "-c", "user.email=repoground@example.invalid",
+        "commit", "-qm", "fixture",
+    )
+    out = tmp_path / "out"
+    out.mkdir()
+    summary = scan_repo(repo, exclude_root_dirs=["releases"])
+    artifacts = write_reports_v2(
+        merges_dir=out,
+        hub=tmp_path,
+        repo_summaries=[summary],
+        detail="test",
+        mode="gesamt",
+        max_bytes=10_000,
+        plan_only=False,
+        extras=MockExtras(),
+        output_mode="dual",
+        generator_info={
+            **make_generator_info(),
+            "source_scope_exclusions": {"root_dirs": ["releases"]},
+        },
+    )
+    assert artifacts.language_structure is not None
+    structure = json.loads(artifacts.language_structure.read_text(encoding="utf-8"))
+    paths = {record["source"]["path"] for record in structure["records"]}
+    assert {"scripts/live.sh", "src/live.rs", "docs/releases/keep.sh"} <= paths
+    assert not any(path.startswith("releases/") for path in paths)
+    assert artifacts.chunk_index is not None
+    chunks = [
+        json.loads(line)
+        for line in artifacts.chunk_index.read_text(encoding="utf-8").splitlines()
+    ]
+    assert not any(chunk["path"].startswith("releases/") for chunk in chunks)
+
+
 def _entry(manifest: dict, role: str) -> dict:
     return next(item for item in manifest["artifacts"] if item["role"] == role)
 

@@ -208,6 +208,7 @@ def build_language_structure_document(
     canonical_dump_index_sha256: str,
     run_id: str,
     rust_scip_artifact: Mapping[str, Any] | None = None,
+    exclude_root_dirs: Iterable[str] = (),
     max_files: int = 5000,
     max_file_bytes: int = 524_288,
     max_records: int = 50_000,
@@ -236,6 +237,7 @@ def build_language_structure_document(
         "max_files": max_files,
         "max_file_bytes": max_file_bytes,
         "max_records": max_records,
+        "exclude_root_dirs": tuple(exclude_root_dirs),
     }
     bash = scan_bash_repository(root, **common)
     rust = scan_rust_repository(root, scip_artifact=rust_scip_artifact, **common)

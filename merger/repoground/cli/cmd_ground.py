@@ -1612,6 +1612,26 @@ def _emit_flake_relation_artifact(
     return path
 
 
+def _source_scope_generator_fields(summary: dict[str, Any]) -> dict[str, Any]:
+    """Describe deliberate scope reductions without burdening snapshot control flow."""
+    excluded = summary.get("excluded_root_dirs")
+    return {"source_scope_exclusions": {"root_dirs": excluded}} if excluded else {}
+
+
+def _mark_source_scope_manifest(manifest_path: Path, summary: dict[str, Any]) -> None:
+    """Declare exact intentional source omissions before bundle finalization."""
+    excluded = summary.get("excluded_root_dirs")
+    if not excluded:
+        return
+    manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest_data.setdefault("capabilities", {})["source_scope_exclusions"] = {
+        "root_dirs": excluded,
+        "scope": "retrieval_snapshot_only",
+        "does_not_establish": ["complete_source_tree_coverage"],
+    }
+    _json_write_atomic(manifest_path, manifest_data)
+
+
 def build_snapshot_create_result(args: argparse.Namespace) -> dict[str, Any]:
     profile = args.profile
     repo = Path(args.repo).expanduser().resolve()
@@ -1662,8 +1682,7 @@ def build_snapshot_create_result(args: argparse.Namespace) -> dict[str, Any]:
         "version": os.getenv("REPOGROUND_VERSION", "dev"),
         "platform": getattr(args, "platform", "cli"),
         "repobrief_output_plan": output_plan,
-        **({"source_scope_exclusions": {"root_dirs": summary["excluded_root_dirs"]}}
-           if summary.get("excluded_root_dirs") else {}),
+        **_source_scope_generator_fields(summary),
     }
     artifacts = write_reports_v2(
         out,
@@ -1706,17 +1725,7 @@ def build_snapshot_create_result(args: argparse.Namespace) -> dict[str, Any]:
     )
     output_plan["bounded_bundle"] = bounded_bundle_plan
     mark_bundle_manifest_profile(artifacts.bundle_manifest, profile, output_plan)
-    # Make deliberate source-scope exclusions visible to agent consumers.
-    # The source Git revision stays exact; its historical archive subtree is
-    # intentionally absent from this retrieval bundle.
-    if summary.get("excluded_root_dirs"):
-        manifest_data = json.loads(artifacts.bundle_manifest.read_text(encoding="utf-8"))
-        manifest_data.setdefault("capabilities", {})["source_scope_exclusions"] = {
-            "root_dirs": summary["excluded_root_dirs"],
-            "scope": "retrieval_snapshot_only",
-            "does_not_establish": ["complete_source_tree_coverage"],
-        }
-        _json_write_atomic(artifacts.bundle_manifest, manifest_data)
+    _mark_source_scope_manifest(artifacts.bundle_manifest, summary)
     snapshot_plan_path = emit_snapshot_plan_report(
         artifacts.bundle_manifest, profile, output_plan
     )

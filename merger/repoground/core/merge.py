@@ -83,6 +83,7 @@ def _write_language_structure_artifact(
     repo_summaries: List[Dict[str, Any]],
     final_dump_index: Optional[Path],
     run_id: str,
+    exclude_root_dirs: tuple[str, ...] = (),
 ) -> Optional[Path]:
     if not enabled:
         return None
@@ -91,6 +92,7 @@ def _write_language_structure_artifact(
         repo_summaries=repo_summaries,
         final_dump_index=final_dump_index,
         run_id=run_id,
+        exclude_root_dirs=exclude_root_dirs,
     )
 
 
@@ -2577,6 +2579,19 @@ def _record_excluded_noise_dir(
 
     excluded_noise["count"] = count
 
+def _validated_excluded_root_dirs(exclude_root_dirs: Optional[List[str]]) -> frozenset[str]:
+    """Accept only exact top-level source directory names."""
+    names = tuple(exclude_root_dirs or ())
+    if any(
+        not isinstance(name, str)
+        or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name, flags=re.ASCII) is None
+        or name in {".", ".."}
+        for name in names
+    ):
+        raise ValueError("exclude_root_dirs requires safe top-level directory names")
+    return frozenset(names)
+
+
 def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_contains: Optional[str] = None, max_bytes: int = DEFAULT_MAX_BYTES, include_paths: Optional[List[str]] = None, calculate_md5: bool = True, include_hidden: bool = True, exclude_root_dirs: Optional[List[str]] = None) -> Dict[str, Any]:
     """
     Scans a repository and returns a summary dict with file info.
@@ -2594,16 +2609,7 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
 
     ext_filter = set(e.lower() for e in extensions) if extensions else None
     path_filter = path_contains.strip() if path_contains else None
-    # Source-scope exclusions are exact top-level directories, never globs.
-    excluded_root_names = tuple(exclude_root_dirs or ())
-    if any(
-        not isinstance(name, str)
-        or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name, flags=re.ASCII) is None
-        or name in {".", ".."}
-        for name in excluded_root_names
-    ):
-        raise ValueError("exclude_root_dirs requires safe top-level directory names")
-    excluded_root_set = frozenset(excluded_root_names)
+    excluded_root_set = _validated_excluded_root_dirs(exclude_root_dirs)
 
     # Optimize include_paths check
     include_set = None
@@ -2675,9 +2681,7 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
         # Filter directories
         keep_dirs = []
         for d in dirnames:
-            if dirpath == root_str and d in excluded_root_set:
-                continue
-            if d in SKIP_DIRS:
+            if d in SKIP_DIRS or (dirpath == root_str and d in excluded_root_set):
                 if d in _BUILD_AND_CACHE_DIRS:
                     _record_excluded_noise_dir(repo_root, Path(dirpath) / d, excluded_noise)
                 continue
@@ -6824,6 +6828,12 @@ def _write_architecture_summary(
     return arch_path
 
 
+def _source_scope_config_fields(generator_info: Dict[str, Any]) -> Dict[str, Any]:
+    """Include the scope fingerprint only for deliberately reduced snapshots."""
+    scope = generator_info.get("source_scope_exclusions")
+    return {"source_scope_exclusions": scope} if scope else {}
+
+
 def write_reports_v2(
     merges_dir: Path,
     hub: Path,
@@ -6914,9 +6924,8 @@ def write_reports_v2(
         "output_mode": output_mode,
         "redact_secrets": redact_secrets,
         "include_hidden": include_hidden,
+        **_source_scope_config_fields(generator_info),
     }
-    if generator_info.get("source_scope_exclusions"):
-        config_payload["source_scope_exclusions"] = generator_info["source_scope_exclusions"]
     config_str = json.dumps(config_payload, sort_keys=True, separators=(",", ":"))
     config_sha256 = hashlib.sha256(config_str.encode("utf-8")).hexdigest()
 
@@ -7384,6 +7393,9 @@ def write_reports_v2(
             repo_summaries=repo_summaries,
             final_dump_index=final_dump_index,
             run_id=run_id,
+            exclude_root_dirs=tuple(
+                (generator_info.get("source_scope_exclusions") or {}).get("root_dirs", ())
+            ),
         ),
         role=ArtifactRole.LANGUAGE_STRUCTURE_JSON,
         content_type="application/json",

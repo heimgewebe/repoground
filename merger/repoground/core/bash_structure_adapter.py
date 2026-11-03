@@ -92,11 +92,17 @@ def _is_candidate(path: Path, first_line: str) -> tuple[bool, list[str]]:
     return True, ["shell_dialect_not_proven_bash"]
 
 
-def _iter_files(root: Path, *, max_files: int) -> tuple[list[Path], bool]:
+def _iter_files(
+    root: Path, *, max_files: int, exclude_root_dirs: tuple[str, ...] = ()
+) -> tuple[list[Path], bool]:
     files: list[Path] = []
     truncated = False
+    excluded = frozenset(exclude_root_dirs)
     for current, dirs, names in os.walk(root, followlinks=False):
-        dirs[:] = sorted(d for d in dirs if d not in _SKIP_DIRS)
+        dirs[:] = sorted(
+            d for d in dirs
+            if d not in _SKIP_DIRS and (Path(current) != root or d not in excluded)
+        )
         for name in sorted(names):
             path = Path(current) / name
             if path.is_symlink() or path.suffix.lower() not in {
@@ -361,6 +367,7 @@ def scan_bash_repository(
     bundle_manifest: str,
     canonical_dump_index_sha256: str,
     max_files: int = 5000,
+    exclude_root_dirs: tuple[str, ...] = (),
     max_file_bytes: int = 524_288,
     max_records: int = 50_000,
 ) -> dict[str, Any]:
@@ -371,7 +378,9 @@ def scan_bash_repository(
         max_file_bytes=max_file_bytes,
         max_records=max_records,
     )
-    files, files_truncated = _iter_files(root, max_files=max_files)
+    files, files_truncated = _iter_files(
+        root, max_files=max_files, exclude_root_dirs=exclude_root_dirs
+    )
     records: list[dict[str, Any]] = []
     degradations: list[dict[str, Any]] = []
     scanned = 0
