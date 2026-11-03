@@ -27,6 +27,12 @@ Quellen:
 
 Die alten Laufdaten liegen teilweise in einem *hostlokalen* Grabowski-State-Verzeichnis und sind nicht dadurch automatisch zu einem öffentlichen, archivierten Datensatz geworden, dass ein Bericht im Repository liegt. Bei späterem Import Originaldateien, Run-/Trace-SHA-256, Provenienz und Datenschutz erneut prüfen. Nie gerundete Berichtszahlen als exakte ursprüngliche Trial-Receipts rekonstruieren.
 
+## Commonworld – technische Zitierabnahme vom 03.11.2026 (kein A/B/C-Lauf)
+
+**[Revisions- und Hashbeleg](../proofs/repoground-commonworld-citation-recovery-20261103.md)**. Nach Merge von PR #1400 läuft die RepoGround-CLI/Fleet-Publikation auf Generator `b9db1745335f12f5e32120cc0366cf4687585a00`; die frisch veröffentlichte Commonworld-Quelle ist `2c6a790a8b76027d620cfc416918c9b6f08e34cc`. Das Bundle ist `fresh_exact` und `range_strict`-PASS. **1.886 von 1.886** Such-Chunks haben einen kanonischen Range-Bezug; keiner stammt aus dem bewusst ausgeschlossenen `releases/`-Root. Drei vorher unzitierbare Implementierungs-/Testpfade bestanden den echten `query_existing_index → range_get`-Rücklesetest einschließlich SHA-256-Abgleich. Auch `context_pack → range_get` mit direkt zurückgegebenem Ref wurde bestanden.
+
+Der alte Snapshot hatte **1.639 von 50.770** Chunks mit `canonical_range` (3,23 %) und einen 16-teiligen Markdown-Dump. Generator, Source-Revision und Scope unterschieden sich; daraus ist **keine isolierte Zeit- oder Qualitätswirkung** ableitbar. **Neue Agentenprovider-Receipts: 0; neue A/B/C-Qualitätsbewertungen: 0; Agentennutzenstatus: `not_established`.** R3/R5 bleiben unveränderte, methodisch getrennte historische Kohorten.
+
 ## Eingefrorener Ausgangspunkt für die neue Kohorte
 
 - **Studienversion:** repoground-agent-study-frozen-20261101-v1
