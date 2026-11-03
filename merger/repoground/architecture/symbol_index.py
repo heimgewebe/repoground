@@ -148,7 +148,9 @@ def _is_python_source_file(path: Path) -> bool:
     return re.fullmatch(pattern, interpreter) is not None
 
 
-def extract_python_symbols(repo_root: Path) -> tuple[list[dict[str, Any]], int, list[str]]:
+def extract_python_symbols(
+    repo_root: Path, *, exclude_root_dirs: tuple[str, ...] = (),
+) -> tuple[list[dict[str, Any]], int, list[str]]:
     symbols: list[dict[str, Any]] = []
     skipped_files_count = 0
     skipped_errors: list[str] = []
@@ -156,8 +158,12 @@ def extract_python_symbols(repo_root: Path) -> tuple[list[dict[str, Any]], int, 
     # Keep os.walk lazy and top-down: wrapping it in sorted(...) consumes the
     # whole tree before dirs[:] can prune excluded subdirectories. Sorting
     # dirs and files here preserves deterministic traversal order.
+    excluded = frozenset(exclude_root_dirs)
     for root, dirs, files in os.walk(repo_root, topdown=True):
-        dirs[:] = sorted(d for d in dirs if d not in EXCLUDED_DIRS)
+        dirs[:] = sorted(
+            d for d in dirs
+            if d not in EXCLUDED_DIRS and (Path(root) != repo_root or d not in excluded)
+        )
         for file_name in sorted(files):
             path = Path(root) / file_name
             if not _is_python_source_file(path):
@@ -177,8 +183,16 @@ def extract_python_symbols(repo_root: Path) -> tuple[list[dict[str, Any]], int, 
     return sorted(symbols, key=lambda item: (item["path"], item["start_line"], item["qualified_name"], item["kind"])), skipped_files_count, skipped_errors
 
 
-def generate_symbol_index_document(repo_root: Path, run_id: str, canonical_sha256: str) -> dict[str, Any]:
-    symbols, skipped_count, skipped_errors = extract_python_symbols(repo_root)
+def generate_symbol_index_document(
+    repo_root: Path,
+    run_id: str,
+    canonical_sha256: str,
+    *,
+    exclude_root_dirs: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    symbols, skipped_count, skipped_errors = extract_python_symbols(
+        repo_root, exclude_root_dirs=exclude_root_dirs
+    )
     return {
         "kind": "lenskit.python_symbol_index",
         "version": "1.0",

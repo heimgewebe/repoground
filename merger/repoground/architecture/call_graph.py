@@ -2283,7 +2283,10 @@ def _normalized_worker_count(max_workers: int | None) -> int:
 
 
 def _collect_python_inputs(
-    repo_root: Path, cache: CallGraphBuildCache | None
+    repo_root: Path,
+    cache: CallGraphBuildCache | None,
+    *,
+    exclude_root_dirs: tuple[str, ...] = (),
 ) -> tuple[
     list[str],
     dict[str, _PythonFileInput],
@@ -2296,9 +2299,12 @@ def _collect_python_inputs(
     outcomes: dict[str, _ParseOutcome] = {}
     cache_hits = 0
     cache_misses: list[_PythonFileInput] = []
+    excluded = frozenset(exclude_root_dirs)
     for root, dirs, files in os.walk(repo_root, topdown=True):
         dirs[:] = sorted(
-            directory for directory in dirs if directory not in EXCLUDED_DIRS
+            directory for directory in dirs
+            if directory not in EXCLUDED_DIRS
+            and (Path(root) != repo_root or directory not in excluded)
         )
         for file_name in sorted(files):
             path = Path(root) / file_name
@@ -2373,6 +2379,7 @@ def extract_python_calls(
     max_workers: int | None = None,
     max_in_flight_bytes: int = DEFAULT_CALL_GRAPH_MAX_IN_FLIGHT_BYTES,
     build_report: dict[str, Any] | None = None,
+    exclude_root_dirs: tuple[str, ...] = (),
 ) -> tuple[list[dict[str, Any]], int, list[str]]:
     """Return deterministic calls with optional hash-bound reuse and parsing."""
     workers = _normalized_worker_count(max_workers)
@@ -2384,7 +2391,7 @@ def extract_python_calls(
         raise ValueError("max_in_flight_bytes must be a positive integer")
 
     ordered_paths, inputs, outcomes, cache_hits, cache_misses = _collect_python_inputs(
-        repo_root, cache
+        repo_root, cache, exclude_root_dirs=exclude_root_dirs
     )
 
     parallel_eligible = (
@@ -2459,6 +2466,7 @@ def generate_call_graph_document(
     max_workers: int | None = None,
     max_in_flight_bytes: int = DEFAULT_CALL_GRAPH_MAX_IN_FLIGHT_BYTES,
     build_report: dict[str, Any] | None = None,
+    exclude_root_dirs: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     calls, skipped_count, skipped_errors = extract_python_calls(
         repo_root,
@@ -2466,6 +2474,7 @@ def generate_call_graph_document(
         max_workers=max_workers,
         max_in_flight_bytes=max_in_flight_bytes,
         build_report=build_report,
+        exclude_root_dirs=exclude_root_dirs,
     )
     resolution_counts = {status: 0 for status in RESOLUTION_STATUSES}
     evidence_counts = {level: 0 for level in EVIDENCE_LEVELS}

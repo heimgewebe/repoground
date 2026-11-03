@@ -60,6 +60,13 @@ def _single_repo_root(
     return Path(repo_root)
 
 
+def _source_scope_root_dirs(repo_summaries: List[Dict[str, Any]]) -> tuple[str, ...]:
+    """Use the exact source-scan omissions for independently generated sidecars."""
+    if len(repo_summaries) != 1:
+        return ()
+    return tuple(repo_summaries[0].get("excluded_root_dirs", ()))
+
+
 def _write_provenance_document(
     *,
     base_manifest_path: Path,
@@ -96,7 +103,10 @@ def write_python_symbol_index_json(
     return _write_provenance_document(
         base_manifest_path=base_manifest_path,
         suffix=".python_symbol_index.json",
-        document=generate_symbol_index_document(repo_root, run_id, canonical_sha),
+        document=generate_symbol_index_document(
+            repo_root, run_id, canonical_sha,
+            exclude_root_dirs=_source_scope_root_dirs(repo_summaries),
+        ),
     )
 
 
@@ -120,7 +130,10 @@ def write_python_call_graph_json(
     return _write_provenance_document(
         base_manifest_path=base_manifest_path,
         suffix=".python_call_graph.json",
-        document=generate_call_graph_document(repo_root, run_id, canonical_sha),
+        document=generate_call_graph_document(
+            repo_root, run_id, canonical_sha,
+            exclude_root_dirs=_source_scope_root_dirs(repo_summaries),
+        ),
     )
 
 

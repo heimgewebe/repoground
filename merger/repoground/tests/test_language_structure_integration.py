@@ -142,9 +142,12 @@ def test_scoped_snapshot_omits_historical_releases_from_structure_and_chunks(
     sources = {
         "scripts/live.sh": "#!/usr/bin/env bash\nlive() {\n  :\n}\n",
         "src/live.rs": "pub fn live() {}\n",
+        "scripts/live.py": "def live_helper():\n    return 1\n\ndef live_entry():\n    return live_helper()\n",
+        "docs/releases/keep.py": "def keep():\n    return 1\n",
         "docs/releases/keep.sh": "#!/usr/bin/env bash\nkeep() {\n  :\n}\n",
         "releases/old/scripts/old.sh": "#!/usr/bin/env bash\nold() {\n  :\n}\n",
         "releases/old/src/old.rs": "pub fn old() {}\n",
+        "releases/old/scripts/old.py": "def stale_helper():\n    return 0\n\ndef stale_entry():\n    return stale_helper()\n",
     }
     for relative, body in sources.items():
         target = repo / relative
@@ -186,6 +189,16 @@ def test_scoped_snapshot_omits_historical_releases_from_structure_and_chunks(
         for line in artifacts.chunk_index.read_text(encoding="utf-8").splitlines()
     ]
     assert not any(chunk["path"].startswith("releases/") for chunk in chunks)
+    assert artifacts.python_symbol_index is not None
+    symbols = json.loads(artifacts.python_symbol_index.read_text(encoding="utf-8"))
+    symbol_paths = {record["path"] for record in symbols["symbols"]}
+    assert {"scripts/live.py", "docs/releases/keep.py"} <= symbol_paths
+    assert not any(path.startswith("releases/") for path in symbol_paths)
+    assert artifacts.python_call_graph is not None
+    calls = json.loads(artifacts.python_call_graph.read_text(encoding="utf-8"))
+    call_paths = {record["path"] for record in calls["calls"]}
+    assert "scripts/live.py" in call_paths
+    assert not any(path.startswith("releases/") for path in call_paths)
 
 
 def _entry(manifest: dict, role: str) -> dict:
