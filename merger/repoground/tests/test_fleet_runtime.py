@@ -423,6 +423,33 @@ def test_partial_clone_refuses_unvalidated_promisor_sources_before_worktree(
     assert not target.exists()
 
 
+@pytest.mark.parametrize("case_alias", ["Origin", "ORIGIN"])
+def test_partial_clone_case_alias_only_cannot_impersonate_origin(
+    tmp_path: Path, case_alias: str,
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path, "member-case-alias-only")
+    remote = "git@github.com:heimgewebe/member.git"
+    git(repo, "remote", "add", "origin", remote)
+    # No remote.origin.promisor pair: the old lowercasing check treated this
+    # different Git remote subsection as the trusted origin's promisor pair.
+    git(repo, "config", f"remote.{case_alias}.url", "ssh://attacker.invalid/repo")
+    git(repo, "config", f"remote.{case_alias}.promisor", "true")
+    git(repo, "config", f"remote.{case_alias}.partialclonefilter", "blob:none")
+
+    with pytest.raises(RuntimeError, match="unsafe local Git transport configuration"):
+        module.assert_fleet_member_git_transport_safe(
+            repo, env=module._authority_git_env(),
+        )
+    target = tmp_path / "managed-case-rejected"
+    with pytest.raises(RuntimeError, match="unsafe local Git transport configuration"):
+        module.prepare_managed_worktree(
+            target, expected_repo=repo, target=sha,
+            authenticated_remote=remote,
+        )
+    assert not target.exists()
+
+
 def test_fleet_member_partial_clone_flags_in_worktree_scope_are_rejected(
     tmp_path: Path,
 ) -> None:
