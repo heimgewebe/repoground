@@ -2264,6 +2264,13 @@ def prepare_managed_worktree(
         if ssh_command is not None:
             env["GIT_SSH_COMMAND"] = ssh_command
         if path.exists() or path.is_symlink():
+            if authenticated_remote is not None:
+                # An existing worktree can carry a separate config.worktree.
+                # Validate that actual checkout before supplying origin SSH or
+                # HTTPS credentials to any cleanup, status or reset operation.
+                assert_fleet_member_git_transport_safe(
+                    path, env=_authority_git_env(),
+                )
             cleanup_managed_disposable_artifacts(
                 path,
                 expected_repo,

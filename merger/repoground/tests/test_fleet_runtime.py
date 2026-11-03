@@ -500,6 +500,68 @@ def test_partial_clone_source_worktree_reuses_authenticated_github_ssh(
     ).stdout.strip() == sha
 
 
+@pytest.mark.parametrize(
+    ("worktree_key", "worktree_value"),
+    [
+        ("remote.backup.promisor", "true"),
+        ("remote.Origin.promisor", "true"),
+        ("remote.origin.promisor", "true"),
+        ("extensions.partialClone", "backup"),
+    ],
+)
+def test_reused_partial_clone_worktree_rejects_own_transport_overrides(
+    tmp_path: Path, worktree_key: str, worktree_value: str,
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path, "member-reused-worktree")
+    remote = "git@github.com:heimgewebe/member.git"
+    git(repo, "remote", "add", "origin", remote)
+    git(repo, "config", "remote.origin.promisor", "true")
+    git(repo, "config", "remote.origin.partialclonefilter", "blob:none")
+    git(repo, "config", "extensions.worktreeConfig", "true")
+    # Git --worktree --list requires the per-worktree config file to exist.
+    git(repo, "config", "--worktree", "core.abbrev", "7")
+    target = tmp_path / "managed-existing"
+    git(repo, "worktree", "add", "--detach", str(target), sha)
+    git(target, "config", "--worktree", "core.abbrev", "7")
+    # The origin checkout itself remains valid; only this target is unsafe.
+    module.assert_fleet_member_git_transport_safe(
+        repo, env=module._authority_git_env(),
+    )
+    git(target, "config", "--worktree", worktree_key, worktree_value)
+    if worktree_key.startswith("remote.") and worktree_key != "remote.origin.promisor":
+        name = worktree_key.split(".")[1]
+        git(target, "config", "--worktree", f"remote.{name}.url", "ssh://attacker.invalid/repo")
+
+    with pytest.raises(RuntimeError, match="unsafe worktree Git transport configuration"):
+        module.prepare_managed_worktree(
+            target, expected_repo=repo, target=sha,
+            authenticated_remote=remote,
+        )
+    assert git(target, "rev-parse", "HEAD") == sha
+
+
+def test_reused_partial_clone_worktree_with_clean_config_is_accepted(
+    tmp_path: Path,
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path, "member-reused-clean-worktree")
+    remote = "git@github.com:heimgewebe/member.git"
+    git(repo, "remote", "add", "origin", remote)
+    git(repo, "config", "remote.origin.promisor", "true")
+    git(repo, "config", "remote.origin.partialclonefilter", "blob:none")
+    git(repo, "config", "extensions.worktreeConfig", "true")
+    # Git --worktree --list requires the per-worktree config file to exist.
+    git(repo, "config", "--worktree", "core.abbrev", "7")
+    target = tmp_path / "managed-clean"
+    git(repo, "worktree", "add", "--detach", str(target), sha)
+    git(target, "config", "--worktree", "core.abbrev", "7")
+    module.prepare_managed_worktree(
+        target, expected_repo=repo, target=sha, authenticated_remote=remote,
+    )
+    assert git(target, "rev-parse", "HEAD") == sha
+
+
 def test_partial_clone_worktree_rejects_origin_change_before_lazy_fetch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
