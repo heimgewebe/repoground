@@ -82,10 +82,13 @@ def test_snapshot_create_dispatches_existing_generator(monkeypatch, tmp_path, ca
         str(out),
         "--profile",
         "agent-portable",
+        "--exclude-root-dir",
+        "releases",
     ])
 
     assert rc == 0
     assert calls["scan"]["args"][0] == repo.resolve()
+    assert calls["scan"]["kwargs"]["exclude_root_dirs"] == ["releases"]
     assert calls["write"]["args"][0] == out.resolve()
     assert calls["write"]["args"][3] == "max"
     assert calls["write"]["args"][5] == 0
@@ -2060,3 +2063,40 @@ def test_bounded_budget_respects_central_profile_authority(tmp_path, monkeypatch
         cmd_ground.apply_bounded_bundle_budget(manifest, "agent-portable", 1)
     assert call_graph.exists()
     assert manifest.read_bytes() == before
+
+def test_snapshot_scoped_source_still_emits_resolved_live_script_citation(
+    tmp_path, capsys
+):
+    """No archived deployment copies may hide the actual implementation."""
+    repo = tmp_path / "commonworld"
+    (repo / "scripts").mkdir(parents=True)
+    (repo / "releases" / "old").mkdir(parents=True)
+    (repo / "scripts" / "validate_commons_admission.py").write_text(
+        "def validate_commons_admission():\n    return True\n", encoding="utf-8"
+    )
+    (repo / "releases" / "old" / "stale.py").write_text(
+        "STALE_COPY = True\n" * 500, encoding="utf-8"
+    )
+    out = tmp_path / "briefs"
+    rc = main([
+        "ground", "snapshot", "create", "--repo", str(repo),
+        "--out", str(out), "--profile", "fleet-context",
+        "--redact-secrets", "--exclude-root-dir", "releases",
+    ])
+    receipt = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert receipt["status"] == "ok"
+    manifest = json.loads(Path(receipt["bundle_manifest"]).read_text())
+    scope = manifest["capabilities"]["source_scope_exclusions"]
+    assert scope["root_dirs"] == ["releases"]
+    assert scope["scope"] == "retrieval_snapshot_only"
+    assert "complete_source_tree_coverage" in scope["does_not_establish"]
+    artifacts = {item["role"]: item["path"] for item in manifest["artifacts"]}
+    manifest_dir = Path(receipt["bundle_manifest"]).parent
+    citations = [
+        json.loads(line)
+        for line in (manifest_dir / artifacts["citation_map_jsonl"]).read_text().splitlines()
+    ]
+    paths = {item["source_range"]["file_path"] for item in citations}
+    assert "scripts/validate_commons_admission.py" in paths
+    assert not any(path.startswith("releases/") for path in paths)

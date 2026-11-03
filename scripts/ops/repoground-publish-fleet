@@ -327,6 +327,7 @@ class PublicationConfig:
     max_bytes: int = 0
     split_size: str = "25MB"
     language_structure: bool = False
+    excluded_root_dirs: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -336,6 +337,8 @@ class PublicationConfig:
             "max_bytes": self.max_bytes,
             "split_size": self.split_size,
             "language_structure": self.language_structure,
+            **({"excluded_root_dirs": list(self.excluded_root_dirs)}
+               if self.excluded_root_dirs else {}),
         }
 
 
@@ -731,6 +734,14 @@ def publication_config(entry: RepoEntry) -> PublicationConfig:
     # use the sidecar, and public-share never routes through this configuration.
     if entry.repo == "vault-gewebe":
         return PublicationConfig(profile="agent-portable", language_structure=True)
+    # Commonworld's tracked releases/ subtree contains historical deployment
+    # copies (~291 MiB). They remain authoritative Git objects, but are not
+    # independent live source for code-navigation agent snapshots.
+    if entry.key == "heimgewebe/commonworld":
+        return PublicationConfig(
+            profile="fleet-context", language_structure=True,
+            excluded_root_dirs=("releases",),
+        )
     return PublicationConfig(profile="fleet-context", language_structure=True)
 
 
@@ -6182,6 +6193,8 @@ def build_refresh_command(
         "--split-size",
         config.split_size,
     ]
+    for excluded_dir in config.excluded_root_dirs:
+        command.extend(["--exclude-root-dir", excluded_dir])
     if config.redact_secrets:
         command.append("--redact-secrets")
     if config.language_structure:

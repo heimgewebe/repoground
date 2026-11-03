@@ -3343,6 +3343,21 @@ def test_publication_config_uses_compact_daily_profile(tmp_path: Path) -> None:
         profile="agent-portable", language_structure=True
     )
     assert module.publication_config(default).as_dict()["language_structure"] is True
+    commonworld = module.RepoEntry(
+        key="heimgewebe/commonworld", owner="heimgewebe", repo="commonworld",
+        path=tmp_path / "commonworld",
+        remote="git@github.com:heimgewebe/commonworld.git",
+    )
+    config = module.publication_config(commonworld)
+    assert config.excluded_root_dirs == ("releases",)
+    assert config.as_dict()["excluded_root_dirs"] == ["releases"]
+    assert "excluded_root_dirs" not in module.publication_config(default).as_dict()
+    command = module.build_refresh_command(
+        source_wt=tmp_path / "commonworld", out_dir=tmp_path / "output",
+        registry_repository="heimgewebe__commonworld", ref_segment="main",
+        config=config,
+    )
+    assert command[command.index("--exclude-root-dir") + 1] == "releases"
 
 
 def test_fleet_refresh_command_explicitly_opts_into_language_structure(
