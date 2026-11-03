@@ -503,39 +503,51 @@ class CodexStudyRunnerTest(unittest.TestCase):
                 "nested source proof",
             )
 
-    def test_private_pin_falls_back_to_copy_on_cross_filesystem(self):
-        import errno
+    def test_private_pin_never_hardlinks_published_bundle_files(self):
         import hashlib
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             pub = root / "published"
-            pub.mkdir()
+            (pub / "nested").mkdir(parents=True)
             source = pub / "test.bundle.manifest.json"
-            raw = json.dumps({"links": {"post_emit_health_path": "health.json"}}).encode()
+            raw = json.dumps({
+                "links": {"post_emit_health_path": "health.json"},
+                "artifacts": [{"path": "nested/part.txt"}],
+            }).encode()
             source.write_bytes(raw)
             (pub / "health.json").write_text(json.dumps({
                 "status": "pass", "bundle_manifest_path": str(source),
             }))
             role = pub / "role.txt"
             role.write_bytes(b"preserve original bundle role bytes\x00\xfe")
+            output_health = pub / "test.output_health.json"
+            output_health.write_text('{"verdict":"pass"}')
+            nested = pub / "nested" / "part.txt"
+            nested.write_text("nested source proof")
             ws = root / "workspace"
             ws.mkdir()
-            with patch.object(runner.os, "link", side_effect=OSError(
-                errno.EXDEV, "cross-device link",
-            )) as linked:
+            with patch.object(runner.os, "link", side_effect=AssertionError(
+                "pinning must never alter published artifact link counts"
+            )):
                 copied = runner._pin_snapshot_manifests({"repoground": {
                     "repoground": {
                         "manifest_path": str(source),
                         "manifest_sha256": hashlib.sha256(raw).hexdigest(),
                     },
                 }}, ws)["repoground"]
-            self.assertGreaterEqual(linked.call_count, 1)
-            self.assertEqual((copied.parent / "role.txt").read_bytes(), role.read_bytes())
-            self.assertNotEqual(
-                (copied.parent / "role.txt").stat().st_ino, role.stat().st_ino,
-            )
-            self.assertEqual(stat.S_IMODE((copied.parent / "role.txt").stat().st_mode), 0o600)
+            for published in (role, output_health, nested):
+                private = copied.parent / published.relative_to(pub)
+                self.assertEqual(private.read_bytes(), published.read_bytes())
+                self.assertEqual(published.stat().st_nlink, 1)
+                self.assertEqual(private.stat().st_nlink, 1)
+                self.assertNotEqual(
+                    (private.stat().st_dev, private.stat().st_ino),
+                    (published.stat().st_dev, published.stat().st_ino),
+                )
+                self.assertEqual(stat.S_IMODE(private.stat().st_mode), 0o600)
+            (copied.parent / output_health.name).write_text('{"verdict":"changed"}')
+            self.assertEqual(output_health.read_text(), '{"verdict":"pass"}')
 
     def test_nested_artifact_traversal_and_symlink_not_pinned(self):
         import hashlib
