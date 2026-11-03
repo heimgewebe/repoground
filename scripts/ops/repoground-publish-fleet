@@ -4116,7 +4116,10 @@ def assert_fleet_member_git_transport_safe(
                     key.strip().lower()
                     for key, value in worktree_entries
                     if (
-                        key.strip().lower() in _FLEET_MEMBER_PARTIAL_CLONE_KEYS
+                        # A per-worktree origin URL would redirect the lazy fetch
+                        # even when the source checkout origin was authenticated.
+                        key.strip().lower() == "remote.origin.url"
+                        or key.strip().lower() in _FLEET_MEMBER_PARTIAL_CLONE_KEYS
                         or _fleet_member_local_config_entry_is_transport_override(
                             key,
                             value,

@@ -506,6 +506,7 @@ def test_partial_clone_source_worktree_reuses_authenticated_github_ssh(
         ("remote.backup.promisor", "true"),
         ("remote.Origin.promisor", "true"),
         ("remote.origin.promisor", "true"),
+        ("remote.origin.url", "ssh://attacker.invalid/repo"),
         ("extensions.partialClone", "backup"),
     ],
 )
