@@ -1163,6 +1163,83 @@ def _navigation_path_intent(query: str) -> bool:
     return words[0] in _NAVIGATION_LOCATORS
 
 
+def _code_evidence_intent(query: str) -> bool:
+    """Technical questions needing source evidence, not general documentation."""
+    tokens = set(_content_tokens(query))
+    if tokens & {"documentation", "dokumentation", "docs", "handbook", "guide", "manual"}:
+        return False
+    markers = (
+        "git", "commit", "revision", "nixos", "flake", "runtime",
+        "entrypoint", "broker", "operator", "source", "quelle",
+        "quell", "test", "modul", "module", "paket", "package",
+        "contract", "vertrag", "schema", "systemd", "implement",
+        "build", "definition",
+    )
+    # German compounds and code identifiers retain their subject matter.
+    matched = {
+        marker for marker in markers
+        if any(marker in word for word in tokens)
+    }
+    return len(matched) >= 2
+
+
+def _code_path_anchors(query: str) -> list[str]:
+    """At most four explicit source-address hints, never guessed file paths."""
+    normalized = unicodedata.normalize("NFC", query).lower()
+    anchors: list[str] = []
+    # Source file names in the question are stronger hints than prose nouns.
+    for match in re.finditer(
+        r"(?<!\w)(?:[\w.-]+/)*[\w.-]+\.(?:py|nix|json|toml|ya?ml|rs|go|[jt]sx?|sh)\b",
+        normalized,
+    ):
+        anchor = Path(match.group()).name
+        if anchor not in anchors:
+            anchors.append(anchor)
+    tokens = _content_tokens(query)
+    for marker in (
+        "entrypoint", "broker", "operator", "nixos", "flake", "systemd",
+        "runtime", "contract", "schema", "module", "package", "test",
+    ):
+        if any(marker in token for token in tokens) and marker not in anchors:
+            anchors.append(marker)
+    return anchors[:4]
+
+
+def _code_source_class(path: str) -> int:
+    source = path.replace("\\", "/").lower()
+    if source.startswith("docs/") or source.endswith((".md", ".rst", ".txt")):
+        return 4
+    if source.startswith(("tests/", "test/")) or "/tests/" in source:
+        return 2
+    if source.startswith(("config/", "contracts/", "configs/")):
+        return 1
+    if source.endswith((".py", ".rs", ".go", ".js", ".jsx", ".ts", ".tsx", ".sh", ".nix")):
+        return 0
+    if source.endswith((".json", ".yaml", ".yml", ".toml")):
+        return 1
+    return 3
+
+
+def _code_path_index_reads(
+    manifest_path: Path, *, query: str, fts_query: str, k: int
+) -> list[dict[str, Any]]:
+    """Bounded code-path evidence, constrained by the original FTS terms."""
+    found = []
+    for anchor in _code_path_anchors(query):
+        indexed = query_existing_index(
+            manifest_path,
+            query,
+            k=min(100, max(1, k * 4)),
+            filters={"path": anchor},
+            resolve_evidence=True,
+            project_sources=True,
+            prepared_fts_query=fts_query,
+        )
+        if indexed.get("status") == "available":
+            found.append(indexed)
+    return found
+
+
 def _relaxed_path_index_reads(
     manifest_path: Path, *, query: str, fts_query: str, k: int
 ) -> list[dict[str, Any]]:
@@ -1248,6 +1325,68 @@ def _navigation_source_matches_topic(source: str, topic_terms: set[str]) -> bool
     )
 
 
+def _ordered_code_evidence_sources(
+    candidates: list[tuple[int, str, dict[str, Any], dict[str, Any]]],
+    path_results: list[dict[str, Any]],
+) -> list[tuple[int, str, dict[str, Any], dict[str, Any]]]:
+    """Prioritize verified code evidence without adding complexity to routing."""
+    hinted = {
+        row["chunk_id"]
+        for result in path_results
+        for row in (result.get("query_result") or {}).get("results", [])
+        if isinstance(row, dict) and isinstance(row.get("chunk_id"), str)
+    }
+    return sorted(
+        candidates,
+        key=lambda row: (
+            _code_source_class(row[1]) == 4,
+            -row[0],
+            row[2].get("chunk_id") not in hinted,
+            _code_source_class(row[1]),
+        ),
+    )
+
+
+def _ordered_navigation_sources(
+    candidates: list[tuple[int, str, dict[str, Any], dict[str, Any]]],
+    query: str,
+) -> list[tuple[int, str, dict[str, Any], dict[str, Any]]]:
+    """Preserve original topical navigation and file-class diversity."""
+    buckets: list[list[tuple[int, str, dict[str, Any], dict[str, Any]]]] = [
+        [], [], [], []
+    ]
+    topic_terms = _navigation_topic_terms(set(_content_tokens(query)))
+    for candidate in sorted(
+        candidates,
+        key=lambda row: (
+            not _navigation_source_matches_topic(row[1], topic_terms),
+            -row[0],
+            len(Path(row[1]).stem),
+        ),
+    ):
+        buckets[_navigation_source_class(candidate[1])].append(candidate)
+    terms = set(_content_tokens(query))
+    wants_test = bool(terms & {"test", "tests"})
+    wants_contract = bool(terms & {"contract", "contracts", "schema"})
+    wants_implementation = bool(
+        terms & {
+            "implementation", "implementierung", "producer", "production",
+            "logic", "handler", "source", "code", "module", "modules",
+        }
+    ) or not (wants_test or wants_contract)
+    priority = (
+        (0, wants_implementation),
+        (1, wants_test),
+        (2, wants_contract),
+    )
+    ordered = []
+    for bucket, requested in priority:
+        if requested and buckets[bucket]:
+            ordered.append(buckets[bucket].pop(0))
+    ordered.extend(candidate for group in buckets for candidate in group)
+    return ordered
+
+
 def _prefer_diverse_relaxed_sources(
     query_result: dict[str, Any],
     *,
@@ -1255,6 +1394,7 @@ def _prefer_diverse_relaxed_sources(
     k: int,
     path_results: list[dict[str, Any]],
     source_first: bool = False,
+    source_focus: bool = False,
 ) -> dict[str, Any]:
     """Take at most k distinct sources with existing verifiable citations."""
     candidates = []
@@ -1274,38 +1414,9 @@ def _prefer_diverse_relaxed_sources(
     # prioritizing verified implementation/test/contract paths.
     navigation = _navigation_path_intent(query)
     if navigation and source_first:
-        buckets: list[list[tuple[int, str, dict[str, Any], dict[str, Any]]]] = [
-            [], [], [], []
-        ]
-        topic_terms = _navigation_topic_terms(set(_content_tokens(query)))
-        for candidate in sorted(
-            candidates,
-            key=lambda row: (
-                not _navigation_source_matches_topic(row[1], topic_terms),
-                -row[0],
-                len(Path(row[1]).stem),
-            ),
-        ):
-            buckets[_navigation_source_class(candidate[1])].append(candidate)
-        terms = set(_content_tokens(query))
-        wants_test = bool(terms & {"test", "tests"})
-        wants_contract = bool(terms & {"contract", "contracts", "schema"})
-        wants_implementation = bool(
-            terms & {
-                "implementation", "implementierung", "producer", "production",
-                "logic", "handler", "source", "code", "module", "modules",
-            }
-        ) or not (wants_test or wants_contract)
-        priority = (
-            (0, wants_implementation),
-            (1, wants_test),
-            (2, wants_contract),
-        )
-        ordered = []
-        for bucket, requested in priority:
-            if requested and buckets[bucket]:
-                ordered.append(buckets[bucket].pop(0))
-        ordered.extend(candidate for group in buckets for candidate in group)
+        ordered = _ordered_navigation_sources(candidates, query)
+    elif source_focus:
+        ordered = _ordered_code_evidence_sources(candidates, path_results)
     else:
         ordered = (
             candidates[:1] + sorted(candidates[1:], key=lambda row: -row[0])
@@ -1316,7 +1427,7 @@ def _prefer_diverse_relaxed_sources(
     seen = set()
     for _overlap, source, row, evidence in ordered:
         # BM25 ranks chunks, not files. Diversity applies only to navigation.
-        identity = source if navigation else row.get("chunk_id")
+        identity = source if navigation or source_focus else row.get("chunk_id")
         if identity in seen:
             continue
         seen.add(identity)
@@ -1437,13 +1548,21 @@ def _query_context(
         "relaxed": False,
     }
     navigation = _navigation_path_intent(query)
+    source_focus = not navigation and _code_evidence_intent(query)
     tokens = _content_tokens(query)
     # A diagnostic may quote a query verbatim without locating its source.
     source_first = _navigation_source_first_needed(
         ranges, navigation=navigation, tokens=tokens
     )
+    source_focus_needed = bool(ranges) and source_focus and not any(
+        _code_source_class(str(item.get("source_path") or "")) < 3
+        and _navigation_source_matches_topic(
+            str(item.get("source_path") or ""), set(tokens)
+        )
+        for item in ranges
+    )
     if (
-        (ranges and not source_first)
+        (ranges and not source_first and not source_focus_needed)
         or query_result.get("status") != "available"
         or len(tokens) < 2
     ):
@@ -1451,9 +1570,9 @@ def _query_context(
     or_query = _or_fts_query(tokens)
     # Overfetch verified chunks only as needed; preserve the wider existing
     # search window for explicit navigation with multiple requested sources.
-    candidate_k = min(100, max(1, k * 3, 24 if navigation and k > 1 else k))
+    candidate_k = min(100, max(1, k * (6 if source_focus else 3), 24 if navigation and k > 1 else k))
     manifest_digest_before = (
-        _manifest_content_digest(manifest_path) if navigation else None
+        _manifest_content_digest(manifest_path) if navigation or source_focus else None
     )
     relaxed_result = _run_query(
         manifest_path, query, candidate_k, prepared_fts_query=or_query
@@ -1465,11 +1584,13 @@ def _query_context(
     path_results = (
         _relaxed_path_index_reads(manifest_path, query=query, fts_query=or_query, k=k)
         if need_path_hints
+        else _code_path_index_reads(manifest_path, query=query, fts_query=or_query, k=k)
+        if source_focus
         else []
     )
     # The path may name a different manifest after an atomic replacement.
     # Hash only a small manifest, not the entire SQLite index, on navigation.
-    manifest_content_unchanged = not navigation or (
+    manifest_content_unchanged = not (navigation or source_focus) or (
         manifest_digest_before is not None
         and manifest_digest_before == _manifest_content_digest(manifest_path)
     )
@@ -1530,10 +1651,14 @@ def _query_context(
     ]
     selected_result = _prefer_diverse_relaxed_sources(
         relaxed_result, query=query, k=k, path_results=path_results,
-        source_first=source_first,
+        source_first=source_first, source_focus=source_focus,
     )
-    if source_first and not any(
-        _navigation_source_class(str(hit.get("source_path") or "")) < 3
+    if (source_first or source_focus_needed) and not any(
+        (
+            _navigation_source_class(str(hit.get("source_path") or "")) < 3
+            if source_first
+            else _code_source_class(str(hit.get("source_path") or "")) < 3
+        )
         and _navigation_source_matches_topic(
             str(hit.get("source_path") or ""), _navigation_topic_terms(set(tokens))
         )

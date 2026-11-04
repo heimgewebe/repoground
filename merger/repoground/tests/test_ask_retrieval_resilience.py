@@ -2109,3 +2109,103 @@ def test_topical_source_wins_before_k_one_truncation(monkeypatch, tmp_path):
     assert [h["citation_id"] for h in state["retrieval_hits"]] == [
         r["citation_id"] for r in state["resolved_ranges"]
     ]
+
+
+def test_code_evidence_intent_is_not_generic_documentation_or_debugging():
+    from merger.repoground.core.ask_context import (
+        _code_evidence_intent, _code_path_anchors,
+    )
+    assert _code_evidence_intent(
+        "Welche Grabowski-Git-Revision verwenden NixOS-Pakete und ihr Runtime-Entrypoint-Vertrag?"
+    )
+    assert _code_evidence_intent(
+        "Welche NixOS-Buildprüfungen und Tests hängen von runtime-entrypoint.json ab?"
+    )
+    assert not _code_evidence_intent("Why does authentication fail for an expired token?")
+    assert not _code_evidence_intent("Find documentation about implementation tests")
+    assert not _code_evidence_intent("Why is this implementation slow?")
+    anchors = _code_path_anchors("Was zeigt src/grabowski_runtime.py im NixOS-Entrypoint?")
+    assert anchors[0] == "grabowski_runtime.py"
+    assert "entrypoint" in anchors
+
+
+def test_code_evidence_question_prioritizes_verified_sources_not_docs(
+    monkeypatch, tmp_path,
+):
+    from merger.repoground.core import ask_context as context
+
+    # Existing index rows are all independently bound to the same manifest and
+    # cited index identity. A synthetic fixture is NOT an agent benchmark.
+    baseline = _rgopt03_verified_index(
+        "strict", ["docs/operator-overview.md"]
+    )
+    broad = _rgopt03_verified_index(
+        "broad", [
+            "docs/nixos-operation.md",
+            "architecture/boot-sequence.md",
+            "tests/test_unrelated_task.py",
+        ],
+    )
+    hints = _rgopt03_verified_index(
+        "hint", [
+            "nixos/system/modules/grabowski-operator-package.nix",
+            "nixos/system/modules/grabowski-broker-package.nix",
+            "config/runtime-entrypoint.json",
+        ],
+    )
+    manifest = tmp_path / "immutable.bundle.manifest.json"
+    manifest.write_text("immutable manifest", encoding="utf-8")
+
+    def run_index(_manifest, _query, _k, prepared_fts_query=None):
+        return baseline if prepared_fts_query is None else broad
+
+    monkeypatch.setattr(context, "_run_query", run_index)
+    monkeypatch.setattr(
+        context, "_code_path_index_reads", lambda *_args, **_kwargs: [hints],
+    )
+    state = context._query_context(
+        manifest,
+        query="Welche Grabowski-Git-Revision und NixOS-Pakete sind im Runtime-Entrypoint-Vertrag gebunden?",
+        k=3, max_context_tokens=1000, max_context_bytes=4000,
+    )
+    paths = [item["source_path"] for item in state["resolved_ranges"]]
+    assert paths == [
+        "nixos/system/modules/grabowski-operator-package.nix",
+        "nixos/system/modules/grabowski-broker-package.nix",
+        "config/runtime-entrypoint.json",
+    ]
+    assert state["strategy"] == "or_relaxed"
+    assert all(item["citation_id"].startswith("cit_") for item in state["resolved_ranges"])
+    assert {
+        item["citation_id"] for item in state["resolved_ranges"]
+    } == {item["citation_id"] for item in state["retrieval_hits"]}
+
+def test_code_question_without_exact_hits_retains_verified_relaxed_docs(
+    monkeypatch, tmp_path,
+):
+    """P2 regression: a technical question may have only citable documentation."""
+    from merger.repoground.core import ask_context as context
+
+    exact = _rgopt03_verified_index("empty", [])
+    documentation = _rgopt03_verified_index("docs", ["docs/runtime-build.md"])
+    manifest = tmp_path / "immutable.bundle.manifest.json"
+    manifest.write_text("immutable", encoding="utf-8")
+
+    def indexed(_manifest, _question, _k, prepared_fts_query=None):
+        return documentation if prepared_fts_query is not None else exact
+
+    monkeypatch.setattr(context, "_run_query", indexed)
+    monkeypatch.setattr(context, "_code_path_index_reads", lambda *_a, **_kw: [])
+
+    result = context._query_context(
+        manifest,
+        query="How does the runtime build initialize?",
+        k=5,
+        max_context_tokens=1000,
+        max_context_bytes=4000,
+    )
+    assert result["strategy"] == "or_relaxed"
+    assert [item["source_path"] for item in result["resolved_ranges"]] == [
+        "docs/runtime-build.md",
+    ]
+    assert all(item["citation_id"].startswith("cit_") for item in result["resolved_ranges"])
