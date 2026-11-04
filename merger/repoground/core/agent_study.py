@@ -985,7 +985,7 @@ def _select_study_decision(rows: Sequence[Mapping[str, Any]], extras: Sequence[s
             and select["quality_correct"] >= math.ceil(
                 SEMANTIC_MINIMUM_CORRECT_FRACTION * select["valid_success"]
             )
-            and select["repoground_calls_total"] > 0
+            and select["repoground_calls_total"] > select["repoground_failures_total"]
             and all(
                 by_arm[arm].get("unlisted_paths_review_pending", 0) == 0
                 for arm in ARMS

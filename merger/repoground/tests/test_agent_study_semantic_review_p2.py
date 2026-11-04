@@ -70,6 +70,7 @@ def full_study_inputs() -> tuple[list[dict], dict, dict, dict]:
             "unsupported_paths": None, "negative_false_confidence": 0,
             "unlisted_paths_review_pending": 0,
             "repoground_calls_total": 20 if arm == "repoground_selective" else 0,
+            "repoground_failures_total": 0,
         }
         for arm in study.ARMS
     }
@@ -246,6 +247,17 @@ class ReviewP2Tests(unittest.TestCase):
         arms["git_only"]["quality_correct"] = 23
         arms["repoground_selective"]["quality_correct"] = 23
         arms["repoground_selective"]["repoground_calls_total"] = 0
+        decision, _ = study._select_study_decision(
+            rows, [], plan, arms, effects, "real_runner_reported",
+            semantic_v2=True,
+        )
+        self.assertEqual(decision, "no_selective_benefit_established")
+
+    def test_failed_repoground_calls_cannot_be_counted_as_use(self) -> None:
+        rows, arms, effects, plan = full_study_inputs()
+        arms["git_only"]["quality_correct"] = 23
+        arms["repoground_selective"]["quality_correct"] = 23
+        arms["repoground_selective"]["repoground_failures_total"] = 20
         decision, _ = study._select_study_decision(
             rows, [], plan, arms, effects, "real_runner_reported",
             semantic_v2=True,
