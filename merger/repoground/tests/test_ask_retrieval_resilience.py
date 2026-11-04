@@ -2179,3 +2179,33 @@ def test_code_evidence_question_prioritizes_verified_sources_not_docs(
     assert {
         item["citation_id"] for item in state["resolved_ranges"]
     } == {item["citation_id"] for item in state["retrieval_hits"]}
+
+def test_code_question_without_exact_hits_retains_verified_relaxed_docs(
+    monkeypatch, tmp_path,
+):
+    """P2 regression: a technical question may have only citable documentation."""
+    from merger.repoground.core import ask_context as context
+
+    exact = _rgopt03_verified_index("empty", [])
+    documentation = _rgopt03_verified_index("docs", ["docs/runtime-build.md"])
+    manifest = tmp_path / "immutable.bundle.manifest.json"
+    manifest.write_text("immutable", encoding="utf-8")
+
+    def indexed(_manifest, _question, _k, prepared_fts_query=None):
+        return documentation if prepared_fts_query is not None else exact
+
+    monkeypatch.setattr(context, "_run_query", indexed)
+    monkeypatch.setattr(context, "_code_path_index_reads", lambda *_a, **_kw: [])
+
+    result = context._query_context(
+        manifest,
+        query="How does the runtime build initialize?",
+        k=5,
+        max_context_tokens=1000,
+        max_context_bytes=4000,
+    )
+    assert result["strategy"] == "or_relaxed"
+    assert [item["source_path"] for item in result["resolved_ranges"]] == [
+        "docs/runtime-build.md",
+    ]
+    assert all(item["citation_id"].startswith("cit_") for item in result["resolved_ranges"])

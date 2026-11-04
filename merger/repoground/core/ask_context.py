@@ -1554,7 +1554,7 @@ def _query_context(
     source_first = _navigation_source_first_needed(
         ranges, navigation=navigation, tokens=tokens
     )
-    source_focus_needed = source_focus and not any(
+    source_focus_needed = bool(ranges) and source_focus and not any(
         _code_source_class(str(item.get("source_path") or "")) < 3
         and _navigation_source_matches_topic(
             str(item.get("source_path") or ""), set(tokens)
