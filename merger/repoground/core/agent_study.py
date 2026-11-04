@@ -47,6 +47,9 @@ DECISION_LIMITS = {
     "maximum_incorrect_delta": 0,
     "maximum_false_confidence_delta": 0,
 }
+# A fast arm without independently verified useful answers or actual
+# RepoGround use cannot establish a *RepoGround* treatment benefit.
+SEMANTIC_MINIMUM_CORRECT_FRACTION = 0.75
 
 
 def _need(predicate: bool, message: str) -> None:
@@ -780,7 +783,8 @@ def _collect_study_trials(plan: Mapping[str, Any], taskset: Mapping[str, Any], r
     return rows, supplied, extras, cases
 
 
-def _summarize_study_arms(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+def _summarize_study_arms(rows: Sequence[Mapping[str, Any]], *,
+                          semantic_v2: bool = False) -> dict[str, Any]:
     by_arm = {}
     for arm in ARMS:
         subset = [x for x in rows if x["condition"] == arm]
@@ -794,7 +798,7 @@ def _summarize_study_arms(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             "quality_correct": len([x for x in valid if x["score"]["quality_success"] is True]),
             "quality_incorrect": sum(x["score"]["human_grade"] == "incorrect" for x in valid),
             "unsupported_paths": (
-                None if any(x["score"]["unsupported_paths"] is None for x in valid)
+                None if semantic_v2 or any(x["score"]["unsupported_paths"] is None for x in valid)
                 else sum(x["score"]["unsupported_paths"] for x in valid)
             ),
             "negative_false_confidence": sum(x["score"]["negative_false_confidence"] for x in valid),
@@ -821,7 +825,7 @@ def _summarize_study_arms(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         }
         # Keep the original v1 report structure and hashes reproducible.
         # Only semantic-v2 cohorts expose new, independently graded fields.
-        if any("unlisted_paths" in x["score"] for x in valid):
+        if semantic_v2 or any("unlisted_paths" in x["score"] for x in valid):
             by_arm[arm]["unlisted_paths"] = sum(
                 x["score"]["unlisted_paths"] for x in valid
             )
@@ -961,7 +965,7 @@ def _aggregate_study_pairs(rows: Sequence[Mapping[str, Any]], cases: Mapping[str
     return blocks, effects, by_class
 
 
-def _select_study_decision(rows: Sequence[Mapping[str, Any]], extras: Sequence[str], plan: Mapping[str, Any], by_arm: Mapping[str, Any], effects: Mapping[str, Any], measurement_scope: str) -> tuple[str, bool]:
+def _select_study_decision(rows: Sequence[Mapping[str, Any]], extras: Sequence[str], plan: Mapping[str, Any], by_arm: Mapping[str, Any], effects: Mapping[str, Any], measurement_scope: str, *, semantic_v2: bool = False) -> tuple[str, bool]:
     valid_all = len(extras) == 0 and all(x["valid"] and x["status"] == "success" for x in rows)
     grades_complete = valid_all and all(
         x["score"]["human_grade"] not in (None, "uncertain")
@@ -974,8 +978,21 @@ def _select_study_decision(rows: Sequence[Mapping[str, Any]], extras: Sequence[s
             and len({x["case_id"] for x in rows}) >= DECISION_LIMITS["minimum_complete_tasks"]):
         base = by_arm["git_only"]
         select = by_arm["repoground_selective"]
+        semantic_utility_ready = not semantic_v2 or (
+            # "partial" is a completed grade, not a correct answer or a
+            # completed source-relevance review. Neither can prove utility.
+            select["valid_success"] > 0
+            and select["quality_correct"] >= math.ceil(
+                SEMANTIC_MINIMUM_CORRECT_FRACTION * select["valid_success"]
+            )
+            and select["repoground_calls_total"] > 0
+            and all(
+                by_arm[arm].get("unlisted_paths_review_pending", 0) == 0
+                for arm in ARMS
+            )
+        )
         # Quality gate prevents a fast but less accurate condition from winning.
-        if (select["quality_correct"] >= base["quality_correct"]
+        if (semantic_utility_ready and select["quality_correct"] >= base["quality_correct"]
             and select["quality_incorrect"] - base["quality_incorrect"]
             <= DECISION_LIMITS["maximum_incorrect_delta"]
             and (select["unsupported_paths"] is None or base["unsupported_paths"] is None
@@ -994,11 +1011,15 @@ def evaluate(plan: Mapping[str, Any], taskset: Mapping[str, Any],
              *, trace_root: str | Path, measurement_scope: str) -> dict[str, Any]:
     _validate_study_plan(plan, taskset, measurement_scope)
     rows, supplied, extras, cases = _collect_study_trials(plan, taskset, receipts, grades, trace_root)
-    by_arm = _summarize_study_arms(rows)
+    semantic_v2 = taskset["version"] == SEMANTIC_TASKSET_VERSION
+    by_arm = _summarize_study_arms(rows, semantic_v2=semantic_v2)
     blocks, effects, by_class = _aggregate_study_pairs(rows, cases, plan)
-    decision, grades_complete = _select_study_decision(rows, extras, plan, by_arm, effects, measurement_scope)
+    decision, grades_complete = _select_study_decision(
+        rows, extras, plan, by_arm, effects, measurement_scope,
+        semantic_v2=semantic_v2,
+    )
     return {
-        "kind": REPORT_KIND, "version": VERSION,
+        "kind": REPORT_KIND, "version": SEMANTIC_TASKSET_VERSION if semantic_v2 else VERSION,
         "run_id": plan["run_id"], "created_at": datetime.now(timezone.utc).isoformat(),
         "measurement_scope": measurement_scope,
         "taskset_sha256": plan["study_sha256"], "protocol_key": plan["protocol_key"],
@@ -1012,7 +1033,13 @@ def evaluate(plan: Mapping[str, Any], taskset: Mapping[str, Any],
         "trials": rows,
         "decision": {"status": decision, "default_promoted": False,
                      "quality_review_complete": grades_complete,
-                     "limits": DECISION_LIMITS,
+                     "limits": (
+                         {**DECISION_LIMITS,
+                          "minimum_correct_fraction": SEMANTIC_MINIMUM_CORRECT_FRACTION,
+                          "requires_nonzero_selective_repoground_use": True,
+                          "requires_all_extra_paths_reviewed": True}
+                         if semantic_v2 else DECISION_LIMITS
+                     ),
                      "does_not_establish": ["causal_usefulness_without_design_checks", "automatic_rollout_authority"]},
     }
 
@@ -1023,7 +1050,11 @@ def history(reports: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     ids: set[str] = set()
     groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for report in reports:
-        _need(report.get("kind") == REPORT_KIND and report.get("version") == VERSION, "invalid report kind/version")
+        _need(
+            report.get("kind") == REPORT_KIND
+            and report.get("version") in (VERSION, SEMANTIC_TASKSET_VERSION),
+            "invalid report kind/version",
+        )
         run_id = report.get("run_id")
         _need(isinstance(run_id, str) and run_id not in ids, "duplicate history run id")
         ids.add(run_id)

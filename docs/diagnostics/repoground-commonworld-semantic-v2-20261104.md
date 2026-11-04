@@ -26,6 +26,14 @@ Jeder v2-Oracle besitzt:
 
 Die tatsächlichen numerischen `unsupported_paths` bleiben bei v1 exakt die strikte Allowlist-Differenz. Bei v2 ist diese Kennzahl **unbekannt (`null`)**, weil bloß unregistrierte Pfade keine geprüften Falschbehauptungen sind. Stattdessen werden separat `unlisted_paths` und `unlisted_paths_review_pending` berichtet. Die Summary zählt diese Werte, ohne sie als unbelegte Aussagen zu erfinden. Ein fehlendes oder negatives Qualitätsurteil kann dadurch keinen Nutzenkandidaten begründen.
 
+### Korrektur nach Review – P2, vor dem ersten v2-Providerlauf
+
+Die Report-Ausgabe ist zusätzlich versionsgebunden: Das historische `agent-study-evaluation.v1.schema.json` bleibt unverändert streng bei ganzzahligen `unsupported_paths`; **nur** v2-Berichte haben `version: "2.0"` und werden mit `agent-study-evaluation.v2.schema.json` validiert. Dort sind unbekannte `unsupported_paths: null` sowie die numerischen `unlisted_paths` und `unlisted_paths_review_pending` vertraglich festgelegt. Die Plan-/Request-/Receipt-Version bleibt `1.0`; v1-Berichte bleiben `1.0` und werden vom v1-Vertrag abgenommen.
+
+Ein v2-`selective_benefit_candidate` erfordert zusätzlich zum ursprünglichen paarweisen Konfidenzintervall: mindestens **75 % unabhängig als korrekt und quellengeprüft bewertete C-Antworten**, mindestens einen **tatsächlich beobachteten erfolgreichen RepoGround-Einsatz** im selektiven Arm und **null offen gebliebene Zusatzpfad-Reviews über alle drei Arme**. Unbekannte Pfadfehler werden weder als null noch als stillschweigender PASS behandelt. Sämtliche Antworten müssen vollständig und quellengeprüft bewertet sein; `partial` ist kein `correct`. Diese Schwelle gilt nur für das neue v2-Protokoll und wurde vor dessen ersten Agentenläufen eingeführt, nicht nach Kenntnis von v2-Ergebnissen. Selbst eine bestandene Schwelle begründet nur einen Kandidaten, keinen kausalen Nachweis oder Produktiv-Promotion.
+
+Die beiden realen Codex-P2-Findings am PR #1404 haben genau diese Lücken identifiziert. Die Regressionen decken vollständige synthetische Studien mit nur teilweisen Urteilen, offenen Zusatzquellen, null tatsächlicher selektiver Nutzung und beide JSON-Schema-Generationen ab. **Synthetische Testreceipts sind ausschließlich Regressionen, keine Nutzenevidenz.**
+
 ### Negativkontrollen
 
 - **G1 – aktuelle reale Browserladezeit:** `abstain`, denn ein Git-Stand liefert keinen aktuellen Nutzer-Millisekundenwert.
