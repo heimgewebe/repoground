@@ -1325,6 +1325,68 @@ def _navigation_source_matches_topic(source: str, topic_terms: set[str]) -> bool
     )
 
 
+def _ordered_code_evidence_sources(
+    candidates: list[tuple[int, str, dict[str, Any], dict[str, Any]]],
+    path_results: list[dict[str, Any]],
+) -> list[tuple[int, str, dict[str, Any], dict[str, Any]]]:
+    """Prioritize verified code evidence without adding complexity to routing."""
+    hinted = {
+        row["chunk_id"]
+        for result in path_results
+        for row in (result.get("query_result") or {}).get("results", [])
+        if isinstance(row, dict) and isinstance(row.get("chunk_id"), str)
+    }
+    return sorted(
+        candidates,
+        key=lambda row: (
+            _code_source_class(row[1]) == 4,
+            -row[0],
+            row[2].get("chunk_id") not in hinted,
+            _code_source_class(row[1]),
+        ),
+    )
+
+
+def _ordered_navigation_sources(
+    candidates: list[tuple[int, str, dict[str, Any], dict[str, Any]]],
+    query: str,
+) -> list[tuple[int, str, dict[str, Any], dict[str, Any]]]:
+    """Preserve original topical navigation and file-class diversity."""
+    buckets: list[list[tuple[int, str, dict[str, Any], dict[str, Any]]]] = [
+        [], [], [], []
+    ]
+    topic_terms = _navigation_topic_terms(set(_content_tokens(query)))
+    for candidate in sorted(
+        candidates,
+        key=lambda row: (
+            not _navigation_source_matches_topic(row[1], topic_terms),
+            -row[0],
+            len(Path(row[1]).stem),
+        ),
+    ):
+        buckets[_navigation_source_class(candidate[1])].append(candidate)
+    terms = set(_content_tokens(query))
+    wants_test = bool(terms & {"test", "tests"})
+    wants_contract = bool(terms & {"contract", "contracts", "schema"})
+    wants_implementation = bool(
+        terms & {
+            "implementation", "implementierung", "producer", "production",
+            "logic", "handler", "source", "code", "module", "modules",
+        }
+    ) or not (wants_test or wants_contract)
+    priority = (
+        (0, wants_implementation),
+        (1, wants_test),
+        (2, wants_contract),
+    )
+    ordered = []
+    for bucket, requested in priority:
+        if requested and buckets[bucket]:
+            ordered.append(buckets[bucket].pop(0))
+    ordered.extend(candidate for group in buckets for candidate in group)
+    return ordered
+
+
 def _prefer_diverse_relaxed_sources(
     query_result: dict[str, Any],
     *,
@@ -1352,57 +1414,9 @@ def _prefer_diverse_relaxed_sources(
     # prioritizing verified implementation/test/contract paths.
     navigation = _navigation_path_intent(query)
     if navigation and source_first:
-        buckets: list[list[tuple[int, str, dict[str, Any], dict[str, Any]]]] = [
-            [], [], [], []
-        ]
-        topic_terms = _navigation_topic_terms(set(_content_tokens(query)))
-        for candidate in sorted(
-            candidates,
-            key=lambda row: (
-                not _navigation_source_matches_topic(row[1], topic_terms),
-                -row[0],
-                len(Path(row[1]).stem),
-            ),
-        ):
-            buckets[_navigation_source_class(candidate[1])].append(candidate)
-        terms = set(_content_tokens(query))
-        wants_test = bool(terms & {"test", "tests"})
-        wants_contract = bool(terms & {"contract", "contracts", "schema"})
-        wants_implementation = bool(
-            terms & {
-                "implementation", "implementierung", "producer", "production",
-                "logic", "handler", "source", "code", "module", "modules",
-            }
-        ) or not (wants_test or wants_contract)
-        priority = (
-            (0, wants_implementation),
-            (1, wants_test),
-            (2, wants_contract),
-        )
-        ordered = []
-        for bucket, requested in priority:
-            if requested and buckets[bucket]:
-                ordered.append(buckets[bucket].pop(0))
-        ordered.extend(candidate for group in buckets for candidate in group)
+        ordered = _ordered_navigation_sources(candidates, query)
     elif source_focus:
-        # Filename overlap is evidence of where to look, not correctness.
-        # Verified source/config/test chunks rank before broad prose; keep
-        # their original citation/manifest binding and dedupe by file.
-        hinted = {
-            row["chunk_id"]
-            for result in path_results
-            for row in (result.get("query_result") or {}).get("results", [])
-            if isinstance(row, dict) and isinstance(row.get("chunk_id"), str)
-        }
-        ordered = sorted(
-            candidates,
-            key=lambda row: (
-                _code_source_class(row[1]) == 4,
-                -row[0],
-                row[2].get("chunk_id") not in hinted,
-                _code_source_class(row[1]),
-            ),
-        )
+        ordered = _ordered_code_evidence_sources(candidates, path_results)
     else:
         ordered = (
             candidates[:1] + sorted(candidates[1:], key=lambda row: -row[0])
