@@ -1,6 +1,7 @@
 """Contract tests for the external real-provider adapter; no synthetic quality claim."""
 import importlib.util
 import json
+import hashlib
 import stat
 import tempfile
 import unittest
@@ -205,7 +206,7 @@ class CodexStudyRunnerTest(unittest.TestCase):
             fallback, valid = runner._answer(json.dumps(broken), repositories)
             self.assertFalse(valid)
             self.assertEqual(fallback["explanation"], "")
-        self.assertEqual(runner.AGENT_VERSION, "codex-study-prompt-v2")
+        self.assertEqual(runner.AGENT_VERSION, "codex-study-prompt-v3")
 
     def test_mcp_success_depends_on_specific_tool_contract(self):
         available = {"status": "available"}
@@ -668,6 +669,64 @@ class CodexStudyRunnerTest(unittest.TestCase):
             self.assertIn(b"item.completed", raw)
             self.assertGreaterEqual(end, start)
 
+    def test_source_intervention_v3_rejects_discovery_only_and_unproven_ranges(self):
+        assert not runner._mandatory_source_intervention([
+            {"sequence": 1, "name": "repoground_bundle_discover", "status": "success"},
+        ])
+        search = {"sequence": 1, "name": "repoground_ask_context", "status": "success"}
+        source = {
+            "sequence": 2, "name": "repoground_range_get",
+            "status": "success", "source_content_sha256": "d" * 64,
+        }
+        assert runner._mandatory_source_intervention([search, source])
+        assert not runner._mandatory_source_intervention([
+            {**source, "sequence": 1}, {**search, "sequence": 2},
+        ])
+        assert not runner._mandatory_source_intervention([
+            search, {**source, "source_content_sha256": "not-verified"}
+        ])
+
+
+    def test_sha_bound_range_get_receipt_requires_original_ref_and_actual_bytes(self):
+        evidence = {
+            "repo": "repoground", "source_commit": "a" * 40,
+            "generator_commit": "b" * 40, "manifest_sha256": "c" * 64,
+            "observed_status": "available", "freshness": "pinned_exact",
+        }
+        source_sha = hashlib.sha256(b"hello").hexdigest()
+        ref = {"artifact_role": "canonical_md", "content_sha256": source_sha}
+        payload = {"status": "available", "result": {
+            "status": "available", "range": {
+                "sha256": source_sha, "bytes": 5, "text": "hello",
+            },
+        }}
+        call = {
+            "id": "m", "type": "mcp_tool_call", "server": "study_repoground",
+            "tool": "range_get", "arguments": {"range_ref": ref},
+            "result": {"structured_content": payload},
+            "status": "completed", "error": None,
+        }
+        proof = runner._mcp_tool_receipt(call, 1, 7, {"repoground": evidence})
+        assert proof["status"] == "success"
+        assert proof["source_content_sha256"] == source_sha
+        assert proof["repoground_evidence"] == evidence
+        for bad in (
+            {**payload, "result": {**payload["result"], "range": {
+                **payload["result"]["range"], "sha256": "e" * 64,
+            }}},
+            {**payload, "result": {**payload["result"], "range": {
+                **payload["result"]["range"], "bytes": 4,
+            }}},
+            {**payload, "result": {**payload["result"], "range": {
+                **payload["result"]["range"], "text": "other",
+            }}},
+        ):
+            item = {**call, "result": {"structured_content": bad}}
+            invalid = runner._mcp_tool_receipt(item, 1, 7, {"repoground": evidence})
+            assert invalid["status"] == "failed"
+            assert "source_content_sha256" not in invalid
+        unbound = {**call, "arguments": {"range_ref": {**ref, "content_sha256": "f" * 64}}}
+        assert runner._mcp_tool_receipt(unbound, 1, 7, {"repoground": evidence})["status"] == "failed"
 
 if __name__ == "__main__":
     unittest.main()

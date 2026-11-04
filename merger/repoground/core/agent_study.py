@@ -403,6 +403,8 @@ def _validate_receipt_tools(request: Mapping[str, Any], receipt: Mapping[str, An
         _need(bool(declared_repo_tools) and isinstance(request["repoground"], dict),
               "treatment needs source-bound RepoGround tools")
     repoground_success = 0
+    source_search_sequences: list[int] = []
+    source_read_sequences: list[int] = []
     for i, call in enumerate(calls):
         c = _object(call, "tool call")
         _need(c.get("sequence") == i + 1, "tool-call sequence gap")
@@ -423,8 +425,23 @@ def _validate_receipt_tools(request: Mapping[str, Any], receipt: Mapping[str, An
                 "successful RepoGround call lacks exact source/manifest/freshness identity",
             )
             repoground_success += 1
+            if name in ("repoground_ask_context", "repoground_query_existing_index"):
+                source_search_sequences.append(i + 1)
+            if name == "repoground_range_get":
+                sha = c.get("source_content_sha256")
+                if isinstance(sha, str) and SHA256.fullmatch(sha):
+                    source_read_sequences.append(i + 1)
     if request["condition"] == "repoground_mandatory" and receipt["status"] == "success":
-        _need(repoground_success >= 1, "mandatory condition had no successful RepoGround call")
+        version = request.get("execution_context", {}).get("agent_version")
+        if version == "codex-study-prompt-v3":
+            _need(
+                bool(source_search_sequences)
+                and any(read > min(source_search_sequences) for read in source_read_sequences),
+                "mandatory v3 condition lacked source search followed by SHA-bound range_get",
+            )
+        else:
+            # Historical r1/r2 receipts keep their original admission contract.
+            _need(repoground_success >= 1, "mandatory condition had no successful RepoGround call")
 
 
 def _validate_receipt_answer(request: Mapping[str, Any], receipt: Mapping[str, Any]) -> None:
@@ -435,7 +452,9 @@ def _validate_receipt_answer(request: Mapping[str, Any], receipt: Mapping[str, A
     # without the actual bounded natural-language answer under review.
     explanation = answer.get("explanation")
     needs_explanation = (
-        request.get("execution_context", {}).get("agent_version") == "codex-study-prompt-v2"
+        request.get("execution_context", {}).get("agent_version") in (
+            "codex-study-prompt-v2", "codex-study-prompt-v3"
+        )
         and receipt.get("status") == "success"
     )
     # Failed malformed-model answers remain valid failure receipts; never

@@ -33,8 +33,11 @@ TOOL_NAMES = {
     "file": ["codex_file_command"],
     "repoground": ["repoground_" + tool for tool in MCP_TOOLS],
 }
-AGENT_VERSION = "codex-study-prompt-v2"
+AGENT_VERSION = "codex-study-prompt-v3"
 PROVIDER = "openai-codex-cli"
+SOURCE_SEARCH_TOOLS = frozenset({
+    "repoground_ask_context", "repoground_query_existing_index",
+})
 MAX_TRACE_BYTES = 32 * 1024 * 1024
 MAX_TOOL_CALLS = 160
 MODEL_TIMEOUT = 290
@@ -462,7 +465,13 @@ def _prompt(req: dict[str, Any]) -> str:
             + repo + ": " + ", ".join(commits)
         )
     if req["condition"] == "repoground_mandatory":
-        lines.append("Diese Versuchsbedingung verlangt vor der Antwort mindestens einen tatsächlich erfolgreichen RepoGround-MCP-Aufruf.")
+        lines.append(
+            "Diese Bedingung verlangt mindestens eine erfolgreiche inhaltliche "
+            "RepoGround-Suche (repoground_ask_context oder "
+            "repoground_query_existing_index) und anschließend mindestens einen "
+            "erfolgreichen repoground_range_get auf einen kanonischen Quellbereich "
+            "mit überprüftem SHA-256. repoground_bundle_discover allein genügt nicht."
+        )
     elif req["condition"] == "repoground_selective":
         lines.append("RepoGround-MCP ist verfügbar, aber freiwillig; null RepoGround-Aufrufe sind ausdrücklich erlaubt.")
     else:
@@ -673,6 +682,32 @@ def _flake_pack_matches_bound_manifest(payload: Any, expected: dict[str, Any]) -
     )
 
 
+def _mcp_range_get_content_sha256(item: dict[str, Any], payload: Any) -> str | None:
+    """Bind one actual MCP source byte read to its unchanged canonical range ref."""
+    if not isinstance(payload, dict) or payload.get("status") != "available":
+        return None
+    args = item.get("arguments")
+    ref = args.get("range_ref") if isinstance(args, dict) else None
+    result = payload.get("result")
+    resolved = result.get("range") if isinstance(result, dict) else None
+    if not isinstance(ref, dict) or ref.get("artifact_role") != "canonical_md":
+        return None
+    if not isinstance(resolved, dict) or result.get("status") != "available":
+        return None
+    expected = ref.get("content_sha256")
+    observed = resolved.get("sha256")
+    count = resolved.get("bytes")
+    text = resolved.get("text")
+    if (
+        not isinstance(expected, str) or HEX64.fullmatch(expected) is None
+        or observed != expected or type(count) is not int or count <= 0
+        or not isinstance(text, str) or len(text.encode("utf-8")) != count
+        or hashlib.sha256(text.encode("utf-8")).hexdigest() != expected
+    ):
+        return None
+    return observed
+
+
 def _mcp_tool_receipt(
     item: dict[str, Any], sequence: int, duration_ms: int,
     expected: dict[str, dict[str, Any]],
@@ -686,10 +721,15 @@ def _mcp_tool_receipt(
         raise ValueError("unregistered RepoGround MCP tool observed")
     payload = _mcp_payload(item)
     result = item.get("result")
+    range_sha = (
+        _mcp_range_get_content_sha256(item, payload)
+        if item.get("tool") == "range_get" else None
+    )
     successful = (
         item.get("status") == "completed" and not item.get("error")
         and not (isinstance(result, dict) and result.get("isError") is True)
         and _mcp_evidence_available(str(item.get("tool")), payload)
+        and (item.get("tool") != "range_get" or range_sha is not None)
         and (
             item.get("tool") != "get_flake_relation_evidence"
             or _flake_pack_matches_bound_manifest(payload, expected[repo])
@@ -706,7 +746,25 @@ def _mcp_tool_receipt(
         # The exact health-checked manifest was bound before the actual MCP
         # response; do not confuse pinned_exact with mutable HEAD freshness.
         call["repoground_evidence"] = expected[repo]
+        if range_sha is not None:
+            call["source_content_sha256"] = range_sha
     return call
+
+
+def _mandatory_source_intervention(calls: list[dict[str, Any]]) -> bool:
+    """Discovery does not count: observe search followed by verified source bytes."""
+    searches = [
+        call["sequence"] for call in calls
+        if call["name"] in SOURCE_SEARCH_TOOLS and call["status"] == "success"
+    ]
+    return bool(searches) and any(
+        call["name"] == "repoground_range_get"
+        and call["status"] == "success"
+        and isinstance(call.get("source_content_sha256"), str)
+        and HEX64.fullmatch(call["source_content_sha256"]) is not None
+        and call["sequence"] > min(searches)
+        for call in calls
+    )
 
 
 def _measured_tool_item(
@@ -883,15 +941,15 @@ def run(req: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
     calls, final_answer = _tool_receipts(events, manifest_evidence)
     answer, parsed = _answer(final_answer, req["repositories"], req.get("citation_commits"))
     statuses = [e.get("type") for e, _at in events]
-    rg_success = any(c["name"] in TOOL_NAMES["repoground"] and c["status"] == "success"
-                     for c in calls)
+    intervention_used = _mandatory_source_intervention(calls)
     success = (
         exitcode == 0 and not timeout and "turn.completed" in statuses
-        and parsed and (req["condition"] != "repoground_mandatory" or rg_success)
+        and parsed
+        and (req["condition"] != "repoground_mandatory" or intervention_used)
     )
     error = None if success else {"class": (
-        "timeout" if timeout else "missing_mandatory_repoground_call"
-        if req["condition"] == "repoground_mandatory" and not rg_success
+        "timeout" if timeout else "missing_mandatory_source_intervention"
+        if req["condition"] == "repoground_mandatory" and not intervention_used
         else "invalid_agent_answer" if not parsed else "provider_failed"
     )}
     return {
