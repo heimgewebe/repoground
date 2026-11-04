@@ -486,13 +486,15 @@ def _validate_v2_trace_answer(
     request: Mapping[str, Any], receipt: Mapping[str, Any],
     trace_root: Path,
 ) -> None:
-    """For successful v2, compare the receipt to the actual last Codex reply.
+    """For successful v2/v3, compare the receipt to the last Codex reply.
 
     This is a byte-bound provenance check, not an assertion of correctness.
     Legacy v1 traces and failed/invalid provider answers are left unchanged.
     """
     if (
-        request.get("execution_context", {}).get("agent_version") != "codex-study-prompt-v2"
+        request.get("execution_context", {}).get("agent_version") not in (
+            "codex-study-prompt-v2", "codex-study-prompt-v3"
+        )
         or receipt.get("status") != "success"
     ):
         return
@@ -500,25 +502,25 @@ def _validate_v2_trace_answer(
     path = trace_root / receipt["trace"]["path"]
     with path.open("rb") as handle:
         for line in handle:
-            _need(len(line) <= MAX_TRACE, "v2 trace event oversized")
+            _need(len(line) <= MAX_TRACE, "v2/v3 trace event oversized")
             try:
                 event = json.loads(line)
             except ValueError as exc:
-                raise AgentBenchmarkError("v2 successful trace contains invalid JSONL") from exc
+                raise AgentBenchmarkError("v2/v3 successful trace contains invalid JSONL") from exc
             if (
                 isinstance(event, dict) and event.get("type") == "item.completed"
                 and isinstance(event.get("item"), dict)
                 and event["item"].get("type") == "agent_message"
             ):
                 last = event["item"].get("text")
-    _need(isinstance(last, str), "v2 trace lacks an actual final agent message")
+    _need(isinstance(last, str), "v2/v3 trace lacks an actual final agent message")
     try:
         model_answer = json.loads(last)
     except ValueError as exc:
-        raise AgentBenchmarkError("v2 final model answer not valid JSON") from exc
+        raise AgentBenchmarkError("v2/v3 final model answer not valid JSON") from exc
     _need(
         model_answer == receipt["answer"],
-        "v2 receipt answer differs from source-bound provider trace",
+        "v2/v3 receipt answer differs from source-bound provider trace",
     )
 
 

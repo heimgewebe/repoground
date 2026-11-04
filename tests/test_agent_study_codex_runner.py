@@ -728,5 +728,47 @@ class CodexStudyRunnerTest(unittest.TestCase):
         unbound = {**call, "arguments": {"range_ref": {**ref, "content_sha256": "f" * 64}}}
         assert runner._mcp_tool_receipt(unbound, 1, 7, {"repoground": evidence})["status"] == "failed"
 
+
+    def test_v2_partial_range_read_uses_range_sha_not_entire_artifact(self):
+        # The bundle artifact SHA and selected byte-range SHA are different.
+        range_sha = hashlib.sha256(b"hello").hexdigest()
+        whole_sha = hashlib.sha256(b"prefix-hello-suffix").hexdigest()
+        self.assertNotEqual(range_sha, whole_sha)
+        ref = {
+            "artifact_role": "canonical_md", "range_ref_version": "2",
+            "content_sha256": whole_sha, "range_content_sha256": range_sha,
+        }
+        payload = {"status": "available", "result": {"status": "available",
+                   "range": {"sha256": range_sha, "text": "hello", "bytes": 5}}}
+        evidence = {"repoground": {
+            "repo": "repoground", "source_commit": "a" * 40,
+            "generator_commit": "b" * 40, "manifest_sha256": "c" * 64,
+            "observed_status": "available", "freshness": "pinned_exact",
+        }}
+        item = {"type": "mcp_tool_call", "server": "study_repoground",
+                "tool": "range_get", "arguments": {"range_ref": ref},
+                "result": {"structured_content": payload},
+                "status": "completed", "error": None}
+        proof = runner._mcp_tool_receipt(item, 1, 5, evidence)
+        self.assertEqual(proof["status"], "success")
+        self.assertEqual(proof["source_content_sha256"], range_sha)
+        for broken_ref in (
+            {**ref, "range_content_sha256": "d" * 64},
+            {**ref, "range_ref_version": "3"},
+            {**ref, "content_sha256": "bad"},
+        ):
+            with self.subTest(ref=broken_ref):
+                invalid = runner._mcp_tool_receipt(
+                    {**item, "arguments": {"range_ref": broken_ref}}, 1, 5, evidence,
+                )
+                self.assertEqual(invalid["status"], "failed")
+        forged_content = {"status": "available", "result": {"status": "available",
+                          "range": {"sha256": range_sha, "text": "other", "bytes": 5}}}
+        invalid = runner._mcp_tool_receipt(
+            {**item, "result": {"structured_content": forged_content}}, 1, 5, evidence,
+        )
+        self.assertEqual(invalid["status"], "failed")
+
+
 if __name__ == "__main__":
     unittest.main()

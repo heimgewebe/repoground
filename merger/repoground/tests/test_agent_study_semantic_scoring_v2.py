@@ -187,5 +187,47 @@ class SemanticAgentStudyV2Tests(unittest.TestCase):
         self.assertFalse(false_claim["quality_success"])
 
 
+
+    def test_v3_success_receipt_must_match_final_provider_trace(self) -> None:
+        import tempfile
+
+        actual = {
+            "outcome": "answer", "reported_paths": [], "citations": [],
+            "asserted_sufficient_evidence": True,
+            "explanation": "This is the exact actual final provider text used as evidence.",
+        }
+        altered = {
+            **actual,
+            "explanation": "This is a different answer substituted after provider execution.",
+        }
+        message = {
+            "type": "item.completed",
+            "item": {"type": "agent_message", "text": json.dumps(actual)},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            trace_path = Path(tmp) / "provider.jsonl"
+            trace_path.write_text(json.dumps(message) + "\n", encoding="utf-8")
+            for version in ("codex-study-prompt-v2", "codex-study-prompt-v3"):
+                request = {"execution_context": {"agent_version": version}}
+                receipt = {
+                    "status": "success", "trace": {"path": trace_path.name},
+                    "answer": actual,
+                }
+                study._validate_v2_trace_answer(request, receipt, Path(tmp))
+                with self.subTest(version=version), self.assertRaisesRegex(
+                    study.AgentBenchmarkError, "receipt answer differs",
+                ):
+                    study._validate_v2_trace_answer(
+                        request, {**receipt, "answer": altered}, Path(tmp),
+                    )
+            # v1 is not retroactively subjected to new successful-answer rules.
+            study._validate_v2_trace_answer(
+                {"execution_context": {"agent_version": "codex-study-prompt-v1"}},
+                {"status": "success", "trace": {"path": trace_path.name},
+                 "answer": altered},
+                Path(tmp),
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

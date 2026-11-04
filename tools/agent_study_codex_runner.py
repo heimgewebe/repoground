@@ -694,7 +694,18 @@ def _mcp_range_get_content_sha256(item: dict[str, Any], payload: Any) -> str | N
         return None
     if not isinstance(resolved, dict) or result.get("status") != "available":
         return None
-    expected = ref.get("content_sha256")
+    version = ref.get("range_ref_version")
+    if version == "2":
+        # v2 separates the whole artifact's identity from extracted bytes.
+        whole_sha = ref.get("content_sha256")
+        if not isinstance(whole_sha, str) or HEX64.fullmatch(whole_sha) is None:
+            return None
+        expected = ref.get("range_content_sha256")
+    elif version is None:
+        # The original v1 range reference binds its selected bytes here.
+        expected = ref.get("content_sha256")
+    else:
+        return None
     observed = resolved.get("sha256")
     count = resolved.get("bytes")
     text = resolved.get("text")
