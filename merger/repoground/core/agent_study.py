@@ -26,6 +26,7 @@ from merger.repoground.core.agent_benchmark import (
 )
 
 VERSION = "1.0"
+SEMANTIC_TASKSET_VERSION = "2.0"
 TASKSET_KIND = "repoground.agent_study_taskset"
 PLAN_KIND = "repoground.agent_study_plan"
 REQUEST_KIND = "repoground.agent_study_request"
@@ -96,7 +97,8 @@ def _ref(value: Any, repositories: Mapping[str, Any], label: str) -> tuple[str, 
 
 def taskset_valid(taskset: Mapping[str, Any]) -> dict[str, Any]:
     """Validate the *frozen* oracle; a new oracle revision is a new study."""
-    _need(taskset.get("kind") == TASKSET_KIND and taskset.get("version") == VERSION, "taskset kind/version mismatch")
+    taskset_version = taskset.get("version")
+    _need(taskset.get("kind") == TASKSET_KIND and taskset_version in (VERSION, SEMANTIC_TASKSET_VERSION), "taskset kind/version mismatch")
     _need(taskset.get("measurement_scope") == "frozen_three_arm_agent_study", "taskset scope mismatch")
     _need(taskset.get("default_promoted") is False, "promotion cannot be the taskset default")
     _need(isinstance(taskset.get("id"), str) and SLUG.fullmatch(taskset["id"]), "bad taskset id")
@@ -127,6 +129,21 @@ def taskset_valid(taskset: Mapping[str, Any]) -> dict[str, Any]:
         _need(isinstance(scope, list) and scope and len(scope) == len(set(scope)) and all(r in repositories for r in scope), f"{cid}: repository scope invalid")
         expectation = _object(case.get("oracle"), f"{cid}.oracle")
         _need(expectation.get("outcome") in ("answer", "abstain", "unavailable"), f"{cid}: unknown outcome")
+        semantic_v2 = taskset_version == SEMANTIC_TASKSET_VERSION
+        if semantic_v2:
+            _need(expectation.get("path_policy") == "independent_review",
+                  f"{cid}: v2 extra paths require independent_review")
+            _need(type(expectation.get("negative_conclusion")) is bool,
+                  f"{cid}: v2 requires explicit negative_conclusion boolean")
+            _need(isinstance(expectation.get("review_criteria"), str)
+                  and 24 <= len(expectation["review_criteria"]) <= 1200,
+                  f"{cid}: v2 requires pre-registered semantic review criteria")
+            _need(not (expectation["negative_conclusion"] and expectation["outcome"] != "answer"),
+                  f"{cid}: a negative conclusion is a substantive answer, not an abstention")
+        else:
+            _need(not any(key in expectation for key in (
+                "path_policy", "negative_conclusion", "review_criteria"
+            )), f"{cid}: v2 semantic fields forbidden in historical v1 oracle")
         needed = expectation.get("required_paths")
         allowed = expectation.get("allowed_paths")
         _need(isinstance(needed, list) and isinstance(allowed, list), f"{cid}: required/allowed paths required")
@@ -139,7 +156,10 @@ def taskset_valid(taskset: Mapping[str, Any]) -> dict[str, Any]:
             negative += 1
             _need(not req, f"{cid}: negative case cannot require exact answer paths")
         else:
-            _need(bool(req), f"{cid}: answer case must have required paths")
+            _need(bool(req) or (semantic_v2 and expectation["negative_conclusion"]),
+                  f"{cid}: answer case must have required paths unless v2 negative conclusion")
+            if semantic_v2 and expectation["negative_conclusion"]:
+                negative += 1
         citation = case.get("citation_commits", {})
         _need(isinstance(citation, dict), f"{cid}: citation_commits must be a mapping")
         for repo, revisions in citation.items():
@@ -153,7 +173,7 @@ def taskset_valid(taskset: Mapping[str, Any]) -> dict[str, Any]:
                   f"{cid}: duplicate historical citation revisions")
         _need(isinstance(expectation.get("rationale"), str) and len(expectation["rationale"]) >= 12, f"{cid}: independent oracle rationale required")
     _need(all(classes[cls] == 3 for cls in CLASSES), "v1 requires three tasks in each of four classes")
-    _need(negative >= 2, "v1 requires at least two unknown/unavailable controls")
+    _need(negative >= 2, "at least two evidence-limit controls required")
     _need(sum(bool(c["pilot"]) for c in cases) == 6, "v1 requires exactly six pilot cases")
     _need(set(taskset.get("arms", [])) == set(ARMS) and len(taskset["arms"]) == 3, "all three arms are required")
     return {"taskset_id": taskset["id"], "taskset_sha256": sha256_json(taskset), "case_count": len(cases)}
@@ -543,28 +563,46 @@ def _score(case: Mapping[str, Any], receipt: Mapping[str, Any], grade: Mapping[s
     expected = {(x["repo"], x["path"]) for x in oracle["required_paths"]}
     allowed = {(x["repo"], x["path"]) for x in oracle["allowed_paths"]}
     missing = len(expected - paths)
-    false_paths = len(paths - allowed)
+    unlisted = len(paths - allowed)
+    semantic = oracle.get("path_policy") == "independent_review"
     outcome_ok = receipt["answer"]["outcome"] == oracle["outcome"]
+    # "No, these tests do not prove production" is a substantive, defensible
+    # answer. The confidence field may truthfully express confidence in "no".
+    # Actual absence of an answer (abstain/unavailable) is a separate outcome.
     negative_false_confidence = oracle["outcome"] != "answer" and (
         receipt["answer"]["outcome"] == "answer" or receipt["answer"]["asserted_sufficient_evidence"]
+    )
+    verified_grade = bool(
+        grade is not None and grade["verdict"] == "correct"
+        and grade["citations_checked"] is True
     )
     result = {
         "path_recall": None if not expected else round((len(expected) - missing) / len(expected), 6),
         "missing_gold_paths": missing,
-        "unsupported_paths": false_paths,
+        # v1's strict allowlist is preserved, including historical reports.
+        # v2 never labels a merely *unlisted* source as factually unsupported.
+        "unsupported_paths": None if semantic else unlisted,
         "expected_outcome": oracle["outcome"], "outcome_match": outcome_ok,
         "negative_false_confidence": negative_false_confidence,
         "human_grade": None, "human_verified_citations": None,
         "quality_success": None,
     }
+    if semantic:
+        result.update({
+            "unlisted_paths": unlisted,
+            "unlisted_paths_review_pending": unlisted if not verified_grade else 0,
+            "negative_conclusion": oracle["negative_conclusion"],
+        })
     if grade is not None:
         result["human_grade"] = grade["verdict"]
         result["human_verified_citations"] = grade["citations_checked"]
+        # A v2 independent "correct" verdict entails checking the explanation,
+        # every cited range, and relevance of every reported path. Neither
+        # ungraded nor uncertain extra paths can produce a quality success.
         result["quality_success"] = bool(
-            receipt["status"] == "success"
-            and grade["verdict"] == "correct"
-            and grade["citations_checked"] is True
-            and not missing and not false_paths and outcome_ok and not negative_false_confidence
+            receipt["status"] == "success" and verified_grade
+            and not missing and outcome_ok and not negative_false_confidence
+            and (semantic or not unlisted)
         )
     return result
 
@@ -751,7 +789,10 @@ def _summarize_study_arms(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             "grades_complete": len([x for x in valid if x["score"]["human_grade"] is not None]),
             "quality_correct": len([x for x in valid if x["score"]["quality_success"] is True]),
             "quality_incorrect": sum(x["score"]["human_grade"] == "incorrect" for x in valid),
-            "unsupported_paths": sum(x["score"]["unsupported_paths"] for x in valid),
+            "unsupported_paths": (
+                None if any(x["score"]["unsupported_paths"] is None for x in valid)
+                else sum(x["score"]["unsupported_paths"] for x in valid)
+            ),
             "negative_false_confidence": sum(x["score"]["negative_false_confidence"] for x in valid),
             "duration_ms": {
                 "mean": _mean([x["metrics"]["duration_ms"] for x in valid]),
@@ -774,6 +815,15 @@ def _summarize_study_arms(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             "tool_breakdown": [],
             "cost_billed_total": None,  # Only report same-currency billed costs when ALL are known.
         }
+        # Keep the original v1 report structure and hashes reproducible.
+        # Only semantic-v2 cohorts expose new, independently graded fields.
+        if any("unlisted_paths" in x["score"] for x in valid):
+            by_arm[arm]["unlisted_paths"] = sum(
+                x["score"]["unlisted_paths"] for x in valid
+            )
+            by_arm[arm]["unlisted_paths_review_pending"] = sum(
+                x["score"]["unlisted_paths_review_pending"] for x in valid
+            )
         tool_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for item in accounted:
             for call in item["metrics"]["tool_breakdown"]:
@@ -924,7 +974,8 @@ def _select_study_decision(rows: Sequence[Mapping[str, Any]], extras: Sequence[s
         if (select["quality_correct"] >= base["quality_correct"]
             and select["quality_incorrect"] - base["quality_incorrect"]
             <= DECISION_LIMITS["maximum_incorrect_delta"]
-            and select["unsupported_paths"] <= base["unsupported_paths"]
+            and (select["unsupported_paths"] is None or base["unsupported_paths"] is None
+                 or select["unsupported_paths"] <= base["unsupported_paths"])
             and select["negative_false_confidence"] <= base["negative_false_confidence"]
             and effects["selective_vs_git"]["duration_delta_ms_bootstrap_95ci"] is not None
             and effects["selective_vs_git"]["duration_delta_ms_bootstrap_95ci"][1] < 0):
