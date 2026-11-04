@@ -1,0 +1,513 @@
+{
+  "kind": "repoground.agent_study_taskset",
+  "version": "1.0",
+  "id": "repoground-commonworld-agent-utility-frozen-20261103-v1",
+  "measurement_scope": "frozen_three_arm_agent_study",
+  "default_promoted": false,
+  "arms": [
+    "git_only",
+    "repoground_mandatory",
+    "repoground_selective"
+  ],
+  "repositories": {
+    "commonworld": {
+      "slug": "heimgewebe/commonworld",
+      "commit": "2c6a790a8b76027d620cfc416918c9b6f08e34cc"
+    }
+  },
+  "cases": [
+    {
+      "id": "known-bootstrap-contract",
+      "class": "known_target",
+      "pilot": true,
+      "repositories": [
+        "commonworld"
+      ],
+      "question": "Erkläre, wie Commonworld den BOOTSTRAP_RECORDS-Export normalisiert: Welche Funktion setzt welchen Eindeutigkeitsvertrag um, welche Fehlerfälle werden geworfen und welche Tests belegen das? Nenne Codebereiche.",
+      "oracle": {
+        "outcome": "answer",
+        "required_paths": [
+          {
+            "repo": "commonworld",
+            "path": "scripts/catalog_delivery_compile.mjs"
+          },
+          {
+            "repo": "commonworld",
+            "path": "tests/js/catalog-delivery-compile.test.mjs"
+          }
+        ],
+        "allowed_paths": [
+          {
+            "repo": "commonworld",
+            "path": "scripts/catalog_delivery_compile.mjs"
+          },
+          {
+            "repo": "commonworld",
+            "path": "tests/js/catalog-delivery-compile.test.mjs"
+          },
+          {
+            "repo": "commonworld",
+            "path": "scripts/measure_catalog_delivery_browser.mjs"
+          }
+        ],
+        "rationale": "Das Modul erzwingt genau eine Zuweisung; die JS-Tests enthalten Varianten für fehlende und doppelte Exporte."
+      }
+    },
+    {
+      "id": "known-commons-admission",
+      "class": "known_target",
+      "pilot": true,
+      "repositories": [
+        "commonworld"
+      ],
+      "question": "Rekonstruiere die Commons-Zulassung: Wann darf eine Basis enthalten sein, welche Pflichtdimensionen und Quellenbezüge werden geprüft, und wie werden überfällige Wiederprüfungen behandelt? Belege Vertrag, Implementierung und Tests.",
+      "oracle": {
+        "outcome": "answer",
+        "required_paths": [
+          {
+            "repo": "commonworld",
+            "path": "scripts/validate_commons_admission.py"
+          },
+          {
+            "repo": "commonworld",
+            "path": "contracts/commonworld/commons-basis.schema.json"
+          },
+          {
+            "repo": "commonworld",
+            "path": "tests/test_commons_admission.py"
+          }
+        ],
+        "allowed_paths": [
+          {
+            "repo": "commonworld",
+            "path": "scripts/validate_commons_admission.py"
+          },
+          {
+            "repo": "commonworld",
+            "path": "contracts/commonworld/commons-basis.schema.json"
+          },
+          {
+            "repo": "commonworld",
+            "path": "tests/test_commons_admission.py"
+          },
+          {
+            "repo": "commonworld",
+            "path": "contracts/commonworld/commons-definition.contract.json"
+          },
+          {
+            "repo": "commonworld",
+            "path": "catalog/commons-bases/retroreview-policy.json"
+          }
+        ],
+        "rationale": "Der Validator lädt Vertrag, Schema und Katalog; er prüft fünf Dimensionen, Reviewfristen und Quellen-IDs, während Tests überfällige Wiedervorlage behandeln."
+      }
+    },
+    {
+      "id": "known-public-catalog",
+      "class": "known_target",
+      "pilot": false,
+      "repositories": [
+        "commonworld"
+      ],
+      "question": "Welche öffentlichen Kataloginvarianten prüft der Commonworld-Validator für kuratierte Projekte und ihre Reviewtermine, und wie werden fehlerhafte Datensätze in Tests abgedeckt? Begrenze die Antwort auf belegte Regeln.",
+      "oracle": {
+        "outcome": "answer",
+        "required_paths": [
+          {
+            "repo": "commonworld",
+            "path": "scripts/validate_public_catalog.py"
+          },
+          {
+            "repo": "commonworld",
+            "path": "tests/test_public_catalog.py"
+          }
+        ],
+        "allowed_paths": [
+          {
+            "repo": "commonworld",
+            "path": "scripts/validate_public_catalog.py"
+          },
+          {
+            "repo": "commonworld",
+            "path": "tests/test_public_catalog.py"
+          },
+          {
+            "repo": "commonworld",
+            "path": "contracts/commonworld/project.schema.json"
+          },
+          {
+            "repo": "commonworld",
+            "path": "catalog/catalog.json"
+          }
+        ],
+        "rationale": "Implementierung und negative Unit-Tests prüfen Reviewtermine, Aktivitätsstatus und projektspezifische Pflichtfelder."
+      }
+    },
+    {
+      "id": "reverse-bootstrap-usage",
+      "class": "reverse_relations",
+      "pilot": true,
+      "repositories": [
+        "commonworld"
+      ],
+      "question": "Welche produktive Commonworld-Implementierung ruft normalizeBootstrapForCompile tatsächlich auf und welche Testdatei importiert diese Funktion? Unterscheide expliziten Import, Aufruf und bloße Namensnennung.",
+      "oracle": {
+        "outcome": "answer",
+        "required_paths": [
+          {
+            "repo": "commonworld",
+            "path": "scripts/catalog_delivery_compile.mjs"
+          },
+          {
+            "repo": "commonworld",
+            "path": "scripts/measure_catalog_delivery_browser.mjs"
+          },
+          {
+            "repo": "commonworld",
+            "path": "tests/js/catalog-delivery-compile.test.mjs"
+          }
+        ],
+        "allowed_paths": [
+          {
+            "repo": "commonworld",
+            "path": "scripts/catalog_delivery_compile.mjs"
+          },
+          {
+            "repo": "commonworld",
+            "path": "scripts/measure_catalog_delivery_browser.mjs"
+          },
+          {
+            "repo": "commonworld",
+            "path": "tests/js/catalog-delivery-compile.test.mjs"
+          }
+        ],
+        "rationale": "Die Browser-Messdatei importiert und ruft die JS-Funktion auf; die Node-Tests importieren sie gesondert."
+      }
+    },
+    {
+      "id": "reverse-admission-contract",
+      "class": "reverse_relations",
+      "pilot": false,
+      "repositories": [
+        "commonworld"
+      ],
+      "question": "Zeige den nachprüfbaren Datenfluss zwischen Commons-Definitionsvertrag, JSON-Schema, retro-review-Richtlinie, Zulassungsvalidator und Testfixtures. Welche Beziehungen sind direkte Datei-Ladevorgänge, welche nur konzeptionell?",
+      "oracle": {
+        "outcome": "answer",
+        "required_paths": [
+          {
+            "repo": "commonworld",
+            "path": "scripts/validate_commons_admission.py"
+          },
+          {
+            "repo": "commonworld",
+            "path": "contracts/commonworld/commons-definition.contract.json"
+          },
+          {
+            "repo": "commonworld",
+            "path": "contracts/commonworld/commons-basis.schema.json"
+          },
+          {
+            "repo": "commonworld",
+            "path": "catalog/commons-bases/retroreview-policy.json"
+          },
+          {
+            "repo": "commonworld",
+            "path": "tests/test_commons_admission.py"
+          }
+        ],
+        "allowed_paths": [
+          {
+            "repo": "commonworld",
+            "path": "scripts/validate_commons_admission.py"
+          },
+          {
+            "repo": "commonworld",
+            "path": "contracts/commonworld/commons-definition.contract.json"
+          },
+          {
+            "repo": "commonworld",
+            "path": "contracts/commonworld/commons-basis.schema.json"
+          },
+          {
+            "repo": "commonworld",
+            "path": "catalog/commons-bases/retroreview-policy.json"
+          },
+          {
+            "repo": "commonworld",
+            "path": "tests/test_commons_admission.py"
+          },
+          {
+            "repo": "commonworld",
+            "path": "catalog/commons-bases/index.json"
+          }
+        ],
+        "rationale": "Die Source enthält DEFINITION_PATH/SCHEMA_PATH/RETRO_POLICY_PATH und lädt alle drei; der Test baut korrespondierende Fixtures."
+      }
+    },
+    {
+      "id": "reverse-digital-layer",
+      "class": "reverse_relations",
+      "pilot": false,
+      "repositories": [
+        "commonworld"
+      ],
+      "question": "Welche Commonworld-Module verwenden derive_digital_layer des Katalogvalidators, und in welcher Abhängigkeitsrichtung? Begründe anhand der tatsächlichen Imports oder Aufrufe statt nur ähnlicher Namen.",
+      "oracle": {
+        "outcome": "answer",
+        "required_paths": [
+          {
+            "repo": "commonworld",
+            "path": "scripts/validate_public_catalog.py"
+          },
+          {
+            "repo": "commonworld",
+            "path": "scripts/validate_public_seed_baseline.py"
+          },
+          {
+            "repo": "commonworld",
+            "path": "scripts/validate_renderer_selection.py"
+          }
+        ],
+        "allowed_paths": [
+          {
+            "repo": "commonworld",
+            "path": "scripts/validate_public_catalog.py"
+          },
+          {
+            "repo": "commonworld",
+            "path": "scripts/validate_public_seed_baseline.py"
+          },
+          {
+            "repo": "commonworld",
+            "path": "scripts/validate_renderer_selection.py"
+          },
+          {
+            "repo": "commonworld",
+            "path": "tests/test_public_catalog.py"
+          }
+        ],
+        "rationale": "Die Seed- und Renderer-Auswahlscripte importieren derive_digital_layer direkt aus validate_public_catalog."
+      }
+    },
+    {
+      "id": "impact-bootstrap-parser",
+      "class": "impact_tests",
+      "pilot": true,
+      "repositories": [
+        "commonworld"
+      ],
+      "question": "Ein Patch erlaubt eine zweite syntaktische Schreibweise des BOOTSTRAP_RECORDS-Exports. Welche Implementierung, produktiven Verbraucher und konkreten Tests müssen bezüglich Mehrfachtreffer, fehlender Exporte und Parser-Ergebnis geprüft werden? Belege Code und Testfälle.",
+      "oracle": {
+        "outcome": "answer",
+        "required_paths": [
+          {
+            "repo": "commonworld",
+            "path": "scripts/catalog_delivery_compile.mjs"
+          },
+          {
+            "repo": "commonworld",
+            "path": "scripts/measure_catalog_delivery_browser.mjs"
+          },
+          {
+            "repo": "commonworld",
+            "path": "tests/js/catalog-delivery-compile.test.mjs"
+          }
+        ],
+        "allowed_paths": [
+          {
+            "repo": "commonworld",
+            "path": "scripts/catalog_delivery_compile.mjs"
+          },
+          {
+            "repo": "commonworld",
+            "path": "scripts/measure_catalog_delivery_browser.mjs"
+          },
+          {
+            "repo": "commonworld",
+            "path": "tests/js/catalog-delivery-compile.test.mjs"
+          }
+        ],
+        "rationale": "Die Parserregel beeinflusst den Browser-Katalogmesspfad und die drei gezielten Tests für Normalisierung und Fehlerfälle."
+      }
+    },
+    {
+      "id": "impact-commons-review-deadline",
+      "class": "impact_tests",
+      "pilot": false,
+      "repositories": [
+        "commonworld"
+      ],
+      "question": "Die Re-Review-Frist eines Commons-Basisdatensatzes soll verändert werden. Welche Validatorbedingungen, Richtlinien, Fixturedaten und Regressionstests sind tatsächlich betroffen? Trenne bestehende Regeln von vermuteter Produktivwirkung.",
+      "oracle": {
+        "outcome": "answer",
+        "required_paths": [
+          {
+            "repo": "commonworld",
+            "path": "scripts/validate_commons_admission.py"
+          },
+          {
+            "repo": "commonworld",
+            "path": "tests/test_commons_admission.py"
+          },
+          {
+            "repo": "commonworld",
+            "path": "catalog/commons-bases/retroreview-policy.json"
+          }
+        ],
+        "allowed_paths": [
+          {
+            "repo": "commonworld",
+            "path": "scripts/validate_commons_admission.py"
+          },
+          {
+            "repo": "commonworld",
+            "path": "tests/test_commons_admission.py"
+          },
+          {
+            "repo": "commonworld",
+            "path": "catalog/commons-bases/retroreview-policy.json"
+          },
+          {
+            "repo": "commonworld",
+            "path": "contracts/commonworld/commons-basis.schema.json"
+          },
+          {
+            "repo": "commonworld",
+            "path": "catalog/commons-bases/index.json"
+          }
+        ],
+        "rationale": "Der Validierer unterscheidet Altbestand-Fristen und bereits vorhandene Basis sowie stale-Zustände; Tests decken beide ab."
+      }
+    },
+    {
+      "id": "impact-public-project-field",
+      "class": "impact_tests",
+      "pilot": false,
+      "repositories": [
+        "commonworld"
+      ],
+      "question": "Ein Katalogprojekt erhält eine neue obligatorische Validierung für seine Kurations-/Reviewdaten. Welche vorhandenen Vertrags-, Prüf- und Teststellen muss ein PR im Commonworld-Repository mindestens untersuchen, und welche indirekten Verbraucher sind nur potenziell betroffen?",
+      "oracle": {
+        "outcome": "answer",
+        "required_paths": [
+          {
+            "repo": "commonworld",
+            "path": "scripts/validate_public_catalog.py"
+          },
+          {
+            "repo": "commonworld",
+            "path": "tests/test_public_catalog.py"
+          },
+          {
+            "repo": "commonworld",
+            "path": "contracts/commonworld/project.schema.json"
+          }
+        ],
+        "allowed_paths": [
+          {
+            "repo": "commonworld",
+            "path": "scripts/validate_public_catalog.py"
+          },
+          {
+            "repo": "commonworld",
+            "path": "tests/test_public_catalog.py"
+          },
+          {
+            "repo": "commonworld",
+            "path": "contracts/commonworld/project.schema.json"
+          },
+          {
+            "repo": "commonworld",
+            "path": "scripts/validate_public_seed_baseline.py"
+          },
+          {
+            "repo": "commonworld",
+            "path": "catalog/catalog.json"
+          }
+        ],
+        "rationale": "Die Schema-/Validierungs-Tests und Kurationschecks sind konkrete Prüfstellen, während weitere Verbraucher nicht automatisch betroffen sind."
+      }
+    },
+    {
+      "id": "boundary-runtime-browser",
+      "class": "boundary",
+      "pilot": true,
+      "repositories": [
+        "commonworld"
+      ],
+      "question": "Kannst du aus dem eingefrorenen Commonworld-Git-Stand beweisen, wie viele Millisekunden der öffentliche Browserkatalog zum aktuellen Zeitpunkt beim realen Nutzer lädt? Unterscheide vorhandenen Messcode, Messkonfiguration und aktuelle Live-Messung; verzichte bei fehlendem Beleg auf eine Zahl.",
+      "oracle": {
+        "outcome": "abstain",
+        "required_paths": [],
+        "allowed_paths": [
+          {
+            "repo": "commonworld",
+            "path": "scripts/measure_catalog_delivery_browser.mjs"
+          },
+          {
+            "repo": "commonworld",
+            "path": "contracts/commonworld/catalog-delivery-budget.contract.json"
+          }
+        ],
+        "rationale": "Statischer Code und Budgetvertrag beweisen keine aktuelle produktionsechte Browser-Wallclock-Laufzeit am Nutzergerät."
+      }
+    },
+    {
+      "id": "boundary-live-commons",
+      "class": "boundary",
+      "pilot": true,
+      "repositories": [
+        "commonworld"
+      ],
+      "question": "Beweisen alle im eingefrorenen Git-Stand vorhandenen Unit- und Validatorprüfungen, dass aktuell sämtliche Commons in der Produktivwebsite korrekt veröffentlicht und abrufbar sind? Nenne nur belegbare Aussagen und markiere fehlende Live-Evidenz.",
+      "oracle": {
+        "outcome": "abstain",
+        "required_paths": [],
+        "allowed_paths": [
+          {
+            "repo": "commonworld",
+            "path": "scripts/validate_commons_admission.py"
+          },
+          {
+            "repo": "commonworld",
+            "path": "tests/test_commons_admission.py"
+          },
+          {
+            "repo": "commonworld",
+            "path": "scripts/validate_public_catalog.py"
+          },
+          {
+            "repo": "commonworld",
+            "path": "tests/test_public_catalog.py"
+          }
+        ],
+        "rationale": "Quellcode und lokale Tests sind keine vollständige Live-Veröffentlichungs- oder Browserabnahme sämtlicher Commons."
+      }
+    },
+    {
+      "id": "boundary-historical-release",
+      "class": "boundary",
+      "pilot": false,
+      "repositories": [
+        "commonworld"
+      ],
+      "question": "Beweist die Existenz historischer Commonworld-Dateien im Verzeichnis releases/, dass genau diese Version heute öffentlich ausgeliefert wird? Erkläre die Unterscheidung zwischen Release-Kopie, aktuellem Repository-Stand, aktivem RepoGround-Index und Produktivdeployment.",
+      "oracle": {
+        "outcome": "abstain",
+        "required_paths": [],
+        "allowed_paths": [
+          {
+            "repo": "commonworld",
+            "path": "docs/blueprints/commonworld-masterplan.md"
+          },
+          {
+            "repo": "commonworld",
+            "path": "catalog/catalog.json"
+          }
+        ],
+        "rationale": "Eine historische Release-Kopie und eine aktive Quellindexauswahl sind kein Live-Deploymentnachweis; das aktuelle Bundle schließt releases/ aus."
+      }
+    }
+  ]
+}

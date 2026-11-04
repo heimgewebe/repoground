@@ -101,7 +101,7 @@ def taskset_valid(taskset: Mapping[str, Any]) -> dict[str, Any]:
     _need(taskset.get("default_promoted") is False, "promotion cannot be the taskset default")
     _need(isinstance(taskset.get("id"), str) and SLUG.fullmatch(taskset["id"]), "bad taskset id")
     repositories = _object(taskset.get("repositories"), "repositories")
-    _need(len(repositories) >= 2, "need multiple repositories")
+    _need(len(repositories) >= 1, "need at least one repository")
     for name, raw in repositories.items():
         _need(isinstance(name, str) and SLUG.fullmatch(name), "bad repository id")
         r = _object(raw, f"repository {name}")
