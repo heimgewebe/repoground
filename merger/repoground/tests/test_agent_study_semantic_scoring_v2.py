@@ -30,6 +30,12 @@ def sample(case: dict, *, extra: bool = False, outcome: str = "answer",
             "reported_paths": paths,
             "outcome": outcome,
             "asserted_sufficient_evidence": sufficient,
+            "citations": [{
+                "repo": "commonworld",
+                "path": case["oracle"]["allowed_paths"][0]["path"],
+                "commit": "2c6a790a8b76027d620cfc416918c9b6f08e34cc",
+                "start_line": 1, "end_line": 2,
+            }],
         },
     }
 
@@ -152,6 +158,17 @@ class SemanticAgentStudyV2Tests(unittest.TestCase):
                 self.assertTrue(result["outcome_match"])
                 self.assertFalse(result["negative_false_confidence"])
                 self.assertTrue(result["quality_success"])
+
+    def test_no_structured_citations_never_passes_a_substantive_v2_answer(self) -> None:
+        case = self.cases["boundary-live-commons"]
+        response = sample(case, outcome="answer", sufficient=True)
+        response["answer"]["citations"] = []
+        reviewed = study._score(case, response, grade())
+        self.assertFalse(reviewed["quality_success"])
+        old_case = next(x for x in load(OLD)["cases"] if x["id"] == "known-bootstrap-contract")
+        legacy = sample(old_case)
+        legacy["answer"]["citations"] = []
+        self.assertTrue(study._score(old_case, legacy, grade())["quality_success"])
 
     def test_negative_no_must_be_semantically_graded(self) -> None:
         case = self.cases["boundary-live-commons"]

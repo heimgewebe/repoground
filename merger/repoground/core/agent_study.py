@@ -603,6 +603,10 @@ def _score(case: Mapping[str, Any], receipt: Mapping[str, Any], grade: Mapping[s
             receipt["status"] == "success" and verified_grade
             and not missing and outcome_ok and not negative_false_confidence
             and (semantic or not unlisted)
+            # A substantive v2 answer, including a supported "No", must cite
+            # real frozen Git sources; review cannot bless an empty citation list.
+            and (not semantic or oracle["outcome"] != "answer"
+                 or bool(receipt["answer"].get("citations")))
         )
     return result
 
