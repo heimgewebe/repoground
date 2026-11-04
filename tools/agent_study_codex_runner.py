@@ -8,7 +8,6 @@ No model result, cost, citation, tool time, or quality grade is manufactured.
 from __future__ import annotations
 
 import argparse
-import errno
 import hashlib
 import json
 import os
@@ -319,17 +318,13 @@ def _pin_bundle_sibling(
         post["bundle_manifest_sha256"] = expected_sha
         _create_once(directory / post_name, _json_bytes(post) + b"\n")
         return
-    # Use a byte-preserving private copy for bundle volumes on another fs.
+    # Published bundles reject extra hardlinks (notably output_health).
+    # Always use an independent private inode, including on the same filesystem.
     destination = directory / source.name
-    try:
-        os.link(source, destination, follow_symlinks=False)
-    except OSError as exc:
-        if exc.errno != errno.EXDEV:
-            raise
-        with source.open("rb") as reader, _open_private_create(destination) as writer:
-            shutil.copyfileobj(reader, writer, length=1024 * 1024)
-            writer.flush()
-            os.fsync(writer.fileno())
+    with source.open("rb") as reader, _open_private_create(destination) as writer:
+        shutil.copyfileobj(reader, writer, length=1024 * 1024)
+        writer.flush()
+        os.fsync(writer.fileno())
 
 
 def _pin_nested_artifacts(
