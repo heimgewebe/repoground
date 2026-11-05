@@ -31,6 +31,69 @@ def event(kind, item=None, usage=None):
     return payload
 
 
+def flake_pack_fixture(root: Path) -> dict:
+    source_commit = "a" * 40
+    evidence = {
+        "kind": "repoground.flake-revision-relations", "version": "1",
+        "source_repo": "heimgewebe/heim-pc", "source_commit": source_commit,
+        "status": "partial", "relations": [],
+        "gaps": ["target_commit_unavailable"],
+    }
+    evidence["evidence_sha256"] = runner._digest(runner._json_bytes(evidence))
+    pack = {
+        "kind": "repoground.flake_relation_evidence_pack", "version": "1.0",
+        "source_repo": "heimgewebe/heim-pc", "source_commit": source_commit,
+        "target_pins": [{"repo_id": "heimgewebe/nixer", "commit": "b" * 40}],
+        "evidence": evidence,
+        "read_contract": {
+            "no_git_access": True, "no_network_access": True,
+            "revision_exact": True, "asserts_runtime_dependency": False,
+            "absence_means_no_proof_not_no_dependency": True,
+        },
+    }
+    pack["pack_sha256"] = runner._digest(runner._json_bytes(pack))
+    artifact_path = root / "packs" / "flake.json"
+    artifact_path.parent.mkdir()
+    artifact_bytes = runner._json_bytes(pack) + b"\n"
+    artifact_path.write_bytes(artifact_bytes)
+    manifest = {"artifacts": [{
+        "role": "flake_relation_evidence_json", "path": "packs/flake.json",
+        "sha256": hashlib.sha256(artifact_bytes).hexdigest(),
+        "bytes": len(artifact_bytes),
+    }]}
+    manifest_path = root / "fixture.bundle.manifest.json"
+    manifest_bytes = runner._json_bytes(manifest) + b"\n"
+    manifest_path.write_bytes(manifest_bytes)
+    manifest_sha = hashlib.sha256(manifest_bytes).hexdigest()
+    expected = {"heim-pc": {
+        "repo": "heim-pc", "source_commit": source_commit,
+        "generator_commit": "c" * 40, "manifest_sha256": manifest_sha,
+        "observed_status": "available", "freshness": "pinned_exact",
+        "_manifest_path": str(manifest_path),
+    }}
+    payload = {
+        **pack, "status": "available", "manifest_sha256": manifest_sha,
+        "does_not_establish": [
+            "runtime_dependency", "active_generation", "running_service",
+            "complete_change_impact",
+        ],
+    }
+    item = {
+        "id": "m-s4", "type": "mcp_tool_call",
+        "server": "study_heim_pc", "tool": "get_flake_relation_evidence",
+        "arguments": {
+            "expected_repo": "heimgewebe/heim-pc", "expected_commit": source_commit,
+        },
+        "result": {"structured_content": payload},
+        "error": None, "status": "completed",
+    }
+    return {
+        "artifact_path": artifact_path, "manifest": manifest,
+        "manifest_path": manifest_path, "expected": expected,
+        "payload": payload, "item": item,
+    }
+
+
 class CodexStudyRunnerTest(unittest.TestCase):
     def test_tool_inventory_has_no_mutating_snapshot_create(self):
         self.assertNotIn("repoground_snapshot_create", runner.TOOL_NAMES["repoground"])
@@ -311,43 +374,129 @@ class CodexStudyRunnerTest(unittest.TestCase):
 
     def test_flake_relation_tool_requires_exact_manifest_commit_and_digest(self):
         self.assertIn("get_flake_relation_evidence", runner.MCP_TOOLS)
-        expected = {"heim-pc": {
-            "repo": "heim-pc", "source_commit": "a" * 40,
-            "generator_commit": "b" * 40, "manifest_sha256": "c" * 64,
-            "observed_status": "available", "freshness": "pinned_exact",
-        }}
-        payload = {
-            "pack_sha256": "d" * 64,
-            "source_commit": "a" * 40,
-            "manifest_sha256": "c" * 64,
-            "evidence": {
-                "status": "ok", "relations": [{"relation_type": "flake_pinned_input"}],
-                "gaps": [],
-            },
-        }
-        event = {
-            "id": "m-s4", "type": "mcp_tool_call",
-            "server": "study_heim_pc", "tool": "get_flake_relation_evidence",
-            "arguments": {
-                "expected_repo": "heimgewebe/heim-pc", "expected_commit": "a" * 40,
-            },
-            "result": {"structured_content": payload},
-            "error": None, "status": "completed",
-        }
-        success = runner._mcp_tool_receipt(event, 1, 12, expected)
-        self.assertEqual(success["status"], "success")
-        self.assertEqual(success["repoground_evidence"], expected["heim-pc"])
-        for mutated in (
-            {"source_commit": "e" * 40},
-            {"manifest_sha256": "f" * 64},
-            {"pack_sha256": "not-a-sha"},
-            {"evidence": {"status": "unknown", "relations": [], "gaps": ["missing"]}},
-        ):
-            bad = {**payload, **mutated}
-            response = {**event, "result": {"structured_content": bad}}
-            proof = runner._mcp_tool_receipt(response, 1, 12, expected)
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = flake_pack_fixture(Path(tmp))
+            success = runner._mcp_tool_receipt(
+                fixture["item"], 1, 12, fixture["expected"],
+            )
+            self.assertEqual(success["status"], "success")
+            self.assertEqual(success["resource_role"], "flake_relation_evidence_json")
+            self.assertEqual(
+                success["resource_content_sha256"],
+                fixture["manifest"]["artifacts"][0]["sha256"],
+            )
+            self.assertNotIn("_manifest_path", success["repoground_evidence"])
+            usage = runner._repoground_data_use([success], treatment=True)
+            self.assertEqual(usage["verified_mcp_read_count"], 1)
+            self.assertEqual(usage["classification"], "observed_repoground_data_use")
+
+            payload = fixture["payload"]
+            changed_relations = deepcopy(payload)
+            changed_relations["evidence"]["relations"] = [{"changed": True}]
+            changed_gaps = deepcopy(payload)
+            changed_gaps["evidence"]["gaps"] = ["different_gap"]
+            changed_body = deepcopy(payload)
+            changed_body["read_contract"]["revision_exact"] = False
+            for bad in (
+                changed_relations, changed_gaps, changed_body,
+                {**payload, "source_commit": "e" * 40},
+                {**payload, "manifest_sha256": "f" * 64},
+                {**payload, "pack_sha256": "not-a-sha"},
+                {**payload, "unknown_content": True},
+            ):
+                response = {
+                    **fixture["item"], "result": {"structured_content": bad},
+                }
+                proof = runner._mcp_tool_receipt(
+                    response, 1, 12, fixture["expected"],
+                )
+                self.assertEqual(proof["status"], "failed")
+                self.assertNotIn("resource_content_sha256", proof)
+                self.assertNotIn("repoground_evidence", proof)
+
+    def test_flake_relation_tool_rejects_forged_manifest_or_artifact_digest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = flake_pack_fixture(Path(tmp))
+            fixture["artifact_path"].write_bytes(b'{"forged":true}\n')
+            proof = runner._mcp_tool_receipt(
+                fixture["item"], 1, 1, fixture["expected"],
+            )
             self.assertEqual(proof["status"], "failed")
-            self.assertNotIn("repoground_evidence", proof)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = flake_pack_fixture(Path(tmp))
+            fixture["manifest"]["artifacts"][0]["sha256"] = "f" * 64
+            raw = runner._json_bytes(fixture["manifest"]) + b"\n"
+            fixture["manifest_path"].write_bytes(raw)
+            manifest_sha = hashlib.sha256(raw).hexdigest()
+            fixture["expected"]["heim-pc"]["manifest_sha256"] = manifest_sha
+            fixture["payload"]["manifest_sha256"] = manifest_sha
+            fixture["item"]["result"] = {"structured_content": fixture["payload"]}
+            proof = runner._mcp_tool_receipt(
+                fixture["item"], 1, 1, fixture["expected"],
+            )
+            self.assertEqual(proof["status"], "failed")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = flake_pack_fixture(Path(tmp))
+            pack = json.loads(fixture["artifact_path"].read_bytes())
+            pack["evidence"]["gaps"] = ["changed_without_inner_digest"]
+            artifact_bytes = runner._json_bytes(pack) + b"\n"
+            fixture["artifact_path"].write_bytes(artifact_bytes)
+            role = fixture["manifest"]["artifacts"][0]
+            role.update({
+                "sha256": hashlib.sha256(artifact_bytes).hexdigest(),
+                "bytes": len(artifact_bytes),
+            })
+            raw = runner._json_bytes(fixture["manifest"]) + b"\n"
+            fixture["manifest_path"].write_bytes(raw)
+            manifest_sha = hashlib.sha256(raw).hexdigest()
+            fixture["expected"]["heim-pc"]["manifest_sha256"] = manifest_sha
+            fixture["payload"].update(pack)
+            fixture["payload"]["manifest_sha256"] = manifest_sha
+            fixture["item"]["result"] = {"structured_content": fixture["payload"]}
+            proof = runner._mcp_tool_receipt(
+                fixture["item"], 1, 1, fixture["expected"],
+            )
+            self.assertEqual(proof["status"], "failed")
+
+    def test_flake_relation_tool_requires_safe_unique_private_role(self):
+        for case in ("symlink", "traversal", "ambiguous", "no_private_pin"):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                pin_root = root / "pin"
+                pin_root.mkdir()
+                fixture = flake_pack_fixture(pin_root)
+                if case == "symlink":
+                    outside = root / "outside.json"
+                    outside.write_bytes(fixture["artifact_path"].read_bytes())
+                    fixture["artifact_path"].unlink()
+                    fixture["artifact_path"].symlink_to(outside)
+                elif case in ("traversal", "ambiguous"):
+                    if case == "traversal":
+                        (root / "outside.json").write_bytes(
+                            fixture["artifact_path"].read_bytes()
+                        )
+                        fixture["manifest"]["artifacts"][0]["path"] = "../outside.json"
+                    else:
+                        fixture["manifest"]["artifacts"].append(deepcopy(
+                            fixture["manifest"]["artifacts"][0]
+                        ))
+                    raw = runner._json_bytes(fixture["manifest"]) + b"\n"
+                    fixture["manifest_path"].write_bytes(raw)
+                    manifest_sha = hashlib.sha256(raw).hexdigest()
+                    fixture["expected"]["heim-pc"]["manifest_sha256"] = manifest_sha
+                    fixture["payload"]["manifest_sha256"] = manifest_sha
+                    fixture["item"]["result"] = {
+                        "structured_content": fixture["payload"],
+                    }
+                else:
+                    fixture["expected"]["heim-pc"].pop("_manifest_path")
+                proof = runner._mcp_tool_receipt(
+                    fixture["item"], 1, 1, fixture["expected"],
+                )
+                self.assertEqual(proof["status"], "failed")
+                self.assertNotIn("resource_content_sha256", proof)
 
     def test_flake_relation_tool_allows_gaps_without_inventing_missing_relations(self):
         payload = {
