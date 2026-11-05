@@ -1011,9 +1011,22 @@ def _tool_receipts(events: list[tuple[dict[str, Any], float]],
 def _repoground_data_use(
     calls: list[dict[str, Any]], *, treatment: bool,
 ) -> dict[str, Any]:
-    """Report verified reads and path exposure without equating the two."""
+    """Report byte-verified content reads and path exposure separately."""
     mcp_calls = [call for call in calls if call["name"].startswith("repoground_")]
-    mcp_reads = [call for call in mcp_calls if "repoground_evidence" in call]
+
+    def verified_content_read(call: dict[str, Any]) -> bool:
+        digest_field = {
+            "repoground_range_get": "source_content_sha256",
+            "repoground_read_mcp_resource": "resource_content_sha256",
+        }.get(call.get("name"))
+        digest = call.get(digest_field) if digest_field is not None else None
+        return (
+            call.get("status") == "success"
+            and isinstance(digest, str)
+            and HEX64.fullmatch(digest) is not None
+        )
+
+    mcp_reads = [call for call in mcp_calls if verified_content_read(call)]
     shell_accesses = sum(
         len(call.get("repoground_data_access", [])) for call in calls
     )

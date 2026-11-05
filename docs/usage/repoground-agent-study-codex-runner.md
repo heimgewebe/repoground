@@ -45,9 +45,14 @@ auf stdout zurück. Der vorhandene
   öffentlichen Manifestpfads keinen anderen Snapshot unter derselben
   `pinned_exact`-Quittung einschleusen. Der Original-Health-Beleg
   und das ursprüngliche Bundle bleiben unverändert.
-- **Datenkanal statt MCP-Zähler:** Das Receipt weist erfolgreiche
-  SHA-gebundene MCP-Lektüre und beobachteten Shellzugriff auf exakt gebundene
-  private beziehungsweise Publisher-Bundlepfade getrennt aus. Null MCP-Calls
+- **Datenkanal statt MCP-Zähler:** Das Receipt weist inhaltliche,
+  bytegenau SHA-verifizierte MCP-Lektüre und beobachteten Shellzugriff auf
+  exakt gebundene private beziehungsweise Publisher-Bundlepfade getrennt aus.
+  Manifest-/Toolmetadaten aus `bundle_discover`, `snapshot_status` oder
+  `repoground_evidence` allein zählen nicht als verifizierter Inhaltsread.
+  Der Flake-Relationsbeleg bindet derzeit Pack, Manifest und Quellrevision,
+  weist aber keine vom Runner bytegenau nachgerechneten Inhaltsbytes nach und
+  zählt deshalb ebenfalls nicht. Null MCP-Calls
   beweisen ausdrücklich nicht null RepoGround-Datenverwendung. Eine solche
   Pfadexposition beweist für sich keine inhaltliche Lektüre, kontaminiert den
   Messkanal aber fail-closed (`shell_bundle_data_contamination`) und kann in

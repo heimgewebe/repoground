@@ -300,6 +300,58 @@ def test_git_only_cannot_hide_mcp_tool_and_selective_may_skip(planned, tmp_path)
     assert study.validate_receipt(selective, receipt, trace_root=tmp_path) == []
 
 
+def test_new_shell_data_use_contract_rejects_forgery_but_keeps_legacy(
+    planned, tmp_path,
+):
+    g = {c["id"]: c for c in gold()["cases"]}
+    req = next(
+        r for r in planned["requests"]
+        if r["condition"] == "repoground_selective"
+    )
+    legacy = sample_receipt(
+        req, g[req["case_id"]], tmp_path, use_repoground=False,
+    )
+    assert study.validate_receipt(req, legacy, trace_root=tmp_path) == []
+
+    marker = [{
+        "repo": "repoground", "target": "private_pin",
+        "classification": "observed_bound_bundle_shell_access",
+    }]
+    marker_without_summary = deepcopy(legacy)
+    marker_without_summary["tool_calls"][0]["repoground_data_access"] = marker
+    assert "requires repoground_data_use" in " ".join(
+        study.validate_receipt(req, marker_without_summary, trace_root=tmp_path)
+    )
+
+    data_use = {
+        "classification": "observed_bound_bundle_path_exposure",
+        "observed_channels": ["shell"],
+        "mcp_call_count": 0,
+        "verified_mcp_read_count": 0,
+        "shell_bundle_access_count": 1,
+        "zero_mcp_calls_proves_zero_repoground_data_use": False,
+        "causal_attribution": "not_established_same_uid_shell_not_os_isolated",
+    }
+    forged_count = deepcopy(marker_without_summary)
+    forged_count["repoground_data_use"] = {
+        **data_use, "shell_bundle_access_count": 0,
+    }
+    assert "disagrees" in " ".join(
+        study.validate_receipt(req, forged_count, trace_root=tmp_path)
+    )
+
+    forged_success = deepcopy(marker_without_summary)
+    forged_success["repoground_data_use"] = data_use
+    assert "requires failed" in " ".join(
+        study.validate_receipt(req, forged_success, trace_root=tmp_path)
+    )
+
+    contaminated = deepcopy(forged_success)
+    contaminated["status"] = "failed"
+    contaminated["error"] = {"class": "shell_bundle_data_contamination"}
+    assert study.validate_receipt(req, contaminated, trace_root=tmp_path) == []
+
+
 @pytest.mark.parametrize("mutation", ["hash", "size", "session", "request", "model", "estimated", "timer", "symlink"])
 def test_tampered_receipt_rejected(planned, tmp_path, mutation):
     g = {c["id"]: c for c in gold()["cases"]}
@@ -556,6 +608,50 @@ def test_live_receipt_schema_draft7_matches_synthetic_shape(planned, tmp_path):
     v2["error"] = {"class": "invalid_agent_answer"}
     v2["answer"]["explanation"] = ""
     jsonschema.validate(v2, schema)
+
+    extended = deepcopy(receipt)
+    extended["tool_calls"][0].update({
+        "source_content_sha256": "a" * 64,
+        "resource_role": "flake_relation_evidence_json",
+        "resource_content_sha256": "b" * 64,
+        "repoground_data_access": [{
+            "repo": "repoground",
+            "target": "private_pin",
+            "classification": "observed_bound_bundle_shell_access",
+        }],
+    })
+    extended["repoground_data_use"] = {
+        "classification": "observed_bound_bundle_path_exposure",
+        "observed_channels": ["shell"],
+        "mcp_call_count": 0,
+        "verified_mcp_read_count": 0,
+        "shell_bundle_access_count": 1,
+        "zero_mcp_calls_proves_zero_repoground_data_use": False,
+        "causal_attribution": "not_established_same_uid_shell_not_os_isolated",
+    }
+    jsonschema.validate(extended, schema)
+
+    invalid_receipts = []
+    for field, value in (
+        ("source_content_sha256", "A" * 64),
+        ("resource_content_sha256", "b" * 63),
+        ("resource_role", "role/with/slash"),
+    ):
+        invalid = deepcopy(extended)
+        invalid["tool_calls"][0][field] = value
+        invalid_receipts.append(invalid)
+    invalid = deepcopy(extended)
+    invalid["tool_calls"][0]["repoground_data_access"][0]["unexpected"] = True
+    invalid_receipts.append(invalid)
+    invalid = deepcopy(extended)
+    invalid["repoground_data_use"]["mcp_call_count"] = None
+    invalid_receipts.append(invalid)
+    invalid = deepcopy(extended)
+    invalid["repoground_data_use"]["unexpected"] = True
+    invalid_receipts.append(invalid)
+    for invalid in invalid_receipts:
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(invalid, schema)
 
 
 def test_report_schema_draft7_matches_generated_fixture(planned, tmp_path):

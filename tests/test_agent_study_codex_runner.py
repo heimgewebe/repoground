@@ -5,10 +5,17 @@ import hashlib
 import stat
 import tempfile
 import unittest
+from copy import deepcopy
 from pathlib import Path
 from unittest import mock
 
+import jsonschema
+
 SCRIPT = Path(__file__).resolve().parents[1] / "tools" / "agent_study_codex_runner.py"
+RECEIPT_SCHEMA = json.loads((
+    Path(__file__).resolve().parents[1]
+    / "merger/repoground/contracts/agent-study-receipt.v1.schema.json"
+).read_text())
 spec = importlib.util.spec_from_file_location("agent_study_codex_runner", SCRIPT)
 runner = importlib.util.module_from_spec(spec)
 assert spec and spec.loader
@@ -101,6 +108,40 @@ class CodexStudyRunnerTest(unittest.TestCase):
                 (event("item.completed", source_search), 2.1),
             ], evidence, workspace)
             self.assertNotIn("repoground_data_access", ordinary[0])
+
+    def test_only_sha_verified_content_reads_count_as_mcp_reads(self):
+        evidence = {
+            "repo": "repoground", "source_commit": "a" * 40,
+            "generator_commit": "b" * 40, "manifest_sha256": "c" * 64,
+            "observed_status": "available", "freshness": "pinned_exact",
+        }
+        discover = {
+            "sequence": 1, "name": "repoground_bundle_discover",
+            "status": "success", "repoground_evidence": evidence,
+        }
+        range_get = {
+            "sequence": 2, "name": "repoground_range_get", "status": "success",
+            "repoground_evidence": evidence, "source_content_sha256": "d" * 64,
+        }
+
+        metadata_only = runner._repoground_data_use([discover], treatment=True)
+        self.assertEqual(metadata_only["mcp_call_count"], 1)
+        self.assertEqual(metadata_only["verified_mcp_read_count"], 0)
+        self.assertEqual(metadata_only["observed_channels"], [])
+        self.assertEqual(
+            metadata_only["classification"],
+            "no_bound_repoground_data_use_observed",
+        )
+
+        content_read = runner._repoground_data_use(
+            [discover, range_get], treatment=True,
+        )
+        self.assertEqual(content_read["mcp_call_count"], 2)
+        self.assertEqual(content_read["verified_mcp_read_count"], 1)
+        self.assertEqual(content_read["observed_channels"], ["mcp"])
+        self.assertEqual(
+            content_read["classification"], "observed_repoground_data_use",
+        )
 
     def test_run_fails_closed_only_on_bound_shell_bundle_path_exposure(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -199,6 +240,7 @@ class CodexStudyRunnerTest(unittest.TestCase):
                     ):
                         receipt = runner.run(request, {"trace_root": str(trace_root)})
 
+                    jsonschema.validate(receipt, RECEIPT_SCHEMA)
                     self.assertEqual(receipt["usage"], {
                         "source": "provider_reported", **usage,
                     })
@@ -217,6 +259,11 @@ class CodexStudyRunnerTest(unittest.TestCase):
                     else:
                         self.assertEqual(receipt["status"], "success")
                         self.assertIsNone(receipt["error"])
+
+            invalid = deepcopy(receipt)
+            del invalid["repoground_data_use"]["classification"]
+            with self.assertRaises(jsonschema.ValidationError):
+                jsonschema.validate(invalid, RECEIPT_SCHEMA)
 
     def test_unpaired_tool_event_is_not_given_fake_zero_latency(self):
         item = {"id": "t", "type": "command_execution", "command": "rg foo", "exit_code": 0}
@@ -876,9 +923,17 @@ class CodexStudyRunnerTest(unittest.TestCase):
             "status": "completed", "error": None,
         }
         proof = runner._mcp_tool_receipt(call, 1, 7, {"repoground": evidence})
+        jsonschema.validate(
+            proof, RECEIPT_SCHEMA["properties"]["tool_calls"]["items"],
+        )
         assert proof["status"] == "success"
         assert proof["source_content_sha256"] == source_sha
         assert proof["repoground_evidence"] == evidence
+        tampered = {**proof, "source_content_sha256": source_sha.upper()}
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.validate(
+                tampered, RECEIPT_SCHEMA["properties"]["tool_calls"]["items"],
+            )
         for bad in (
             {**payload, "result": {**payload["result"], "range": {
                 **payload["result"]["range"], "sha256": "e" * 64,
@@ -892,6 +947,9 @@ class CodexStudyRunnerTest(unittest.TestCase):
         ):
             item = {**call, "result": {"structured_content": bad}}
             invalid = runner._mcp_tool_receipt(item, 1, 7, {"repoground": evidence})
+            jsonschema.validate(
+                invalid, RECEIPT_SCHEMA["properties"]["tool_calls"]["items"],
+            )
             assert invalid["status"] == "failed"
             assert "source_content_sha256" not in invalid
         unbound = {**call, "arguments": {"range_ref": {**ref, "content_sha256": "f" * 64}}}
@@ -982,12 +1040,21 @@ class CodexStudyRunnerTest(unittest.TestCase):
             prefix = "repoground://snapshot/" + stem
             uri = prefix + "/artifact/flake_relation_evidence_json"
             call = runner._mcp_tool_receipt(item(uri, content.decode()), 1, 5, expected)
+            jsonschema.validate(
+                call, RECEIPT_SCHEMA["properties"]["tool_calls"]["items"],
+            )
             self.assertEqual(call["name"], "repoground_read_mcp_resource")
             self.assertEqual(call["status"], "success")
             self.assertEqual(call["resource_content_sha256"], artifact_sha)
             self.assertEqual(call["resource_role"], "flake_relation_evidence_json")
             self.assertEqual(call["repoground_evidence"]["manifest_sha256"], manifest_sha)
             self.assertNotIn("_manifest_path", call["repoground_evidence"])
+            tampered = {**call, "resource_content_sha256": "0" * 63 + "G"}
+            with self.assertRaises(jsonschema.ValidationError):
+                jsonschema.validate(
+                    tampered,
+                    RECEIPT_SCHEMA["properties"]["tool_calls"]["items"],
+                )
             manifest_uri = prefix + "/manifest"
             manifest_call = runner._mcp_tool_receipt(
                 item(manifest_uri, manifest_bytes.decode()), 2, 7, expected,
@@ -1006,6 +1073,10 @@ class CodexStudyRunnerTest(unittest.TestCase):
             for bad in bad_items:
                 with self.subTest(resource=bad["arguments"]["uri"]):
                     proof = runner._mcp_tool_receipt(bad, 3, 5, expected)
+                    jsonschema.validate(
+                        proof,
+                        RECEIPT_SCHEMA["properties"]["tool_calls"]["items"],
+                    )
                     self.assertEqual(proof["status"], "failed")
                     self.assertNotIn("resource_content_sha256", proof)
             with self.assertRaisesRegex(ValueError, "unregistered RepoGround MCP tool"):
