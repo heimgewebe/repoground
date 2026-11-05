@@ -381,6 +381,49 @@ class CodexStudyRunnerTest(unittest.TestCase):
         invalid = {**item, "result": {"structured_content": {"resources": ["foreign"]}}}
         self.assertFalse(runner._builtin_empty_mcp(invalid))
 
+    def test_failed_unknown_mcp_resources_list_is_only_client_diagnostic(self):
+        # Original Nixer-r3 Codex event: a failed discovery of an unregistered
+        # alias, followed by normal authorized RepoGround calls. No bytes were
+        # returned from the failed discovery, and it is retained in raw JSONL.
+        item = {
+            "id": "missing-server", "type": "mcp_tool_call",
+            "server": "repoground", "tool": "list_mcp_resources",
+            "arguments": {"server": "repoground"},
+            "status": "failed",
+            "error": {"message": "resources/list failed: unknown MCP server 'repoground'"},
+            "result": None,
+        }
+        events = [
+            (event("item.started", item), 1.0),
+            (event("item.completed", item), 1.1),
+        ]
+        for expected in ({}, {"heim-pc": {"source_commit": "a" * 40}}):
+            with self.subTest(expected=bool(expected)):
+                calls, answer = runner._tool_receipts(events, expected)
+                self.assertEqual(calls, [])
+                self.assertEqual(answer, "")
+
+        # A returned resource, malformed envelope, or real forbidden MCP tool
+        # must remain a hard error rather than being waved away as metadata.
+        for bad in (
+            {**item, "status": "completed", "error": None, "result": {"resources": []}},
+            {**item, "result": {"contents": [{"text": "secret"}]}},
+            {**item, "arguments": {"server": "other"}},
+            {**item, "error": {"message": "resources/list returned foreign data"}},
+            {**item, "error": {**item["error"], "contents": ["foreign"]}},
+            {**item, "tool": "read_mcp_resource"},
+        ):
+            with self.subTest(status=bad["status"], tool=bad["tool"],
+                              args=bad["arguments"]):
+                invalid_events = [
+                    (event("item.started", bad), 1.0),
+                    (event("item.completed", bad), 1.1),
+                ]
+                with self.assertRaisesRegex(
+                    ValueError, "unregistered or forbidden MCP server"
+                ):
+                    runner._tool_receipts(invalid_events, {"heim-pc": {}})
+
     def test_malformed_answer_not_cast_into_success(self):
         fallback, ok = runner._answer("not JSON", {"repoground": {"commit": "a" * 40}})
         self.assertFalse(ok)
