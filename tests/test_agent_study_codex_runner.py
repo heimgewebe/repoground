@@ -770,5 +770,133 @@ class CodexStudyRunnerTest(unittest.TestCase):
         self.assertEqual(invalid["status"], "failed")
 
 
+
+    def test_mcp_resource_reads_verified_against_pinned_manifest_artifacts(self):
+        # This is the actual Codex read_mcp_resource envelope; it is NOT one
+        # of the 13 server-registered MCP tools.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            stem = "heimgewebe__heim-pc__main--" + "a" * 40 + "-max-test"
+            manifest_path = root / (stem + ".bundle.manifest.json")
+            content = b'{"kind":"flake-proof","status":"partial"}\n'
+            asset_name = stem + ".flake_relation_evidence.json"
+            (root / asset_name).write_bytes(content)
+            artifact_sha = hashlib.sha256(content).hexdigest()
+            manifest = {"artifacts": [{
+                "role": "flake_relation_evidence_json", "path": asset_name,
+                "sha256": artifact_sha, "bytes": len(content),
+            }]}
+            manifest_bytes = (json.dumps(manifest, sort_keys=True) + "\n").encode()
+            manifest_path.write_bytes(manifest_bytes)
+            manifest_sha = hashlib.sha256(manifest_bytes).hexdigest()
+            expected = {"heim-pc": {
+                "repo": "heim-pc", "source_commit": "a" * 40,
+                "generator_commit": "b" * 40, "manifest_sha256": manifest_sha,
+                "observed_status": "available", "freshness": "pinned_exact",
+                "_manifest_path": str(manifest_path),
+            }}
+
+            def item(uri, source_text, *, embedded_uri=None, server="study_heim_pc",
+                     many=False):
+                part = {"uri": embedded_uri or uri, "mimeType": "application/json",
+                        "text": source_text}
+                wrapper = {"server": server, "uri": uri,
+                           "contents": [part, part] if many else [part]}
+                return {"id": "t", "type": "mcp_tool_call",
+                        "server": "study_heim_pc", "tool": "read_mcp_resource",
+                        "status": "completed", "error": None,
+                        "arguments": {"server": "study_heim_pc", "uri": uri},
+                        "result": {"content": [
+                            {"type": "text", "text": json.dumps(wrapper)},
+                        ]}}
+
+            prefix = "repoground://snapshot/" + stem
+            uri = prefix + "/artifact/flake_relation_evidence_json"
+            call = runner._mcp_tool_receipt(item(uri, content.decode()), 1, 5, expected)
+            self.assertEqual(call["name"], "repoground_read_mcp_resource")
+            self.assertEqual(call["status"], "success")
+            self.assertEqual(call["resource_content_sha256"], artifact_sha)
+            self.assertEqual(call["resource_role"], "flake_relation_evidence_json")
+            self.assertEqual(call["repoground_evidence"]["manifest_sha256"], manifest_sha)
+            self.assertNotIn("_manifest_path", call["repoground_evidence"])
+            manifest_uri = prefix + "/manifest"
+            manifest_call = runner._mcp_tool_receipt(
+                item(manifest_uri, manifest_bytes.decode()), 2, 7, expected,
+            )
+            self.assertEqual(manifest_call["status"], "success")
+            self.assertEqual(manifest_call["resource_content_sha256"], manifest_sha)
+            bad_items = [
+                item(uri, '{"kind":"forge"}'),
+                item(uri, content.decode(), embedded_uri=prefix + "/manifest"),
+                item(uri, content.decode(), server="study_grabowski"),
+                item(uri, content.decode(), many=True),
+                item(prefix + "/artifact/not_produced", content.decode()),
+                item(prefix.replace("a" * 40, "c" * 40) +
+                     "/artifact/flake_relation_evidence_json", content.decode()),
+            ]
+            for bad in bad_items:
+                with self.subTest(resource=bad["arguments"]["uri"]):
+                    proof = runner._mcp_tool_receipt(bad, 3, 5, expected)
+                    self.assertEqual(proof["status"], "failed")
+                    self.assertNotIn("resource_content_sha256", proof)
+            with self.assertRaisesRegex(ValueError, "unregistered RepoGround MCP tool"):
+                runner._mcp_tool_receipt({
+                    **item(uri, content.decode()), "tool": "unregistered_write",
+                }, 4, 5, expected)
+
+
+
+    def test_private_manifest_survives_publication_retention(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            public = root / "publisher"
+            private = root / "workspace"
+            public.mkdir()
+            private.mkdir()
+            stem = "heimgewebe__heim-pc__main--" + "a" * 40 + "-max-test"
+            name = stem + ".bundle.manifest.json"
+            artifact_name = stem + ".flake_relation_evidence.json"
+            body = b'{"kind":"flake-proof","status":"partial"}\n'
+            digest = hashlib.sha256(body).hexdigest()
+            doc = {"artifacts": [{"role": "flake_relation_evidence_json",
+                                   "path": artifact_name, "sha256": digest,
+                                   "bytes": len(body)}]}
+            raw = (json.dumps(doc, sort_keys=True) + "\n").encode()
+            for directory in (public, private):
+                (directory / name).write_bytes(raw)
+                (directory / artifact_name).write_bytes(body)
+            evidence = {"heim-pc": {
+                "repo": "heim-pc", "source_commit": "a" * 40,
+                "generator_commit": "b" * 40,
+                "manifest_sha256": hashlib.sha256(raw).hexdigest(),
+                "observed_status": "available", "freshness": "pinned_exact",
+                "_manifest_path": str(public / name),
+            }}
+            bound = runner._private_manifest_evidence(
+                evidence, {"heim-pc": private / name},
+            )
+            self.assertEqual(bound["heim-pc"]["_manifest_path"], str(private / name))
+            self.assertEqual(evidence["heim-pc"]["_manifest_path"], str(public / name))
+            (public / name).unlink()
+            (public / artifact_name).unlink()
+            uri = "repoground://snapshot/" + stem + "/artifact/flake_relation_evidence_json"
+            item = {"type": "mcp_tool_call", "id": "resource",
+                    "server": "study_heim_pc", "tool": "read_mcp_resource",
+                    "status": "completed", "error": None,
+                    "arguments": {"server": "study_heim_pc", "uri": uri},
+                    "result": {"content": [{"type": "text", "text": json.dumps({
+                        "server": "study_heim_pc", "uri": uri,
+                        "contents": [{"uri": uri, "mimeType": "application/json",
+                                      "text": body.decode()}],
+                    })}]}}
+            receipt = runner._mcp_tool_receipt(item, 1, 5, bound)
+            self.assertEqual(receipt["status"], "success")
+            self.assertEqual(receipt["resource_content_sha256"], digest)
+            self.assertNotIn("_manifest_path", receipt["repoground_evidence"])
+            with self.assertRaisesRegex(ValueError, "manifest inventory"):
+                runner._private_manifest_evidence(evidence, {})
+
+
+
 if __name__ == "__main__":
     unittest.main()

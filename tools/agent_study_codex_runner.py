@@ -31,7 +31,9 @@ MCP_TOOLS = (
 TOOL_NAMES = {
     "git": ["codex_git_command"],
     "file": ["codex_file_command"],
-    "repoground": ["repoground_" + tool for tool in MCP_TOOLS],
+    # MCP resource reads are a Codex client operation, not a server tools/list entry.
+    "repoground": ["repoground_" + tool for tool in MCP_TOOLS]
+    + ["repoground_read_mcp_resource"],
 }
 AGENT_VERSION = "codex-study-prompt-v3"
 PROVIDER = "openai-codex-cli"
@@ -298,6 +300,8 @@ def _manifest_evidence(req: dict[str, Any], sources: dict[str, Path]) -> dict[st
             "manifest_sha256": bound["manifest_sha256"],
             "observed_status": "available",
             "freshness": "pinned_exact",
+            # Internal only: never copy a host path into the provider receipt.
+            "_manifest_path": str(path),
         }
     return evidence
 
@@ -415,6 +419,18 @@ def _assert_pinned_manifests(
     for repo, manifest in pinned.items():
         if manifest.is_symlink() or _digest(manifest.read_bytes()) != request["repoground"][repo]["manifest_sha256"]:
             raise ValueError("private manifest changed while MCP was running")
+
+
+def _private_manifest_evidence(
+    evidence: dict[str, dict[str, Any]], pinned: dict[str, Path],
+) -> dict[str, dict[str, Any]]:
+    """Resolve resource proofs against the private copies used by Codex."""
+    if set(evidence) != set(pinned):
+        raise ValueError("private manifest inventory mismatch")
+    return {
+        repo: {**bound, "_manifest_path": str(pinned[repo])}
+        for repo, bound in evidence.items()
+    }
 
 
 def _output_schema() -> dict[str, Any]:
@@ -719,6 +735,105 @@ def _mcp_range_get_content_sha256(item: dict[str, Any], payload: Any) -> str | N
     return observed
 
 
+def _mcp_resource_artifact_identity(
+    suffix: str, manifest: dict[str, Any],
+) -> tuple[str, Any, Any] | None:
+    """Find one SHA-declared artifact matching an advertised resource role."""
+    aliases = {"canonical": "canonical_md",
+               "reading-pack": "agent_reading_pack",
+               "health": "post_emit_health"}
+    role = aliases.get(suffix)
+    if suffix.startswith("artifact/"):
+        role = suffix.removeprefix("artifact/")
+    if not role or "/" in role or len(role) > 128:
+        return None
+    artifacts = manifest.get("artifacts")
+    if not isinstance(artifacts, list):
+        return None
+    matches = [a for a in artifacts if isinstance(a, dict)
+               and a.get("role") == role]
+    if len(matches) != 1:
+        return None
+    return role, matches[0].get("sha256"), matches[0].get("bytes")
+
+
+def _mcp_resource_bound_identity(
+    uri: str, evidence: dict[str, Any],
+) -> tuple[str, str, int] | None:
+    """Read the already-frozen manifest and bind its exact advertised role."""
+    manifest_name = evidence.get("_manifest_path")
+    if not isinstance(manifest_name, str):
+        return None
+    manifest_path = Path(manifest_name)
+    if (
+        not manifest_path.name.endswith(".bundle.manifest.json")
+        or manifest_path.is_symlink() or not manifest_path.is_file()
+        or manifest_path.stat().st_size > 4 * 1024 * 1024
+    ):
+        return None
+    try:
+        manifest_bytes = manifest_path.read_bytes()
+        if _digest(manifest_bytes) != evidence.get("manifest_sha256"):
+            return None
+        manifest = json.loads(manifest_bytes)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(manifest, dict):
+        return None
+    stem = manifest_path.name.removesuffix(".bundle.manifest.json")
+    prefix = "repoground://snapshot/" + stem + "/"
+    if not uri.startswith(prefix):
+        return None
+    suffix = uri[len(prefix):]
+    if suffix == "manifest":
+        identity = "manifest", evidence["manifest_sha256"], len(manifest_bytes)
+    else:
+        identity = _mcp_resource_artifact_identity(suffix, manifest)
+    if identity is None:
+        return None
+    role, digest, size = identity
+    if (
+        not isinstance(digest, str) or HEX64.fullmatch(digest) is None
+        or type(size) is not int or size < 1 or size > 16 * 1024 * 1024
+    ):
+        return None
+    return role, digest, size
+
+
+def _mcp_resource_read_proof(
+    item: dict[str, Any], payload: Any, evidence: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Admit only a client resources/read response matching pinned bytes."""
+    args = item.get("arguments")
+    if not isinstance(args, dict) or set(args) != {"server", "uri"}:
+        return None
+    if args["server"] != item.get("server") or not isinstance(args["uri"], str):
+        return None
+    uri = args["uri"]
+    identity = _mcp_resource_bound_identity(uri, evidence)
+    if identity is None:
+        return None
+    role, expected_sha, expected_bytes = identity
+    if (
+        not isinstance(payload, dict)
+        or payload.get("server") != item.get("server")
+        or payload.get("uri") != uri
+        or not isinstance(payload.get("contents"), list)
+        or len(payload["contents"]) != 1
+    ):
+        return None
+    content = payload["contents"][0]
+    if (
+        not isinstance(content, dict) or content.get("uri") != uri
+        or not isinstance(content.get("text"), str)
+    ):
+        return None
+    data = content["text"].encode("utf-8")
+    if len(data) != expected_bytes or _digest(data) != expected_sha:
+        return None
+    return {"resource_role": role, "resource_content_sha256": expected_sha}
+
+
 def _mcp_tool_receipt(
     item: dict[str, Any], sequence: int, duration_ms: int,
     expected: dict[str, dict[str, Any]],
@@ -736,10 +851,17 @@ def _mcp_tool_receipt(
         _mcp_range_get_content_sha256(item, payload)
         if item.get("tool") == "range_get" else None
     )
+    resource_proof = (
+        _mcp_resource_read_proof(item, payload, expected[repo])
+        if item.get("tool") == "read_mcp_resource" else None
+    )
     successful = (
         item.get("status") == "completed" and not item.get("error")
         and not (isinstance(result, dict) and result.get("isError") is True)
-        and _mcp_evidence_available(str(item.get("tool")), payload)
+        and (
+            resource_proof is not None if item.get("tool") == "read_mcp_resource"
+            else _mcp_evidence_available(str(item.get("tool")), payload)
+        )
         and (item.get("tool") != "range_get" or range_sha is not None)
         and (
             item.get("tool") != "get_flake_relation_evidence"
@@ -756,9 +878,14 @@ def _mcp_tool_receipt(
     if successful:
         # The exact health-checked manifest was bound before the actual MCP
         # response; do not confuse pinned_exact with mutable HEAD freshness.
-        call["repoground_evidence"] = expected[repo]
+        # Do not leak the internal pinned host path into durable receipts.
+        call["repoground_evidence"] = {
+            k: v for k, v in expected[repo].items() if not k.startswith("_")
+        }
         if range_sha is not None:
             call["source_content_sha256"] = range_sha
+        if resource_proof is not None:
+            call.update(resource_proof)
     return call
 
 
@@ -945,6 +1072,7 @@ def run(req: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
     if not raw or not events:
         raise RuntimeError("no actual Codex JSONL events")
     _assert_pinned_manifests(req, pinned)
+    manifest_evidence = _private_manifest_evidence(manifest_evidence, pinned)
     usage = _usage(events)
     if usage is None:
         # A missing provider receipt is not a claim of zero token consumption.
