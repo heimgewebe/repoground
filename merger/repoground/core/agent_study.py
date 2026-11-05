@@ -387,9 +387,68 @@ def _trace(receipt: Mapping[str, Any], trace_root: Path) -> None:
     _need(sha == trace["sha256"], "trace hash mismatch")
 
 
+def _validate_receipt_data_use(
+    calls: list[Any], receipt: Mapping[str, Any],
+) -> None:
+    """Validate the additive shell-contamination contract; legacy has no markers."""
+    shell_bundle_access_count = 0
+    has_shell_bundle_access_marker = False
+    for call in calls:
+        c = _object(call, "tool call")
+        if "repoground_data_access" not in c:
+            continue
+        has_shell_bundle_access_marker = True
+        accesses = c["repoground_data_access"]
+        _need(
+            isinstance(accesses, list) and bool(accesses),
+            "repoground_data_access must be a nonempty array",
+        )
+        for access in accesses:
+            marker = _object(access, "repoground_data_access marker")
+            _need(
+                set(marker) == {"repo", "target", "classification"}
+                and isinstance(marker["repo"], str) and bool(marker["repo"])
+                and marker["target"] in ("private_pin", "publisher")
+                and marker["classification"]
+                == "observed_bound_bundle_shell_access",
+                "repoground_data_access marker invalid",
+            )
+        shell_bundle_access_count += len(accesses)
+    if "repoground_data_use" not in receipt:
+        _need(
+            not has_shell_bundle_access_marker,
+            "repoground_data_access requires repoground_data_use",
+        )
+        return
+    data_use = _object(receipt["repoground_data_use"], "repoground_data_use")
+    declared_shell_count = _nonnegative(
+        data_use.get("shell_bundle_access_count"),
+        "repoground_data_use.shell_bundle_access_count",
+    )
+    _need(
+        declared_shell_count == shell_bundle_access_count,
+        "repoground_data_use shell count disagrees with tool calls",
+    )
+    contamination_error = (
+        isinstance(receipt.get("error"), dict)
+        and receipt["error"].get("class") == "shell_bundle_data_contamination"
+    )
+    if declared_shell_count:
+        _need(
+            receipt.get("status") == "failed" and contamination_error,
+            "shell bundle data access requires failed contamination receipt",
+        )
+    else:
+        _need(
+            not contamination_error,
+            "shell contamination error requires observed bundle access",
+        )
+
+
 def _validate_receipt_tools(request: Mapping[str, Any], receipt: Mapping[str, Any]) -> None:
     calls = receipt.get("tool_calls")
     _need(isinstance(calls, list) and len(calls) <= MAX_CALLS, "tool_calls invalid or too long")
+    _validate_receipt_data_use(calls, receipt)
     declared_repo_tools = set(request.get("repoground_tool_names", []))
     direct_tools = set(request.get("git_file_tool_names", []))
     _need(bool(direct_tools) and not direct_tools.intersection(declared_repo_tools),
