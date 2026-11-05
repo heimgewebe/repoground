@@ -71,8 +71,9 @@ auf stdout zurück. Der vorhandene
   RepoGround-Abfrage noch als fehlgeschlagener unregistrierter Read.
   Ein tatsächliches nicht zugelassenes Ressourcen-Lesewerkzeug wird
   hingegen weiterhin abgewiesen. Ein ausdrücklich fehlgeschlagener
-  Codex-Client-`resources/list`-Aufruf an einen unbekannten Servernamen
-  ohne Resultat bleibt nur als Diagnose im Original-JSONL; er wird weder
+  Codex-Client-Aufruf von `resources/list` **oder**
+  `resources/templates/list` an einen unbekannten Servernamen ohne Resultat
+  bleibt nur als Diagnose im Original-JSONL; er wird weder
   als RepoGround-Lesezugriff noch als unregistrierte Serveraktion gewertet.
   Ein erfolgreicher oder Daten liefernder Fremdserver bleibt ein harter Fehler.
 - **Echte Messwerte:** Input-/Output-/Cache-Tokens werden ausschließlich

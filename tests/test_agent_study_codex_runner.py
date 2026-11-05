@@ -573,6 +573,50 @@ class CodexStudyRunnerTest(unittest.TestCase):
                 ):
                     runner._tool_receipts(invalid_events, {"heim-pc": {}})
 
+    def test_failed_unknown_resource_template_probe_is_only_client_diagnostic(self):
+        # Original r4 reverse-broker trace (5f3d4973...): the Codex client
+        # queried a nonexistent alias with resources/templates/list, received
+        # only a failed diagnostic, then used registered study MCP servers.
+        # The untouched failed original attempt remains invalid historically.
+        item = {
+            "id": "missing-template-server", "type": "mcp_tool_call",
+            "server": "repoground", "tool": "list_mcp_resource_templates",
+            "arguments": {"server": "repoground"}, "status": "failed",
+            "error": {
+                "message": "resources/templates/list failed: unknown MCP server 'repoground'",
+            },
+            "result": None,
+        }
+        for expected in ({}, {"heim-pc": {"source_commit": "a" * 40}}):
+            with self.subTest(expected=bool(expected)):
+                calls, answer = runner._tool_receipts([
+                    (event("item.started", item), 1.0),
+                    (event("item.completed", item), 1.2),
+                ], expected)
+                self.assertEqual(calls, [])
+                self.assertEqual(answer, "")
+
+        # A different error, any successful or nonempty result, extra
+        # diagnostic fields or an attempted foreign read remains a hard error.
+        invalid = (
+            {**item, "status": "completed", "error": None,
+             "result": {"resourceTemplates": []}},
+            {**item, "result": {"resourceTemplates": [{"uri": "repoground://foreign"}]}},
+            {**item, "arguments": {"server": "study_heim_pc"}},
+            {**item, "error": {"message": "resources/list failed: unknown MCP server 'repoground'"}},
+            {**item, "error": {**item["error"], "returned_content": "foreign"}},
+            {**item, "tool": "read_mcp_resource"},
+        )
+        for bad in invalid:
+            with self.subTest(bad=bad):
+                with self.assertRaisesRegex(
+                    ValueError, "unregistered or forbidden MCP server"
+                ):
+                    runner._tool_receipts([
+                        (event("item.started", bad), 1.0),
+                        (event("item.completed", bad), 1.2),
+                    ], {"heim-pc": {}})
+
     def test_malformed_answer_not_cast_into_success(self):
         fallback, ok = runner._answer("not JSON", {"repoground": {"commit": "a" * 40}})
         self.assertFalse(ok)

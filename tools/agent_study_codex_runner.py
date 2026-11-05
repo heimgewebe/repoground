@@ -1097,24 +1097,30 @@ def _mandatory_source_intervention(calls: list[dict[str, Any]]) -> bool:
 
 
 def _failed_unknown_client_discovery(item: dict[str, Any]) -> bool:
-    """A failed Codex resources/list probe supplied no server evidence.
+    """Failed Codex resources/list or resources/templates/list returned no evidence.
 
-    A wrong server name is a client diagnostic, never a successful resource
-    retrieval. Admit only the exact observed no-result error envelope.
+    An unknown server alias in this client-only metadata probe is not a
+    successful resource retrieval. Admit only exact no-result error envelopes.
     """
     server = item.get("server")
     arguments = item.get("arguments")
     error = item.get("error")
+    tool = item.get("tool")
+    error_prefix = (
+        "resources/list failed" if tool == "list_mcp_resources"
+        else "resources/templates/list failed"
+        if tool == "list_mcp_resource_templates" else None
+    )
     return (
         item.get("type") == "mcp_tool_call"
-        and item.get("tool") == "list_mcp_resources"
+        and error_prefix is not None
         and item.get("status") == "failed"
         and item.get("result") is None
         and isinstance(server, str) and bool(server)
         and isinstance(arguments, dict) and arguments == {"server": server}
         and isinstance(error, dict) and set(error) == {"message"}
         and error["message"] == (
-            "resources/list failed: unknown MCP server '" + server + "'"
+            error_prefix + ": unknown MCP server '" + server + "'"
         )
     )
 
