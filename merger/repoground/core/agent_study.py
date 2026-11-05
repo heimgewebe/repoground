@@ -403,6 +403,8 @@ def _validate_receipt_tools(request: Mapping[str, Any], receipt: Mapping[str, An
         _need(bool(declared_repo_tools) and isinstance(request["repoground"], dict),
               "treatment needs source-bound RepoGround tools")
     repoground_success = 0
+    source_search_sequences: list[int] = []
+    source_read_sequences: list[int] = []
     for i, call in enumerate(calls):
         c = _object(call, "tool call")
         _need(c.get("sequence") == i + 1, "tool-call sequence gap")
@@ -423,8 +425,23 @@ def _validate_receipt_tools(request: Mapping[str, Any], receipt: Mapping[str, An
                 "successful RepoGround call lacks exact source/manifest/freshness identity",
             )
             repoground_success += 1
+            if name in ("repoground_ask_context", "repoground_query_existing_index"):
+                source_search_sequences.append(i + 1)
+            if name == "repoground_range_get":
+                sha = c.get("source_content_sha256")
+                if isinstance(sha, str) and SHA256.fullmatch(sha):
+                    source_read_sequences.append(i + 1)
     if request["condition"] == "repoground_mandatory" and receipt["status"] == "success":
-        _need(repoground_success >= 1, "mandatory condition had no successful RepoGround call")
+        version = request.get("execution_context", {}).get("agent_version")
+        if version == "codex-study-prompt-v3":
+            _need(
+                bool(source_search_sequences)
+                and any(read > min(source_search_sequences) for read in source_read_sequences),
+                "mandatory v3 condition lacked source search followed by SHA-bound range_get",
+            )
+        else:
+            # Historical r1/r2 receipts keep their original admission contract.
+            _need(repoground_success >= 1, "mandatory condition had no successful RepoGround call")
 
 
 def _validate_receipt_answer(request: Mapping[str, Any], receipt: Mapping[str, Any]) -> None:
@@ -435,7 +452,9 @@ def _validate_receipt_answer(request: Mapping[str, Any], receipt: Mapping[str, A
     # without the actual bounded natural-language answer under review.
     explanation = answer.get("explanation")
     needs_explanation = (
-        request.get("execution_context", {}).get("agent_version") == "codex-study-prompt-v2"
+        request.get("execution_context", {}).get("agent_version") in (
+            "codex-study-prompt-v2", "codex-study-prompt-v3"
+        )
         and receipt.get("status") == "success"
     )
     # Failed malformed-model answers remain valid failure receipts; never
@@ -467,13 +486,15 @@ def _validate_v2_trace_answer(
     request: Mapping[str, Any], receipt: Mapping[str, Any],
     trace_root: Path,
 ) -> None:
-    """For successful v2, compare the receipt to the actual last Codex reply.
+    """For successful v2/v3, compare the receipt to the last Codex reply.
 
     This is a byte-bound provenance check, not an assertion of correctness.
     Legacy v1 traces and failed/invalid provider answers are left unchanged.
     """
     if (
-        request.get("execution_context", {}).get("agent_version") != "codex-study-prompt-v2"
+        request.get("execution_context", {}).get("agent_version") not in (
+            "codex-study-prompt-v2", "codex-study-prompt-v3"
+        )
         or receipt.get("status") != "success"
     ):
         return
@@ -481,25 +502,25 @@ def _validate_v2_trace_answer(
     path = trace_root / receipt["trace"]["path"]
     with path.open("rb") as handle:
         for line in handle:
-            _need(len(line) <= MAX_TRACE, "v2 trace event oversized")
+            _need(len(line) <= MAX_TRACE, "v2/v3 trace event oversized")
             try:
                 event = json.loads(line)
             except ValueError as exc:
-                raise AgentBenchmarkError("v2 successful trace contains invalid JSONL") from exc
+                raise AgentBenchmarkError("v2/v3 successful trace contains invalid JSONL") from exc
             if (
                 isinstance(event, dict) and event.get("type") == "item.completed"
                 and isinstance(event.get("item"), dict)
                 and event["item"].get("type") == "agent_message"
             ):
                 last = event["item"].get("text")
-    _need(isinstance(last, str), "v2 trace lacks an actual final agent message")
+    _need(isinstance(last, str), "v2/v3 trace lacks an actual final agent message")
     try:
         model_answer = json.loads(last)
     except ValueError as exc:
-        raise AgentBenchmarkError("v2 final model answer not valid JSON") from exc
+        raise AgentBenchmarkError("v2/v3 final model answer not valid JSON") from exc
     _need(
         model_answer == receipt["answer"],
-        "v2 receipt answer differs from source-bound provider trace",
+        "v2/v3 receipt answer differs from source-bound provider trace",
     )
 
 
