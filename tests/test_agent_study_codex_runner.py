@@ -846,5 +846,57 @@ class CodexStudyRunnerTest(unittest.TestCase):
 
 
 
+    def test_private_manifest_survives_publication_retention(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            public = root / "publisher"
+            private = root / "workspace"
+            public.mkdir()
+            private.mkdir()
+            stem = "heimgewebe__heim-pc__main--" + "a" * 40 + "-max-test"
+            name = stem + ".bundle.manifest.json"
+            artifact_name = stem + ".flake_relation_evidence.json"
+            body = b'{"kind":"flake-proof","status":"partial"}\n'
+            digest = hashlib.sha256(body).hexdigest()
+            doc = {"artifacts": [{"role": "flake_relation_evidence_json",
+                                   "path": artifact_name, "sha256": digest,
+                                   "bytes": len(body)}]}
+            raw = (json.dumps(doc, sort_keys=True) + "\n").encode()
+            for directory in (public, private):
+                (directory / name).write_bytes(raw)
+                (directory / artifact_name).write_bytes(body)
+            evidence = {"heim-pc": {
+                "repo": "heim-pc", "source_commit": "a" * 40,
+                "generator_commit": "b" * 40,
+                "manifest_sha256": hashlib.sha256(raw).hexdigest(),
+                "observed_status": "available", "freshness": "pinned_exact",
+                "_manifest_path": str(public / name),
+            }}
+            bound = runner._private_manifest_evidence(
+                evidence, {"heim-pc": private / name},
+            )
+            self.assertEqual(bound["heim-pc"]["_manifest_path"], str(private / name))
+            self.assertEqual(evidence["heim-pc"]["_manifest_path"], str(public / name))
+            (public / name).unlink()
+            (public / artifact_name).unlink()
+            uri = "repoground://snapshot/" + stem + "/artifact/flake_relation_evidence_json"
+            item = {"type": "mcp_tool_call", "id": "resource",
+                    "server": "study_heim_pc", "tool": "read_mcp_resource",
+                    "status": "completed", "error": None,
+                    "arguments": {"server": "study_heim_pc", "uri": uri},
+                    "result": {"content": [{"type": "text", "text": json.dumps({
+                        "server": "study_heim_pc", "uri": uri,
+                        "contents": [{"uri": uri, "mimeType": "application/json",
+                                      "text": body.decode()}],
+                    })}]}}
+            receipt = runner._mcp_tool_receipt(item, 1, 5, bound)
+            self.assertEqual(receipt["status"], "success")
+            self.assertEqual(receipt["resource_content_sha256"], digest)
+            self.assertNotIn("_manifest_path", receipt["repoground_evidence"])
+            with self.assertRaisesRegex(ValueError, "manifest inventory"):
+                runner._private_manifest_evidence(evidence, {})
+
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -421,6 +421,18 @@ def _assert_pinned_manifests(
             raise ValueError("private manifest changed while MCP was running")
 
 
+def _private_manifest_evidence(
+    evidence: dict[str, dict[str, Any]], pinned: dict[str, Path],
+) -> dict[str, dict[str, Any]]:
+    """Resolve resource proofs against the private copies used by Codex."""
+    if set(evidence) != set(pinned):
+        raise ValueError("private manifest inventory mismatch")
+    return {
+        repo: {**bound, "_manifest_path": str(pinned[repo])}
+        for repo, bound in evidence.items()
+    }
+
+
 def _output_schema() -> dict[str, Any]:
     path = {"type": "object", "properties": {
         "repo": {"type": "string"}, "path": {"type": "string"},
@@ -1060,6 +1072,7 @@ def run(req: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
     if not raw or not events:
         raise RuntimeError("no actual Codex JSONL events")
     _assert_pinned_manifests(req, pinned)
+    manifest_evidence = _private_manifest_evidence(manifest_evidence, pinned)
     usage = _usage(events)
     if usage is None:
         # A missing provider receipt is not a claim of zero token consumption.
