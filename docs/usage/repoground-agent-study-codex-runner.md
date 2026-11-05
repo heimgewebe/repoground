@@ -50,9 +50,14 @@ auf stdout zurück. Der vorhandene
   exakt gebundene private beziehungsweise Publisher-Bundlepfade getrennt aus.
   Manifest-/Toolmetadaten aus `bundle_discover`, `snapshot_status` oder
   `repoground_evidence` allein zählen nicht als verifizierter Inhaltsread.
-  Der Flake-Relationsbeleg bindet derzeit Pack, Manifest und Quellrevision,
-  weist aber keine vom Runner bytegenau nachgerechneten Inhaltsbytes nach und
-  zählt deshalb ebenfalls nicht. Null MCP-Calls
+  `get_flake_relation_evidence` zählt nur dann als verifizierter Inhaltsread,
+  wenn der Runner das strukturierte Paket vollständig mit der eindeutigen Rolle
+  `flake_relation_evidence_json` im SHA-geprüften privaten Manifest-Pin
+  gleichsetzt und Bytezahl, Rohdatei-SHA256 sowie die kanonischen eingebetteten
+  Evidence-/Pack-Digests an den tatsächlich gelesenen regulären Artefaktbytes
+  verifiziert. Fehlender privater Pin, Symlink, unsicherer Relativpfad,
+  mehrdeutige Rolle oder zusätzliche beziehungsweise abweichende Paketfelder
+  lassen den Toolcall fehlschlagen und erzeugen keinen Inhaltsread. Null MCP-Calls
   beweisen ausdrücklich nicht null RepoGround-Datenverwendung. Eine solche
   Pfadexposition beweist für sich keine inhaltliche Lektüre, kontaminiert den
   Messkanal aber fail-closed (`shell_bundle_data_contamination`) und kann in

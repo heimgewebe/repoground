@@ -15,6 +15,7 @@ import re
 import selectors
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -735,16 +736,152 @@ def _mcp_evidence_available(tool: str, payload: Any) -> bool:
     return status == "available"
 
 
-def _flake_pack_matches_bound_manifest(payload: Any, expected: dict[str, Any]) -> bool:
-    """Reject tool results not bound to the immutable manifest and source commit."""
-    return (
-        isinstance(payload, dict)
-        and payload.get("manifest_sha256") == expected.get("manifest_sha256")
-        and payload.get("source_commit") == expected.get("source_commit")
-        and isinstance(payload.get("pack_sha256"), str)
-        and HEX64.fullmatch(payload["pack_sha256"]) is not None
-    )
+def _read_bounded_regular_file(path: Path, limit: int) -> bytes | None:
+    """Read one non-symlink regular file through its checked descriptor."""
+    try:
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        descriptor = os.open(path, flags)
+        with os.fdopen(descriptor, "rb") as handle:
+            info = os.fstat(handle.fileno())
+            if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= limit:
+                return None
+            raw = handle.read(limit + 1)
+        if len(raw) != info.st_size:
+            return None
+        return raw
+    except OSError:
+        return None
 
+
+def _flake_pinned_manifest(
+    expected: dict[str, Any],
+) -> tuple[Path, dict[str, Any]] | None:
+    """Verify a private frozen manifest's original bytes and physical path."""
+    manifest_name = expected.get("_manifest_path")
+    if not isinstance(manifest_name, str):
+        return None
+    manifest_path = Path(manifest_name)
+    try:
+        if (
+            not manifest_path.is_absolute()
+            or any(part in (".", "..") for part in manifest_path.parts)
+            or manifest_path.resolve(strict=True) != manifest_path
+        ):
+            return None
+        pin_root = manifest_path.parent
+        if pin_root.is_symlink() or pin_root.resolve(strict=True) != pin_root:
+            return None
+    except OSError:
+        return None
+    manifest_bytes = _read_bounded_regular_file(manifest_path, 4 * 1024 * 1024)
+    if manifest_bytes is None or _digest(manifest_bytes) != expected.get("manifest_sha256"):
+        return None
+    try:
+        manifest = json.loads(manifest_bytes)
+    except (UnicodeError, ValueError):
+        return None
+    if not isinstance(manifest, dict):
+        return None
+    return pin_root, manifest
+
+
+def _flake_pack_private_artifact(
+    expected: dict[str, Any],
+) -> tuple[bytes, str] | None:
+    """Read one strictly bound artifact from an immutable private manifest."""
+    pinned = _flake_pinned_manifest(expected)
+    if pinned is None:
+        return None
+    pin_root, manifest = pinned
+    artifacts = manifest.get("artifacts") if isinstance(manifest, dict) else None
+    roles = [
+        row for row in (artifacts if isinstance(artifacts, list) else [])
+        if isinstance(row, dict) and row.get("role") == "flake_relation_evidence_json"
+    ]
+    if len(roles) != 1:
+        return None
+    role = roles[0]
+    relative = role.get("path")
+    declared_sha = role.get("sha256")
+    declared_bytes = role.get("bytes")
+    if (
+        not isinstance(relative, str) or not relative or relative.startswith("/")
+        or "\\" in relative or "\x00" in relative
+        or any(part in ("", ".", "..") for part in relative.split("/"))
+        or not isinstance(declared_sha, str) or HEX64.fullmatch(declared_sha) is None
+        or type(declared_bytes) is not int or not 0 < declared_bytes <= 2 * 1024 * 1024
+    ):
+        return None
+    artifact_path = pin_root.joinpath(*relative.split("/"))
+    try:
+        if (
+            artifact_path.resolve(strict=True) != artifact_path
+            or not artifact_path.is_relative_to(pin_root)
+        ):
+            return None
+    except OSError:
+        return None
+    artifact_bytes = _read_bounded_regular_file(artifact_path, 2 * 1024 * 1024)
+    if (
+        artifact_bytes is None or len(artifact_bytes) != declared_bytes
+        or _digest(artifact_bytes) != declared_sha
+    ):
+        return None
+    return artifact_bytes, declared_sha
+
+
+def _flake_pack_content_proof(
+    payload: Any, expected: dict[str, Any],
+) -> dict[str, str] | None:
+    """Bind structured Flake output to actual bytes in the private frozen pin."""
+    pack_fields = {
+        "kind", "version", "source_repo", "source_commit", "target_pins",
+        "evidence", "read_contract", "pack_sha256",
+    }
+    envelope_fields = {"status", "manifest_sha256", "does_not_establish"}
+    if (
+        not isinstance(payload, dict) or set(payload) != pack_fields | envelope_fields
+        or payload.get("status") != "available"
+        or payload.get("manifest_sha256") != expected.get("manifest_sha256")
+        or payload.get("source_commit") != expected.get("source_commit")
+        or payload.get("does_not_establish") != [
+            "runtime_dependency", "active_generation", "running_service",
+            "complete_change_impact",
+        ]
+    ):
+        return None
+    pinned = _flake_pack_private_artifact(expected)
+    if pinned is None:
+        return None
+    artifact_bytes, declared_sha = pinned
+    try:
+        artifact_pack = json.loads(artifact_bytes)
+        returned_pack = {key: payload[key] for key in pack_fields}
+        evidence = artifact_pack.get("evidence") if isinstance(artifact_pack, dict) else None
+        if (
+            not isinstance(artifact_pack, dict) or set(artifact_pack) != pack_fields
+            or artifact_pack != returned_pack
+            or not isinstance(artifact_pack.get("pack_sha256"), str)
+            or HEX64.fullmatch(artifact_pack["pack_sha256"]) is None
+            or _digest(_json_bytes({
+                key: value for key, value in artifact_pack.items()
+                if key != "pack_sha256"
+            })) != artifact_pack["pack_sha256"]
+            or not isinstance(evidence, dict)
+            or not isinstance(evidence.get("evidence_sha256"), str)
+            or HEX64.fullmatch(evidence["evidence_sha256"]) is None
+            or _digest(_json_bytes({
+                key: value for key, value in evidence.items()
+                if key != "evidence_sha256"
+            })) != evidence["evidence_sha256"]
+        ):
+            return None
+    except (KeyError, TypeError, UnicodeError, ValueError):
+        return None
+    return {
+        "resource_role": "flake_relation_evidence_json",
+        "resource_content_sha256": declared_sha,
+    }
 
 def _mcp_range_get_content_sha256(item: dict[str, Any], payload: Any) -> str | None:
     """Bind one actual MCP source byte read to its unchanged canonical range ref."""
@@ -903,6 +1040,10 @@ def _mcp_tool_receipt(
         _mcp_resource_read_proof(item, payload, expected[repo])
         if item.get("tool") == "read_mcp_resource" else None
     )
+    flake_proof = (
+        _flake_pack_content_proof(payload, expected[repo])
+        if item.get("tool") == "get_flake_relation_evidence" else None
+    )
     successful = (
         item.get("status") == "completed" and not item.get("error")
         and not (isinstance(result, dict) and result.get("isError") is True)
@@ -913,7 +1054,7 @@ def _mcp_tool_receipt(
         and (item.get("tool") != "range_get" or range_sha is not None)
         and (
             item.get("tool") != "get_flake_relation_evidence"
-            or _flake_pack_matches_bound_manifest(payload, expected[repo])
+            or flake_proof is not None
         )
     )
     call = {
@@ -934,6 +1075,8 @@ def _mcp_tool_receipt(
             call["source_content_sha256"] = range_sha
         if resource_proof is not None:
             call.update(resource_proof)
+        if flake_proof is not None:
+            call.update(flake_proof)
     return call
 
 
@@ -1046,6 +1189,7 @@ def _repoground_data_use(
         digest_field = {
             "repoground_range_get": "source_content_sha256",
             "repoground_read_mcp_resource": "resource_content_sha256",
+            "repoground_get_flake_relation_evidence": "resource_content_sha256",
         }.get(call.get("name"))
         digest = call.get(digest_field) if digest_field is not None else None
         return (
