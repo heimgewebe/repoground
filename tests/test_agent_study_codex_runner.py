@@ -6,6 +6,7 @@ import stat
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 SCRIPT = Path(__file__).resolve().parents[1] / "tools" / "agent_study_codex_runner.py"
 spec = importlib.util.spec_from_file_location("agent_study_codex_runner", SCRIPT)
@@ -56,6 +57,166 @@ class CodexStudyRunnerTest(unittest.TestCase):
         self.assertEqual(calls[0]["duration_ms"], 165)
         self.assertEqual(calls[0]["output_bytes"], 5)
         self.assertEqual(answer, "")
+
+    def test_zero_mcp_calls_with_direct_bundle_shell_read_is_data_use(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "workspace"
+            pin = root / "private" / "repo" / "frozen.bundle.manifest.json"
+            workspace.mkdir()
+            pin.parent.mkdir(parents=True)
+            pin.write_text("frozen RepoGround evidence")
+            evidence = {"repo": {
+                "_manifest_path": str(pin),
+                "_publisher_manifest_path": str(root / "publisher" / pin.name),
+            }}
+            item = {
+                "id": "shell-read", "type": "command_execution",
+                "command": "find " + str(root) + " -type f -exec sed -n '1p' {} +",
+                "status": "completed", "exit_code": 0,
+                "aggregated_output": str(pin) + "\nfrozen RepoGround evidence\n",
+            }
+            calls, _ = runner._tool_receipts([
+                (event("item.started", item), 1.0),
+                (event("item.completed", item), 1.1),
+            ], evidence, workspace)
+            usage = runner._repoground_data_use(calls, treatment=True)
+            self.assertEqual(usage["mcp_call_count"], 0)
+            self.assertEqual(usage["shell_bundle_access_count"], 1)
+            self.assertEqual(usage["observed_channels"], ["shell"])
+            self.assertEqual(
+                usage["classification"], "observed_bound_bundle_path_exposure",
+            )
+            self.assertFalse(usage["zero_mcp_calls_proves_zero_repoground_data_use"])
+            self.assertEqual(
+                usage["causal_attribution"],
+                "not_established_same_uid_shell_not_os_isolated",
+            )
+
+            source_search = {**item, "id": "source-search",
+                             "command": "rg pinned-bundles repos/repoground",
+                             "aggregated_output": "tools/runner.py:pinned-bundles"}
+            ordinary, _ = runner._tool_receipts([
+                (event("item.started", source_search), 2.0),
+                (event("item.completed", source_search), 2.1),
+            ], evidence, workspace)
+            self.assertNotIn("repoground_data_access", ordinary[0])
+
+    def test_run_fails_closed_only_on_bound_shell_bundle_path_exposure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "workspace"
+            trace_root = root / "traces"
+            workspace.mkdir()
+            trace_root.mkdir()
+            publisher = root / "publisher" / "frozen.bundle.manifest.json"
+            fingerprint = {
+                "runner_version": "current-runner", "tool_contract": "current-tools",
+            }
+            request = {
+                "kind": "repoground.agent_study_request", "version": "1.0",
+                "request_id": "trial", "session_id": "session",
+                "workspace_id": "workspace", "condition": "repoground_selective",
+                "runner": {
+                    "provider": "openai-codex-cli", "model": "provider-model",
+                    "sampling": {"model_reasoning_effort": "medium"},
+                    "runner_version": fingerprint["runner_version"],
+                },
+                "execution_context": {
+                    "agent_version": runner.AGENT_VERSION, "host_class": "test-host",
+                    "cache_policy": "controlled",
+                    "tool_contract": fingerprint["tool_contract"],
+                },
+                "repositories": {"repo": {"commit": "a" * 40, "slug": "owner/repo"}},
+                "question": "Find the source", "repoground": {"repo": {}},
+                "tools_allowed": sorted(sum(runner.TOOL_NAMES.values(), [])),
+                "git_file_tool_names": sorted(
+                    runner.TOOL_NAMES["git"] + runner.TOOL_NAMES["file"]
+                ),
+                "repoground_tool_names": sorted(runner.TOOL_NAMES["repoground"]),
+                "isolation": {
+                    "fresh_session": True, "fresh_workspace": True,
+                    "no_prior_arm_transcripts": True,
+                    "disable_unlisted_plugins": True,
+                },
+            }
+            answer = json.dumps({
+                "outcome": "answer", "reported_paths": [], "citations": [],
+                "asserted_sufficient_evidence": True,
+                "explanation": "The provider returned an otherwise valid answer.",
+            })
+            usage = {
+                "input_tokens": 120, "output_tokens": 17, "cached_input_tokens": 80,
+            }
+            started = runner.datetime(2026, 11, 5, tzinfo=runner.timezone.utc)
+            evidence = {"repo": {
+                "_manifest_path": str(publisher), "manifest_sha256": "b" * 64,
+            }}
+
+            for contaminated in (True, False):
+                with self.subTest(contaminated=contaminated):
+                    request["request_id"] = "trial-contaminated" if contaminated else "trial-clean"
+                    pin = trace_root / (request["request_id"] + ".pinned-bundles") / "repo" / publisher.name
+                    command = (
+                        "sed -n '1p' " + str(pin) if contaminated
+                        else "rg pinned-bundles repos/repoground"
+                    )
+                    running = {
+                        "id": "shell", "type": "command_execution", "command": command,
+                        "status": "in_progress",
+                    }
+                    completed = {
+                        **running, "status": "completed", "exit_code": 0,
+                        "aggregated_output": "ordinary source result\n",
+                    }
+                    events = [
+                        (event("item.started", running), 1.0),
+                        (event("item.completed", completed), 1.1),
+                        (event("item.completed", {
+                            "id": "answer", "type": "agent_message", "text": answer,
+                        }), 1.2),
+                        (event("turn.completed", usage=usage), 1.3),
+                    ]
+                    raw = b"original provider trace " + str(contaminated).encode()
+                    with (
+                        mock.patch.object(runner, "_fingerprint", return_value=fingerprint),
+                        mock.patch.object(
+                            runner, "_prepare_sources", return_value=(workspace, {}),
+                        ),
+                        mock.patch.object(
+                            runner, "_manifest_evidence", return_value=evidence,
+                        ),
+                        mock.patch.object(
+                            runner, "_pin_snapshot_manifests",
+                            return_value={"repo": pin},
+                        ),
+                        mock.patch.object(runner, "_codex_argv", return_value=["codex"]),
+                        mock.patch.object(
+                            runner, "_capture",
+                            return_value=(raw, events, 0, False, started, started, 15),
+                        ),
+                        mock.patch.object(runner, "_assert_pinned_manifests"),
+                    ):
+                        receipt = runner.run(request, {"trace_root": str(trace_root)})
+
+                    self.assertEqual(receipt["usage"], {
+                        "source": "provider_reported", **usage,
+                    })
+                    self.assertEqual(receipt["trace"]["bytes"], len(raw))
+                    self.assertEqual(receipt["trace"]["sha256"], runner._digest(raw))
+                    self.assertEqual(
+                        receipt["repoground_data_use"]["shell_bundle_access_count"],
+                        int(contaminated),
+                    )
+                    if contaminated:
+                        self.assertEqual(receipt["status"], "failed")
+                        self.assertEqual(
+                            receipt["error"],
+                            {"class": "shell_bundle_data_contamination"},
+                        )
+                    else:
+                        self.assertEqual(receipt["status"], "success")
+                        self.assertIsNone(receipt["error"])
 
     def test_unpaired_tool_event_is_not_given_fake_zero_latency(self):
         item = {"id": "t", "type": "command_execution", "command": "rg foo", "exit_code": 0}
@@ -456,8 +617,16 @@ class CodexStudyRunnerTest(unittest.TestCase):
             request = {"repoground": {"repoground": bound}}
             ws = root / "worktree"
             ws.mkdir()
-            pinned = runner._pin_snapshot_manifests(request, ws)
+            pin_root = root / "private-pins"
+            pinned = runner._pin_snapshot_manifests(request, pin_root)
             target = pinned["repoground"]
+            self.assertTrue(target.is_relative_to(pin_root))
+            self.assertEqual(list(ws.iterdir()), [])
+            baseline_root = root / "git-only-pins"
+            self.assertEqual(runner._pin_snapshot_manifests(
+                {"repoground": None}, baseline_root,
+            ), {})
+            self.assertFalse(baseline_root.exists())
             self.assertEqual(target.read_bytes(), raw)
             self.assertNotEqual(source, target)
             self.assertEqual(json.loads((target.parent / "health.json").read_text())[
@@ -498,7 +667,7 @@ class CodexStudyRunnerTest(unittest.TestCase):
                     "manifest_path": str(source),
                     "manifest_sha256": hashlib.sha256(raw).hexdigest(),
                 },
-            }}, work)["repoground"]
+            }}, work / "private-pins")["repoground"]
             self.assertEqual(
                 (copied.parent / "artifacts" / "docs" / "demo.md").read_text(),
                 "nested source proof",
@@ -536,7 +705,7 @@ class CodexStudyRunnerTest(unittest.TestCase):
                         "manifest_path": str(source),
                         "manifest_sha256": hashlib.sha256(raw).hexdigest(),
                     },
-                }}, ws)["repoground"]
+                }}, ws / "private-pins")["repoground"]
             for published in (role, output_health, nested):
                 private = copied.parent / published.relative_to(pub)
                 self.assertEqual(private.read_bytes(), published.read_bytes())
@@ -571,7 +740,7 @@ class CodexStudyRunnerTest(unittest.TestCase):
                 work = ws / str(suffix)
                 work.mkdir()
                 with self.assertRaisesRegex(ValueError, "unsafe manifest"):
-                    runner._pin_snapshot_manifests(request, work)
+                    runner._pin_snapshot_manifests(request, work / "private-pins")
             (pub / "artifacts").symlink_to(root, target_is_directory=True)
             raw = json.dumps({"links": {"post_emit_health_path": "health.json"},
                               "artifacts": [{"path": "artifacts/demo.md"}]}).encode()
@@ -583,7 +752,7 @@ class CodexStudyRunnerTest(unittest.TestCase):
             work = ws / "symlink"
             work.mkdir()
             with self.assertRaisesRegex(ValueError, "unsafe"):
-                runner._pin_snapshot_manifests(request, work)
+                runner._pin_snapshot_manifests(request, work / "private-pins")
 
     def test_mcp_digest_changes_when_imported_module_changes(self):
         with tempfile.TemporaryDirectory() as directory:

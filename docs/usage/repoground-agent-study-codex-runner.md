@@ -25,17 +25,18 @@ auf stdout zurück. Der vorhandene
 - **Frische Umgebung:** Jede Anfrage benutzt eine einmalige Codex-Sitzung
   (`--ephemeral`) und einen neuen privaten Workspace. Git-Quellen werden
   von den explizit gebundenen Repositories nach dem eingefrorenen Commit
-  geklont, ohne den aktuellen HEAD als Ersatz zu verwenden.
+  geklont, ohne den aktuellen HEAD als Ersatz zu verwenden. Private
+  Bundle-Pins liegen request-spezifisch beim privaten Trace-State und nicht
+  im Agenten-Workspace; der Git-only-Arm erhält weder Kopie noch Link.
 - **Exakter MCP-Werkzeugumfang:** Mit `--repo-root` bietet der Server unter anderem `change_evidence_pack` an. Codex erhält ausschließlich die zwölf im Experiment vorgesehenen Read-Tools über `mcp_servers.<server>.enabled_tools`. Der lokale Codex-CLI-Client 0.164.0 bestätigte diese Whitelist im Konfigurations-Readback; nachträglich hinzugefügte Serverwerkzeuge sind nicht automatisch verfügbar.
 - **Unveränderliche Belege:** Die verwendeten Bundle-Manifeste, Generator-,
   Quell- und Health-Identitäten werden vor dem Providerstart geprüft.
   Danach bekommt jeder Agentenlauf eine **private Kopie der exakten
-  Manifestbytes** im frischen Workspace; referenzierte, unveränderliche
+  Manifestbytes** außerhalb des Agenten-Workspace; referenzierte, unveränderliche
   Bundle-Artefakte werden auch bei verschachtelten Relativpfaden im
-  ursprünglichen Verzeichnisaufbau eingebunden. Auf demselben Dateisystem
-  geschieht das per Hardlink, bei `EXDEV` durch eine bytegetreue private
-  Kopie mit Dateimodus `0600`. Weder Quellpfade außerhalb des Bundlebaums
-  noch Symlinks werden dafür akzeptiert.
+  ursprünglichen Verzeichnisaufbau als unabhängige private Inodes mit
+  Dateimodus `0600` kopiert. Publisher-Dateien werden nie hardgelinkt;
+  weder Quellpfade außerhalb des Bundlebaums noch Symlinks werden akzeptiert.
   Eine lokale Kopie des Post-Emit-Health-Dokuments wird zusätzlich an den
   originalen Manifest-SHA256 gebunden, weil der ursprüngliche absolute
   Publikationspfad kein Pfad zur privaten Kopie ist. Das MCP startet
@@ -44,6 +45,15 @@ auf stdout zurück. Der vorhandene
   öffentlichen Manifestpfads keinen anderen Snapshot unter derselben
   `pinned_exact`-Quittung einschleusen. Der Original-Health-Beleg
   und das ursprüngliche Bundle bleiben unverändert.
+- **Datenkanal statt MCP-Zähler:** Das Receipt weist erfolgreiche
+  SHA-gebundene MCP-Lektüre und beobachteten Shellzugriff auf exakt gebundene
+  private beziehungsweise Publisher-Bundlepfade getrennt aus. Null MCP-Calls
+  beweisen ausdrücklich nicht null RepoGround-Datenverwendung. Eine solche
+  Pfadexposition beweist für sich keine inhaltliche Lektüre, kontaminiert den
+  Messkanal aber fail-closed (`shell_bundle_data_contamination`) und kann in
+  der neuen Runner-Version keinen erfolgreichen Trial erzeugen. Normale
+  Git-Quelltexte, die RepoGround oder `pinned-bundles` nur erwähnen, lösen
+  ohne Übereinstimmung mit einem gebundenen Laufzeitpfad keinen Fund aus.
 - **MCP-Ressourcenmetadaten:** Die Codex-eigenen Aufrufe
   `list_mcp_resources` und `list_mcp_resource_templates` dürfen
   nichtleere Ressourcenlisten liefern. Diese Aufrufe bleiben im
@@ -66,6 +76,10 @@ Einzellatenz **0 ms** betragen, obwohl das Werkzeug gearbeitet hat.
 Diese Toolzeiten sind nur Beobachtungs-/Untergrenzen, nicht
 präzise providerinterne Werkzeuglaufzeiten. Sie dürfen nicht als
 Kausalnachweis für die End-to-End-Dauer verwendet werden.
+Ebenso stellt der Read-only-Sandboxmodus bei Prozessen mit derselben UID keine
+belegte harte Dateisystemisolation her. Deshalb kennzeichnet das Receipt die
+reine MCP-Kausalität als nicht etabliert, selbst wenn kein Shell-Bundlezugriff
+im Trace beobachtet wurde.
 
 ## Vorbedingungen
 

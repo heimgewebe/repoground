@@ -392,17 +392,16 @@ def _pin_bundle_manifest(bound: dict[str, Any], directory: Path) -> Path:
 
 
 def _pin_snapshot_manifests(
-    req: dict[str, Any], workspace: Path,
+    req: dict[str, Any], root: Path,
 ) -> dict[str, Path]:
-    """Pin exact manifest bytes outside the publisher's mutable path.
+    """Pin exact manifest bytes outside publisher and agent workspace.
 
     The producer can atomically replace its source manifest without changing
-    any consumer-visible bytes used in this fresh, read-only trial workspace.
+    any consumer-visible bytes used by the private MCP server.
     """
     manifests = req.get("repoground") or {}
     if not manifests:
         return {}
-    root = workspace / "pinned-bundles"
     root.mkdir(mode=0o700, exist_ok=False)
     return {
         repo: _pin_bundle_manifest(bound, root / repo)
@@ -428,7 +427,11 @@ def _private_manifest_evidence(
     if set(evidence) != set(pinned):
         raise ValueError("private manifest inventory mismatch")
     return {
-        repo: {**bound, "_manifest_path": str(pinned[repo])}
+        repo: {
+            **bound,
+            "_publisher_manifest_path": bound["_manifest_path"],
+            "_manifest_path": str(pinned[repo]),
+        }
         for repo, bound in evidence.items()
     }
 
@@ -642,18 +645,63 @@ def _builtin_empty_mcp(item: dict[str, Any]) -> bool:
     return tool in expected and payload == expected[tool]
 
 
+def _shell_bundle_access(
+    item: dict[str, Any], expected: dict[str, dict[str, Any]],
+    workspace: Path | None,
+) -> list[dict[str, str]]:
+    """Classify shell commands that name an exact bound bundle location.
+
+    Exact runtime paths avoid treating ordinary checked-out source text that
+    merely discusses RepoGround or pinned bundles as evidence consumption.
+    This is trace classification, not a claim of same-UID shell isolation.
+    """
+    command = str(item.get("command") or "")
+    observed = command + "\n" + str(item.get("aggregated_output") or "")
+    accesses: list[dict[str, str]] = []
+    for repo, evidence in sorted(expected.items()):
+        for key, location in (
+            ("private_pin", evidence.get("_manifest_path")),
+            ("publisher", evidence.get("_publisher_manifest_path")),
+        ):
+            if not isinstance(location, str):
+                continue
+            manifest = Path(location)
+            candidates = {str(manifest), str(manifest.parent)}
+            if workspace is not None:
+                for path in (manifest, manifest.parent):
+                    try:
+                        relative = path.relative_to(workspace)
+                    except ValueError:
+                        continue
+                    if relative.parts:
+                        candidates.add(relative.as_posix())
+            if any(candidate and candidate in observed for candidate in candidates):
+                accesses.append({
+                    "repo": repo, "target": key,
+                    "classification": "observed_bound_bundle_shell_access",
+                })
+                break
+    return accesses
+
+
 def _command_tool_receipt(
     item: dict[str, Any], sequence: int, duration_ms: int,
+    expected: dict[str, dict[str, Any]] | None = None,
+    workspace: Path | None = None,
 ) -> dict[str, Any]:
     command = str(item.get("command") or "")
     name = "codex_git_command" if re.search(r"\bgit\b", command) else "codex_file_command"
     successful = item.get("status") == "completed" and item.get("exit_code") == 0
-    return {
+    receipt = {
         "sequence": sequence, "name": name,
         "status": "success" if successful else "failed",
         "duration_ms": duration_ms, "input_bytes": len(command.encode("utf-8")),
         "output_bytes": len(str(item.get("aggregated_output") or "").encode("utf-8")),
     }
+    accesses = _shell_bundle_access(item, expected or {}, workspace)
+    if accesses:
+        receipt["repoground_data_access"] = accesses
+    return receipt
 
 
 def _mcp_evidence_available(tool: str, payload: Any) -> bool:
@@ -925,7 +973,8 @@ def _measured_tool_item(
 
 
 def _tool_receipts(events: list[tuple[dict[str, Any], float]],
-                   expected: dict[str, dict[str, Any]]) -> tuple[list[dict[str, Any]], str]:
+                   expected: dict[str, dict[str, Any]],
+                   workspace: Path | None = None) -> tuple[list[dict[str, Any]], str]:
     starts: dict[str, float] = {}
     calls: list[dict[str, Any]] = []
     last_answer = ""
@@ -948,13 +997,47 @@ def _tool_receipts(events: list[tuple[dict[str, Any], float]],
             raise ValueError("unmeasured tool start/end pair")
         duration = round((timestamp - starts[item_id]) * 1000)
         if item["type"] == "command_execution":
-            call = _command_tool_receipt(item, len(calls) + 1, duration)
+            call = _command_tool_receipt(
+                item, len(calls) + 1, duration, expected, workspace,
+            )
         else:
             call = _mcp_tool_receipt(item, len(calls) + 1, duration, expected)
         calls.append(call)
         if len(calls) > MAX_TOOL_CALLS:
             raise ValueError("too many observed tool calls")
     return calls, last_answer
+
+
+def _repoground_data_use(
+    calls: list[dict[str, Any]], *, treatment: bool,
+) -> dict[str, Any]:
+    """Report verified reads and path exposure without equating the two."""
+    mcp_calls = [call for call in calls if call["name"].startswith("repoground_")]
+    mcp_reads = [call for call in mcp_calls if "repoground_evidence" in call]
+    shell_accesses = sum(
+        len(call.get("repoground_data_access", [])) for call in calls
+    )
+    channels = []
+    if mcp_reads:
+        channels.append("mcp")
+    if shell_accesses:
+        channels.append("shell")
+    return {
+        "classification": (
+            "observed_repoground_data_use" if mcp_reads
+            else "observed_bound_bundle_path_exposure" if shell_accesses
+            else "no_bound_repoground_data_use_observed"
+        ),
+        "observed_channels": channels,
+        "mcp_call_count": len(mcp_calls),
+        "verified_mcp_read_count": len(mcp_reads),
+        "shell_bundle_access_count": shell_accesses,
+        "zero_mcp_calls_proves_zero_repoground_data_use": False,
+        "causal_attribution": (
+            "not_established_same_uid_shell_not_os_isolated" if treatment
+            else "runner_exposed_no_mcp_or_private_bundle_pin"
+        ),
+    }
 
 def _valid_answer_path(raw: Any, repositories: dict[str, Any]) -> bool:
     if not isinstance(raw, dict) or set(raw) != {"repo", "path"}:
@@ -1058,14 +1141,17 @@ def run(req: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
     _validate_request(req, fingerprint)
     workspace, sources = _prepare_sources(req, cfg)
     manifest_evidence = _manifest_evidence(req, sources)
-    pinned = _pin_snapshot_manifests(req, workspace)
-    argv = _codex_argv(req, cfg, workspace, sources, pinned)
     trace_root = Path(cfg["trace_root"])
     _private_dir(trace_root)
     trace_path = trace_root / (req["request_id"] + ".jsonl")
     stderr_path = trace_root / (req["request_id"] + ".stderr.txt")
     if trace_path.exists() or stderr_path.exists():
         raise ValueError("refusing prior trial trace or stderr")
+    pin_root = trace_root / (req["request_id"] + ".pinned-bundles")
+    if pin_root.resolve().is_relative_to(workspace.resolve()):
+        raise ValueError("private bundle pins must be outside agent workspace")
+    pinned = _pin_snapshot_manifests(req, pin_root)
+    argv = _codex_argv(req, cfg, workspace, sources, pinned)
     raw, events, exitcode, timeout, started, ended, duration = _capture(
         argv, workspace, stderr_path, trace_path,
     )
@@ -1077,17 +1163,21 @@ def run(req: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
     if usage is None:
         # A missing provider receipt is not a claim of zero token consumption.
         raise RuntimeError("Codex never supplied valid provider usage")
-    calls, final_answer = _tool_receipts(events, manifest_evidence)
+    calls, final_answer = _tool_receipts(events, manifest_evidence, workspace)
+    data_use = _repoground_data_use(calls, treatment=bool(req.get("repoground")))
     answer, parsed = _answer(final_answer, req["repositories"], req.get("citation_commits"))
     statuses = [e.get("type") for e, _at in events]
     intervention_used = _mandatory_source_intervention(calls)
+    shell_contaminated = data_use["shell_bundle_access_count"] > 0
     success = (
         exitcode == 0 and not timeout and "turn.completed" in statuses
         and parsed
         and (req["condition"] != "repoground_mandatory" or intervention_used)
+        and not shell_contaminated
     )
     error = None if success else {"class": (
-        "timeout" if timeout else "missing_mandatory_source_intervention"
+        "shell_bundle_data_contamination" if shell_contaminated
+        else "timeout" if timeout else "missing_mandatory_source_intervention"
         if req["condition"] == "repoground_mandatory" and not intervention_used
         else "invalid_agent_answer" if not parsed else "provider_failed"
     )}
@@ -1097,9 +1187,11 @@ def run(req: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
         "condition": req["condition"], "session_id": req["session_id"],
         "workspace_id": req["workspace_id"], "runner": req["runner"],
         "execution_context": req["execution_context"],
-        "status": "success" if success else "timeout" if timeout else "failed",
+        "status": "success" if success else "failed" if shell_contaminated
+        else "timeout" if timeout else "failed",
         "started_at": started.isoformat(), "ended_at": ended.isoformat(),
         "duration_ms": duration, "usage": usage, "tool_calls": calls,
+        "repoground_data_use": data_use,
         "answer": answer,
         "trace": {"path": trace_path.name, "bytes": len(raw), "sha256": _digest(raw)},
         "billed_cost": None, "resources": None, "error": error,
