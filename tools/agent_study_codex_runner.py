@@ -953,6 +953,29 @@ def _mandatory_source_intervention(calls: list[dict[str, Any]]) -> bool:
     )
 
 
+def _failed_unknown_client_discovery(item: dict[str, Any]) -> bool:
+    """A failed Codex resources/list probe supplied no server evidence.
+
+    A wrong server name is a client diagnostic, never a successful resource
+    retrieval. Admit only the exact observed no-result error envelope.
+    """
+    server = item.get("server")
+    arguments = item.get("arguments")
+    error = item.get("error")
+    return (
+        item.get("type") == "mcp_tool_call"
+        and item.get("tool") == "list_mcp_resources"
+        and item.get("status") == "failed"
+        and item.get("result") is None
+        and isinstance(server, str) and bool(server)
+        and isinstance(arguments, dict) and arguments == {"server": server}
+        and isinstance(error, dict) and set(error) == {"message"}
+        and error["message"] == (
+            "resources/list failed: unknown MCP server '" + server + "'"
+        )
+    )
+
+
 def _measured_tool_item(
     item: dict[str, Any], *, baseline: bool = False,
 ) -> bool:
@@ -969,6 +992,11 @@ def _measured_tool_item(
             ):
                 raise ValueError("nonempty or failed MCP discovery in git_only")
             return False
+    if _failed_unknown_client_discovery(item):
+        # The original provider JSONL retains the failed probe; it did not
+        # expose a registered tool or source bytes, so it cannot taint a valid
+        # answer or count as a successful RepoGround retrieval.
+        return False
     return True
 
 
