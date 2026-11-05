@@ -175,6 +175,49 @@
             "type": "integer",
             "minimum": 0
           },
+          "source_content_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "resource_role": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+          },
+          "resource_content_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "repoground_data_access": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "repo",
+                "target",
+                "classification"
+              ],
+              "properties": {
+                "repo": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "target": {
+                  "enum": [
+                    "private_pin",
+                    "publisher"
+                  ]
+                },
+                "classification": {
+                  "const": "observed_bound_bundle_shell_access"
+                }
+              }
+            }
+          },
           "repoground_evidence": {
             "type": "object",
             "additionalProperties": false,
@@ -214,6 +257,59 @@
               }
             }
           }
+        }
+      }
+    },
+    "repoground_data_use": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "classification",
+        "observed_channels",
+        "mcp_call_count",
+        "verified_mcp_read_count",
+        "shell_bundle_access_count",
+        "zero_mcp_calls_proves_zero_repoground_data_use",
+        "causal_attribution"
+      ],
+      "properties": {
+        "classification": {
+          "enum": [
+            "observed_repoground_data_use",
+            "observed_bound_bundle_path_exposure",
+            "no_bound_repoground_data_use_observed"
+          ]
+        },
+        "observed_channels": {
+          "type": "array",
+          "maxItems": 2,
+          "items": {
+            "enum": [
+              "mcp",
+              "shell"
+            ]
+          }
+        },
+        "mcp_call_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "verified_mcp_read_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "shell_bundle_access_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "zero_mcp_calls_proves_zero_repoground_data_use": {
+          "const": false
+        },
+        "causal_attribution": {
+          "enum": [
+            "not_established_same_uid_shell_not_os_isolated",
+            "runner_exposed_no_mcp_or_private_bundle_pin"
+          ]
         }
       }
     },
