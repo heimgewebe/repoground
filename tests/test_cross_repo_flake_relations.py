@@ -669,6 +669,56 @@ class FlakeRelationsTest(TestCase):
                 result["gaps"],
             )
 
+    def test_assert_guarded_returned_host_modules_still_bind_nixer(self):
+        # Real Heim-PC outputs are "let ... in assert lockAuthorityValid
+        # || throw ...; { nixosConfigurations... };" rather than "in {".
+        for returned in (
+            'assert lockAuthorityValid || throw "drift"; { inherit hostModules; };',
+            'assert lockAuthorityValid || throw "drift"; '
+            '{ nixosConfigurations.heim-pc = { modules = hostModules ++ [ ]; }; };',
+        ):
+            with self.subTest(returned=returned), tempfile.TemporaryDirectory() as tmp:
+                src, _sha, target, t_sha, pin = fixture(Path(tmp))
+                sha = rewrite_committed(
+                    src, "nixos/system/flake.nix",
+                    "in { inherit hostModules; };", "in " + returned,
+                )
+                result = flake_revision_relations(
+                    src, sha, source_repo="heimgewebe/heim-pc",
+                    targets={"heimgewebe/nixer": (target, pin)},
+                )
+                self.assertEqual(result["status"], "ok")
+                self.assertEqual(result["gaps"], [])
+                self.assertEqual(
+                    {edge["relation_type"] for edge in result["relations"]},
+                    {"flake_pinned_input", "nixos_module_binding",
+                     "nixos_local_module_inclusion", "nixos_service_declaration"},
+                )
+
+    def test_assert_guard_must_not_infer_unused_or_ambiguous_outputs(self):
+        # The returned attrset must really use hostModules. A guard alone
+        # does not authorize any Nixer module binding.
+        for returned in (
+            "assert proof; { packages = {}; };",
+            "assert proof; assert other; { inherit hostModules; };",
+            "assert proof ({ nested = true; }); { inherit hostModules; };",
+        ):
+            with self.subTest(returned=returned), tempfile.TemporaryDirectory() as tmp:
+                src, _sha, target, t_sha, pin = fixture(Path(tmp))
+                sha = rewrite_committed(
+                    src, "nixos/system/flake.nix",
+                    "in { inherit hostModules; };", "in " + returned,
+                )
+                result = flake_revision_relations(
+                    src, sha, source_repo="heimgewebe/heim-pc",
+                    targets={"heimgewebe/nixer": (target, pin)},
+                )
+                self.assertEqual(
+                    [edge["relation_type"] for edge in result["relations"]],
+                    ["flake_pinned_input"],
+                )
+                self.assertIn("host_modules_output_unverified:nixer", result["gaps"])
+
     def test_unused_host_modules_binding_not_in_returned_outputs(self):
         with tempfile.TemporaryDirectory() as tmp:
             src, sha, target, t_sha, _pin = fixture(Path(tmp))
