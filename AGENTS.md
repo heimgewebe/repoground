@@ -40,8 +40,8 @@ Do not modify generated docs (`docs/_generated/*`) or commit local runtime artif
 For coding, review, or repository-maintenance work, use this order:
 
 1. **Bind live state:** read the current Git head, dirty state, open PRs, CI, and active worktree/lease ownership.
-2. **Choose the smallest source:** use Git and direct file reads for ordinary code, diff and test questions. Only seek a bounded RepoGround profile when published snapshot status, historical provenance or cross-repository S1 evidence could change the answer.
-3. **Read and bind evidence when relevant:** compare source/revision and SHA-256 of the *bundle manifest*, declared *artifact* and embedded *pack/evidence* separately. A published S1 relation proves only its source-bound declaration, not a built or running service. `canonical_md` remains source-content truth.
+2. **Choose a task profile only when needed:** use Git and direct file reads for ordinary code, diff and test questions. Only seek a bounded RepoGround profile when published snapshot status, historical provenance or cross-repository S1 evidence could change the answer.
+3. **Read RepoGround evidence only when relevant:** compare source/revision and SHA-256 of the *bundle manifest*, declared *artifact* and embedded *pack/evidence* separately. A published S1 relation proves only its source-bound declaration, not a built or running service. `canonical_md` remains source-content truth.
 4. **Plan in the agent:** the coding agent decides the change and states what it will and will not mutate. RepoGround does not produce review verdicts or autonomous patch decisions.
 5. **Execute through Grabowski:** perform writes in an owner-bound isolated checkout. Never reset or reuse foreign dirty work, leases, or processes.
 6. **Read back reality:** re-read Git, CI, and relevant runtime state. A failed or ambiguous mutation is not treated as completed until authoritative readback proves it.
