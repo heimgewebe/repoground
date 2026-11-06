@@ -40,35 +40,50 @@ Do not modify generated docs (`docs/_generated/*`) or commit local runtime artif
 For coding, review, or repository-maintenance work, use this order:
 
 1. **Bind live state:** read the current Git head, dirty state, open PRs, CI, and active worktree/lease ownership.
-2. **Choose a task profile:** select the smallest RepoGround profile that matches the question or change boundary.
-3. **Read RepoGround evidence:** use bounded RepoGround context and citations for navigation; `canonical_md` remains the only content truth.
+2. **Choose the smallest source:** use Git and direct file reads for ordinary code, diff and test questions. Only seek a bounded RepoGround profile when published snapshot status, historical provenance or cross-repository S1 evidence could change the answer.
+3. **Read and bind evidence when relevant:** compare source/revision and SHA-256 of the *bundle manifest*, declared *artifact* and embedded *pack/evidence* separately. A published S1 relation proves only its source-bound declaration, not a built or running service. `canonical_md` remains source-content truth.
 4. **Plan in the agent:** the coding agent decides the change and states what it will and will not mutate. RepoGround does not produce review verdicts or autonomous patch decisions.
 5. **Execute through Grabowski:** perform writes in an owner-bound isolated checkout. Never reset or reuse foreign dirty work, leases, or processes.
 6. **Read back reality:** re-read Git, CI, and relevant runtime state. A failed or ambiguous mutation is not treated as completed until authoritative readback proves it.
 
 Stop without mutation when the current revision, task/claim, lease ownership, or required evidence cannot be established. A RepoGround context pass does not establish correctness, test sufficiency, merge readiness, runtime health, or permission to deploy.
 
-## Using RepoGround as an actual agent tool (phased adoption)
+## Using RepoGround as an actual agent tool (selective, evidence-based)
 
-The [binding massive expansion program](docs/roadmap/repoground-massive-expansion-program.md)
-prioritizes building the temporal, cross-repository change-intelligence system **before** the broad end-to-end usefulness benchmark. The earlier preference for proving general agent benefit before feature expansion has been superseded by the user's explicit decision on 2026-10-27. The existing [vision and agent adoption plan](docs/roadmap/repoground-vision-and-agent-adoption.md) remains useful for consumer correctness, but **its former implementation ordering is no longer a gate**. Three non-overlapping [execution briefs](docs/roadmap/repoground-massive-expansion-program.md#5-genau-drei-unabhängige-ausführungs-threads) can be carried out in parallel by Grabowski-owned work lanes.
-For suitable code navigation, PR review, test selection, change-impact or source-grounding tasks:
+**Current operational decision (2026-11-06):** RepoGround is productive but **optional**.
+Two separate, frozen, real Codex A/C task pairs showed different uses: the
+ordinary Nixer source-diff case had **zero MCP calls** and no attributable benefit;
+the published Nixer S1-evidence case had nine MCP calls, five byte-/SHA-verified
+content reads and an otherwise Git-inaccessible publication-status answer.
+That single positive pair took 27.13% less wall time and 35.82% fewer input
+tokens; neither speedup nor broad agent quality is established causally or
+statistically. The 2026-10-27 [mass-expansion program](docs/roadmap/repoground-massive-expansion-program.md)
+remains historical planning, **not a standing mandate** to expand features or
+require RepoGround before ordinary Git work. No new global adoption gate.
 
-1. Bind the actual repository revision and worktree state from Git. Check that a unique,
-   healthy and relevant RepoGround publication and read-only tool are **currently** available.
-   Do not infer a live bundle from the presence of an MCP config file or old docs.
-2. When available, prefer bounded task-profile retrieval or symbol/range tools for relevant
-   evidence and carry their precise source/revision into the task. Do not mistake a
-   derived navigation result for canonical content or current runtime truth.
-3. When missing, stale, ambiguous, or forbidden, explicitly mark RepoGround unavailable
-   and use normal Git, file-search and required primary-source checks. Optional retrieval
-   unavailability must not invent a new global stop gate or weaken an existing safety gate.
-4. For pilot evaluation, distinguish a **real tool invocation and useful evidence** from
-   "tool connected" or an agent's self-report. Compare end-to-end coding outcomes and costs
-   with the normal non-RepoGround workflow. Avoid snapshot-freshness-only self-benchmarks.
-5. Do not assume this repo's AGENTS.md configures Claude, Codex, or Grabowski elsewhere.
-   Their host/repository consumers require their own bounded, reviewed integration PRs
-   with actual readback receipts.
+1. For ordinary code questions, diffs, local symbol inspection, basic PR review
+   and test selection, **start with Git and bounded direct source reads**.
+   Do not fetch RepoGround solely because an MCP tool is connected.
+2. For questions whose answer depends on a *published* bundle, its freshness,
+   manifest/artefact hashes, explicit S1 cross-repository relationships or
+   evidence gaps, use the smallest healthy, revision-bound RepoGround reader.
+   Check the original manifest and the referenced artifact's exact hash; keep
+   `manifest_sha256`, the role's `artifact.sha256`, `pack_sha256` and
+   `evidence_sha256` distinct. A missing publication is **unknown**, not
+   proof of a missing source dependency.
+3. Treat S1 Flake declarations as source-bound facts only. Verify source Git
+   blobs when they matter; separately inspect Nix evaluation, built closure,
+   active generation and real service status before any runtime assertion.
+   Read-only resource metadata or unverified MCP content does not establish
+   verified artifact-byte use; do not label that automatically a transport
+   failure. Never invent a runtime dependency from a static relation.
+4. When RepoGround is missing, stale, ambiguous or forbidden, continue via
+   Git and relevant primary sources. Do not add stop gates, extra releases or
+   repeated trials merely to satisfy retrieval. Do not generalize a one-pair
+   descriptive performance difference.
+5. This repository's instructions do not configure Claude, Codex or Grabowski
+   in other repositories. Any separate consumer integration needs its own
+   narrowly scoped change and live readback.
 
 This remains a non-agentic, deterministic read surface. RepoGround does not approve
 patches, tests, merges, releases, or deployments.

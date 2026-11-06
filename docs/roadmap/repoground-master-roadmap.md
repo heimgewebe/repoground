@@ -9,18 +9,52 @@ Leitlinien:
 - Keine Implementierung in diesem PR.
 - Keine Blaupausen-Megafusion.
 
-## Strategische Anschlussplanung ab 27.10.2026 – massiver Ausbau beschlossen
+## Operative Nutzwertentscheidung vom 06.11.2026 (aktuell)
 
-**Verbindlicher Vorrang:** Das [RepoGround-Massivausbauprogramm](repoground-massive-expansion-program.md) ersetzt die bisherige Reihenfolge „erst allgemeiner Nutzennachweis, danach breiter Funktionsausbau“. **Zuerst werden** der deterministische Struktur- und Veränderungsgraph, revisionsgebundene technische Geschichte, echte repositoryübergreifende Beziehungen sowie ein nutzbares Agenten-/Ereignisprodukt in drei unabhängigen Arbeitssträngen substanziell ausgebaut. **Danach** wird der systemweite Mehrwert durch einen breiten Aufgabenvergleich bewertet.
+Der Generator `028e1453a794c665fcb2c144afaf4f5918eda813` ist produktiv;
+der geprüfte Heim-PC-Snapshot `2c0f7724934f6e15cab99325f3dd050774a28335`
+enthält fünf revisionsgebundene Nixer-S1-Relationen ohne Lücken.
+SHA-geprüfte MCP-Lektüre belegt diese publizierte Quellenbeziehung,
+**keine** aktivierte NixOS-Generation oder laufenden Dienste.
 
-Die drei unmittelbar ausführbaren Arbeitspakete sind:
+Zwei getrennte reale Codex-A/C-Einzelfallvergleiche:
+- **Normaler Nixer-Quelldiff:** RepoGround optional, aber null MCP-Aufrufe;
+  kein Zusatznutzen nachgewiesen.
+- **Nixer-S1-Publikationsbeleg:** neun MCP-Aufrufe, fünf SHA-verifizierte
+  Inhaltsreads. Git-only musste den Publikationsstatus unbekannt lassen,
+  während der optionale Arm fünf S1-Beziehungen belegte. Er benötigte
+  im Einzelpaar 27,13 % weniger Zeit und 35,82 % weniger Eingabetokens.
+  Diese Differenzen beweisen **keinen kausalen oder allgemeinen Vorteil**.
+  Die Modellantwort verwechselte den Artefakt- mit dem Manifest-SHA.
+  Unverifizierte Inhaltsreads sind keine belegten Serverfehler.
+
+Private, unveränderte Ergebnisberichte (SHA-256):
+`412f9fc09bdd7585c8916c6a457723ac17d8b61b16596b7425ff2644e3948bd1`
+(Quelldiff),
+`dbf3c369761e924a4fdff49a81a8e30624be6a00eae85bf230d07a7fbd250737`
+(Publikationsfall).
+
+**Operative Auswahl:** Git für gewöhnliche Codefragen; RepoGround
+**optional** bei publizierter Snapshot-/Manifest-Provenienz,
+revisionsgebundenen S1-Beziehungen und Evidenzlücken. Kein genereller
+Pflichtabruf, keine zusätzliche Architektur und keine Ausbaupflicht ohne
+konkreten, überprüfbaren Nutzen. Die Planung vom Oktober bleibt eine
+historische Referenz, keine neue Schreibfreigabe.
+
+---
+
+## Strategische Anschlussplanung ab 27.10.2026 – historischer Beschluss
+
+**Historische Festlegung vom 27.10.2026, durch die aktuelle Nutzwertentscheidung eingeschränkt:** Das [RepoGround-Massivausbauprogramm](repoground-massive-expansion-program.md) ersetzt die bisherige Reihenfolge „erst allgemeiner Nutzennachweis, danach breiter Funktionsausbau“. **Zuerst werden** der deterministische Struktur- und Veränderungsgraph, revisionsgebundene technische Geschichte, echte repositoryübergreifende Beziehungen sowie ein nutzbares Agenten-/Ereignisprodukt in drei unabhängigen Arbeitssträngen substanziell ausgebaut. **Danach** wird der systemweite Mehrwert durch einen breiten Aufgabenvergleich bewertet.
+
+Die drei damals vorgesehenen Arbeitspakete waren:
 - [Struktur-/Veränderungskern](repoground-expansion-thread-1-graph.md)
 - [Föderation und Zeitgeschichte](repoground-expansion-thread-2-federation-time.md)
 - [Agentenprodukt und Ereignisfluss](repoground-expansion-thread-3-consumers.md)
 
 **Operativer P1-Querschnitt:** [Merge-to-Snapshot-Konvergenz](repoground-snapshot-convergence-plan.md) priorisiert schnelle, ressourcenschonende Aktualisierung nach `main`-Änderungen und einen nutzbaren Agenten-Fallback. Die vorhandene Fleet-/Grabowski-Infrastruktur wird repariert statt ersetzt; der strategische Ausbaufahrplan wird dadurch nicht um eine weitere globale Freigabesperre erweitert.
 
-Der frühere [Vision- und Agentenadoptionsplan](repoground-vision-and-agent-adoption.md) bleibt als fachlicher Referenzplan gültig, **seine frühere vorgelagerte Benchmark-/Adoptionssperre gilt nicht mehr**. Fehlende vollständige 20er-A/B-Messung blockiert keine unabhängige Implementierung. Dagegen bleiben konkrete Git-/Lease-/CI-/Review-/Sicherheits-/Versionsgates vor einer jeweiligen Integration verbindlich.
+Der frühere [Vision- und Agentenadoptionsplan](repoground-vision-and-agent-adoption.md) bleibt als fachlicher Referenzplan gültig. Die seinerzeit aufgehobene starre 20er-Benchmark-/Adoptionssperre wird nicht wieder eingeführt; dies begründet aber keine allgemeine Ausbaupflicht. Maßgeblich sind die aktuelle operative Nutzwertentscheidung oben und konkret belegter Bedarf. Dagegen bleiben konkrete Git-/Lease-/CI-/Review-/Sicherheits-/Versionsgates vor einer jeweiligen Integration verbindlich.
 
 Die Master-Roadmap ist weder alternative Taskstatusquelle noch Implementierungsbeleg; aktuelle Primärzustände, eigentümergebundene Grabowski-Writer-Lanes und kanonische Task-/PR-Belege sind weiter notwendig.
 
