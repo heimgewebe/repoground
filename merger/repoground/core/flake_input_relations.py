@@ -184,7 +184,11 @@ def _let_body_opener(syntax: str, start: int) -> int:
         nested += 1 if token.group() == "let" else -1
         if nested == 0:
             after = start + token.end()
-            matched = re.match(r"\s*\{", syntax[after:])
+            # An output can be guarded by exactly one static Nix assert.
+            # Refuse nested attrsets, semicolons or ambiguous expressions.
+            matched = re.match(
+                r"\s*(?:assert\s+[^;{}]{1,4096};\s*)?\{", syntax[after:]
+            )
             return after + matched.end() - 1 if matched else -1
         if nested < 0:
             break
