@@ -156,6 +156,27 @@ def test_mcp_stdio_lists_read_tools_and_hides_snapshot_create_by_default(tmp_pat
         "get_flake_relation_evidence",
     }
 
+def test_mcp_stdio_guides_exact_bundle_selection_and_bounded_s1_counts(tmp_path):
+    server = RepoGroundMcpStdioServer(bundle_root=tmp_path)
+    _initialize(server)
+    tools = {tool["name"]: tool for tool in _tools(server)}
+
+    callers = tools["get_callers"]
+    properties = callers["inputSchema"]["properties"]
+    assert callers["inputSchema"]["required"] == ["name"]
+    assert "owner/repo" in properties["repo"]["description"]
+    assert "bundle_discover" in properties["stem"]["description"]
+    assert "Git commit ID" in properties["stem"]["description"]
+    assert "Exclusive" in properties["bundle_manifest"]["description"]
+    assert "k=1" in callers["description"]
+    assert "total_caller_count" in callers["description"]
+    assert "total_call_site_count" in callers["description"]
+    assert "S0" in callers["description"]
+    assert "get_callers(name,k=1)" in tools["get_structure_neighborhood"]["description"]
+    assert "repo/stem" in tools["get_structure_neighborhood"]["description"]
+    assert "Git source lookups" in tools["bundle_discover"]["description"]
+    assert callers["annotations"]["readOnlyHint"] is True
+
 
 def test_snapshot_create_enable_requires_explicit_repo_root(tmp_path):
     with pytest.raises(ValueError, match="requires an explicit --repo-root"):
