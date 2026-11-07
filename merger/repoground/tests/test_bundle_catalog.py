@@ -607,6 +607,81 @@ def test_catalog_rejects_open_time_escape_exchange_and_restore_before_read(
     )
     assert str(external.resolve()) not in json.dumps(catalog, sort_keys=True)
 
+def test_publication_stem_alias_selects_same_healthy_merge_manifest(tmp_path):
+    publication_stem = "heimgewebe__repoground__main--" + "a" * 40 + "-max-261107-1928"
+    manifest_stem = publication_stem + "_merge"
+    manifest = _write_bundle(
+        tmp_path,
+        directory="heimgewebe__repoground/main/publication",
+        stem=manifest_stem,
+        created_at="2026-11-07T19:28:50Z",
+        run_id="source-bound-publication",
+    )
+    catalog = discover_bundle_catalog(tmp_path)
+    assert [item["stem"] for item in catalog["candidates"]] == [manifest_stem]
+
+    for requested_stem in (manifest_stem, publication_stem):
+        selection = select_bundle_manifest(
+            tmp_path, repo="heimgewebe/repoground", stem=requested_stem
+        )
+        assert selection["status"] == "available"
+        assert selection["requested_stem"] == requested_stem
+        assert selection["selected"]["stem"] == manifest_stem
+        assert selection["selected"]["manifest_path"] == str(manifest.resolve())
+        assert selection["match_count"] == 1
+
+    for wrong_stem in (publication_stem[:-1], "a" * 40, manifest_stem + "_merge"):
+        assert select_bundle_manifest(
+            tmp_path, repo="heimgewebe/repoground", stem=wrong_stem
+        )["status"] == "missing"
+    assert select_bundle_manifest(
+        tmp_path, repo="other-owner/repoground", stem=publication_stem
+    )["status"] == "missing"
+
+
+def test_publication_stem_alias_does_not_bypass_unhealthy_exact_match(tmp_path):
+    _write_bundle(
+        tmp_path,
+        directory="repo/main/exact",
+        stem="same",
+        created_at="2026-11-07T19:00:00Z",
+        run_id="unhealthy-exact",
+        output_status="fail",
+    )
+    healthy = _write_bundle(
+        tmp_path,
+        directory="repo/main/alias",
+        stem="same_merge",
+        created_at="2026-11-07T20:00:00Z",
+        run_id="healthy-alias",
+    )
+
+    selected = select_bundle_manifest(
+        tmp_path, repo="heimgewebe/repoground", stem="same"
+    )
+    assert selected["status"] == "missing"
+    assert selected["reason"] == "no_matching_healthy_bundle"
+    assert select_bundle_manifest(
+        tmp_path, repo="heimgewebe/repoground", stem="same_merge"
+    )["selected"]["manifest_path"] == str(healthy.resolve())
+
+
+def test_publication_stem_alias_preserves_newest_identity_ambiguity(tmp_path):
+    for directory in ("repo/main/public-a", "repo/main/public-b"):
+        _write_bundle(
+            tmp_path,
+            directory=directory,
+            stem="duplicate_merge",
+            created_at="2026-11-07T19:28:50Z",
+            run_id="same-publication",
+        )
+    selection = select_bundle_manifest(
+        tmp_path, repo="heimgewebe/repoground", stem="duplicate"
+    )
+    assert selection["status"] == "ambiguous"
+    assert selection["reason"] == "newest_bundle_identity_ambiguous"
+    assert selection["selected"] is None
+
 
 def test_selector_skips_newer_unhealthy_bundle(tmp_path):
     healthy = _write_bundle(

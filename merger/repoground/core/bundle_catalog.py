@@ -1112,17 +1112,32 @@ def select_bundle_manifest(
     if stem is not None and (not isinstance(stem, str) or not stem.strip()):
         raise BundleCatalogError("stem must be null or a non-empty string")
 
-    identity_matches = []
-    for candidate in catalog["candidates"]:
-        if stem is not None and candidate["stem"] != stem:
-            continue
-        if not _candidate_matches_repo(
+    repo_matches = [
+        candidate
+        for candidate in catalog["candidates"]
+        if _candidate_matches_repo(
             candidate, requested_repo, requested_repo_qualified
-        ):
-            continue
-        if candidate.get("timestamp_status") != "valid":
-            continue
-        identity_matches.append(candidate)
+        )
+    ]
+    if stem is not None:
+        exact_matches = [
+            candidate for candidate in repo_matches if candidate["stem"] == stem
+        ]
+        if exact_matches:
+            repo_matches = exact_matches
+        else:
+            # Published stems omit the "_merge" artifact suffix. Resolve this
+            # one exact alias only after repository filtering; never replace
+            # a present but unhealthy/invalid exact match with another bundle.
+            alias = f"{stem}_merge" if not stem.endswith("_merge") else None
+            repo_matches = [
+                candidate for candidate in repo_matches if candidate["stem"] == alias
+            ]
+    identity_matches = [
+        candidate
+        for candidate in repo_matches
+        if candidate.get("timestamp_status") == "valid"
+    ]
 
     if requested_repo is not None and not requested_repo_qualified:
         identity_groups = _short_repo_identity_groups(identity_matches, requested_repo)
