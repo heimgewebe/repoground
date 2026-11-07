@@ -75,7 +75,7 @@ size, path, and integrity checks.
 The MCP tools available by default are generated from the runtime registry:
 
 <!-- repoground-mcp-tools:start -->
-- `bundle_discover`: List healthy existing bundles or select one by repository identity/stem.
+- `bundle_discover`: Discover existing healthy publication stems when they are unknown. Do not refresh or use for routine Git source lookups.
 - `snapshot_status`: Read health, availability and freshness for one selected existing bundle.
 - `ask_context`: Build a cited context pack from one existing RepoGround bundle.
 - `query_existing_index`: Route exact symbol-definition questions to the symbol index; otherwise use exact AND and labelled OR fallback with bounded cited ranges.
@@ -84,9 +84,9 @@ The MCP tools available by default are generated from the runtime registry:
 - `live_freshness`: Compare snapshot Git provenance with the configured local checkout without refreshing it.
 - `find_symbol`: Locate Python symbol definitions by name with exact path and line range.
 - `find_references`: List bounded static call sites for a callee name.
-- `get_callers`: Group uniquely resolved callers for one exact target symbol.
+- `get_callers`: Count and list S1-resolved Python callers of a named symbol. For counts use k=1: total_caller_count and total_call_site_count still cover ALL resolved sites, even if callers is truncated. S0/unresolved edges remain uncertain; this is not runtime proof.
 - `get_callees`: Group uniquely resolved outgoing calls for one exact caller symbol.
-- `get_structure_neighborhood`: Read incoming/outgoing proven S1 relations and unresolved S0 hints for an exact file:PATH or symbol ID from a published bundle. Includes cross-language declarations and coverage; never scans or refreshes sources.
+- `get_structure_neighborhood`: Read cross-language S1 edges and S0 gaps for a file or symbol ID. For Python caller COUNTS prefer get_callers(name,k=1): it returns global totals without a large neighborhood. Select a healthy publication via repo/stem or bundle_manifest; never refresh.
 - `get_flake_relation_evidence`: Read precomputed S1 Nix Flake input/module declarations and explicit S0 gaps from one immutable manifest-bound bundle. Source and target Git revisions are verified against the publication, without Git, network access or runtime dependency claims.
 <!-- repoground-mcp-tools:end -->
 
