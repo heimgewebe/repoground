@@ -50,15 +50,24 @@ def _selector_properties() -> dict[str, Any]:
     return {
         "bundle_manifest": {
             "type": ["string", "null"],
-            "description": "Optional exact manifest path inside the startup bundle root.",
+            "description": (
+                "Existing manifest path inside the startup bundle root. "
+                "Exclusive with repo and stem selectors."
+            ),
         },
         "repo": {
             "type": ["string", "null"],
-            "description": "Repository identity such as owner/repository or repository name.",
+            "description": (
+                "Repository identity (prefer owner/repo, e.g. heimgewebe/heim-pc). "
+                "Use with an exact stem for revision-bound reads; never a file path."
+            ),
         },
         "stem": {
             "type": ["string", "null"],
-            "description": "Optional exact snapshot stem.",
+            "description": (
+                "Exact published bundle stem, NOT a Git commit ID or abbreviation. "
+                "Copy from bundle_discover and pair with repo."
+            ),
         },
     }
 
@@ -80,7 +89,10 @@ def _tool_definitions(enable_snapshot_create: bool, enable_change_evidence: bool
         {
             "name": "bundle_discover",
             "title": "RepoGround bundle discovery",
-            "description": "List healthy existing bundles or select one by repository identity/stem.",
+            "description": (
+                "Discover existing healthy publication stems when they are unknown. "
+                "Do not refresh or use for routine Git source lookups."
+            ),
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -229,7 +241,12 @@ def _tool_definitions(enable_snapshot_create: bool, enable_change_evidence: bool
         (
             "get_callers",
             "RepoGround caller locator",
-            "Group uniquely resolved callers for one exact target symbol.",
+            (
+                "Count and list S1-resolved Python callers of a named symbol. "
+                "For counts use k=1: total_caller_count and total_call_site_count "
+                "still cover ALL resolved sites, even if callers is truncated. "
+                "S0/unresolved edges remain uncertain; this is not runtime proof."
+            ),
         ),
         (
             "get_callees",
@@ -263,9 +280,10 @@ def _tool_definitions(enable_snapshot_create: bool, enable_change_evidence: bool
         "name": "get_structure_neighborhood",
         "title": "RepoGround structure neighborhood",
         "description": (
-            "Read incoming/outgoing proven S1 relations and unresolved S0 hints "
-            "for an exact file:PATH or symbol ID from a published bundle. "
-            "Includes cross-language declarations and coverage; never scans or refreshes sources."
+            "Read cross-language S1 edges and S0 gaps for a file or symbol ID. "
+            "For Python caller COUNTS prefer get_callers(name,k=1): it returns "
+            "global totals without a large neighborhood. Select a healthy "
+            "publication via repo/stem or bundle_manifest; never refresh."
         ),
         "inputSchema": schema({
             "target_id": {"type": "string", "minLength": 1, "maxLength": 4096},
