@@ -533,7 +533,7 @@ def _canonical_name_aliases(name: Any) -> set[str]:
     raw = name.strip()
     aliases = {raw.casefold()}
     parts = raw.split("__")
-    if len(parts) >= 3 and parts[0] and parts[1]:
+    if len(parts) >= 2 and parts[0] and parts[1]:
         owner_repo = f"{parts[0]}/{parts[1]}".casefold()
         aliases.update(
             {owner_repo, f"{parts[0]}__{parts[1]}".casefold(), parts[1].casefold()}
