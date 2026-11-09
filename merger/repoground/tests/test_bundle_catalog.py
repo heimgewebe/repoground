@@ -33,9 +33,18 @@ def _write_bundle(
     created_at: str,
     run_id: str,
     output_status: str = "pass",
-    remote: str = "git@github.com:heimgewebe/repoground.git",
+    remote: str | None = "git@github.com:heimgewebe/repoground.git",
+    name: str = "heimgewebe__repoground__main",
 ) -> Path:
     bundle_dir = root / directory
+    repository = {
+        "name": name,
+        "git_commit": "a" * 40,
+        "git_dirty": False,
+        "provenance_status": "present",
+    }
+    if remote is not None:
+        repository["repo_remote"] = remote
     output_path = bundle_dir / f"{stem}.output_health.json"
     output_bytes, output_sha = _write_json(
         output_path,
@@ -51,15 +60,7 @@ def _write_bundle(
             "run_id": run_id,
             "created_at": created_at,
             "snapshot_provenance": {
-                "repositories": [
-                    {
-                        "name": "heimgewebe__repoground__main",
-                        "repo_remote": remote,
-                        "git_commit": "a" * 40,
-                        "git_dirty": False,
-                        "provenance_status": "present",
-                    }
-                ]
+                "repositories": [repository]
             },
             "artifacts": [
                 {
@@ -134,6 +135,81 @@ def test_manifest_repo_identities_prefer_explicit_remote():
         }
     )
     assert identities == ["right-owner/repoground"]
+
+
+def test_manifest_repo_aliases_match_remote_less_owner_repo_identity():
+    document = {
+        "snapshot_provenance": {
+            "repositories": [{"name": "heimgewebe__legacy"}]
+        }
+    }
+
+    assert manifest_repo_identities(document) == ["heimgewebe/legacy"]
+    assert manifest_repo_aliases(document) == [
+        "heimgewebe/legacy",
+        "heimgewebe__legacy",
+        "legacy",
+    ]
+
+
+def test_short_repo_selector_selects_remote_less_owner_repo_publication(tmp_path):
+    manifest = _write_bundle(
+        tmp_path,
+        directory="heimgewebe__legacy/main/run",
+        stem="legacy-main_merge",
+        created_at="2026-11-07T19:00:00Z",
+        run_id="legacy-run",
+        remote=None,
+        name="heimgewebe__legacy",
+    )
+
+    for requested_stem in (None, "legacy-main", "legacy-main_merge"):
+        selection = select_bundle_manifest(
+            tmp_path, repo="legacy", stem=requested_stem
+        )
+        assert selection["status"] == "available"
+        assert selection["selected"]["manifest_path"] == str(manifest.resolve())
+        assert selection["selected"]["repo_identities"] == ["heimgewebe/legacy"]
+    assert select_bundle_manifest(tmp_path, repo="heimgewebe/legacy")[
+        "selected"
+    ]["manifest_path"] == str(manifest.resolve())
+
+
+def test_short_repo_selector_rejects_remote_less_owner_repo_collision(tmp_path):
+    first = _write_bundle(
+        tmp_path,
+        directory="heimgewebe__legacy/main/run",
+        stem="legacy-main",
+        created_at="2026-11-07T19:00:00Z",
+        run_id="heimgewebe-run",
+        remote=None,
+        name="heimgewebe__legacy",
+    )
+    second = _write_bundle(
+        tmp_path,
+        directory="other-owner__legacy/main/run",
+        stem="other-main",
+        created_at="2026-11-07T20:00:00Z",
+        run_id="other-owner-run",
+        remote=None,
+        name="other-owner__legacy",
+    )
+
+    short = select_bundle_manifest(tmp_path, repo="legacy")
+
+    assert short["status"] == "ambiguous"
+    assert short["reason"] == "repository_identity_ambiguous"
+    assert short["selected"] is None
+    assert short["repo_identity_groups"] == [
+        "heimgewebe/legacy",
+        "other-owner/legacy",
+    ]
+    assert select_bundle_manifest(tmp_path, repo="legacy", stem="legacy-main")[
+        "selected"
+    ]["manifest_path"] == str(first.resolve())
+    assert select_bundle_manifest(tmp_path, repo="other-owner/legacy")[
+        "selected"
+    ]["manifest_path"] == str(second.resolve())
 
 
 def test_short_repo_selector_fails_closed_across_owners(tmp_path):
