@@ -268,6 +268,39 @@ def _prepare_sources(req: dict[str, Any], cfg: dict[str, Any]) -> tuple[Path, di
     return workspace, result
 
 
+def _reclaim_success_source_clones(
+    workspace: Path, sources: dict[str, Path], frozen: dict[str, Any],
+) -> None:
+    """Drop only unchanged trial-owned clones; keep traces and bundle pins.
+
+    Failed trials retain their workspace for diagnosis. A cleanup failure never
+    changes a valid measured answer or removes a dirty clone.
+    """
+    repos = workspace / "repos"
+    if workspace.is_symlink() or repos.is_symlink() or not repos.is_dir():
+        return
+    for name, clone in sources.items():
+        bound = frozen.get(name)
+        if (
+            not isinstance(bound, dict)
+            or clone != repos / name
+            or clone.is_symlink() or not clone.is_dir()
+            or (clone / ".git").is_symlink()
+            or not (clone / ".git").is_dir()
+        ):
+            continue
+        try:
+            if _exec(["git", "-C", str(clone), "rev-parse", "HEAD"]) != bound.get("commit"):
+                continue
+            if _exec(["git", "-C", str(clone), "status",
+                      "--porcelain", "--untracked-files=all"]):
+                continue
+            shutil.rmtree(clone)
+        except (OSError, RuntimeError, subprocess.SubprocessError):
+            # The provider receipt remains valid even when local cleanup fails.
+            continue
+
+
 def _manifest_evidence(req: dict[str, Any], sources: dict[str, Path]) -> dict[str, dict[str, Any]]:
     evidence = {}
     for name, bound in (req.get("repoground") or {}).items():
@@ -1372,7 +1405,7 @@ def run(req: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
         if req["condition"] == "repoground_mandatory" and not intervention_used
         else "invalid_agent_answer" if not parsed else "provider_failed"
     )}
-    return {
+    receipt = {
         "kind": "repoground.agent_study_receipt", "version": "1.0",
         "request_id": req["request_id"], "request_sha256": _digest(_json_bytes(req)),
         "condition": req["condition"], "session_id": req["session_id"],
@@ -1387,6 +1420,9 @@ def run(req: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
         "trace": {"path": trace_path.name, "bytes": len(raw), "sha256": _digest(raw)},
         "billed_cost": None, "resources": None, "error": error,
     }
+    if success:
+        _reclaim_success_source_clones(workspace, sources, req["repositories"])
+    return receipt
 
 
 def main(argv: list[str] | None = None) -> int:

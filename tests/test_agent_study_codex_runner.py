@@ -3,6 +3,7 @@ import importlib.util
 import json
 import hashlib
 import stat
+import subprocess
 import tempfile
 import unittest
 from copy import deepcopy
@@ -95,6 +96,80 @@ def flake_pack_fixture(root: Path) -> dict:
 
 
 class CodexStudyRunnerTest(unittest.TestCase):
+    def test_reclaim_success_clones_only_when_pristine_and_exact(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            source.mkdir()
+            subprocess.run(["git", "-C", str(source), "init", "-q"], check=True)
+            (source / "sample.txt").write_text("frozen source\n")
+            subprocess.run(["git", "-C", str(source), "add", "sample.txt"], check=True)
+            subprocess.run([
+                "git", "-C", str(source), "-c", "user.name=Study Fixture",
+                "-c", "user.email=fixture@example.invalid", "commit", "-qm", "initial",
+            ], check=True)
+            head = subprocess.check_output(
+                ["git", "-C", str(source), "rev-parse", "HEAD"], text=True,
+            ).strip()
+            workspace = root / "workspace"
+            repos = workspace / "repos"
+            repos.mkdir(parents=True)
+            external_trace = root / "traces" / "receipt.jsonl"
+            external_trace.parent.mkdir()
+            external_trace.write_text("persisted provider trace")
+            frozen = {"repo": {"commit": head}}
+
+            def clone():
+                target = repos / "repo"
+                subprocess.run([
+                    "git", "clone", "--quiet", "--shared", "--no-checkout",
+                    str(source), str(target),
+                ], check=True)
+                subprocess.run([
+                    "git", "-C", str(target), "checkout", "--quiet", "--detach", head,
+                ], check=True)
+                return target
+
+            checkout = clone()
+            runner._reclaim_success_source_clones(
+                workspace, {"repo": checkout}, frozen,
+            )
+            self.assertFalse(checkout.exists())
+            self.assertEqual(external_trace.read_text(), "persisted provider trace")
+            self.assertTrue(workspace.is_dir())
+
+            checkout = clone()
+            (checkout / "untracked.txt").write_text("preserve local result")
+            runner._reclaim_success_source_clones(
+                workspace, {"repo": checkout}, frozen,
+            )
+            self.assertTrue((checkout / "untracked.txt").exists())
+            (checkout / "untracked.txt").unlink()
+
+            runner._reclaim_success_source_clones(
+                workspace, {"repo": checkout}, {"repo": {"commit": "f" * 40}},
+            )
+            self.assertTrue(checkout.exists())
+            runner._reclaim_success_source_clones(
+                workspace, {"repo": root / "source"}, frozen,
+            )
+            self.assertTrue(source.exists())
+
+    def test_reclaim_does_not_follow_workspace_source_symlinks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "workspace"
+            (workspace / "repos").mkdir(parents=True)
+            outside = root / "outside"
+            outside.mkdir()
+            (outside / "data.txt").write_text("retain")
+            link = workspace / "repos" / "repo"
+            link.symlink_to(outside, target_is_directory=True)
+            runner._reclaim_success_source_clones(
+                workspace, {"repo": link}, {"repo": {"commit": "a" * 40}},
+            )
+            self.assertEqual((outside / "data.txt").read_text(), "retain")
+
     def test_tool_inventory_has_no_mutating_snapshot_create(self):
         self.assertNotIn("repoground_snapshot_create", runner.TOOL_NAMES["repoground"])
         self.assertEqual(len(runner.MCP_TOOLS), len(set(runner.MCP_TOOLS)))
@@ -283,6 +358,7 @@ class CodexStudyRunnerTest(unittest.TestCase):
                     ]
                     raw = b"original provider trace " + str(contaminated).encode()
                     with (
+                        mock.patch.object(runner, "_reclaim_success_source_clones") as cleanup,
                         mock.patch.object(runner, "_fingerprint", return_value=fingerprint),
                         mock.patch.object(
                             runner, "_prepare_sources", return_value=(workspace, {}),
@@ -314,12 +390,16 @@ class CodexStudyRunnerTest(unittest.TestCase):
                         int(contaminated),
                     )
                     if contaminated:
+                        cleanup.assert_not_called()
                         self.assertEqual(receipt["status"], "failed")
                         self.assertEqual(
                             receipt["error"],
                             {"class": "shell_bundle_data_contamination"},
                         )
                     else:
+                        cleanup.assert_called_once_with(
+                            workspace, {}, request["repositories"],
+                        )
                         self.assertEqual(receipt["status"], "success")
                         self.assertIsNone(receipt["error"])
 

@@ -28,6 +28,12 @@ auf stdout zurück. Der vorhandene
   geklont, ohne den aktuellen HEAD als Ersatz zu verwenden. Private
   Bundle-Pins liegen request-spezifisch beim privaten Trace-State und nicht
   im Agenten-Workspace; der Git-only-Arm erhält weder Kopie noch Link.
+- **Kein dauerhafter Quellklon-Müll:** Nach einem erfolgreichen, vermessenen
+  Trial entfernt derselbe Runner ausschließlich die unveränderten,
+  HEAD-identischen Git-Quellklone seines eigenen Workspaces. Verschmutzte
+  Klone, fehlgeschlagene Trials sowie die privaten JSONL-Traces und
+  Bundle-Pins bleiben erhalten. Eine gescheiterte Aufräumaktion ändert
+  weder das Mess-Receipt noch erzeugt sie einen zusätzlichen Dienst.
 - **Exakter MCP-Werkzeugumfang:** Mit `--repo-root` bietet der Server unter anderem `change_evidence_pack` an. Codex erhält ausschließlich die zwölf im Experiment vorgesehenen Read-Tools über `mcp_servers.<server>.enabled_tools`. Der lokale Codex-CLI-Client 0.164.0 bestätigte diese Whitelist im Konfigurations-Readback; nachträglich hinzugefügte Serverwerkzeuge sind nicht automatisch verfügbar.
 - **Unveränderliche Belege:** Die verwendeten Bundle-Manifeste, Generator-,
   Quell- und Health-Identitäten werden vor dem Providerstart geprüft.
