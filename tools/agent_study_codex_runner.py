@@ -1327,6 +1327,51 @@ def _usage(events: list[tuple[dict[str, Any], float]]) -> dict[str, Any] | None:
     }
 
 
+def _discard_finished_source_clones(
+    req: dict[str, Any], cfg: dict[str, Any],
+    workspace: Path, sources: dict[str, Path],
+) -> None:
+    """Discard only reproducible, unchanged Git clones after a valid model run.
+
+    Keep independent pinned bundles, raw traces and receipts for audit and
+    replay. Retain a modified or otherwise unprovable checkout for inspection.
+    """
+    if not sources:
+        return
+    root = Path(cfg["workspaces_root"])
+    clones = workspace / "repos"
+    if (
+        workspace != root / req["workspace_id"]
+        or root.is_symlink() or workspace.is_symlink()
+        or clones.is_symlink() or not clones.is_dir()
+        or {path.name for path in clones.iterdir()} != set(sources)
+    ):
+        return
+    for name, path in sources.items():
+        original = Path(cfg["source_roots"][name]).resolve(strict=True)
+        if (
+            path != clones / name or path.is_symlink()
+            or not (path / ".git").is_dir()
+            or original.is_relative_to(workspace)
+        ):
+            return
+        commit = req["repositories"][name]["commit"]
+        _exec(["git", "-C", str(original), "cat-file", "-e", commit + "^{commit}"])
+        if (
+            _exec(["git", "-C", str(path), "rev-parse", "HEAD"]) != commit
+            or _exec(["git", "-C", str(path), "status", "--porcelain",
+                      "--untracked-files=all"])
+            or _exec(["git", "-C", str(path), "ls-files", "--others",
+                      "--ignored", "--exclude-standard"])
+        ):
+            return
+        refs = _exec(["git", "-C", str(path), "for-each-ref",
+                      "--format=%(objectname)", "refs/heads", "refs/tags"])
+        for sha in refs.splitlines():
+            _exec(["git", "-C", str(original), "cat-file", "-e", sha])
+    shutil.rmtree(clones)
+
+
 def run(req: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
     fingerprint = _fingerprint(cfg)
     _validate_request(req, fingerprint)
@@ -1372,7 +1417,7 @@ def run(req: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
         if req["condition"] == "repoground_mandatory" and not intervention_used
         else "invalid_agent_answer" if not parsed else "provider_failed"
     )}
-    return {
+    receipt = {
         "kind": "repoground.agent_study_receipt", "version": "1.0",
         "request_id": req["request_id"], "request_sha256": _digest(_json_bytes(req)),
         "condition": req["condition"], "session_id": req["session_id"],
@@ -1387,6 +1432,13 @@ def run(req: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
         "trace": {"path": trace_path.name, "bytes": len(raw), "sha256": _digest(raw)},
         "billed_cost": None, "resources": None, "error": error,
     }
+    if success:
+        try:
+            _discard_finished_source_clones(req, cfg, workspace, sources)
+        except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+            # Cleanup is hygiene, not a new gate on the original model result.
+            print("source clone cleanup deferred: " + type(exc).__name__, file=sys.stderr)
+    return receipt
 
 
 def main(argv: list[str] | None = None) -> int:

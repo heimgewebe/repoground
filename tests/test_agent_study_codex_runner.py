@@ -4,6 +4,7 @@ import json
 import hashlib
 import stat
 import tempfile
+import subprocess
 import unittest
 from copy import deepcopy
 from pathlib import Path
@@ -95,6 +96,77 @@ def flake_pack_fixture(root: Path) -> dict:
 
 
 class CodexStudyRunnerTest(unittest.TestCase):
+    def test_finished_source_clone_cleanup_preserves_traces_and_dirty_work(self):
+        for dirty in (False, True, 'ignored'):
+            with self.subTest(dirty=dirty), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                original = root / "source"
+                original.mkdir()
+                subprocess.run(["git", "-C", str(original), "init", "-q"], check=True)
+                (original / "README.md").write_text("frozen\\n")
+                subprocess.run(["git", "-C", str(original), "add", "README.md"], check=True)
+                subprocess.run([
+                    "git", "-C", str(original),
+                    "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                    "commit", "-qm", "snapshot",
+                ], check=True)
+                head = subprocess.check_output(
+                    ["git", "-C", str(original), "rev-parse", "HEAD"], text=True,
+                ).strip()
+                workspace = root / "workspaces" / "workspace-trial"
+                repos = workspace / "repos"
+                repos.mkdir(parents=True)
+                source_clone = repos / "demo"
+                subprocess.run([
+                    "git", "clone", "--quiet", "--shared", "--no-checkout",
+                    str(original), str(source_clone),
+                ], check=True)
+                subprocess.run([
+                    "git", "-C", str(source_clone), "checkout", "--quiet",
+                    "--detach", head,
+                ], check=True)
+                if dirty is True:
+                    (source_clone / "README.md").write_text("local change\\n")
+                elif dirty == "ignored":
+                    (source_clone / ".git" / "info" / "exclude").write_text("ignored.tmp\\n")
+                    (source_clone / "ignored.tmp").write_text("local-only\\n")
+                pin = workspace / "pinned-bundles"
+                pin.mkdir()
+                (pin / "proof.txt").write_text("immutable\\n")
+                trace = root / "traces" / "trial.jsonl"
+                trace.parent.mkdir()
+                trace.write_text("provider trace\\n")
+                runner._discard_finished_source_clones(
+                    {"workspace_id": "workspace-trial",
+                     "repositories": {"demo": {"commit": head}}},
+                    {"workspaces_root": str(root / "workspaces"),
+                     "source_roots": {"demo": str(original)}},
+                    workspace, {"demo": source_clone},
+                )
+                self.assertEqual(source_clone.exists(), bool(dirty))
+                self.assertTrue((original / "README.md").is_file())
+                self.assertEqual((pin / "proof.txt").read_text(), "immutable\\n")
+                self.assertEqual(trace.read_text(), "provider trace\\n")
+
+    def test_finished_source_clone_cleanup_retains_unrecoverable_revision(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            workspace = root / "workspaces" / "workspace-trial"
+            source_clone = workspace / "repos" / "demo"
+            (source_clone / ".git").mkdir(parents=True)
+            original = root / "source"
+            original.mkdir()
+            with mock.patch.object(runner, "_exec", side_effect=RuntimeError("missing git object")):
+                with self.assertRaisesRegex(RuntimeError, "missing git object"):
+                    runner._discard_finished_source_clones(
+                        {"workspace_id": "workspace-trial",
+                         "repositories": {"demo": {"commit": "a" * 40}}},
+                        {"workspaces_root": str(root / "workspaces"),
+                         "source_roots": {"demo": str(original)}},
+                        workspace, {"demo": source_clone},
+                    )
+            self.assertTrue(source_clone.is_dir())
+
     def test_tool_inventory_has_no_mutating_snapshot_create(self):
         self.assertNotIn("repoground_snapshot_create", runner.TOOL_NAMES["repoground"])
         self.assertEqual(len(runner.MCP_TOOLS), len(set(runner.MCP_TOOLS)))
@@ -300,8 +372,10 @@ class CodexStudyRunnerTest(unittest.TestCase):
                             return_value=(raw, events, 0, False, started, started, 15),
                         ),
                         mock.patch.object(runner, "_assert_pinned_manifests"),
+                        mock.patch.object(runner, "_discard_finished_source_clones") as cleanup,
                     ):
                         receipt = runner.run(request, {"trace_root": str(trace_root)})
+                    self.assertEqual(cleanup.call_count, int(not contaminated))
 
                     jsonschema.validate(receipt, RECEIPT_SCHEMA)
                     self.assertEqual(receipt["usage"], {
