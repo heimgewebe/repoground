@@ -293,7 +293,7 @@ def _reclaim_success_source_clones(
             if _exec(["git", "-C", str(clone), "rev-parse", "HEAD"]) != bound.get("commit"):
                 continue
             if _exec(["git", "-C", str(clone), "status",
-                      "--porcelain", "--untracked-files=all"]):
+                      "--porcelain", "--untracked-files=all", "--ignored"]):
                 continue
             shutil.rmtree(clone)
         except (OSError, RuntimeError, subprocess.SubprocessError):

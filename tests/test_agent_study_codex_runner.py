@@ -146,6 +146,24 @@ class CodexStudyRunnerTest(unittest.TestCase):
             self.assertTrue((checkout / "untracked.txt").exists())
             (checkout / "untracked.txt").unlink()
 
+            (checkout / ".git" / "info" / "exclude").write_text("local-results/\n")
+            local_results = checkout / "local-results"
+            local_results.mkdir()
+            (local_results / "notes.txt").write_text("ignored diagnostics must survive")
+            baseline = subprocess.run(
+                ["git", "-C", str(checkout), "status",
+                 "--porcelain", "--untracked-files=all"],
+                capture_output=True, text=True, check=True,
+            )
+            self.assertEqual(baseline.stdout, "")
+            runner._reclaim_success_source_clones(
+                workspace, {"repo": checkout}, frozen,
+            )
+            self.assertEqual(
+                (local_results / "notes.txt").read_text(),
+                "ignored diagnostics must survive",
+            )
+
             runner._reclaim_success_source_clones(
                 workspace, {"repo": checkout}, {"repo": {"commit": "f" * 40}},
             )
