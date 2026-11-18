@@ -12,7 +12,7 @@ Status: accepted architecture boundary for the freigabefähigen slice of
 | Repo-local historical task projection | Local board/index only | `docs/tasks/*` | **No** – projection / ratchet surface |
 | Historical proofs | Evidence archive | `docs/proofs/*` | No – evidence, not current product contract |
 | Diagnostics snapshots | Generated/run evidence | `docs/diagnostics/*`, canary outputs | No – run-bound diagnostics |
-| CI control plane | Classified workflows | `.github/workflows/*` + `config/workflow-control-plane.v1.json` | Class-dependent (see inventory) |
+| CI checks | GitHub Actions + repository rulesets | `.github/workflows/*` | Required checks are defined in GitHub rulesets; tests verify behavior |
 
 ## Rules
 
@@ -22,9 +22,9 @@ Status: accepted architecture boundary for the freigabefähigen slice of
 2. **Do not treat `docs/tasks` as Bureau.** The local board/index may drive the
    planning-registration ratchet and human navigation of historical TASK-*
    rows. Canonical REPOGROUND-LEGACY-* / Bureau initiatives live in Bureau.
-3. **CI classes are explicit.** Every workflow must be classified in
-   `config/workflow-control-plane.v1.json`. Silent new workflows fail the
-   inventory check in `lint`.
+3. **CI checks follow actual behavior.** GitHub rulesets define required checks;
+   workflows run substantive tests. Do not maintain a second SHA-256 registry of
+   Git-tracked workflow files or block routine workflow edits on hash refresh.
 4. **Entry links stay resolvable.** The entry-document link gate covers the
    fixed operator entry set (README, AGENTS, GETTING_STARTED, system map, …).
 
