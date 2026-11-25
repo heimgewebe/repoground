@@ -320,6 +320,18 @@ def _decode_slice(data: mmap.mmap, start: int, end: int, *, label: str) -> Any:
         raise ValueError(f"invalid JSON in {label}") from exc
 
 
+def _expression_index_key(value: Any) -> str | None:
+    """Bound expression keys without rejecting an otherwise usable graph.
+
+    Expressions can contain large literals or chained calls. Both insertion
+    and lookup hash the same case-folded text; the original call record
+    remains in the verified source and is read back unchanged.
+    """
+    if not isinstance(value, str) or not value:
+        return None
+    return hashlib.sha256(value.casefold().encode("utf-8")).hexdigest()
+
+
 def _append_posting(
     postings: dict[str, array],
     key: Any,
@@ -432,7 +444,7 @@ def _index_call_record(
     )
     _append_posting(
         builder.expression_positions,
-        raw.get("callee_expression"),
+        _expression_index_key(raw.get("callee_expression")),
         call_position,
         key_counter=builder.key_counter,
     )
@@ -672,7 +684,9 @@ def _positions_for_targets(
     for name in simple_names:
         add(state.simple_name_positions.get(name))
     for name in qualified_names:
-        add(state.expression_positions.get(name))
+        key = _expression_index_key(name)
+        if key is not None:
+            add(state.expression_positions.get(key))
     return sorted(positions)
 
 
