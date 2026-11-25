@@ -88,6 +88,54 @@ def test_large_call_graph_projects_without_widening_generic_payload_limit(
     )
 
 
+def test_long_expression_key_does_not_block_projection(tmp_path: Path) -> None:
+    _adapter, bundle, _config = _impact_adapter(tmp_path)
+    manifest_path = Path(bundle["manifest"])
+    call_graph_path = _artifact_path(manifest_path, "python_call_graph_json")
+    call_graph = json.loads(call_graph_path.read_text(encoding="utf-8"))
+    expression = "LONG_" + "Ab" * impact_index.MAX_KEY_BYTES
+    call_graph["calls"][0]["callee_expression"] = expression
+    call_graph_path.write_text(json.dumps(call_graph), encoding="utf-8")
+    _refresh_manifest_artifact(manifest_path, "python_call_graph_json", call_graph_path)
+    impact_index.clear_call_graph_impact_index_cache()
+
+    result = impact_index.project_call_graph_for_impact(
+        manifest_path, _target_symbols()
+    )
+    assert result["status"] == "available"
+    assert result["content_json"]["calls"] == call_graph["calls"]
+
+    # Exercise expression lookup alone, including case-folding. No caller,
+    # target id or simple-name match can select this record.
+    by_expression = impact_index.project_call_graph_for_impact(
+        manifest_path, [{"qualified_name": expression.swapcase()}]
+    )
+    assert by_expression["status"] == "available"
+    assert by_expression["content_json"]["calls"] == [call_graph["calls"][0]]
+    absent = impact_index.project_call_graph_for_impact(
+        manifest_path, [{"qualified_name": expression + "_other"}]
+    )
+    assert absent["status"] == "available"
+    assert absent["content_json"]["calls"] == []
+
+
+def test_long_non_expression_key_still_blocks_projection(tmp_path: Path) -> None:
+    _adapter, bundle, _config = _impact_adapter(tmp_path)
+    manifest_path = Path(bundle["manifest"])
+    call_graph_path = _artifact_path(manifest_path, "python_call_graph_json")
+    call_graph = json.loads(call_graph_path.read_text(encoding="utf-8"))
+    call_graph["calls"][0]["simple_name"] = "x" * (impact_index.MAX_KEY_BYTES + 1)
+    call_graph_path.write_text(json.dumps(call_graph), encoding="utf-8")
+    _refresh_manifest_artifact(manifest_path, "python_call_graph_json", call_graph_path)
+    impact_index.clear_call_graph_impact_index_cache()
+
+    result = impact_index.project_call_graph_for_impact(
+        manifest_path, _target_symbols()
+    )
+    assert result["status"] == "blocked"
+    assert "key exceeds bounded key size" in result["error"]
+
+
 def test_projection_cache_reuses_verified_offset_index(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
