@@ -29,8 +29,8 @@
     {
       "caller_path": ".github/workflows/wgx-guard.yml",
       "job": "guard",
-      "uses": "heimgewebe/metarepo/.github/workflows/reusable-repo-verify.yml@5afd566efb27fb6594ff32daa4d3b86c5184ba30",
-      "source_content_sha256": "56a987f6f5c4138f6c5024382fd7a7cd82f4631fa4fbdf28bf1a12ddbcf26e1c",
+      "uses": "heimgewebe/metarepo/.github/workflows/reusable-repo-verify.yml@bf9e0ba587f7488994617ee849914839a87238ae",
+      "source_content_sha256": "023de696fce730be32bbd5ba93e03fc2f5f73c72fc889ab27d1b5c523166ed94",
       "required_permissions": {
         "contents": "read"
       },
